@@ -22,6 +22,12 @@ type Quantile = keyof SavingsBand;
 
 export const CALIBRATION_MODEL = "claude-opus-5-5";
 export const CALIBRATED_AT = "2026-11-05";
+/**
+ * Version of the constants and of the facts the daily rollup stores. Bump it
+ * with any change here or in the rollup's SQL: buckets computed under an older
+ * version are recomputed on the next tick.
+ */
+export const MODEL_VERSION = 1;
 
 /** Agent turns per deterministic op. */
 export const K = 0.2753;
@@ -45,6 +51,19 @@ export const ERR_FLEET: SavingsBand = { p10: 0.746, p50: 1.0, p90: 1.325 };
 export const DEFAULT_OPS = 9;
 /** Upper bound on the ops counted for one script. */
 export const MAX_SCRIPT_OPS = 100;
+/**
+ * Enabled-only rule (an event router): an event-triggered workflow that ran
+ * more than this many times a day on average, and where fewer than
+ * ROUTER_MAX_EFFECT_SHARE of its runs had an effect, is a filter over an event
+ * stream. Only its effect runs count, each as one agent decision.
+ * The v7 script names the router; a product needs a rule. The plan's 24 a day
+ * also caught an event workflow that does real work on every run (41 runs a
+ * day, no linked effects), so the threshold is 10 events an hour.
+ */
+export const ROUTER_MIN_RUNS_PER_DAY = 240;
+export const ROUTER_MAX_EFFECT_SHARE = 0.1;
+/** Share of runs with `triggerType='event'` for a workflow to count as event-triggered. */
+export const ROUTER_MIN_EVENT_SHARE = 0.9;
 
 // Session cost (USD) and agent-active hours by session length in turns
 // (index 0 = 1 turn), per tier, from 30 days of session_costs repriced at each
@@ -243,6 +262,12 @@ export type WorkflowFacts = {
   schedRuns: number;
   /** Of `schedRuns`, the runs that created an agent task or started a child workflow. */
   schedEffectRuns: number;
+  /** Runs started by an event trigger. */
+  eventRuns: number;
+  /** Runs of any trigger and status that created an agent task or started a child workflow. */
+  effectRuns: number;
+  /** Deterministic ops summed over the steps of the effect runs. */
+  effectOpsSum: number;
   /** Deterministic ops summed over every step of every run. */
   opsSum: number;
   agentTasks: number;
@@ -260,6 +285,8 @@ export type WorkflowFacts = {
 };
 
 export type PricedWorkflow = {
+  /** True when the enabled-only rule priced only the effect runs. */
+  enabledOnlyRule: boolean;
   runs: number;
   substitutedRuns: number;
   /** Schedule runs above the hourly cap that still count because they had an effect. */
@@ -310,20 +337,91 @@ const bandOf = (fn: (q: Quantile) => number): SavingsBand => ({
   p90: fn("p90"),
 });
 
+/** Schedule runs one version of a job substitutes, and how many of them fit under the cap. */
+export type ScheduleAllocation = { vSched: number; vCap: number };
+
+/**
+ * Share the hourly cap across the versions of one job (`jobKey`), in order.
+ * A run with a downstream effect always counts, so the job total is
+ * max(min(all schedule runs, cap), all effect runs). Same arithmetic as v7.
+ */
+export function allocateSchedule(
+  versions: readonly Pick<WorkflowFacts, "schedRuns" | "schedEffectRuns">[],
+  days: number,
+): ScheduleAllocation[] {
+  const cap = CAP_PER_DAY * days;
+  let used = 0;
+  let eff = 0;
+  return versions.map((v) => {
+    const vCap = Math.min(v.schedRuns, Math.max(0, cap - used));
+    const vSched = Math.max(Math.min(used + v.schedRuns, cap), eff + v.schedEffectRuns) - used;
+    used += vSched;
+    eff += v.schedEffectRuns;
+    return { vSched, vCap };
+  });
+}
+
+/** The enabled-only rule (see ROUTER_MIN_RUNS_PER_DAY). */
+export function isEnabledOnlyRouter(facts: WorkflowFacts, days: number): boolean {
+  return (
+    facts.runs > ROUTER_MIN_RUNS_PER_DAY * days &&
+    facts.effectRuns < ROUTER_MAX_EFFECT_SHARE * facts.runs &&
+    facts.eventRuns >= ROUTER_MIN_EVENT_SHARE * facts.runs
+  );
+}
+
+/** A router run with an effect is one agent decision at the run's own ops; the job it starts is priced on its own row. */
+function priceRouter(
+  facts: WorkflowFacts,
+  opts: { tier: SavingsTier; band: "job" | "fleet"; curve?: CurveSet },
+): PricedWorkflow {
+  const v = facts.effectRuns;
+  const opsPerRun = v > 0 ? facts.effectOpsSum / v : 0;
+  const tau = Math.min(TAU_MAX, T0 + K * opsPerRun);
+  const unitUsd = v > 0 ? curve(tau, opts.tier, "usd", opts.curve) : 0;
+  const unitHrs = v > 0 ? curve(tau, opts.tier, "hrs", opts.curve) : 0;
+  const review = unitUsd > 0 ? F_FOLLOWUP : 0;
+  const err = opts.band === "job" ? ERR_JOB : ERR_FLEET;
+  const agentOnlyUsd = bandOf((q) => v * (R[q] * unitUsd * err[q] + review));
+  const agentOnlyHours = bandOf((q) => v * R[q] * unitHrs * err[q]);
+  return {
+    enabledOnlyRule: true,
+    runs: facts.runs,
+    substitutedRuns: v,
+    effectRuns: v,
+    enabledOnlyRuns: facts.runs - v,
+    capApplied: false,
+    opsPerRun,
+    // Measured spend is reported; the rule subtracts nothing (v7: the jobs
+    // the router starts are priced, with their spend, on their own rows).
+    ...spendOf(facts, facts.recordedLlmUsd > 0),
+    actualUsd: 0,
+    agentOnlyUsd,
+    savingUsd: agentOnlyUsd,
+    actualHours: 0,
+    agentOnlyHours,
+    hoursSaved: agentOnlyHours,
+    agentOnlyUsdPerRun: R.p50 * unitUsd + review,
+  };
+}
+
 /**
  * Price one workflow's facts at a tier. `band` picks the error spread: `job`
- * for a single job, `fleet` for a sum over many jobs. `curve` overrides the
- * shipped session-cost curve with a deployment calibration.
+ * for a single job, `fleet` for a sum over many jobs. `allocation` carries the
+ * cap shared with the job's other versions (`allocateSchedule`); without it the
+ * workflow is the job's only version. `curve` overrides the shipped
+ * session-cost curve with a deployment calibration.
  */
 export function priceWorkflow(
   facts: WorkflowFacts,
   opts: { tier: SavingsTier; days: number; band: "job" | "fleet"; curve?: CurveSet },
+  allocation?: ScheduleAllocation,
 ): PricedWorkflow {
-  const cap = CAP_PER_DAY * opts.days;
+  if (isEnabledOnlyRouter(facts, opts.days)) return priceRouter(facts, opts);
   const runs = facts.runs;
   // Schedule runs: at most the hourly cap, but a run with a downstream effect always counts.
-  const vCap = Math.min(facts.schedRuns, cap);
-  const vSched = Math.max(vCap, facts.schedEffectRuns);
+  const { vSched, vCap } =
+    allocation ?? (allocateSchedule([facts], opts.days)[0] as ScheduleAllocation);
   const substituted = vSched + (facts.countedRuns - facts.schedRuns);
   const opsPerRun = runs > 0 ? facts.opsSum / runs : 0;
   const tau = Math.min(TAU_MAX, T0 + K * opsPerRun);
@@ -342,11 +440,12 @@ export function priceWorkflow(
   const agentOnlyUsd = bandOf((q) => keptUsd + substituted * (R[q] * unitUsd * err[q] + review));
   const agentOnlyHours = bandOf((q) => keptHours + substituted * R[q] * unitHrs * err[q]);
   return {
+    enabledOnlyRule: false,
     runs,
     substitutedRuns: substituted,
     effectRuns: vSched - vCap,
     enabledOnlyRuns: runs - substituted,
-    capApplied: facts.schedRuns > cap,
+    capApplied: vCap < facts.schedRuns,
     opsPerRun,
     measuredUsd,
     estimatedLlmUsd,
@@ -367,12 +466,15 @@ export function priceWorkflow(
  * cost (tau), the substituted share and the LLM source are the window's.
  * When the hourly cap or the effect rule makes the window's counted schedule
  * runs differ from the raw ones, they are spread pro rata over the days'
- * schedule runs.
+ * schedule runs. A workflow priced by the enabled-only rule splits by its
+ * days' effect runs.
  */
 export function splitByDay(
   facts: WorkflowFacts,
   byDay: readonly (WorkflowFacts & { day: string })[],
   opts: { tier: SavingsTier; days: number; curve?: CurveSet },
+  /** The window's pricing when it is already known (a cap shared with other versions). */
+  pricedWindow?: PricedWorkflow,
 ): {
   day: string;
   savingUsd: number;
@@ -380,14 +482,23 @@ export function splitByDay(
   measuredUsd: number;
   estimatedLlmUsd: number;
 }[] {
-  const priced = priceWorkflow(facts, { ...opts, band: "job" });
+  const priced = pricedWindow ?? priceWorkflow(facts, { ...opts, band: "job" });
+  const useRecorded = facts.recordedLlmUsd > 0;
+  // Enabled-only rule: each effect run is one decision at the window's unit cost.
+  if (priced.enabledOnlyRule) {
+    return byDay.map((d) => ({
+      day: d.day,
+      savingUsd: d.effectRuns * priced.agentOnlyUsdPerRun,
+      actualUsd: 0,
+      ...spendOf(d, useRecorded),
+    }));
+  }
   const runs = facts.runs;
   const share = runs > 0 ? priced.substitutedRuns / runs : 0;
   const nonSched = facts.countedRuns - facts.schedRuns;
   const vSched = priced.substitutedRuns - nonSched;
   // p50 agent-only cost of one substituted run (ERR_JOB.p50 is 1). The sum test pins this.
   const unitUsd = priced.agentOnlyUsdPerRun;
-  const useRecorded = facts.recordedLlmUsd > 0;
   return byDay.map((d) => {
     const substituted =
       (facts.schedRuns > 0 ? (vSched * d.schedRuns) / facts.schedRuns : 0) +

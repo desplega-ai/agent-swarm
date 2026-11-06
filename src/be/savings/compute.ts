@@ -13,10 +13,9 @@ export type SavingsSql = <T>(sql: string, params: DbParam[]) => Promise<T[]>;
 const defaultSql: SavingsSql = (sql, params) => getDbClient().query(sql, params);
 
 /**
- * Above this many runs in the window the live path refuses: the router
- * (~360k runs in 30 days) takes 3 to 7 s for its effect query alone.
- * shortcut: a fixed cutoff instead of the plan's router rule; the daily
- * rollup (next PR) computes high-volume workflows one day at a time.
+ * Above this many runs in the window a live (on-request) computation refuses:
+ * the router has 12k to 30k runs a day and its step scan alone takes seconds.
+ * The daily rollup has no limit: it runs off the request path, one day at a time.
  */
 export const LIVE_MAX_RUNS = 10_000;
 
@@ -34,11 +33,14 @@ const AWAITS_SQL = "(length(source)-length(replace(source,'await','')))/5";
 
 const num = (v: unknown): number => Number(v) || 0;
 
-const emptyFacts = (runs: number): WorkflowFacts => ({
+export const emptyFacts = (runs: number): WorkflowFacts => ({
   runs,
   countedRuns: 0,
   schedRuns: 0,
   schedEffectRuns: 0,
+  eventRuns: 0,
+  effectRuns: 0,
+  effectOpsSum: 0,
   opsSum: 0,
   agentTasks: 0,
   agentUsd: 0,
@@ -70,8 +72,10 @@ export async function computeWorkflowWindow(
   workflow: { id: string; definition: unknown },
   window: { start: string; end: string },
   sql: SavingsSql = defaultSql,
+  opts: { maxRuns?: number } = {},
 ): Promise<WorkflowWindow> {
   const span = [workflow.id, window.start, window.end];
+  const maxRuns = opts.maxRuns ?? LIVE_MAX_RUNS;
   // Index-only count first, so a high-volume workflow never reaches the step scans.
   const total = num(
     (
@@ -82,7 +86,7 @@ export async function computeWorkflowWindow(
     )[0]?.n,
   );
   if (total === 0) return { status: "ok", facts: emptyFacts(0), byDay: [] };
-  if (total > LIVE_MAX_RUNS) return { status: "too-many-runs", runs: total };
+  if (total > maxRuns) return { status: "too-many-runs", runs: total };
 
   const days = new Map<string, DayFacts>();
   const dayOf = (d: unknown): DayFacts => {
@@ -96,7 +100,8 @@ export async function computeWorkflowWindow(
   };
 
   const byTrigger = await sql<{ d: string; tt: string; st: string; n: number }>(
-    `SELECT ${DAY_SQL} d, r.triggerType tt, r.status st, count(*) n FROM workflow_runs r WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1,2,3`,
+    // Without the hint the planner picks the triggerType index and scans every run.
+    `SELECT ${DAY_SQL} d, r.triggerType tt, r.status st, count(*) n FROM workflow_runs r INDEXED BY idx_workflow_runs_workflow_started WHERE r.workflowId=? AND r.startedAt>=? AND r.startedAt<? GROUP BY 1,2,3`,
     span,
   );
   let schedRuns = 0;
@@ -104,6 +109,7 @@ export async function computeWorkflowWindow(
     const f = dayOf(row.d);
     const n = num(row.n);
     f.runs += n;
+    if (row.tt === "event") f.eventRuns += n;
     if (row.st === "skipped" || row.st === "cancelled") continue;
     f.countedRuns += n;
     if (row.tt === "schedule") {
@@ -172,6 +178,25 @@ export async function computeWorkflowWindow(
     span,
   );
   for (const row of followups) dayOf(row.d).followupUsd += num(row.fup);
+
+  // Effect runs of any trigger, found from the child side (child runs via
+  // parentStepId, tasks via workflowRunId), with the steps of those runs:
+  // the enabled-only rule prices only these.
+  const effect = await sql<{ d: string; nid: string | null; n: number }>(
+    `WITH e AS (SELECT s.runId id FROM workflow_runs c INDEXED BY idx_workflow_runs_parentStep_attempt JOIN workflow_run_steps s ON s.id=c.parentStepId JOIN workflow_runs p ON p.id=s.runId
+        WHERE c.parentStepId IS NOT NULL AND p.workflowId=? AND p.startedAt>=? AND p.startedAt<?
+      UNION SELECT k.workflowRunId FROM agent_tasks k INDEXED BY idx_agent_tasks_workflow_run JOIN workflow_runs p ON p.id=k.workflowRunId WHERE k.workflowRunId IS NOT NULL AND p.workflowId=? AND p.startedAt>=? AND p.startedAt<?),
+    ed AS (SELECT e.id, ${DAY_SQL} d FROM e JOIN workflow_runs r ON r.id=e.id)
+    SELECT d, NULL nid, count(*) n FROM ed GROUP BY d
+    UNION ALL SELECT ed.d, s.nodeId, count(*) n FROM ed JOIN workflow_run_steps s ON s.runId=ed.id GROUP BY 1,2`,
+    [...span, ...span],
+  );
+  for (const row of effect) {
+    const f = dayOf(row.d);
+    // The row with no node id carries the day's effect-run count.
+    if (row.nid === null) f.effectRuns += num(row.n);
+    else f.effectOpsSum += (nodeOps.get(String(row.nid).split("#")[0] ?? "") ?? 0) * num(row.n);
+  }
 
   const byDay = [...days.values()].sort((a, b) => a.day.localeCompare(b.day));
   const facts = emptyFacts(0);

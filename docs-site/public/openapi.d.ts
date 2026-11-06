@@ -20047,13 +20047,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Estimated automation savings for a workflow
-         * @description What the workflow's runs in the window would have cost as agent tasks, minus what they cost. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         * Estimated automation savings per workflow
+         * @description What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
          */
         get: {
             parameters: {
-                query: {
-                    workflowId: string;
+                query?: {
+                    workflowId?: string;
+                    kind?: "workflow";
                     days?: "7" | "30" | "90";
                     tier?: "smol" | "regular" | "smart" | "ultra";
                 };
@@ -20063,7 +20064,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Savings rows for the workflow */
+                /** @description Savings rows */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -20081,10 +20082,12 @@ export interface paths {
                             calibratedAt: string;
                             /** @enum {string} */
                             calibrationSource: "shipped" | "deployment";
-                            computedAt: string;
+                            computedAt: string | null;
                             valid: boolean;
                             /** @enum {string|null} */
-                            reason: "no-runs" | "too-many-runs" | null;
+                            reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
                             rows: {
                                 /** @enum {string} */
                                 kind: "workflow";
@@ -20092,6 +20095,7 @@ export interface paths {
                                 name: string;
                                 /** @enum {string} */
                                 basis: "modelled";
+                                enabledOnlyRule: boolean;
                                 runs: number;
                                 substitutedRuns: number;
                                 effectRuns: number;
@@ -20128,10 +20132,34 @@ export interface paths {
                                 };
                                 agentOnlyUsdPerRun: number;
                             }[];
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
                         };
                     };
                 };
-                /** @description Missing workflowId, or an unknown days or tier value */
+                /** @description Neither workflowId nor kind, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20142,24 +20170,6 @@ export interface paths {
                 };
                 /** @description Workflow not found */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description A savings query ran past its time budget */
-                408: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Too many concurrent database queries; retry shortly */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20185,8 +20195,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Daily automation savings for a workflow
-         * @description The workflow's p50 saving, measured spend and scaled actual cost per UTC day of the window, from the same computation as `/api/savings/jobs`, so the points sum to its p50 saving, `measuredUsd`, `estimatedLlmUsd` and `actualUsd`. When the hourly cap applies, the counted schedule runs are spread pro rata over the days. `valid` is false when the workflow had no runs, or more runs than the live computation handles.
+         * Daily automation savings of a workflow
+         * @description The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.
          */
         get: {
             parameters: {
@@ -20201,7 +20211,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Daily savings points for the workflow */
+                /** @description Daily savings points */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -20219,10 +20229,12 @@ export interface paths {
                             calibratedAt: string;
                             /** @enum {string} */
                             calibrationSource: "shipped" | "deployment";
-                            computedAt: string;
+                            computedAt: string | null;
                             valid: boolean;
                             /** @enum {string|null} */
-                            reason: "no-runs" | "too-many-runs" | null;
+                            reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
                             points: {
                                 day: string;
                                 savingUsd: number;
@@ -20247,24 +20259,6 @@ export interface paths {
                 };
                 /** @description Workflow not found */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description A savings query ran past its time budget */
-                408: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Too many concurrent database queries; retry shortly */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };
