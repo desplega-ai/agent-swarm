@@ -20105,6 +20105,459 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings per workflow
+         * @description What the workflows' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow or `kind=workflow` for every workflow with runs. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    kind?: "workflow";
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            rows: {
+                                /** @enum {string} */
+                                kind: "workflow";
+                                workflowId: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                enabledOnlyRule: boolean;
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
+                                measuredUsd: number;
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. */
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            }[];
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Neither workflowId nor kind, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings of a workflow
+         * @description The workflow's p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. The points add up to the window figures of `GET /api/savings/jobs?workflowId=`.
+         */
+        get: {
+            parameters: {
+                query: {
+                    workflowId: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
+                                actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Missing workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The savings curve in use
+         * @description Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The active calibration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            source: "shipped" | "deployment";
+                            active: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                            };
+                            stored: {
+                                valid: boolean;
+                                updatedAt: string;
+                                calibratedAt?: string;
+                                model?: string;
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Derive the savings curve from this deployment's sessions
+         * @description Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default 30 */
+                        days?: number;
+                        /**
+                         * Format: date-time
+                         * @description End of the window (ISO 8601); default now.
+                         */
+                        end?: string;
+                        /** @default false */
+                        apply?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The derived curve, or why there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @description Opus sessions of 1 to 61 turns used. */
+                            sessions: number;
+                            /** @description Why no curve was derived, or why a derived one was not applied. */
+                            refusals: string[];
+                            /** @description The derived curve; null when refused. */
+                            calibration: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                            speed: {
+                                [key: string]: number;
+                            } | null;
+                            repriceMatch: number | null;
+                            /** @description Derived smart-tier mean cost over the shipped one. */
+                            meanRatio: number | null;
+                            gaps: {
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                /** @enum {string} */
+                                key: "usd" | "hrs";
+                                /** @description Median absolute deviation from the shipped curve, as a fraction. */
+                                median: number;
+                                max: number;
+                                /** @description Turn counts more than 5% from the shipped curve. */
+                                over5pct: number;
+                                points: number;
+                                /** @description Session-weighted mean of derived over shipped; 1 means the same price. */
+                                weighted: number;
+                            }[];
+                            applied: boolean;
+                        };
+                    };
+                };
+                /** @description Invalid days, end or apply */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description `apply` without permission to write config */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A session query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Another calibration run is in progress */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The run passed its 120 s deadline */
+                504: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/tokens": {
         parameters: {
             query?: never;

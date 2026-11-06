@@ -5,8 +5,14 @@ import { useNavigate } from "react-router-dom";
 import { ALL_WORKFLOW_RUNS_PER_WORKFLOW } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useWorkflowsSavings } from "@/api/hooks/use-savings";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
-import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@/api/types";
+import type {
+  SavingsJobRow,
+  WorkflowRunStatus,
+  WorkflowRunSummary,
+  WorkflowSummary,
+} from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
@@ -36,6 +42,7 @@ import { isAutomationSetupError } from "@/lib/automation-setup";
 import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatUsd } from "@/pages/usage/usage-format";
 
 function formatDuration(startedAt: string, finishedAt?: string): string {
   if (!finishedAt) return "—";
@@ -60,6 +67,13 @@ export default function WorkflowsPage() {
   const workflowFilter = readStringParam(searchParams, "workflow", "all");
 
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
+  const { data: savings } = useWorkflowsSavings();
+  // One request for the whole list, joined by workflow id.
+  const savingsById = useMemo(() => {
+    const m = new Map<string, SavingsJobRow>();
+    if (savings?.valid) for (const row of savings.rows) m.set(row.workflowId, row);
+    return m;
+  }, [savings]);
   const { data: status } = useStatusContext();
   const { data: agents } = useAgents();
   const { data: allRunsData, isLoading: runsLoading } = useAllWorkflowRuns();
@@ -190,6 +204,25 @@ export default function WorkflowsPage() {
         valueGetter: (params) => params.data?.nodeCount ?? 0,
       },
       {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; workflows without a saving sort below every amount.
+        valueGetter: (params) =>
+          params.data ? (savingsById.get(params.data.id)?.savingUsd.p50 ?? null) : null,
+        cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
+          const row = params.data ? savingsById.get(params.data.id) : undefined;
+          if (!row) return <span className="text-muted-foreground">—</span>;
+          const range = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), ${row.substitutedRuns.toLocaleString("en-US")} of ${row.runs.toLocaleString("en-US")} runs${row.capApplied ? ", capped at 24 a day" : ""}${row.enabledOnlyRule ? ", only runs with an effect count" : ""}`;
+          return (
+            <span className="font-mono tabular-nums" title={range}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
+          );
+        },
+      },
+      {
         field: "enabled",
         headerName: "Enabled",
         width: 100,
@@ -215,7 +248,7 @@ export default function WorkflowsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [anyNeedsSetup, favoriteToggle, handleToggleEnabled, status?.automations],
+    [anyNeedsSetup, favoriteToggle, handleToggleEnabled, savingsById, status?.automations],
   );
 
   const onWorkflowRowClicked = useCallback(

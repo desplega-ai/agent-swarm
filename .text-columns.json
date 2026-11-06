@@ -740,6 +740,20 @@
       "exempt": "identifier"
     }
   },
+  "automation_savings_daily": {
+    "day": { "exempt": "timestamp" },
+    "jobKind": { "exempt": "enum or fixed-format value" },
+    "jobId": { "exempt": "identifier" },
+    "jobKey": { "exempt": "workflow name without the retired suffix" },
+    "jobName": { "exempt": "workflow name" },
+    "subKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
+  },
+  "automation_savings_days": {
+    "day": { "exempt": "timestamp" },
+    "jobKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
+  },
   "budget_refusal_notifications": {
     "task_id": {
       "exempt": "identifier"

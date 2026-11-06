@@ -472,6 +472,69 @@ const metricProps = z.object({
   /** One-sentence explanation in an info tooltip next to the label. */
   info: z.string().optional(),
   trend: metricTrendSchema.optional(),
+  /**
+   * Sparkline under the value: numbers (`null` = gap), or rows read through
+   * `sparklineKey` — usually `{ "$state": "/queries/<name>/data" }`.
+   */
+  sparkline: z
+    .array(z.union([z.number(), z.null(), z.record(z.string(), z.unknown())]))
+    .max(500)
+    .optional(),
+  /** Numeric row field the sparkline reads when `sparkline` holds rows. */
+  sparklineKey: z.string().optional(),
+});
+
+/** Series colors: the dashboard chart palette plus the semantic status tokens. */
+export const CHART_COLORS = [
+  "chart-1",
+  "chart-2",
+  "chart-3",
+  "chart-4",
+  "chart-5",
+  "primary",
+  "success",
+  "warning",
+  "error",
+  "info",
+  "muted",
+] as const;
+
+const chartSeriesSchema = z.object({
+  /** Numeric row field plotted by this series. */
+  key: z.string(),
+  /** Legend and tooltip name. Defaults to `key`. */
+  label: z.string().optional(),
+  /** Defaults to the palette in order: primary, then chart-2 … chart-5. */
+  color: z.enum(CHART_COLORS).optional(),
+});
+
+const chartProps = z.object({
+  kind: z.enum(["line", "area", "bar"]),
+  /** Usually `{ "$state": "/queries/<name>/data" }`. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Usually `{ "$state": "/queries/<name>/error" }`. */
+  error: z.string().nullish(),
+  /** Row field on the x axis. */
+  x: z.string(),
+  /** `category` (default) keeps row order; `time` parses ISO dates or epoch ms and sorts. */
+  xType: z.enum(["category", "time"]).optional(),
+  series: z.array(chartSeriesSchema).min(1).max(8),
+  /** Stack area and bar series on one another (lines never stack). */
+  stacked: z.boolean().optional(),
+  /** Axis and tooltip value format. `percent` reads values as ratios (0.42 = 42%). */
+  format: z.enum(["number", "currency", "percent"]).optional(),
+  /** ISO 4217 code for `format: "currency"`. Defaults to USD. */
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/)
+    .optional(),
+  /** Plot height in px. Defaults to 240. */
+  height: z.number().int().min(120).max(640).optional(),
+  /** Defaults to on with two or more series. */
+  legend: z.boolean().optional(),
+  emptyMessage: z.string().optional(),
 });
 
 const progressProps = z.object({
@@ -1037,6 +1100,8 @@ export type KanbanColumn = z.infer<typeof kanbanColumnSchema>;
 export type ChipOption = z.infer<typeof chipOptionSchema>;
 export type DrawerAction = NonNullable<z.infer<typeof drawerProps>["actions"]>[number];
 export type MetricTrend = z.infer<typeof metricTrendSchema>;
+export type ChartProps = z.infer<typeof chartProps>;
+export type ChartColor = (typeof CHART_COLORS)[number];
 export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
@@ -1127,7 +1192,12 @@ export const swarmCatalogSpec = {
     Metric: {
       props: metricProps,
       description:
-        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash.',
+        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ "$state": "/queries/<name>/data" }`) read through `sparklineKey`. Fewer than two points draws nothing.',
+    },
+    Chart: {
+      props: chartProps,
+      description:
+        'Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: "category"` (default) keeps row order, `"time"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `height` px (120-640, default 240). No rows renders `emptyMessage` (default "No data yet"). Wrap it in a `Card` for a title.',
     },
     Alert: {
       props: alertProps,

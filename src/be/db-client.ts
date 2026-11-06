@@ -40,7 +40,34 @@ export type TransactionOptions = {
    * SELECT-only callbacks.
    */
   readOnly?: boolean;
+  /**
+   * Wall-clock deadline (epoch ms) for the whole transaction, BEGIN retries and
+   * COMMIT retries included. Past it the transaction is rolled back and the call
+   * throws `DbTransactionDeadlineError`: BEGIN stops retrying, and COMMIT is never
+   * issued (or retried) once the deadline has passed, so a caller that already
+   * answered 504 cannot be followed by a late write. A COMMIT that starts before
+   * the deadline can still finish up to one `attemptSpinMs` after it. Ignored for
+   * a nested call (a SAVEPOINT): the outermost transaction owns the deadline.
+   */
+  deadlineAt?: number;
 };
+
+/** The transaction's `deadlineAt` passed before it could commit; nothing was written. */
+export class DbTransactionDeadlineError extends Error {
+  constructor() {
+    super("db-client: transaction passed its deadline and was rolled back");
+    this.name = "DbTransactionDeadlineError";
+  }
+}
+
+function assertBeforeDeadline(deadlineAt: number | undefined): void {
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) throw new DbTransactionDeadlineError();
+}
+
+/** A backoff sleep never runs past the deadline: the next loop turn then fails on time. */
+function sleepMs(ms: number, deadlineAt: number | undefined): number {
+  return deadlineAt === undefined ? ms : Math.max(0, Math.min(ms, deadlineAt - Date.now()));
+}
 
 export interface DbClient extends DbExecutor {
   /**
@@ -393,15 +420,17 @@ class BunSqliteClient implements DbClient {
     }
 
     const readOnly = opts?.readOnly === true;
+    const deadlineAt = opts?.deadlineAt;
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
+      assertBeforeDeadline(deadlineAt);
       const backoff = this.busyRetry.backoffMs[attemptIndex];
       const canRetryAfter = backoff !== undefined && sleptMs + backoff <= this.busyRetry.maxWaitMs;
       // The FINAL attempt spins `finalAttemptSpinMs`, never the ambient
       // busy_timeout: a 5s synchronous camp froze every in-flight request.
       // The dense 500ms backoff tail catches a periodic holder's release gap
       // instead (see DEFAULT_BUSY_RETRY).
-      const attempt = await this.runTransactionAttempt(fn, readOnly, !canRetryAfter);
+      const attempt = await this.runTransactionAttempt(fn, readOnly, !canRetryAfter, deadlineAt);
       if (attempt.ok) return attempt.value;
       if (!canRetryAfter || backoff === undefined) throw attempt.busyBegin;
       sleptMs += backoff;
@@ -409,7 +438,7 @@ class BunSqliteClient implements DbClient {
       // (reads especially) proceeds while this writer waits out the external
       // lock holder. Jitter desynchronizes concurrent retriers from each
       // other and from periodic holders.
-      await sleep(jittered(backoff));
+      await sleep(sleepMs(jittered(backoff), deadlineAt));
     }
   }
 
@@ -422,6 +451,7 @@ class BunSqliteClient implements DbClient {
     fn: (tx: DbExecutor) => Promise<T>,
     readOnly: boolean,
     finalAttempt = false,
+    deadlineAt?: number,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
     const ctx: TxContext = { closed: false, afterCommit: [] };
@@ -449,6 +479,8 @@ class BunSqliteClient implements DbClient {
       }
       began = true;
       const result = await txContext.run(ctx, () => fn(tx));
+      // Last point a deadline can stop the write: the throw rolls back in the catch below.
+      assertBeforeDeadline(deadlineAt);
       if (readOnly) {
         db.run("COMMIT");
       } else {
@@ -456,7 +488,10 @@ class BunSqliteClient implements DbClient {
         // is exact. The open transaction pins the connection, so these
         // retries hold the FIFO lock and their sleeps block queued work;
         // WAL-mode COMMIT BUSY is rare enough for that to be acceptable.
-        await this.retryHoldingLock(() => this.shortSpin(db, () => db.run("COMMIT"), false, false));
+        await this.retryHoldingLock(
+          () => this.shortSpin(db, () => db.run("COMMIT"), false, false),
+          deadlineAt,
+        );
       }
       for (const hook of ctx.afterCommit) this.scheduleHook(hook);
       return { ok: true, value: result };
@@ -635,17 +670,20 @@ class BunSqliteClient implements DbClient {
    * COMMIT-only retry: the open transaction pins the shared connection, so
    * the FIFO lock stays held and these sleeps block queued in-process work.
    */
-  private async retryHoldingLock<T>(attempt: () => T): Promise<T> {
+  private async retryHoldingLock<T>(attempt: () => T, deadlineAt?: number): Promise<T> {
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
       try {
         return attempt();
       } catch (err) {
         if (!isSqliteBusy(err)) throw err;
+        // The transaction is still open and intact after a BUSY COMMIT: the caller rolls it back.
+        assertBeforeDeadline(deadlineAt);
         const backoff = this.busyRetry.backoffMs[attemptIndex];
         if (backoff === undefined || sleptMs + backoff > this.busyRetry.maxWaitMs) throw err;
         sleptMs += backoff;
-        await sleep(backoff);
+        await sleep(sleepMs(backoff, deadlineAt));
+        assertBeforeDeadline(deadlineAt);
       }
     }
   }
