@@ -533,7 +533,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, and Dialog). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 35)
+## Component catalog (all 45)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
