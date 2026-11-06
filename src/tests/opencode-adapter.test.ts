@@ -1163,8 +1163,8 @@ describe("provider key splice (one picked key per task)", () => {
     expect(config.provider.openrouter.models).toBeUndefined();
   });
 
-  test("no splice without a key, or for providers outside the splice", () => {
-    for (const model of ["nan/qwen3.6", "helmcode/glm5.3", "openrouter/x/y"]) {
+  test("no splice without a key, for providers outside the splice", () => {
+    for (const model of ["nan/qwen3.6", "helmcode/glm5.3"]) {
       const config = {};
       expect(applyProviderKeySplice(config, model, {})).toBeUndefined();
       expect(config).toEqual({});
@@ -1178,6 +1178,18 @@ describe("provider key splice (one picked key per task)", () => {
       });
       expect(config).toEqual({});
     }
+  });
+
+  test("openrouter: an uncatalogued gateway model id still gets a bare entry without a key", () => {
+    // No OPENROUTER_API_KEY in env — the credential comes from opencode's own
+    // ~/.local/share/opencode/auth.json instead, which pickProviderKey never
+    // sees. The catalog entry still has to exist or OpenCode falls back to its
+    // default model and fails the task as a catalog mismatch.
+    const config: Record<string, any> = {};
+    expect(applyProviderKeySplice(config, "openrouter/x/y", {})).toBeUndefined();
+    expect(config.provider.openrouter.models).toEqual({ "x/y": { name: "x/y", tool_call: true } });
+    expect(config.provider.openrouter.env).toBeUndefined();
+    expect(config.provider.openrouter.options).toBeUndefined();
   });
 });
 
