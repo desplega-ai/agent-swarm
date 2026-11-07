@@ -219,6 +219,7 @@ import {
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
 import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
+import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -3606,17 +3607,17 @@ export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
 }
 
 /**
- * Batch size and hard cap for the paginated eligibility scans in
+ * Batch size for the paginated eligibility scans in
  * `getUnassignedTaskIdsForAgent` (and `autoAssignPoolTasks` in
  * src/heartbeat/heartbeat.ts, which mirrors this pattern). A fixed single
  * window used to mean N ineligible affinity-tagged tasks at the head of the
  * priority order could hide all eligible work behind them forever — see
  * PR #954 review. Scanning continues page-by-page until `limit` eligible
- * candidates are found or the pool is exhausted; the cap bounds worst-case
- * DB load when eligible work is buried deep or genuinely absent.
+ * candidates are found or the pool is exhausted; the scan cap
+ * (`getEligibilityScanCap`) bounds worst-case DB load when eligible work is
+ * buried deep or genuinely absent.
  */
 const ELIGIBILITY_SCAN_BATCH_SIZE = Number(process.env.ELIGIBILITY_SCAN_BATCH_SIZE) || 25;
-const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
 
 /**
  * Same ordering as `getUnassignedTaskIds`, filtered through
@@ -3641,9 +3642,10 @@ export async function getUnassignedTaskIdsForAgent(
 
   const batchSize = Math.max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE);
   const eligible: string[] = [];
+  const scanCap = getEligibilityScanCap();
   let offset = 0;
 
-  while (eligible.length < limit && offset < ELIGIBILITY_SCAN_CAP) {
+  while (eligible.length < limit && offset < scanCap) {
     const rows = await getDbClient().query<AgentTaskRow>(
       "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
       [batchSize, offset],
