@@ -10,6 +10,7 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+import { findOrCreateUserByEmail, linkIdentity } from "../be/users";
 import * as contractRuntime from "../extensions/contract-runtime";
 import { slackContextKey } from "../tasks/context-key";
 
@@ -115,6 +116,13 @@ async function flush(channelId: string, threadTs: string, text: string, user: st
   threadMessages.push({ ts, user, text });
   bufferThreadMessage(channelId, threadTs, text, user, ts);
   await instantFlush(`${channelId}:${threadTs}`);
+}
+
+async function registeredSlackUser(slackUserId: string, email: string): Promise<string> {
+  const actor = { kind: "system", id: "test" } as const;
+  const { user } = await findOrCreateUserByEmail(email, { name: slackUserId }, actor);
+  await linkIdentity(user.id, "slack", slackUserId, actor);
+  return user.id;
 }
 
 function count(haystack: string, needle: string): number {
@@ -300,6 +308,42 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
     expect(created).toHaveLength(1);
     expect(count(created[0]!.task, "raced message")).toBe(1);
     expect(count(created[0]!.task, "<thread_context>")).toBe(1);
+  });
+
+  test("another user's follow-up never runs under the pending task's requester", async () => {
+    const [channelId, threadTs] = ["C0FOLD6", "6000.0001"];
+    const owner = await registeredSlackUser("U0OWNA", "fold-owner@example.com");
+    const other = await registeredSlackUser("U0OWNB", "fold-other@example.com");
+    threadMessages = [
+      { ts: threadTs, user: "U0OWNA", text: "root message of the thread" },
+      { ts: "6000.0002", user: "U0OWNA", text: "<@U0BOT> please look at this" },
+    ];
+    const target = await createTaskExtended("<@U0OWNA>: please look at this", {
+      agentId: leadId,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: "6000.0002",
+      slackUserId: "U0OWNA",
+      requestedByUserId: owner,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+
+    // The requester's own follow-up folds into their task.
+    await flush(channelId, threadTs, "owner follow-up", "U0OWNA", "6000.0003");
+    expect((await getTaskById(target.id))!.task).toContain("owner follow-up");
+
+    // Another user's follow-up gets a task attributed to them, not a fold.
+    await flush(channelId, threadTs, "other user ask", "U0OWNB", "6000.0004");
+    const folded = (await getTaskById(target.id))!;
+    expect(folded.task).not.toContain("other user ask");
+    expect(folded.requestedByUserId).toBe(owner);
+    const created = (await getSlackTasksInThread(channelId, threadTs)).filter(
+      (task) => task.id !== target.id,
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0]!.task).toContain("other user ask");
+    expect(created[0]!.requestedByUserId).toBe(other);
   });
 });
 

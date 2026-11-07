@@ -113,6 +113,8 @@ export function appendFollowUpMessages(description: string, labelled: string, co
  * a Slack-path task (no taskType: never a worker follow-up or a resume) for
  * this thread's contextKey that no worker has claimed yet. A `!now` flush asks
  * for an immediate run, so it never joins a task queued behind another one.
+ * The newest sender owns a run's attribution and budget, so a flush folds only
+ * into a task requested by that same user; anyone else gets a task of their own.
  */
 function isFoldTarget(
   task: AgentTask | null,
@@ -120,10 +122,12 @@ function isFoldTarget(
   threadTs: string,
   leadId: string | undefined,
   immediate: boolean,
+  requesterId: string | undefined,
 ): task is AgentTask {
   if (
     !leadId ||
     !task ||
+    (task.requestedByUserId ?? undefined) !== requesterId ||
     task.status !== "pending" ||
     task.agentId !== leadId ||
     task.source !== "slack" ||
@@ -510,7 +514,7 @@ async function slackFlush(
     await slackFlush(items, key, immediate, foldAttempts - 1);
     return;
   }
-  if (isFoldTarget(foldTarget, channelId, threadTs, lead?.id, immediate)) {
+  if (isFoldTarget(foldTarget, channelId, threadTs, lead?.id, immediate, newestRequesterId)) {
     // The messages must pass the same pre.task.create gate a new task would.
     const gate = await applyPreTaskCreate({
       description: fullDescription,
