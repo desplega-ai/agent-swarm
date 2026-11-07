@@ -43,6 +43,13 @@ Write plain, short markdown: bold, italic, inline code, code blocks, bullet list
 | Slack | Converted to Slack mrkdwn: bold, italic, code, lists, links. Tables do not render well. | 4000 characters |
 | Teams | Basic markdown: bold, italic, code, lists, links. | 20000 characters |
 
+Tables and charts go in a `card` on `chat-reply`, not in the markdown text. It posts after the text, as its own message. When the card is the answer, keep the task `output` to one line pointing at it, because the swarm posts `output` too. What a card becomes:
+
+- Slack: native Block Kit tables and charts. A spec Slack cannot draw natively is rejected, so fix it and retry.
+- Teams: an Adaptive Card with native tables and fields. Charts fall back to text.
+- Discord: an embed. Tables become pipe-delimited text rows, and charts fall back to text.
+- Telegram: formatted text with link buttons as inline buttons. Tables and charts fall back to text.
+
 The swarm splits longer text into several messages at line breaks. Long answers are hard to read in chat, so keep the answer short and put long material in an artifact or page, then post the link.
 
 ## Attachments
