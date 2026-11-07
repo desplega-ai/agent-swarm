@@ -313,7 +313,8 @@ async function clearAssistantStatus(
 }
 
 function slackTreeStallMinutes(): number {
-  return Number(process.env.SLACK_TREE_STALL_MIN) || 15;
+  const minutes = Number(process.env.SLACK_TREE_STALL_MIN);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
 }
 
 function isStalledMember(task: AgentTask, now: Date): boolean {
