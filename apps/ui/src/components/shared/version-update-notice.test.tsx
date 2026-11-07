@@ -4,11 +4,19 @@ import { act } from "react";
 
 GlobalRegistrator.register();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-afterAll(async () => GlobalRegistrator.unregister());
 // React DOM and Sonner must detect the browser after the DOM exists.
 const { createRoot } = await import("react-dom/client");
 const { Toaster, toast } = await import("sonner");
 const { useVersionUpdateToast, versionUpdateNotice } = await import("./version-update-notice");
+
+let toasterRoot: ReturnType<typeof createRoot> | undefined;
+afterAll(async () => {
+  // A mounted Toaster keeps scheduling React work (removal timers); unregistering
+  // first lets that work fire with no `window`, an unhandled error that fails the run.
+  await act(async () => toasterRoot?.unmount());
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  await GlobalRegistrator.unregister();
+});
 
 const base = {
   entityKey: "app:1",
@@ -81,7 +89,8 @@ describe("useVersionUpdateToast", () => {
   beforeAll(async () => {
     const toasterHost = document.createElement("div");
     document.body.appendChild(toasterHost);
-    await act(async () => createRoot(toasterHost).render(<Toaster />));
+    toasterRoot = createRoot(toasterHost);
+    await act(async () => toasterRoot?.render(<Toaster />));
   });
 
   beforeEach(() => {
