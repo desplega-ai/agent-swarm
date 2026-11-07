@@ -25,6 +25,7 @@ CONSTANTS
     G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     DRAIN_HANDOFF,    \* API drain handoff (#1837), opt-in via API_DRAIN_MAX_MS > 0
+    PROVIDER_FALLBACK, \* provider-error fallback supersede (#2736), on when a profile lists fallbacks
     HYPO_REOFFER,     \* hypothetical path that re-offers an unassigned task
     BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
     G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
@@ -239,8 +240,14 @@ AbortTerminal(w, t) ==
 \* The runner then aborts the session (AbortTerminal frees the slot). Enabled
 \* whenever the API is up, not only while draining (over-approximation); the
 \* drain's refusal to dispatch only removes behaviors and is not modeled.
+\* Since #2736 the same route also runs for a provider error on a task with a
+\* claim-time profile (requestProviderFallback, reason provider_fallback):
+\* the resume always pins to the caller, ignoring capacity, and runs the next
+\* fallback profile. Same guards and the same state change, so this action
+\* covers it; PROVIDER_FALLBACK enables it without the drain. No fallback left
+\* is a no-op on the server (the worker then fails the task: Complete).
 DrainHandoff(w, t) ==
-    /\ DRAIN_HANDOFF /\ apiUp /\ alive[w] /\ t \in running[w]
+    /\ (DRAIN_HANDOFF \/ PROVIDER_FALLBACK) /\ apiUp /\ alive[w] /\ t \in running[w]
     /\ st[t] = "in_progress" /\ own[t] = w
     /\ \E s \in Free :
          /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
