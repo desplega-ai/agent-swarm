@@ -21,7 +21,12 @@ export interface LineageViewState {
   toggle: (id: string) => void;
   showMore: (id: string) => void;
   agentName: (agentId: string | null | undefined) => string | null;
+  /** Phone width: cards fill the column and nesting stops indenting past `COMPACT_INDENT_LEVELS`. */
+  compact?: boolean;
 }
+
+/** On a phone each nested level costs 16 px, so only the first levels indent; deeper cards stay flush and carry a depth chip. */
+const COMPACT_INDENT_LEVELS = 4;
 
 const LINE = "border-muted-foreground/30";
 const PATH_LINE = "border-primary";
@@ -48,9 +53,9 @@ function runTime(task: AgentTask): string | null {
  */
 export function LineageView({ root, state }: { root: LineageNode; state: LineageViewState }) {
   // A wide fan-out reads better as a list than as a row thousands of pixels long.
-  if (root.children.length > ROW_LIMIT) {
+  if (root.children.length > ROW_LIMIT || state.compact) {
     return (
-      <div className="min-w-max px-6 pb-8">
+      <div className={cn("px-6 pb-8", state.compact ? "min-w-0 px-3" : "min-w-max")}>
         <Branch node={root} state={state} />
       </div>
     );
@@ -129,7 +134,16 @@ function RowConnector({ index, count, onPath }: { index: number; count: number; 
 }
 
 /** A card and, when open, its children as an indented list joined by a rail. */
-function Branch({ node, state }: { node: LineageNode; state: LineageViewState }) {
+function Branch({
+  node,
+  state,
+  depth = 0,
+}: {
+  node: LineageNode;
+  state: LineageViewState;
+  depth?: number;
+}) {
+  const flat = Boolean(state.compact) && depth >= COMPACT_INDENT_LEVELS;
   const open = state.expanded.has(node.task.id);
   const { shown, hidden } = visibleChildren(
     node,
@@ -137,21 +151,25 @@ function Branch({ node, state }: { node: LineageNode; state: LineageViewState })
     state.pathIds,
   );
   return (
-    <div className="flex flex-col items-start">
-      <LineageCard node={node} state={state} />
+    <div className={cn("flex flex-col items-start", state.compact && "w-full")}>
+      <LineageCard node={node} state={state} depth={state.compact ? depth : undefined} />
       {open && shown.length > 0 ? (
-        <ol className="ml-4">
+        <ol
+          className={cn(state.compact ? (flat ? "w-full" : "ml-1 w-[calc(100%-0.25rem)]") : "ml-4")}
+        >
           {shown.map((child, index) => (
             <RailItem
               key={child.task.id}
               last={index === shown.length - 1 && hidden === 0}
               onPath={state.pathIds.has(child.task.id)}
+              compact={state.compact}
+              flat={flat}
             >
-              <Branch node={child} state={state} />
+              <Branch node={child} state={state} depth={depth + 1} />
             </RailItem>
           ))}
           {hidden > 0 ? (
-            <RailItem last onPath={false}>
+            <RailItem last onPath={false} compact={state.compact} flat={flat}>
               <MoreButton hidden={hidden} onClick={() => state.showMore(node.task.id)} />
             </RailItem>
           ) : null}
@@ -166,20 +184,27 @@ function RailItem({
   last,
   onPath,
   children,
+  compact,
+  flat,
 }: {
   last: boolean;
   onPath: boolean;
   children: ReactNode;
+  compact?: boolean;
+  /** Past the indent cap: no elbow, no rail, the card sits flush. */
+  flat?: boolean;
 }) {
+  if (flat) return <li className="relative pt-2">{children}</li>;
   return (
-    <li className="relative pt-3 pl-6">
+    <li className={cn("relative pt-3", compact ? "pl-3" : "pl-6")}>
       {last ? null : (
         <span aria-hidden className={cn("absolute top-0 bottom-0 left-0 border-l", LINE)} />
       )}
       <span
         aria-hidden
         className={cn(
-          "absolute top-0 left-0 h-9 w-5 rounded-bl-lg border-b border-l",
+          "absolute top-0 left-0 h-9 rounded-bl-lg border-b border-l",
+          compact ? "w-2.5" : "w-5",
           onPath ? PATH_LINE : LINE,
         )}
       />
@@ -205,7 +230,15 @@ function MoreButton({ hidden, onClick }: { hidden: number; onClick: () => void }
  * The whole card links to the task; the child toggle and the link chips sit
  * above that link.
  */
-function LineageCard({ node, state }: { node: LineageNode; state: LineageViewState }) {
+function LineageCard({
+  node,
+  state,
+  depth,
+}: {
+  node: LineageNode;
+  state: LineageViewState;
+  depth?: number;
+}) {
   const { task } = node;
   const current = task.id === state.focusId;
   const ref = useRef<HTMLDivElement | null>(null);
@@ -233,7 +266,8 @@ function LineageCard({ node, state }: { node: LineageNode; state: LineageViewSta
       ref={ref}
       data-current={current || undefined}
       className={cn(
-        "relative w-72 rounded-xl border bg-card p-3 text-card-foreground shadow-xs transition-colors hover:border-foreground/25",
+        "relative rounded-xl border bg-card p-3 text-card-foreground shadow-xs transition-colors hover:border-foreground/25",
+        state.compact ? "w-full" : "w-72",
         current && "border-primary ring-2 ring-primary/40",
         FADED.has(task.status) && !current && "opacity-60",
       )}
@@ -265,6 +299,11 @@ function LineageCard({ node, state }: { node: LineageNode; state: LineageViewSta
         <span className="font-mono tabular-nums">
           {[cost, time].filter(Boolean).join(" · ") || `#${task.id.slice(0, 8)}`}
         </span>
+        {depth !== undefined && depth >= COMPACT_INDENT_LEVELS ? (
+          <span className="rounded border border-border-subtle px-1 font-mono text-[10px]">
+            L{depth}
+          </span>
+        ) : null}
         <span className="ml-auto flex items-center gap-1">
           <TaskLinks task={task} />
           {childCount > 0 ? (
