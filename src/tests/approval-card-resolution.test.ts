@@ -5,21 +5,42 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 
+/*
+ * A Slack fake with the documented DM routing: chat.postMessage with a U/W id
+ * lands in the user's Slackbot DM (the bot is not a member, so chat.update
+ * there fails), conversations.open returns the bot's own DM, and chat.update
+ * rejects user ids and messages that are not in the given conversation.
+ */
 type UpdateCall = { channel: string; ts: string; text: string; blocks: unknown[] };
+type PostCall = { channel: string; thread_ts?: string; text?: string };
 const updates: UpdateCall[] = [];
+const posts: Array<PostCall & { landedIn: string }> = [];
+const botDmMessages = new Set<string>();
 let failUpdates = false;
+const isUserId = (id: string) => /^[UW]/.test(id);
+const slackbotDm = (user: string) => `DSLACKBOT${user}`;
+const botDm = (user: string) => `DBOT${user}`;
 const update = mock(async (args: UpdateCall) => {
   updates.push(args);
   if (failUpdates) throw new Error("slack down xoxb-123456789012-abcdefghijkl");
+  if (isUserId(args.channel) || args.channel.startsWith("DSLACKBOT")) {
+    throw new Error("An API error occurred: channel_not_found");
+  }
+  if (args.channel.startsWith("DBOT") && !botDmMessages.has(`${args.channel}:${args.ts}`)) {
+    throw new Error("An API error occurred: message_not_found");
+  }
   return { ok: true };
 });
-const postMessage = mock(async (_args: Record<string, unknown>) => ({
-  ts: "1700000000.000200",
-  channel: "D0DM",
-}));
+const postMessage = mock(async (args: PostCall) => {
+  const landedIn = isUserId(args.channel) ? slackbotDm(args.channel) : args.channel;
+  posts.push({ ...args, landedIn });
+  const ts = "1700000000.000200";
+  if (landedIn.startsWith("DBOT")) botDmMessages.add(`${landedIn}:${ts}`);
+  return { ok: true, ts, channel: landedIn };
+});
 const conversationsOpen = mock(async ({ users }: { users: string }) => ({
   ok: true,
-  channel: { id: `D${users}` },
+  channel: { id: botDm(users) },
 }));
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
@@ -45,6 +66,7 @@ import {
 } from "../be/db";
 import {
   dispatchApprovalNotifications,
+  postApprovalCancellationUpdates,
   updateResolvedApprovalCards,
 } from "../workflows/approval-notifications";
 
@@ -92,6 +114,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   updates.length = 0;
+  posts.length = 0;
   conversationsOpen.mockClear();
   failUpdates = false;
 });
@@ -248,13 +271,15 @@ describe("resolved approval Slack card", () => {
     });
     await settle(1);
     expect(updates).toHaveLength(1);
-    // The DM conversation id from chat.postMessage, not the user-id target.
-    expect(updates[0]!.channel).toBe("D0DM");
+    // Posted to and edited in the bot's own DM, never the user's Slackbot DM.
+    expect(posts[0]!.channel).toBe(botDm("U0USER"));
+    expect(updates[0]!.channel).toBe(botDm("U0USER"));
     expect(cardText(updates[0]!)).toContain("✅ *Approved by operator*");
   });
 
-  test("a DM card stored before channelId existed is edited in the bot's DM with the user", async () => {
-    // The pre-deploy entry shape: a user-id target and the messageTs, no conversation id.
+  test("a pre-deploy user-id card is in the Slackbot DM: it gets a thread reply, not an edit", async () => {
+    // The pre-deploy entry shape: a U/W target and the messageTs, no conversation id.
+    // Slack posted those with channel=<user id>, so the card sits in the user's Slackbot DM.
     const user = await createPosted({}, [
       { channel: "slack", target: "U0LEGACY", messageTs: "1700000000.000300" },
     ]);
@@ -263,21 +288,63 @@ describe("resolved approval Slack card", () => {
     ]);
     await resolveApprovalRequest(user.id, { status: "approved", resolvedBy: "operator" });
     await resolveApprovalRequest(grid.id, { status: "rejected", resolvedBy: "operator" });
-    await settle(2);
+    for (let i = 0; i < 100 && posts.length < 2; i++) await Bun.sleep(10);
 
-    expect(updates).toHaveLength(2);
-    const byTs = Object.fromEntries(updates.map((u) => [u.ts, u]));
-    expect(byTs["1700000000.000300"]?.channel).toBe("DU0LEGACY");
-    expect(byTs["1700000000.000400"]?.channel).toBe("DW0GRID");
-    expect(conversationsOpen).toHaveBeenCalledWith({ users: "U0LEGACY" });
-    expect(conversationsOpen).toHaveBeenCalledWith({ users: "W0GRID" });
+    expect(updates).toHaveLength(0);
+    expect(conversationsOpen).not.toHaveBeenCalled();
+    const byTs = Object.fromEntries(posts.map((p) => [p.thread_ts, p]));
+    expect(byTs["1700000000.000300"]?.landedIn).toBe(slackbotDm("U0LEGACY"));
+    expect(byTs["1700000000.000300"]?.text).toContain("Approved by operator");
+    expect(byTs["1700000000.000400"]?.landedIn).toBe(slackbotDm("W0GRID"));
+    expect(byTs["1700000000.000400"]?.text).toContain("Rejected by operator");
+
+    // The reply is claimed: a repeat call posts nothing.
+    await updateResolvedApprovalCards([(await getApprovalRequestById(user.id))!]);
+    expect(posts).toHaveLength(2);
   });
 
-  test("a stored channelId or a channel target never opens a DM", async () => {
+  test("a cancelled pre-deploy user-id card gets one reply, shared with the cancellation reply", async () => {
+    const approval = await createPosted({}, [
+      { channel: "slack", target: "U0LEGACY", messageTs: "1700000000.000500" },
+    ]);
+    const cancelled = await cancelApprovalRequestById(approval.id, {
+      reason: "Superseded",
+      resolvedBy: null,
+    });
+    for (let i = 0; i < 100 && posts.length < 1; i++) await Bun.sleep(10);
+    await postApprovalCancellationUpdates([cancelled!], "Superseded");
+    expect(updates).toHaveLength(0);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.landedIn).toBe(slackbotDm("U0LEGACY"));
+    expect(posts[0]!.text).toContain("Cancelled: Superseded");
+  });
+
+  test("a new user-id card's cancellation reply threads in the bot's DM", async () => {
+    const approval = await createPosted({}, []);
+    await dispatchApprovalNotifications({
+      requestId: approval.id,
+      title: approval.title,
+      questions: approval.questions as Array<{ label?: string }>,
+      notifications: [{ channel: "slack", target: "U0NEW" }],
+    });
+    posts.length = 0;
+    const cancelled = await cancelApprovalRequestById(approval.id, {
+      reason: "Superseded",
+      resolvedBy: null,
+    });
+    await settle(1);
+    await postApprovalCancellationUpdates([cancelled!], "Superseded");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.channel).toBe(botDm("U0NEW"));
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!).toMatchObject({ channel: botDm("U0NEW"), thread_ts: "1700000000.000200" });
+  });
+
+  test("a stored channelId or a channel target is edited in place", async () => {
     await resolveApprovalRequest((await createPosted()).id, { status: "approved" });
     await settle(1);
     expect(updates).toHaveLength(1);
     expect(updates[0]!.channel).toBe("C0CHAN");
-    expect(conversationsOpen).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(0);
   });
 });

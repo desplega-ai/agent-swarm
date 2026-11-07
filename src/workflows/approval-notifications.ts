@@ -125,12 +125,13 @@ export async function dispatchApprovalNotifications(
           continue;
         }
 
+        // A user-id channel posts into the user's Slackbot DM, where the bot cannot edit the card later.
+        const conversationId = await resolveSlackConversationId(
+          slackApp.client,
+          notification.target,
+        );
         // Same guard as the Slack tools: never post into a channel shared with another org.
         if (isBlockExternalEnabled()) {
-          const conversationId = await resolveSlackConversationId(
-            slackApp.client,
-            notification.target,
-          );
           const blockReason = await getChannelBlockReason(slackApp.client, conversationId);
           if (blockReason) {
             console.warn(`[HITL] ${externalChannelToolError(conversationId, blockReason)}`);
@@ -186,7 +187,7 @@ export async function dispatchApprovalNotifications(
         ];
 
         const result = await slackApp.client.chat.postMessage({
-          channel: notification.target,
+          channel: conversationId,
           text: `Approval Required: ${escapeSlackMrkdwn(title)} — ${approvalUrl}`,
           unfurl_links: false,
           unfurl_media: false,
@@ -195,11 +196,11 @@ export async function dispatchApprovalNotifications(
         });
 
         if (result.ts) {
-          // chat.update needs the conversation id; a user-id target posts into a DM.
+          // chat.update and thread replies need the conversation the card is in.
           updatedChannels[i] = {
             ...notification,
             messageTs: result.ts,
-            ...(result.channel ? { channelId: result.channel } : {}),
+            channelId: result.channel ?? conversationId,
           };
           updated = true;
         }
@@ -263,6 +264,7 @@ export async function postApprovalCancellationUpdates(
       channel: string;
       target: string;
       messageTs?: string;
+      channelId?: string;
     }> | null;
     const slackThreads = (channels ?? []).filter(
       (notification) => notification.channel === "slack" && notification.messageTs,
@@ -279,7 +281,8 @@ export async function postApprovalCancellationUpdates(
       if (!claim) continue;
       try {
         await client.chat.postMessage({
-          channel: notification.target,
+          // No channelId: a pre-deploy card, posted to the target, so the reply follows it there.
+          channel: notification.channelId ?? notification.target,
           thread_ts: notification.messageTs,
           text,
           unfurl_links: false,
@@ -316,9 +319,13 @@ export interface ApprovalCardSlackClient {
       unfurl_links: false;
       unfurl_media: false;
     }): Promise<unknown>;
-  };
-  conversations?: {
-    open(input: { users: string }): Promise<{ channel?: { id?: string } }>;
+    postMessage(input: {
+      channel: string;
+      thread_ts: string;
+      text: string;
+      unfurl_links: false;
+      unfurl_media: false;
+    }): Promise<unknown>;
   };
 }
 
@@ -330,21 +337,13 @@ type ApprovalSlackEntry = {
 };
 
 /**
- * The conversation holding a posted card. Entries stored before `channelId`
- * existed carry only the U/W target of a DM, which chat.update rejects; the
- * bot's DM with that user (conversations.open) is where the card was posted.
+ * A card stored before `channelId` existed, sent with a U/W target. Slack put it
+ * in the user's Slackbot DM: chat.update rejects user ids, and the bot cannot
+ * learn or edit that DM, so the outcome goes in a thread reply sent the same way.
+ * That reply shares the cancellation reply's claim: one reply per card.
  */
-async function resolveCardChannel(
-  client: ApprovalCardSlackClient,
-  card: ApprovalSlackEntry,
-): Promise<string> {
-  if (card.channelId) return card.channelId;
-  if (!isSlackUserId(card.target)) return card.target;
-  if (!client.conversations) throw new Error("Slack client cannot open the DM conversation");
-  const opened = await client.conversations.open({ users: card.target });
-  const dmId = opened.channel?.id;
-  if (!dmId) throw new Error(`conversations.open returned no DM channel for user ${card.target}`);
-  return dmId;
+function isLegacyUserDmCard(card: ApprovalSlackEntry): boolean {
+  return !card.channelId && isSlackUserId(card.target);
 }
 
 /** The claim key of one Slack card's in-place edit, beside the cancellation reply's key. */
@@ -401,8 +400,9 @@ export async function buildResolvedApprovalCard(
 }
 
 /**
- * Edit each resolved request's Slack card in place with chat.update. One
- * claim per (channel, messageTs) makes a repeat call a no-op. A Slack error
+ * Edit each resolved request's Slack card in place with chat.update; a card in
+ * a user's Slackbot DM gets a thread reply instead. One claim per
+ * (channel, messageTs) makes a repeat call a no-op. A Slack error
  * releases the claim and is logged; it never throws.
  */
 export async function updateResolvedApprovalCards(
@@ -417,7 +417,9 @@ export async function updateResolvedApprovalCards(
       (n) => n.channel === "slack" && n.messageTs,
     );
     for (const card of cards) {
-      const key = approvalCardUpdateKey(card.target, card.messageTs!);
+      const key = isLegacyUserDmCard(card)
+        ? approvalCancellationNotificationKey(card.target, card.messageTs!)
+        : approvalCardUpdateKey(card.target, card.messageTs!);
       try {
         const claim = await claimApprovalCancellationNotification(approval.id, key, {
           anyTerminal: true,
@@ -426,14 +428,24 @@ export async function updateResolvedApprovalCards(
         try {
           const rendered = await buildResolvedApprovalCard(claim.approval);
           if (!rendered) throw new Error("approval is still pending");
-          await client.chat.update({
-            channel: await resolveCardChannel(client, card),
-            ts: card.messageTs!,
-            text: rendered.text,
-            blocks: rendered.blocks,
-            unfurl_links: false,
-            unfurl_media: false,
-          });
+          if (!isLegacyUserDmCard(card)) {
+            await client.chat.update({
+              channel: card.channelId ?? card.target,
+              ts: card.messageTs!,
+              text: rendered.text,
+              blocks: rendered.blocks,
+              unfurl_links: false,
+              unfurl_media: false,
+            });
+          } else {
+            await client.chat.postMessage({
+              channel: card.target,
+              thread_ts: card.messageTs!,
+              text: rendered.text,
+              unfurl_links: false,
+              unfurl_media: false,
+            });
+          }
           await completeApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
         } catch (error) {
           await releaseApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
