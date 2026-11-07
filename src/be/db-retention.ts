@@ -5,6 +5,11 @@ import { TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
+import {
+  deleteWorkflowRunRetentionBatch,
+  workflowRunRetentionStatements,
+} from "./db/workflow-run-retention";
+import { DbTransactionDeadlineError } from "./db-client";
 import { DB_RETENTION_TUNING_BOUNDS, MAX_DB_RETENTION_DAYS } from "./swarm-config-guard";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,7 +27,7 @@ const YIELD_MS = 25;
  * from operator configuration: a retention policy must never target a table
  * that code review has not explicitly approved as safe to delete from.
  *
- * Two policies exist:
+ * Three policies exist:
  *  - `age`: the env value is a number of days; rows whose `timeColumn` is older
  *    than that horizon are deleted. Optional narrowing: `terminalStatuses`
  *    deletes only rows whose `statusColumn` is in that list, `keepWhenSet`
@@ -32,6 +37,8 @@ const YIELD_MS = 25;
  *  - `keepLatest`: the env value is a count; within each `partitionBy` group,
  *    only the newest `rankBy` rows are kept. The newest row of a group is
  *    never deleted, because the smallest accepted count is 1.
+ *  - `workflowRuns`: days since completion, with parent/child protection and
+ *    transactional dependency cleanup in db/workflow-run-retention.ts.
  */
 export const DB_RETENTION_TABLES = [
   {
@@ -93,12 +100,22 @@ export const DB_RETENTION_TABLES = [
     initialBatchSize: 100,
     maxBatchSize: 500,
   },
+  {
+    table: "workflow_runs",
+    policy: "workflowRuns",
+    envKey: "WORKFLOW_RUNS_RETENTION_DAYS",
+    metricsKey: "workflowRuns",
+    initialBatchSize: 10,
+    minBatchSize: 1,
+    maxBatchSize: 100,
+  },
 ] as const satisfies ReadonlyArray<
   {
     table: string;
     envKey: string;
     metricsKey: string;
     initialBatchSize?: number;
+    minBatchSize?: number;
     maxBatchSize?: number;
   } & (
     | {
@@ -110,6 +127,7 @@ export const DB_RETENTION_TABLES = [
         keepWhenSet?: string;
       }
     | { policy: "keepLatest"; partitionBy: string; rankBy: string }
+    | { policy: "workflowRuns" }
   )
 >;
 
@@ -348,6 +366,10 @@ type SweepStatements = {
 };
 
 export function sweepStatements(table: RetentionTable, value: number, now: Date): SweepStatements {
+  if (table.policy === "workflowRuns") {
+    const iso = new Date(now.getTime() - value * DAY_MS).toISOString();
+    return workflowRunRetentionStatements(`${iso.slice(0, 10)} ${iso.slice(11, 19)}`);
+  }
   if (table.policy === "keepLatest") {
     // ROW_NUMBER over the (partition, rank DESC) index: rank 1 is the newest
     // row of its group. The DELETE removes the deepest history first, so an
@@ -429,13 +451,31 @@ async function sweepTable(
   let slowestStatementMs = 0;
   let size = batchSizeByTable[table.metricsKey] ?? initialBatchSize(table);
   const ceiling = maxBatchSize(table);
+  const floor = "minBatchSize" in table ? table.minBatchSize : MIN_BATCH_SIZE;
 
   try {
     while (!signal.aborted && Date.now() < deadline) {
       const limitUsed = size;
-      // Never wrap multiple batches in a transaction: one autocommit DELETE per
-      // batch, so the write lock and any event-loop stall end with each statement.
-      const result = await client.runTimed(statements.deleteSql, [...statements.params, limitUsed]);
+      // Release the write lock between batches. Workflow runs need a single
+      // transaction per batch to unlink tasks and reclaim their definitions.
+      let result: { changes: number; executionMs: number };
+      try {
+        result =
+          table.policy === "workflowRuns"
+            ? await deleteWorkflowRunRetentionBatch(
+                String(statements.params[0]),
+                limitUsed,
+                deadline,
+              )
+            : await client.runTimed(statements.deleteSql, [...statements.params, limitUsed]);
+      } catch (err) {
+        if (table.policy !== "workflowRuns" || !(err instanceof DbTransactionDeadlineError))
+          throw err;
+        // The entire batch rolled back. Retry smaller on the next pass/tick;
+        // reaching the budget is not a database failure.
+        size = Math.max(floor, Math.floor(size / 2));
+        break;
+      }
       // Execution time only. Wall time around the call also covers waiting for
       // the client's FIFO lock and its BUSY backoff sleeps, neither of which
       // this statement spent in the driver: charging those to the stall metric
@@ -448,7 +488,7 @@ async function sweepTable(
       batches += 1;
 
       if (elapsed > maxStatementMs) {
-        size = Math.max(MIN_BATCH_SIZE, Math.floor(size / 2));
+        size = Math.max(floor, Math.floor(size / 2));
       } else if (elapsed < maxStatementMs / 5) {
         size = Math.min(ceiling, size * 2);
       }
@@ -458,7 +498,9 @@ async function sweepTable(
       // pass. It does NOT prove the table is drained: each DELETE autocommits,
       // so another process can commit an already-expired row before the count
       // below runs. Loop control only — `drained` comes from that count.
-      if (result.changes < limitUsed) break;
+      // Removing a tree root exposes its expired children to the next batch.
+      if (result.changes === 0 || (table.policy !== "workflowRuns" && result.changes < limitUsed))
+        break;
       if (signal.aborted || Date.now() >= deadline) break;
       await yieldTick();
     }

@@ -1,3 +1,4 @@
+import { DbTransactionDeadlineError } from "../../db-client";
 import { getDbClient } from "../runtime";
 
 /**
@@ -230,6 +231,7 @@ async function reclassifyBatch(
   seedTaskIds: readonly string[],
   batchSize: number,
   hops: number,
+  enqueue: typeof enqueueHumanFreeWork = enqueueHumanFreeWork,
 ): Promise<number> {
   const client = getDbClient();
 
@@ -308,7 +310,7 @@ async function reclassifyBatch(
         )`,
       [JSON.stringify(affected)],
     );
-    await enqueueHumanFreeWork(
+    await enqueue(
       unfinished.map((row) => row.id),
       "children",
       hops,
@@ -342,6 +344,60 @@ export async function reclassifyTaskHumanFree(
   if (seeds.length === 0) return 0;
   await enqueueHumanFreeWork(seeds.slice(batchSize), "self", 1);
   return await reclassifyBatch(seeds.slice(0, batchSize), batchSize, 1);
+}
+
+/**
+ * Retention removes a run and its classification input together. Finish its
+ * task trees before committing, using the same bounded classifier statements
+ * but a private continuation list rather than the background queue. The
+ * caller owns the write transaction and its deadline; any failure rolls back
+ * the unlink, run deletion and every flag update together.
+ */
+export async function reclassifyTaskHumanFreeAtomically(
+  seedTaskIds: readonly string[],
+  deadlineAt: number,
+): Promise<void> {
+  const checkDeadline = () => {
+    if (Date.now() >= deadlineAt) throw new DbTransactionDeadlineError();
+  };
+  const pending: Array<{ taskId: string; hops: number }> = [];
+  const enqueue: typeof enqueueHumanFreeWork = async (taskIds, _scope, hops) => {
+    if (hops > HUMAN_FREE_MAX_CONTINUATION_HOPS) {
+      throw new Error("workflow retention: task classification contains a parent cycle");
+    }
+    for (const taskId of taskIds) pending.push({ taskId, hops });
+  };
+  const seeds = [...new Set(seedTaskIds)];
+  for (let offset = 0; offset < seeds.length; offset += HUMAN_FREE_RECLASSIFY_BATCH) {
+    checkDeadline();
+    await reclassifyBatch(
+      seeds.slice(offset, offset + HUMAN_FREE_RECLASSIFY_BATCH),
+      HUMAN_FREE_RECLASSIFY_BATCH,
+      1,
+      enqueue,
+    );
+  }
+  for (let index = 0; index < pending.length; index++) {
+    const item = pending[index]!;
+    let afterRowid = 0;
+    while (true) {
+      checkDeadline();
+      const page = await getDbClient().query<{ id: string; position: number }>(
+        `SELECT id, rowid AS position FROM agent_tasks
+         WHERE parentTaskId = ? AND rowid > ? ORDER BY rowid LIMIT ?`,
+        [item.taskId, afterRowid, HUMAN_FREE_RECLASSIFY_BATCH],
+      );
+      if (page.length === 0) break;
+      await reclassifyBatch(
+        page.map((row) => row.id),
+        HUMAN_FREE_RECLASSIFY_BATCH,
+        item.hops + 1,
+        enqueue,
+      );
+      if (page.length < HUMAN_FREE_RECLASSIFY_BATCH) break;
+      afterRowid = page[page.length - 1]!.position;
+    }
+  }
 }
 
 interface QueueRow {
