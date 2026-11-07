@@ -46,5 +46,76 @@
         }
       }
     }
-  }
+  },
+  "specBlocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Weekly deploys",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Deploys*\n1,284"
+        }
+      ]
+    },
+    {
+      "type": "data_table",
+      "caption": "Table",
+      "rows": [
+        [
+          {
+            "type": "raw_text",
+            "text": "Service"
+          },
+          {
+            "type": "raw_text",
+            "text": "Deploys"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "api"
+          },
+          {
+            "type": "raw_text",
+            "text": "812"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "ui"
+          },
+          {
+            "type": "raw_text",
+            "text": "472"
+          }
+        ]
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open dashboard",
+            "emoji": true
+          },
+          "action_id": "link-https://example.com/deploys",
+          "url": "https://example.com/deploys"
+        }
+      ]
+    }
+  ],
+  "fallbackText": "*Weekly deploys*\nDeploys: 1,284\nService | Deploys\n--------|--------\napi     | 812\nui      | 472"
 }
