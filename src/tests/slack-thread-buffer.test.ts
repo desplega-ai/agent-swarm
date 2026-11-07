@@ -361,30 +361,30 @@ describe("Slack thread buffer", () => {
   });
 
   describe("buffer creation and message appending", () => {
-    test("bufferThreadMessage creates a buffer entry", () => {
-      bufferThreadMessage("C100", "1000.0001", "first message", "U1", "1000.0010");
+    test("bufferThreadMessage creates a buffer entry", async () => {
+      await bufferThreadMessage("C100", "1000.0001", "first message", "U1", "1000.0010");
 
       expect(isThreadBuffered("C100", "1000.0001")).toBe(true);
       expect(getBufferMessageCount("C100:1000.0001")).toBe(1);
     });
 
-    test("appending a second message increments count", () => {
-      bufferThreadMessage("C100", "1000.0001", "second message", "U2", "1000.0020");
+    test("appending a second message increments count", async () => {
+      await bufferThreadMessage("C100", "1000.0001", "second message", "U2", "1000.0020");
 
       expect(getBufferMessageCount("C100:1000.0001")).toBe(2);
     });
 
-    test("appending a third message increments count again", () => {
-      bufferThreadMessage("C100", "1000.0001", "third message", "U1", "1000.0030");
+    test("appending a third message increments count again", async () => {
+      await bufferThreadMessage("C100", "1000.0001", "third message", "U1", "1000.0030");
 
       expect(getBufferMessageCount("C100:1000.0001")).toBe(3);
     });
   });
 
   describe("buffer keyed by channelId:threadTs (no cross-thread contamination)", () => {
-    test("different threads have independent buffers", () => {
-      bufferThreadMessage("C200", "2000.0001", "thread A msg", "U1", "2000.0010");
-      bufferThreadMessage("C200", "2000.0002", "thread B msg", "U1", "2000.0020");
+    test("different threads have independent buffers", async () => {
+      await bufferThreadMessage("C200", "2000.0001", "thread A msg", "U1", "2000.0010");
+      await bufferThreadMessage("C200", "2000.0002", "thread B msg", "U1", "2000.0020");
 
       expect(isThreadBuffered("C200", "2000.0001")).toBe(true);
       expect(isThreadBuffered("C200", "2000.0002")).toBe(true);
@@ -392,9 +392,9 @@ describe("Slack thread buffer", () => {
       expect(getBufferMessageCount("C200:2000.0002")).toBe(1);
     });
 
-    test("different channels with same threadTs are independent", () => {
-      bufferThreadMessage("C300", "3000.0001", "channel A msg", "U1", "3000.0010");
-      bufferThreadMessage("C301", "3000.0001", "channel B msg", "U1", "3000.0020");
+    test("different channels with same threadTs are independent", async () => {
+      await bufferThreadMessage("C300", "3000.0001", "channel A msg", "U1", "3000.0010");
+      await bufferThreadMessage("C301", "3000.0001", "channel B msg", "U1", "3000.0020");
 
       expect(getBufferMessageCount("C300:3000.0001")).toBe(1);
       expect(getBufferMessageCount("C301:3000.0001")).toBe(1);
@@ -406,8 +406,8 @@ describe("Slack thread buffer", () => {
       expect(isThreadBuffered("C999", "9999.0001")).toBe(false);
     });
 
-    test("returns true for buffered thread", () => {
-      bufferThreadMessage("C400", "4000.0001", "msg", "U1", "4000.0010");
+    test("returns true for buffered thread", async () => {
+      await bufferThreadMessage("C400", "4000.0001", "msg", "U1", "4000.0010");
       expect(isThreadBuffered("C400", "4000.0001")).toBe(true);
     });
   });
@@ -417,10 +417,10 @@ describe("Slack thread buffer", () => {
       expect(getBufferMessageCount("CXXX:9999.9999")).toBe(0);
     });
 
-    test("returns correct count after multiple appends", () => {
-      bufferThreadMessage("C500", "5000.0001", "msg1", "U1", "5000.0010");
-      bufferThreadMessage("C500", "5000.0001", "msg2", "U2", "5000.0020");
-      bufferThreadMessage("C500", "5000.0001", "msg3", "U1", "5000.0030");
+    test("returns correct count after multiple appends", async () => {
+      await bufferThreadMessage("C500", "5000.0001", "msg1", "U1", "5000.0010");
+      await bufferThreadMessage("C500", "5000.0001", "msg2", "U2", "5000.0020");
+      await bufferThreadMessage("C500", "5000.0001", "msg3", "U1", "5000.0030");
 
       expect(getBufferMessageCount("C500:5000.0001")).toBe(3);
     });
@@ -431,8 +431,8 @@ describe("Slack thread buffer", () => {
       const channelId = "C600";
       const threadTs = "6000.0001";
 
-      bufferThreadMessage(channelId, threadTs, "fix the bug", "U1", "6000.0010");
-      bufferThreadMessage(channelId, threadTs, "also check the logs", "U2", "6000.0020");
+      await bufferThreadMessage(channelId, threadTs, "fix the bug", "U1", "6000.0010");
+      await bufferThreadMessage(channelId, threadTs, "also check the logs", "U2", "6000.0020");
 
       await instantFlush(`${channelId}:${threadTs}`);
 
@@ -461,7 +461,7 @@ describe("Slack thread buffer", () => {
       // `/<@([A-Z0-9]+)>/g` mention regex) — no underscores.
       await linkIdentity(linked.id, "slack", "U1000LINKED", SYSTEM_ACTOR);
 
-      bufferThreadMessage(
+      await bufferThreadMessage(
         channelId,
         threadTs,
         "cc <@U1000LINKED> and <@U2000UNKNOWN>",
@@ -501,8 +501,8 @@ describe("Slack thread buffer", () => {
       });
 
       // Buffer some follow-up messages
-      bufferThreadMessage(channelId, threadTs, "follow up 1", "U1", "7000.0010");
-      bufferThreadMessage(channelId, threadTs, "follow up 2", "U2", "7000.0020");
+      await bufferThreadMessage(channelId, threadTs, "follow up 1", "U1", "7000.0010");
+      await bufferThreadMessage(channelId, threadTs, "follow up 2", "U2", "7000.0020");
 
       // Use a short timeout to let the debounce timer fire
       // We need to wait for the flush to happen via the timer.
@@ -544,7 +544,7 @@ describe("Slack thread buffer", () => {
         outputSchema: { type: "object", properties: { prs: { type: "array" } } },
       });
 
-      bufferThreadMessage(channelId, threadTs, "status?", "U1", "7500.0010");
+      await bufferThreadMessage(channelId, threadTs, "status?", "U1", "7500.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
       const continuation = await getMostRecentTaskInThread(channelId, threadTs);
@@ -565,7 +565,7 @@ describe("Slack thread buffer", () => {
       const latestActive = await getLatestActiveTaskInThread(channelId, threadTs);
       expect(latestActive).toBeNull();
 
-      bufferThreadMessage(channelId, threadTs, "new request", "U1", "8000.0010");
+      await bufferThreadMessage(channelId, threadTs, "new request", "U1", "8000.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
       // Task created with no dependency
@@ -602,7 +602,7 @@ describe("Slack thread buffer", () => {
       expect(latestActive).not.toBeNull();
 
       // Buffer and instant flush
-      bufferThreadMessage(channelId, threadTs, "urgent fix", "U1", "9000.0010");
+      await bufferThreadMessage(channelId, threadTs, "urgent fix", "U1", "9000.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
       // The newest task in this thread is the flushed one (latest by createdAt)
@@ -620,7 +620,7 @@ describe("Slack thread buffer", () => {
       const channelId = "C1000";
       const threadTs = "10000.0001";
 
-      bufferThreadMessage(channelId, threadTs, "temp msg", "U1", "10000.0010");
+      await bufferThreadMessage(channelId, threadTs, "temp msg", "U1", "10000.0010");
       expect(isThreadBuffered(channelId, threadTs)).toBe(true);
 
       await instantFlush(`${channelId}:${threadTs}`);
@@ -646,7 +646,7 @@ describe("Slack thread buffer", () => {
       const channelId = "C1100";
       const threadTs = "11000.0001";
 
-      bufferThreadMessage(channelId, threadTs, "timed msg", "U1", "11000.0010");
+      await bufferThreadMessage(channelId, threadTs, "timed msg", "U1", "11000.0010");
       expect(isThreadBuffered(channelId, threadTs)).toBe(true);
 
       // After instantFlush, buffer is gone
@@ -654,15 +654,15 @@ describe("Slack thread buffer", () => {
       expect(isThreadBuffered(channelId, threadTs)).toBe(false);
     });
 
-    test("new messages reset the debounce (buffer stays active)", () => {
+    test("new messages reset the debounce (buffer stays active)", async () => {
       const channelId = "C1200";
       const threadTs = "12000.0001";
 
-      bufferThreadMessage(channelId, threadTs, "msg1", "U1", "12000.0010");
+      await bufferThreadMessage(channelId, threadTs, "msg1", "U1", "12000.0010");
       expect(isThreadBuffered(channelId, threadTs)).toBe(true);
 
       // Adding another message should keep the buffer active (timer reset)
-      bufferThreadMessage(channelId, threadTs, "msg2", "U1", "12000.0020");
+      await bufferThreadMessage(channelId, threadTs, "msg2", "U1", "12000.0020");
       expect(isThreadBuffered(channelId, threadTs)).toBe(true);
       expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(2);
     });
@@ -673,7 +673,7 @@ describe("Slack thread buffer", () => {
       const channelId = "C1300";
       const threadTs = "13000.0001";
 
-      bufferThreadMessage(channelId, threadTs, "solo message", "U1", "13000.0010");
+      await bufferThreadMessage(channelId, threadTs, "solo message", "U1", "13000.0010");
       await instantFlush(`${channelId}:${threadTs}`);
 
       const task = await getLatestActiveTaskInThread(channelId, threadTs);
@@ -695,7 +695,7 @@ describe("Slack thread buffer", () => {
       const threadTs = "14000.0001";
 
       try {
-        bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0002");
+        await bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0002");
         await instantFlush(`${channelId}:${threadTs}`);
 
         expect(info).toHaveBeenCalledTimes(1);
@@ -737,7 +737,7 @@ describe("Slack thread buffer", () => {
           END
         `);
 
-        bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0004");
+        await bufferThreadMessage(channelId, threadTs, "follow-up", "U1", "14000.0004");
         await instantFlush(`${channelId}:${threadTs}`);
 
         expect(info).not.toHaveBeenCalled();

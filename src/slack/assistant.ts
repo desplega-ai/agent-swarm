@@ -240,7 +240,7 @@ export function createAssistant(
         // Follow-up message → buffer text and file metadata until the flush.
         if (workingAgent && workingAgent.status !== "offline" && isAdditiveSlack()) {
           noteSlackInboundSideEffect("thread_buffer");
-          bufferThreadMessage(
+          await bufferThreadMessage(
             channelId,
             threadTs,
             messageText,

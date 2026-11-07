@@ -563,7 +563,7 @@ export function registerMessageHandler(app: App): void {
 
         noteSlackInboundSideEffect("thread_flush");
         if (nowMessage || hasFiles) {
-          bufferThreadMessage(
+          await bufferThreadMessage(
             msg.channel,
             msg.thread_ts,
             nowMessage,
@@ -607,7 +607,7 @@ export function registerMessageHandler(app: App): void {
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
         noteSlackInboundSideEffect("thread_buffer");
-        bufferThreadMessage(
+        await bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
           messageText,

@@ -453,6 +453,11 @@ export async function startSlackApp(): Promise<boolean> {
     // Abandoned while it waited: the app was already detached and retired.
     if (generation !== lifecycleGeneration) return false;
     console.log("[Slack] Bot connected via Socket Mode");
+    // Thread replies buffered before the last restart flush as usual.
+    const { restoreBufferedSlackMessages } = await import("./thread-buffer");
+    await restoreBufferedSlackMessages().catch((error) => {
+      console.error("[Slack] Failed to restore buffered thread messages:", error);
+    });
     void inboundDrain?.wake();
     await emitBuiltInIntegrationConnectedOnce("slack");
     // Abandoned or stopped while telemetry was pending: a watcher started now

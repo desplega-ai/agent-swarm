@@ -32,23 +32,14 @@ import { isSlackThreadLeft } from "./left-threads";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import { formatSlackFoldAck, formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
+import type { BufferedMessage } from "./thread-buffer-store";
+import * as bufferStore from "./thread-buffer-store";
 import {
   buildSlackThreadSnapshot,
   formatAuthoredMessage,
   SLACK_PARTICIPANT_CAP,
 } from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
-
-interface BufferedMessage {
-  text: string;
-  userId: string;
-  ts: string;
-  channelId: string;
-  threadTs: string;
-  files?: SlackFile[];
-  botUserId?: string;
-  userTeam?: string;
-}
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
 /** Folds tried before a flush gives up on a pending task that keeps changing under it. */
@@ -187,13 +178,16 @@ const slackBuffer = createAdditiveBuffer<BufferedMessage>({
   label: "slack-thread",
   onFlush: async (items, key, reason) => {
     await slackFlush(items, key, reason === "manual");
+    // Only a flush that returned is done with its rows; a throw keeps them for the next boot.
+    await bufferStore.clear(items);
   },
 });
 
 /**
- * Add a message to the thread buffer. Resets the debounce timer.
+ * Add a message to the thread buffer. Resets the debounce timer. The message
+ * is stored first, so a restart before the flush replays it.
  */
-export function bufferThreadMessage(
+export async function bufferThreadMessage(
   channelId: string,
   threadTs: string,
   text: string,
@@ -202,17 +196,43 @@ export function bufferThreadMessage(
   files?: SlackFile[],
   botUserId?: string,
   userTeam?: string,
-): void {
-  slackBuffer.enqueue(makeKey(channelId, threadTs), {
-    text,
-    userId,
-    ts,
-    channelId,
-    threadTs,
-    files,
-    botUserId,
-    userTeam,
-  });
+): Promise<void> {
+  const item = { text, userId, ts, channelId, threadTs, files, botUserId, userTeam };
+  try {
+    await bufferStore.persist(item);
+  } catch (error) {
+    // Still buffer in memory: losing durability beats losing the message now.
+    console.error(`[Slack] Failed to persist buffered message ${ts}:`, error);
+  }
+  slackBuffer.enqueue(makeKey(channelId, threadTs), item);
+}
+
+let restored = false;
+
+/**
+ * Re-buffer the messages a restart interrupted, once per process. They flush
+ * on the usual timer; the flush drops any a task already carries, so a crash
+ * between task creation and the row delete creates no second task.
+ */
+export async function restoreBufferedSlackMessages(): Promise<number> {
+  if (restored) return 0;
+  restored = true;
+  let items: BufferedMessage[];
+  try {
+    items = await bufferStore.loadAll();
+  } catch (error) {
+    restored = false; // the next connect retries
+    throw error;
+  }
+  for (const item of items) slackBuffer.enqueue(makeKey(item.channelId, item.threadTs), item);
+  if (items.length > 0) {
+    console.log(`[Slack] Restored ${items.length} buffered thread message(s) after restart`);
+  }
+  return items.length;
+}
+
+export function resetSlackBufferRestoreForTests(): void {
+  restored = false;
 }
 
 /**
