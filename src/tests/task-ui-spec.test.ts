@@ -1,5 +1,24 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { rm } from "node:fs/promises";
 import { standardComponentDefinitions } from "@json-render/chat";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDbClient,
+  getTaskById,
+  initDb,
+  startTask,
+} from "../be/db";
+import {
+  getTaskUiSpec,
+  getTaskUiSpecsForTasks,
+  reserveTaskUiActionRun,
+  setTaskUiActionResult,
+  upsertTaskUiSpec,
+} from "../be/task-ui-spec";
+import { registerStoreProgressTool } from "../tools/store-progress";
 import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
 import { validateTaskUiSpec } from "../ui-spec/validate";
 import {
@@ -172,5 +191,178 @@ describe("taskUiSpecSlackBlocks", () => {
 describe("chat catalog drift", () => {
   test("UI_SPEC_COMPONENTS equals the @json-render/chat standard components", () => {
     expect([...UI_SPEC_COMPONENTS]).toEqual(Object.keys(standardComponentDefinitions));
+  });
+});
+
+describe("task UI spec storage", () => {
+  const dbPath = `/tmp/test-task-ui-spec-${crypto.randomUUID()}.sqlite`;
+  let agentId: string;
+  beforeAll(async () => {
+    initDb(dbPath);
+    agentId = (
+      await createAgent({
+        name: "UI spec test",
+        role: "worker",
+        isLead: false,
+        status: "busy",
+        capabilities: [],
+      })
+    ).id;
+  });
+  afterAll(async () => {
+    closeDb();
+    await Promise.all(["", "-wal", "-shm"].map((suffix) => rm(dbPath + suffix, { force: true })));
+  });
+
+  test("upsert twice keeps one row with the latest spec", async () => {
+    const task = await createTaskExtended("UI spec upsert", { agentId, source: "system" });
+    const first = { ...example(), fallbackText: "first" };
+    await upsertTaskUiSpec(task.id, first);
+    const second = {
+      ...example(),
+      actions: { rerun: { kind: "follow_up" as const, prompt: "Run it again" } },
+      fallbackText: "second",
+    };
+    await upsertTaskUiSpec(task.id, second);
+    const rows = await getDbClient().query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM task_ui_specs WHERE task_id = ?",
+      [task.id],
+    );
+    expect(rows[0]!.n).toBe(1);
+    expect(await getTaskUiSpec(task.id)).toEqual(second);
+  });
+
+  test("batch read maps every id, null when a task has no spec", async () => {
+    const withSpec = await createTaskExtended("UI spec batch", { agentId, source: "system" });
+    const without = await createTaskExtended("UI spec none", { agentId, source: "system" });
+    await upsertTaskUiSpec(withSpec.id, { ...example(), fallbackText: "batch" });
+    const byTask = await getTaskUiSpecsForTasks([withSpec.id, without.id, withSpec.id]);
+    expect(byTask.size).toBe(2);
+    expect(byTask.get(withSpec.id)?.fallbackText).toBe("batch");
+    expect(byTask.get(without.id)).toBeNull();
+    expect(await getTaskUiSpec(without.id)).toBeNull();
+  });
+
+  test("an action run is reserved once, then exists", async () => {
+    const task = await createTaskExtended("UI action run", { agentId, source: "system" });
+    const result = await createTaskExtended("UI action result", { agentId, source: "system" });
+    const run = {
+      taskId: task.id,
+      actionId: "rerun",
+      surface: "slack" as const,
+      slackUserId: "U1",
+    };
+    expect(await reserveTaskUiActionRun({ ...run, userId: null })).toBe("reserved");
+    expect(await reserveTaskUiActionRun({ ...run, userId: null })).toBe("exists");
+    await setTaskUiActionResult(task.id, "rerun", result.id);
+    const row = await getDbClient().get<{ resultTaskId: string }>(
+      "SELECT result_task_id AS resultTaskId FROM task_ui_action_runs WHERE task_id = ? AND action_id = ?",
+      [task.id, "rerun"],
+    );
+    expect(row?.resultTaskId).toBe(result.id);
+  });
+
+  describe("store-progress uiSpec", () => {
+    type Result = { structuredContent: { success: boolean; message: string } };
+    const handler = () => {
+      const server = new McpServer({ name: "ui-spec-test", version: "1" });
+      registerStoreProgressTool(server);
+      return (
+        server as unknown as {
+          _registeredTools: Record<
+            string,
+            { handler: (args: unknown, meta: unknown) => Promise<Result> }
+          >;
+        }
+      )._registeredTools["store-progress"]!.handler;
+    };
+    const meta = () => ({ requestInfo: { headers: { "x-agent-id": agentId } } });
+    const startedTask = async (title: string) => {
+      const task = await createTaskExtended(title, { agentId, source: "system" });
+      await startTask(task.id);
+      return task;
+    };
+    const withFlag = async (value: string | undefined, fn: () => Promise<void>) => {
+      const previous = process.env.UI_SPEC_ENABLED;
+      if (value === undefined) delete process.env.UI_SPEC_ENABLED;
+      else process.env.UI_SPEC_ENABLED = value;
+      try {
+        await fn();
+      } finally {
+        if (previous === undefined) delete process.env.UI_SPEC_ENABLED;
+        else process.env.UI_SPEC_ENABLED = previous;
+      }
+    };
+    const invalid = (): TaskUiSpecInput => {
+      const spec = example();
+      (spec.spec.elements.l as { props: { url: string } }).props.url = "javascript:alert(1)";
+      return spec;
+    };
+
+    test("flag off: the task completes, no row, and the message says the spec was ignored", async () => {
+      await withFlag(undefined, async () => {
+        const task = await startedTask("UI spec flag off");
+        const result = await handler()(
+          { taskId: task.id, status: "completed", output: "Done", uiSpec: example() },
+          meta(),
+        );
+        expect(result.structuredContent.success).toBe(true);
+        expect(result.structuredContent.message).toContain("UI_SPEC_ENABLED is off");
+        expect((await getTaskById(task.id))?.status).toBe("completed");
+        expect(await getTaskUiSpec(task.id)).toBeNull();
+      });
+    });
+
+    test("flag on and a valid spec: the row exists", async () => {
+      await withFlag("true", async () => {
+        const task = await startedTask("UI spec valid");
+        const result = await handler()(
+          { taskId: task.id, status: "completed", output: "Done", uiSpec: example() },
+          meta(),
+        );
+        expect(result.structuredContent.success).toBe(true);
+        expect((await getTaskById(task.id))?.status).toBe("completed");
+        const stored = await getTaskUiSpec(task.id);
+        expect(stored?.spec).toEqual(example().spec);
+        expect(stored?.fallbackText).toContain("Weekly deploys");
+      });
+    });
+
+    test("flag on and an invalid spec: refused once, then completed without the spec", async () => {
+      await withFlag("true", async () => {
+        const task = await startedTask("UI spec invalid");
+        const args = { taskId: task.id, status: "completed", output: "Done", uiSpec: invalid() };
+        const refused = await handler()(args, meta());
+        expect(refused.structuredContent.success).toBe(false);
+        expect(refused.structuredContent.message).toContain(
+          "Completion refused: uiSpec is not valid. The task stays in_progress.",
+        );
+        expect(refused.structuredContent.message).toContain("l.url must be an https: URL.");
+        expect((await getTaskById(task.id))?.status).toBe("in_progress");
+
+        const accepted = await handler()(args, meta());
+        expect(accepted.structuredContent.success).toBe(true);
+        expect(accepted.structuredContent.message).toContain(
+          "uiSpec dropped: l.url must be an https: URL.",
+        );
+        expect((await getTaskById(task.id))?.status).toBe("completed");
+        expect(await getTaskUiSpec(task.id)).toBeNull();
+      });
+    });
+
+    test("a uiSpec on a progress call is ignored", async () => {
+      await withFlag("true", async () => {
+        const task = await startedTask("UI spec progress");
+        const result = await handler()(
+          { taskId: task.id, progress: "Halfway", uiSpec: example() },
+          meta(),
+        );
+        expect(result.structuredContent.success).toBe(true);
+        expect(result.structuredContent.message).toContain(
+          'uiSpec is stored only with status "completed".',
+        );
+        expect(await getTaskUiSpec(task.id)).toBeNull();
+      });
+    });
   });
 });
