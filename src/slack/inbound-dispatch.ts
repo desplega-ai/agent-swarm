@@ -165,6 +165,11 @@ function recordOutcome(transport: SlackInboundTransport, outcome: SlackInboundOu
   }
 }
 
+/** Count a delivery that was refused before Bolt saw it (HTTP ingress gates). */
+export function recordSlackInboundWithheld(transport: SlackInboundTransport, code: string): void {
+  recordOutcome(transport, { state: "ignored", code });
+}
+
 /** Count a Socket Mode ack that failed because the client was not ready. */
 export function recordSlackSocketAckNotReady(): void {
   counters.socket.ackNotReady += 1;
@@ -182,7 +187,9 @@ export function resetSlackInboundCountersForTests(): void {
  * which Bolt routes to its error handler after this middleware, are observed
  * here and rethrown unchanged.
  */
-export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
+export function slackInboundOutcomeMiddleware(
+  transport: SlackInboundTransport = "socket",
+): Middleware<AnyMiddlewareArgs> {
   return async ({ next, body }) => {
     // The socket gate withholds deliveries that are not ours before Bolt acks
     // them. This check covers what reaches Bolt another way (receipt replay)
@@ -210,21 +217,21 @@ export function slackInboundOutcomeMiddleware(): Middleware<AnyMiddlewareArgs> {
       return;
     }
 
-    const state = newDeliveryState("socket", false);
+    const state = newDeliveryState(transport, false);
     state.dispatched = true;
     if (!ownership.own) {
       state.ignoredReasons.push(ownership.reason);
-      recordOutcome("socket", resolveSlackInboundOutcome(state));
+      recordOutcome(transport, resolveSlackInboundOutcome(state));
       return;
     }
     await deliveryStorage.run(state, async () => {
       try {
         await next();
       } catch (error) {
-        recordOutcome("socket", resolveSlackInboundOutcome(state, error));
+        recordOutcome(transport, resolveSlackInboundOutcome(state, error));
         throw error;
       }
-      recordOutcome("socket", resolveSlackInboundOutcome(state));
+      recordOutcome(transport, resolveSlackInboundOutcome(state));
     });
   };
 }
@@ -348,12 +355,22 @@ export async function recordSlackSocketEventRanInline(
   retry: { retryNum?: number | null; retryReason?: string | null } = {},
   now: Date = new Date(),
 ): Promise<"recorded" | "duplicate" | "invalid"> {
+  return recordSlackEventRanInline("socket", body, retry, now);
+}
+
+/** `recordSlackSocketEventRanInline` for any transport (the HTTP receiver's order-dependent events). */
+export async function recordSlackEventRanInline(
+  transport: SlackInboundTransport,
+  body: unknown,
+  retry: { retryNum?: number | null; retryReason?: string | null } = {},
+  now: Date = new Date(),
+): Promise<"recorded" | "duplicate" | "invalid"> {
   const key = socketEventKey(body);
   if (!key) return "invalid";
   return recordSlackInboundInline(
     {
       dedupKey: key.dedupKey,
-      transport: "socket",
+      transport,
       kind: "event",
       payloadType: key.payloadType,
       apiAppId: key.apiAppId,
