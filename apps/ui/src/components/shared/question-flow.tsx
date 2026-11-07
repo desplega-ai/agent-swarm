@@ -38,7 +38,8 @@ function keyHintFor(question: ApprovalQuestion) {
  * ticking counter, and a fade swap to `done` once `onSubmit` resolves.
  *
  * Keys listen only while the pointer or focus is inside the flow, because
- * several flows can be mounted at once.
+ * several flows can be mounted at once. Focus wins over hover: a hovered flow
+ * yields its keys while focus sits inside another flow.
  */
 export function QuestionFlow({
   questions,
@@ -170,6 +171,13 @@ export function QuestionFlow({
   };
 
   const onShortcut = (action: DetailShortcut): boolean | undefined => {
+    // Every enabled flow hears the key, and the first to handle it prevents
+    // the rest. A hovered flow passes when the focused element belongs to
+    // another flow, so the focused one answers.
+    const focusedFlow = (document.activeElement as HTMLElement | null)?.closest(
+      "[data-question-flow]",
+    );
+    if (focusedFlow && focusedFlow !== rootRef.current) return false;
     const n = questions.length;
     const question = questions[targetIndex];
     switch (action.type) {
@@ -347,6 +355,7 @@ export function QuestionFlow({
   return (
     <div
       ref={rootRef}
+      data-question-flow=""
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocus={() => setFocusWithin(true)}
