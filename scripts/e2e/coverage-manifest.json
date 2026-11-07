@@ -428,7 +428,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, pre-task-create block",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -437,6 +437,7 @@
         "slack-reaction-override",
         "slack-relay-restart",
         "slack-task-output-citations",
+        "slack-task-output-ui-spec",
         "slack-pre-task-create-block"
       ]
     },
