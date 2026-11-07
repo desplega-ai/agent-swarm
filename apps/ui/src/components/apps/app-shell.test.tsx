@@ -22,6 +22,7 @@ const { MemoryRouter } = await import("react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("@/components/ui/tooltip");
 const { ConfigContext } = await import("@/hooks/use-config");
+const { CurrentUserProvider } = await import("@/contexts/current-user-context");
 const { AppSurface } = await import("./app-surface");
 
 const config = { apiUrl: "http://swarm.test", apiKey: "test" };
@@ -67,11 +68,13 @@ async function mountApp(
     root.render(
       <QueryClientProvider client={new QueryClient()}>
         <ConfigContext.Provider value={configValue}>
-          <MemoryRouter>
-            <TooltipProvider>
-              <AppSurface app={app as never} mode={mode} pageName={pageName} />
-            </TooltipProvider>
-          </MemoryRouter>
+          <CurrentUserProvider>
+            <MemoryRouter>
+              <TooltipProvider>
+                <AppSurface app={app as never} mode={mode} pageName={pageName} />
+              </TooltipProvider>
+            </MemoryRouter>
+          </CurrentUserProvider>
         </ConfigContext.Provider>
       </QueryClientProvider>,
     ),

@@ -293,3 +293,143 @@ describe("POST /api/apps/:id/actions/:name with parentTaskId", () => {
     expect((await getTaskById(started.body.taskId))?.parentTaskId ?? null).toBeNull();
   });
 });
+
+describe("POST /api/apps/:id/actions/:name with followUp and requestedByUserId", () => {
+  test("followUp: false creates the task with its Lead follow-up disabled", async () => {
+    const appId = await createChainedApp();
+    const started = await runAction<{ taskId: string }>(appId, { input: {}, followUp: false });
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.followUpConfig).toEqual({ disabled: true });
+  });
+
+  test("without followUp the task keeps the default Lead follow-up", async () => {
+    const appId = await createChainedApp();
+    const started = await runAction<{ taskId: string }>(appId, { input: {} });
+    expect((await getTaskById(started.body.taskId))?.followUpConfig ?? null).toBeNull();
+  });
+
+  test("a non-task action ignores followUp", async () => {
+    const appId = await createChainedApp();
+    const ran = await runAction<{ ok: boolean }>(
+      appId,
+      { input: {}, followUp: false },
+      { action: SYNC_ACTION },
+    );
+    expect(ran.status).toBe(200);
+  });
+
+  test("the shared operator key attributes the task to the picked identity", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Picked Identity" });
+    const started = await runAction<{ taskId: string }>(
+      appId,
+      { input: {}, requestedByUserId: person.id },
+      { bearer: API_KEY },
+    );
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).toBe(person.id);
+  });
+
+  test("a caller bound to a user is attributed to that user, whatever the body says", async () => {
+    const appId = await createChainedApp();
+    const other = await createUser({ name: "Someone Else" });
+    const started = await runAction<{ taskId: string }>(
+      appId,
+      { input: {}, requestedByUserId: other.id },
+      { bearer: userToken },
+    );
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).not.toBe(other.id);
+    expect((await getTaskById(started.body.taskId))?.requestedByUserId).toBeTruthy();
+  });
+});
+
+describe("POST /api/apps/:id/actions/:name with a SessionThread session", () => {
+  async function asPerson(appId: string, body: Record<string, unknown>, userId: string) {
+    return runAction<{ taskId: string; error: string }>(
+      appId,
+      { input: {}, ...body, requestedByUserId: userId },
+      { bearer: API_KEY },
+    );
+  }
+
+  test("builds the contextKey from this app's id, the session key and the requester", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Session Person" });
+    const started = await asPerson(appId, { session: { key: "item-1", scope: "user" } }, person.id);
+    expect(started.status).toBe(200);
+    expect((await getTaskById(started.body.taskId))?.contextKey).toBe(
+      `task:app:${appId}:item-1:user:${person.id}`,
+    );
+  });
+
+  test("the same session key in another app lands in that app's namespace only", async () => {
+    const first = await createChainedApp();
+    const second = await createChainedApp();
+    const person = await createUser({ name: "Two Apps" });
+    const a = await asPerson(first, { session: { key: "main" } }, person.id);
+    const b = await asPerson(second, { session: { key: "main" } }, person.id);
+    const keyA = (await getTaskById(a.body.taskId))?.contextKey;
+    const keyB = (await getTaskById(b.body.taskId))?.contextKey;
+    expect(keyA).toBe(`task:app:${first}:main:user:${person.id}`);
+    expect(keyB).toBe(`task:app:${second}:main:user:${person.id}`);
+  });
+
+  test("a client-sent contextKey is never used", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "No Raw Key" });
+    const started = await asPerson(
+      appId,
+      { session: { key: "main" }, contextKey: "task:app:other-app:main:user:x" },
+      person.id,
+    );
+    expect((await getTaskById(started.body.taskId))?.contextKey).toBe(
+      `task:app:${appId}:main:user:${person.id}`,
+    );
+  });
+
+  test("a follow-up keeps its parent's contextKey", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Follow Up Person" });
+    const root = await asPerson(appId, { session: { key: "thread-7" } }, person.id);
+    const next = await asPerson(
+      appId,
+      { session: { key: "thread-7" }, parentTaskId: root.body.taskId },
+      person.id,
+    );
+    expect(next.status).toBe(200);
+    const followUp = await getTaskById(next.body.taskId);
+    expect(followUp?.parentTaskId).toBe(root.body.taskId);
+    expect(followUp?.contextKey).toBe(`task:app:${appId}:thread-7:user:${person.id}`);
+  });
+
+  test("a user-scoped session with no requesting user is rejected", async () => {
+    const appId = await createChainedApp();
+    const rejected = await runAction<{ error: string }>(
+      appId,
+      { input: {}, session: { key: "main" } },
+      { bearer: API_KEY },
+    );
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toContain("needs a requesting user");
+  });
+
+  test("scope shared is not supported yet", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Shared Person" });
+    const rejected = await asPerson(
+      appId,
+      { session: { key: "main", scope: "shared" } },
+      person.id,
+    );
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toBe('session scope "shared" is not supported yet');
+  });
+
+  test("a session key that is not a plain token is rejected", async () => {
+    const appId = await createChainedApp();
+    const person = await createUser({ name: "Bad Key" });
+    const rejected = await asPerson(appId, { session: { key: "a:b" } }, person.id);
+    expect(rejected.status).toBe(400);
+  });
+});

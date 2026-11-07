@@ -1026,6 +1026,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "DB_QUERY_WORKER_POOL_ENABLED",
+        label: "Query worker pool",
+        description:
+          "Reuse long-lived child processes for bounded db-query instead of spawning one per query (saves roughly 65 ms per call). On by default; turn it off to spawn a fresh child per query. Only applies while bounded execution is on.",
+        kind: "boolean",
+        defaultValue: "true",
+      },
+      {
         key: "DB_QUERY_HTTP_BUDGET_MS",
         label: "HTTP query budget",
         description:
@@ -1543,6 +1551,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "days",
         defaultValue: "30",
         placeholder: "30",
+      },
+      {
+        key: "BOOT_SCRUB_MODE",
+        label: "Secret redaction of stored rows",
+        description:
+          "When a release adds secret-redaction rules, backfill re-scrubs stored rows in the background, paced by load and resumable across restarts. forward-only applies the rules to new writes only and leaves stored rows alone; switching back to backfill sweeps what was skipped. Stopping a running backfill takes effect at once; starting one takes effect after a restart.",
+        kind: "enum",
+        options: ["backfill", "forward-only"],
+        defaultValue: "backfill",
+        restartRequired: true,
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",

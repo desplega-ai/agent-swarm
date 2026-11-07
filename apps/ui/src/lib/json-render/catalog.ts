@@ -177,8 +177,8 @@ const stackProps = z.object({
    * Grow to fill the remaining space of a `fill`-aware parent (another
    * `fill` Stack/Split) instead of sizing to content, and let its own
    * children do the same. Chain `fill` from the page root down to every
-   * container on the path to a scrolling leaf to build a viewport-height
-   * layout with no page scroll.
+   * container on the path to a scrolling leaf (Tree/SchemaForm/SessionThread)
+   * to build a viewport-height layout with no page scroll.
    */
   fill: z.boolean().optional(),
 });
@@ -405,6 +405,33 @@ const schemaFormProps = z.object({
    * field list scrolls inside whatever height the parent gives it. When a
    * sibling (e.g. a `fill` Tree) also sets `fill`, both split the parent's
    * height evenly and scroll independently. */
+  fill: z.boolean().optional(),
+});
+
+const sessionThreadProps = z.object({
+  /** State id — the composer draft lands at `/ui/<id>/value`. */
+  id: z.string(),
+  sessionKey: z
+    .string()
+    .describe(
+      'App-chosen session key, a plain token (^[A-Za-z0-9_-]{1,128}$), e.g. "main", or a $state binding to a token such as { "$state": "/route/params/itemId" }. The server keys the session as task:app:<appId>:<sessionKey>:user:<viewer>, so each viewer has their own session per key and app.',
+    ),
+  scope: z
+    .enum(["user", "shared"])
+    .optional()
+    .describe(
+      '"user" (default): one session per viewer. "shared" is reserved for a follow-up PR (one session everyone on the page writes to) and is rejected today.',
+    ),
+  /** Composer placeholder (default "Send a message…"). */
+  placeholder: z.string().optional(),
+  onDispatch: actionChainSchema
+    .optional()
+    .describe(
+      'Action chain run with $form={message} to send a message. $chain={leafTaskId} is the session\'s newest task, or null when the viewer has no session yet — a null $chain key drops the param, so `"parentTaskId": {"$chain": "leafTaskId"}` starts a new session on the first message and chains a new task off the leaf on every later one. Each app.action step is sent with the session (key and scope) and followUp: false. The chain should app.action a task.',
+    ),
+  /** Grow to fill a `fill`-aware parent instead of the fixed 420 px height —
+   * the timeline scrolls inside whatever height the parent gives it, with the
+   * composer pinned to the bottom. */
   fill: z.boolean().optional(),
 });
 
@@ -1480,6 +1507,11 @@ export const swarmCatalogSpec = {
       props: schemaFormProps,
       description:
         'Schema-driven props panel. Walks `schema.properties` and renders one control per property — text input (or a select when `enum` is present), number input, or switch — labelled by key with the property `description` as tooltip. Each field seeds from `value?.[key] ?? property.default`. On every field commit the draft object is written to `/ui/<id>/value` and the `onChange` chain is dispatched with `$form` = the current values and `{ "$value": true }` = the value just written (the whole merged doc when `baseDoc` is set; never read `/ui/<id>/value` with `$state` in `onChange`, the renderer resolves it before the commit and it is one edit stale). The draft rebuilds whenever the bound `schema` identity changes. With `baseDoc` (a `{ root, elements }` doc) and `nodeKey`, it edits `baseDoc.elements[nodeKey].props` and `/ui/<id>/value` holds the whole doc with the edit merged in, ready for one `app.mutate` (pass it as `{ "$value": true }`). At most 100 fields and 200 enum options render, and a `baseDoc` over 5,000 elements is refused. `fill: true` grows the field list to fill a `fill`-aware parent and scrolls internally instead of sizing to content — pair it with a `fill` sibling (e.g. Tree) in the same column Stack to split the available height evenly between them.',
+    },
+    SessionThread: {
+      props: sessionThreadProps,
+      description:
+        'A chat on an app page, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). The session is found by key, not stored in a row: the server keys each task an `app.action` step creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer\'s newest session with that key. The viewer must have an identity: with none picked the composer is disabled. `scope: "shared"` (one session for everyone) comes in a follow-up PR and is rejected today. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no session yet → run `onDispatch`, whose `app.action` creates the session\'s root task; a task in the session not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` when there is no session, and a null `$chain` key drops the param, so one `onDispatch` covers the first message and follow-ups. Each `app.action` step is sent with the session and `followUp: false` (unless it sets `followUp` itself), so the Lead adds no review task. Messages are text only (no attachments or mic). After each send the composer stays busy until the new task shows up (at most 30 s). "New session" starts over: the next message creates a new root, and the older session is no longer shown. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
     },
     ElementRef: {
       props: elementRefProps,

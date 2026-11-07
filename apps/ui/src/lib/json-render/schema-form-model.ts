@@ -90,9 +90,29 @@ export const EMPTY_OPTION_VALUE = "\u0000empty";
 
 const RESERVED_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
-/** An `id` safe to splice into the `/ui/<id>/value` state path. */
+const STATE_ID_TOKEN = /^[A-Za-z0-9_-]+$/;
+
+/** The prefix the element assembler gives an `id` inside an element instance. */
+const INSTANCE_ID_PREFIX = "instances/";
+
+/**
+ * An `id` safe to splice into the `/ui/<id>/value` state path: a plain token,
+ * or the assembler's per-instance form `instances/<instanceKey>/<token>`
+ * (`assemble.ts`), whose key segments are non-empty and not reserved.
+ */
 export function isValidStateId(id: unknown): id is string {
-  return typeof id === "string" && /^[A-Za-z0-9_-]+$/.test(id) && !RESERVED_IDS.has(id);
+  if (typeof id !== "string") return false;
+  if (!id.startsWith(INSTANCE_ID_PREFIX)) return STATE_ID_TOKEN.test(id) && !RESERVED_IDS.has(id);
+  const segments = id.slice(INSTANCE_ID_PREFIX.length).split("/");
+  const token = segments.at(-1) ?? "";
+  return (
+    segments.length >= 2 &&
+    STATE_ID_TOKEN.test(token) &&
+    segments.every(
+      (segment) =>
+        segment !== "" && segment !== "." && segment !== ".." && !RESERVED_IDS.has(segment),
+    )
+  );
 }
 
 export type FormMode =

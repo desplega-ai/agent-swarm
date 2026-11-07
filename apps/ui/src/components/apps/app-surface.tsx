@@ -115,6 +115,7 @@ import {
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
@@ -128,6 +129,7 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import { AppScopeProvider } from "@/lib/json-render/app-scope";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
@@ -207,6 +209,15 @@ interface RuntimeCtx {
   navigate: NavigateFunction;
   /** Raw `?mode=` value — the only search param `app.navigate` carries over. */
   modeParam: string | null;
+  /** The dashboard's picked identity: the requester of a task an action creates. */
+  userId: string | null;
+}
+
+/** `params.session` of an `app.action` step (`SessionThread` sets it). */
+function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
+  if (typeof value !== "object" || value === null) return false;
+  const { key, scope } = value as { key?: unknown; scope?: unknown };
+  return typeof key === "string" && (scope === undefined || scope === "user" || scope === "shared");
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -765,6 +776,7 @@ export function AppSurface({
   // `handlers` prop on mount, so the handlers themselves must be identity
   // stable and read everything fresh through this ref.
   const modeParam = searchParams.get("mode");
+  const { userId } = useCurrentUser();
   const ctxRef = useRef<RuntimeCtx>({
     app,
     refetchModel,
@@ -774,6 +786,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   });
   ctxRef.current = {
     app,
@@ -784,6 +797,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   };
 
   // ── Task-watcher lifecycle + re-adoption ─────────────────────────────────
@@ -1081,11 +1095,20 @@ export function AppSurface({
           }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
+            const followUp: unknown = (params as Record<string, unknown>).followUp;
+            const session: unknown = (params as Record<string, unknown>).session;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
               params?.input,
               parentTaskId,
+              {
+                // `followUp: false` (SessionThread sets it) skips the Lead review.
+                followUp: typeof followUp === "boolean" ? followUp : undefined,
+                // A SessionThread's session; the server builds the context key.
+                session: isThreadSession(session) ? session : undefined,
+                requestedByUserId: ctx.userId ?? undefined,
+              },
             );
             setLastResponse(response);
 
@@ -1256,11 +1279,13 @@ export function AppSurface({
           {actionError}
         </AlertCallout>
       )}
-      <StateProvider store={store}>
-        <VisibilityProvider>
-          <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
-        </VisibilityProvider>
-      </StateProvider>
+      <AppScopeProvider value={app.id}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </AppScopeProvider>
     </JsonRenderThemeProvider>
   );
 

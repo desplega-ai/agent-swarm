@@ -589,7 +589,7 @@ export type SteerMode = "steer" | "queue";
 
 export type SteeringStatus = "pending" | "delivered" | "handled" | "promoted" | "cancelled";
 
-export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api";
+export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
 
 /** What the server actually did with the request (the degradation ladder). */
 export type SteerOutcome = "steered" | "queued" | "promoted";

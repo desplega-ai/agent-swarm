@@ -127,7 +127,7 @@ describe("POST /api/approval-requests notifications", () => {
 
     const row = await getApprovalRequestById(id);
     expect(row?.notificationChannels).toEqual([
-      { channel: "slack", target: "C123", messageTs: "1700000000.000100" },
+      { channel: "slack", target: "C123", messageTs: "1700000000.000100", channelId: "C123" },
     ]);
   });
 

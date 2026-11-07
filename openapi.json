@@ -3313,7 +3313,8 @@
               "script",
               "slack",
               "api",
-              "chat"
+              "chat",
+              "app-page"
             ]
           },
           "senderLabel": {
@@ -10420,6 +10421,32 @@
                   "parentTaskId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "followUp": {
+                    "type": "boolean"
+                  },
+                  "requestedByUserId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "session": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "user",
+                          "shared"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "key"
+                    ]
                   }
                 }
               }
@@ -35633,7 +35660,8 @@
                       "script",
                       "slack",
                       "api",
-                      "chat"
+                      "chat",
+                      "app-page"
                     ]
                   },
                   "requestedByUserId": {

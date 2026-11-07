@@ -588,6 +588,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
+| `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
@@ -700,6 +701,29 @@ export default async function run(args, ctx) {
 ```
 
 Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE workflowRunId = ? AND status = 'pending' ORDER BY createdAt DESC LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
+
+SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
+
+- `sessionKey` names the session, a plain token (`^[A-Za-z0-9_-]{1,128}$`): a literal such as `"main"`, or a `$state` binding to a token such as a route param or row id (`{ "$state": "/route/params/itemId" }`) for one session per item. No row stores the session: the server keys every task the thread's `app.action` creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer's newest session with that key. A page can only write sessions of its own app.
+- `scope` is `"user"` (the default): each viewer has their own session per key. The viewer needs an identity; with none picked the composer is disabled. `scope: "shared"` (one session everyone on the page writes to) comes in a follow-up PR: the validator rejects it today. The planned design adds an everyone:write session share on the root when the server creates it.
+- It renders the same conversation as the dashboard's "Session about this page" panel: the session turn timeline (each person message with the sender's name, the swarm's replies with a live Queued / Working status, worker steps, approvals) and the shared composer. A person bubble shows the `message` of an app-action input instead of the whole agent prompt, cut at 4,000 characters. The composer's attachments and mic are off: a message is text only.
+- Sending a message takes one of three routes:
+  1. No session yet → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates the session's root task.
+  2. A task in the session is not finished → the composer steers the newest such task, on any agent, with `source: "app-page"`. It offers Queue, and Interrupt where the harness supports it. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Every task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the newest task id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. The follow-up keeps the session's key.
+- Each `app.action` step of `onDispatch` is sent with the session (`{ key, scope }`) and with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
+- "New session" (shown once a session exists) starts over: the next message creates a new root, and the thread shows only sessions created after the current one. Nothing is deleted; older sessions stay in the dashboard's Sessions list.
+- While the session loads, the composer is disabled with a loading notice. A session whose chain cannot be found blocks sending. After a send, the composer stays busy until the new task shows up, for at most 30 seconds.
+- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
+
+```json
+{ "type": "SessionThread", "props": {
+  "id": "chat",
+  "sessionKey": { "$state": "/route/params/screenId" },
+  "onDispatch": [{ "action": "app.action", "params": {
+    "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }]
+} }
+```
 
 Form details:
 
@@ -820,7 +844,7 @@ Valid `$state` roots are:
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
-Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or `Approval.onResolved`) these scoped sentinels are valid, recursively inside objects and arrays:
+Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or a component chain prop such as `Approval.onResolved` or `SessionThread.onDispatch`) these scoped sentinels are valid, recursively inside objects and arrays:
 
 | Sentinel | Resolves to |
 |---|---|
@@ -830,7 +854,7 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
-| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by the component that runs the chain: a task chain carries `leafTaskId` and `newTaskId`; `Approval.onResolved` carries `status`, `responses` and `resolvedBy`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by the component that runs the chain: a task chain (`SessionThread`) carries `leafTaskId` and `newTaskId`; `Approval.onResolved` carries `status`, `responses` and `resolvedBy`. The component publishes every key, `null` when it has no value yet; a `null` key resolves to nothing and its param is dropped (a `parentTaskId` bound to a `null` `leafTaskId` creates a root task). Where no chain scope is published (Table, Form), or the key is not one the scope carries (a typo), the sentinel is left in place and the action fails instead of silently dropping the parent. An empty string is not "no parent": a `$state` slot meaning "no parent yet" must hold `null`. |
 | `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
@@ -839,7 +863,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`, or `{ "$state": "/route/params/<param>" }` in a Drawer footer); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
-- `app.action`: `{ name, input?, parentTaskId? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400.
+- `app.action`: `{ name, input?, parentTaskId?, followUp? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400. `followUp: false` creates the task with no Lead follow-up (the review task the Lead adds when a worker task finishes); script and sync actions ignore it. A task an action creates is attributed to the viewer's identity. `session: { key, scope }` (SessionThread sets it) keys a task-kind action's task into the viewer's session; the server builds the key, never the page.
 - `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.

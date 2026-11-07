@@ -56,6 +56,7 @@ effect on the next request, no restart) and surfaced on the dashboard's
 | Env var | Default | Controls |
 |---|---|---|
 | `DB_QUERY_BOUNDED_ENABLED` | `true` | Master kill switch for the bounded child-process path. `false` restores the pre-fix synchronous, unbounded path and logs a one-time startup-class warning. |
+| `DB_QUERY_WORKER_POOL_ENABLED` | `true` | Reuse long-lived child processes for bounded queries. `false` spawns a fresh child per query. |
 | `DB_QUERY_HTTP_BUDGET_MS` | `10000` | Wall-clock budget for `/api/db-query` before its child process is killed. |
 | `DB_QUERY_HTTP_MAX_ROWS` | `1000` | Row cap for `/api/db-query`, regardless of how many rows the query matched. |
 | `DB_QUERY_MCP_BUDGET_MS` | `5000` | Wall-clock budget for the MCP `db-query` tool. |

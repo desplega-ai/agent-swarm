@@ -32,7 +32,11 @@
  *   - `{ $chain: "key" }` / `{ $chain: "" }`— chain-derived value (e.g. `leafTaskId` /
  *     `newTaskId` set by a component that runs a task chain, or Approval's `status` /
  *     `responses` / `resolvedBy`) / whole chain object.
- *     Unlike the others, an unresolvable `$chain` is returned as-is (see below).
+ *     Explicit absence: a chain-running component publishes every key it knows,
+ *     `null` when there is no value yet. A key that is present and `null` (or
+ *     `undefined`) resolves to `undefined`, and an object entry holding it is
+ *     dropped (no `parentTaskId` → a root task). An unresolvable `$chain` (no
+ *     chain scope at all, or a key the scope does not carry) is returned as-is.
  * Anything else is a literal.
  */
 
@@ -54,13 +58,18 @@ export interface ParamScope {
    * a task chain's current leaf / newly created task id, or Approval's
    * `{ status, responses, resolvedBy }` — target of `$chain`. Table/Form
    * dispatch scopes leave it unset, and a `$chain` they cannot resolve stays a
-   * sentinel.
+   * sentinel. A key that is present with `null` means "no value yet" and
+   * resolves to `undefined` (see `resolveScopedValue`).
    */
   chain?: Record<string, unknown>;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isChainBinding(value: unknown): value is { $chain: string } {
+  return isPlainObject(value) && "$chain" in value && typeof value.$chain === "string";
 }
 
 export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
@@ -86,20 +95,31 @@ export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
   if ("$state" in value && typeof value.$state === "string") {
     return getByPath(scope.state ?? {}, value.$state);
   }
-  if ("$chain" in value && typeof value.$chain === "string") {
+  if (isChainBinding(value)) {
     // An unresolvable `$chain` is kept as the sentinel object, not collapsed to
     // `undefined` like a missing `$row` field: a `parentTaskId` that quietly
     // disappears changes task topology (a root task instead of a chained one).
     // Leaving it visible lets the `app.action` handler reject the dispatch.
+    // Only a key the chain scope publishes as `null` is an intentional absence.
     if (scope.chain === undefined) return value;
     if (value.$chain === "") return scope.chain;
-    const resolved = getByPath(scope.chain, value.$chain);
-    return resolved === undefined ? value : resolved;
+    const chain: Record<string, unknown> = scope.chain;
+    if (Object.hasOwn(chain, value.$chain)) return chain[value.$chain] ?? undefined;
+    // A nested path under a published key (Approval's `responses/<questionId>`)
+    // reads into it; a missing leaf keeps the sentinel like a missing key.
+    const head = value.$chain.replace(/^\//, "").split("/")[0] ?? "";
+    if (!value.$chain.includes("/") || !Object.hasOwn(chain, head)) return value;
+    const nested = getByPath(chain, value.$chain);
+    return nested === undefined ? value : nested;
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    out[key] = resolveScopedValue(entry, scope);
+    const resolved = resolveScopedValue(entry, scope);
+    // Explicit `$chain` absence drops the key outright, so the dispatched
+    // params carry no `parentTaskId` at all (not one set to `undefined`).
+    if (resolved === undefined && isChainBinding(entry)) continue;
+    out[key] = resolved;
   }
   return out;
 }

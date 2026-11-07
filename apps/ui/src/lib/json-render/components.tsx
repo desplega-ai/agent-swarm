@@ -226,6 +226,7 @@ import {
 } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { SchemaFormComponent } from "./schema-form";
+import { SessionThreadComponent } from "./session-thread";
 import { SmartLink } from "./smart-link";
 import { SplitDrawerPane, useRouteParamPanel, useSplitDetailRegion } from "./split-pane";
 import {
@@ -675,8 +676,8 @@ function StackComponent({ props, children }: { props: StackProps; children: Reac
         stackMotionClass[props.motion ?? "rise"],
         // Grow to fill a `fill`-aware parent's remaining space instead of
         // sizing to content — `min-h-0` lets it shrink so a scrolling leaf
-        // further down the tree gets a real height to scroll within instead
-        // of pushing the page. `overflow-y-auto` is the backstop for
+        // further down the tree (Tree/SchemaForm/SessionThread) gets a real
+        // height to scroll within instead of pushing the page. `overflow-y-auto` is the backstop for
         // non-`fill` children whose combined natural height still exceeds
         // that: THIS Stack scrolls on its own instead of leaking into a shared
         // ancestor scroll container that would drag unrelated columns along.
@@ -4357,4 +4358,5 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   DateRange: ({ props }) => <DateRangeComponent props={props} />,
   Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
+  SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
 };
