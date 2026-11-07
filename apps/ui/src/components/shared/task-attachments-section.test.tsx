@@ -44,7 +44,7 @@ mock.module("@/lib/scrub-secrets", () => require("../../lib/scrub-secrets"));
 mock.module("@/lib/swarm-links", () => require("../../lib/swarm-links"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
-const { TaskAttachmentsSection, TaskPromptAttachments } = await import(
+const { TaskAttachmentsSection, TaskPromptAttachments, isPersonUpload } = await import(
   "./task-attachments-section"
 );
 
@@ -232,5 +232,57 @@ describe("an attachment row without org/drive ids", () => {
       expect(html).toContain('aria-label="Open notes.md in agent-fs"');
     }
     expect(prompt).not.toContain("Expand notes.md preview");
+  });
+});
+
+describe("whose attachment a session shows where", () => {
+  const row = (name: string, extra: Partial<TaskAttachment>) =>
+    ({ ...ID_LESS, id: name, name, ...extra }) as TaskAttachment;
+  // Shapes of real rows: a composer upload has no agent; a Slack file shared
+  // with the bot carries the lead's id; a Slack file an agent fetched, its
+  // store-progress output and a legacy row with no intent are the agent's.
+  const composer = row("composer.png", { intent: "user-upload", agentId: null });
+  const slackShared = row("shared.png", { intent: "user-upload", agentId: "lead-1" });
+  const slackFetched = row("asset-list.md", { intent: "slack-file", agentId: "lead-1" });
+  const output = row("report.md", { intent: "task-deliverable", agentId: "worker-1" });
+  const legacy = row("legacy.md", { agentId: null });
+  const all = [composer, slackShared, slackFetched, output, legacy];
+
+  test("only user-upload rows are the person's", () => {
+    expect(all.filter(isPersonUpload).map((a) => a.name)).toEqual(["composer.png", "shared.png"]);
+  });
+
+  test("the bubble shows the person's files, right-aligned", () => {
+    agentFs = COMB_OFF;
+    const html = render(<TaskPromptAttachments taskId="task-1" attachments={all} from="person" />);
+
+    expect(html).toContain('aria-label="Prompt attachments"');
+    expect(html).toContain("justify-end");
+    expect(html).toContain("composer.png");
+    expect(html).toContain("shared.png");
+    for (const name of ["asset-list.md", "report.md", "legacy.md"]) {
+      expect(html).not.toContain(name);
+    }
+  });
+
+  test("the reply shows the agent's files, left-aligned", () => {
+    agentFs = COMB_OFF;
+    const html = render(<TaskPromptAttachments taskId="task-1" attachments={all} from="agent" />);
+
+    expect(html).toContain('aria-label="Reply attachments"');
+    expect(html).toContain("justify-start");
+    expect(html).not.toContain("justify-end");
+    for (const name of ["asset-list.md", "report.md", "legacy.md"]) {
+      expect(html).toContain(name);
+    }
+    expect(html).not.toContain("composer.png");
+    expect(html).not.toContain("shared.png");
+  });
+
+  test("no rows for a side renders nothing", () => {
+    const html = render(
+      <TaskPromptAttachments taskId="task-1" attachments={[output]} from="person" />,
+    );
+    expect(html).toBe("");
   });
 });

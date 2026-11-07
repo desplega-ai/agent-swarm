@@ -6,6 +6,7 @@ import { outcomeCopyText, TaskOutcome } from "@/components/sessions/task-outcome
 import { MessageCopyButton, messageActionClass } from "@/components/shared/message-copy-button";
 import { RelativeTime } from "@/components/shared/relative-time";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatRelative } from "@/lib/relative-time";
@@ -51,7 +52,7 @@ export function MessageTime({ at, focusable = true }: { at: string; focusable?: 
  * The swarm's reply (SPEC R10.2): no name and no mark. A reply still at work
  * shows its live activity. A finished one keeps that work folded behind
  * "Worked for", as a worker step does, then the text (`TaskOutcome`, without
- * its hover Copy), then a footer with the time, an always-visible Copy of the
+ * its hover Copy), the files the agent attached, then a footer with the time, an always-visible Copy of the
  * same text, and a link to the task. A failed or cancelled one keeps the
  * tinted frame.
  */
@@ -64,6 +65,7 @@ export function SwarmReply({ task }: { task: AgentTask }) {
     <div data-slot="swarm-reply" className="flex min-w-0 flex-col gap-1.5">
       <ChainOfThought taskId={task.id} status={task.status} task={task} />
       <TaskOutcome task={task} hideCopy />
+      <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="agent" />
       <div className="flex min-h-4 items-center gap-1.5 text-muted-foreground">
         <MessageTime at={task.finishedAt ?? task.lastUpdatedAt} />
         {task.status === "failed" || task.status === "cancelled" ? (
