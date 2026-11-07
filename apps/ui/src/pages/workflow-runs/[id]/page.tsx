@@ -16,14 +16,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ForeachStepGroup, foreachDefaultOpen } from "@/components/workflows/foreach-step-group";
 import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
-
-/** A row in the Steps panel: a plain step, or a `foreach` parent with its fanned-out children. */
-type StepListEntry =
-  | { kind: "step"; step: WorkflowRunStep }
-  | { kind: "foreach"; parent: WorkflowRunStep; children: WorkflowRunStep[] };
+import { MobileRunView, type StepListEntry } from "./mobile-run-view";
 
 export default function WorkflowRunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +28,7 @@ export default function WorkflowRunDetailPage() {
   const { data: run, isLoading } = useWorkflowRun(id!);
   const { data: workflow } = useWorkflow(run?.workflowId ?? "");
   const retryRun = useRetryWorkflowRun();
+  const isMobile = useIsMobile();
 
   const { searchParams, setParam, setParams } = useUrlSearchState();
   const selectedNodeId = readStringParam(searchParams, "node") || null;
@@ -160,11 +158,14 @@ export default function WorkflowRunDetailPage() {
   // params, so the second silently drops the first's update.
   const handleGraphNodeClick = useCallback(
     (nodeId: string) => {
-      if (selectedNodeId === nodeId) {
+      // On a phone the graph is its own tab and a tap always jumps to the step, never deselects.
+      if (selectedNodeId === nodeId && !isMobile) {
         setSelectedNodeId(null);
         return;
       }
+      const { parentNodeId, itemKey } = parseSyntheticStepId(nodeId, foreachIds);
       if (foreachIds.has(nodeId)) setGroupOpen(nodeId, true);
+      else if (itemKey !== null) setGroupOpen(parentNodeId, true);
       const ownStepIds = steps
         .map((step) => step.nodeId)
         .filter(
@@ -178,7 +179,9 @@ export default function WorkflowRunDetailPage() {
         node: nodeId,
         steps: Array.from(next).filter(Boolean).join(","),
       });
-      // Scroll to the step card after a tick (to allow expansion to render)
+      // Scroll to the step card after a tick (to allow expansion to render). The phone view
+      // scrolls itself once the Steps tab is showing.
+      if (isMobile) return;
       requestAnimationFrame(() => {
         const el = stepRefs.current.get(ownStepIds[0] ?? nodeId);
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -186,6 +189,7 @@ export default function WorkflowRunDetailPage() {
     },
     [
       expandedStepIds,
+      isMobile,
       selectedNodeId,
       setParams,
       setSelectedNodeId,
@@ -268,6 +272,36 @@ export default function WorkflowRunDetailPage() {
       ref={(el) => registerStepRef(step.nodeId, el)}
     />
   );
+
+  if (isMobile) {
+    return (
+      <MobileRunView
+        run={run}
+        workflow={workflow}
+        steps={steps}
+        stepEntries={stepEntries}
+        foreachIds={foreachIds}
+        selectedNodeId={selectedNodeId}
+        expandedStepIds={expandedStepIds}
+        openGroups={openGroups}
+        statusCounts={statusCounts}
+        duration={duration}
+        retryPending={retryRun.isPending}
+        parentLink={run.parent ? <ParentRunLink parent={run.parent} /> : null}
+        stepRefs={stepRefs}
+        registerStepRef={registerStepRef}
+        onBack={() => navigate(`/workflows/${run.workflowId}?tab=runs`)}
+        onRetry={() => retryRun.mutate(run.id)}
+        onJumpToNode={handleGraphNodeClick}
+        onToggleStep={toggleStep}
+        onToggleGroup={(nodeId) => setGroupOpen(nodeId, !openGroups[nodeId])}
+        onCollapseAll={() => {
+          setExpandedSteps([]);
+          setAllGroupsOpen(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
