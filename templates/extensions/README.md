@@ -16,6 +16,7 @@ Each folder holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json
 | `slack-reply-gate` | `pre.task.create` | Asks Jev (TypeSafe or OpenRouter) whether Lead should answer a Slack thread follow-up; in `enforce` drops the wake-up and marks the message :mute: |
 | `comms-adherence-gate` | `pre.tool.call` | Asks Jev (TypeSafe or OpenRouter) whether a Slack task's final output matches the requester's comms preferences and latest request; in `enforce` blocks a non-adherent completion once per task |
 | `require-verification-note` | `pre.tool.call` | Refuses completion without a `Verified:` line in the output |
+| `sql-admin-only` | `pre.tool.call` | Blocks `db-query` calls on tasks created by a non-admin user |
 | `task-digest` | `post.task.completed`, `post.task.failed` | Ships the `task-digest-collect` script, the `task-digest-daily` schedule (09:00 UTC), the `task-digest-report` workflow, and the `task-digest-guide` skill |
 
 A template can ship scripts, schedules, workflows (`workflows/*.yaml` or `.json`), and skills (`skills/<dir>/SKILL.md` plus optional `files/**`). Every asset name starts with `<name>-`, including the workflow `name` and the `SKILL.md` frontmatter `name`. Schedules, workflows, and skills stay off until the extension is enabled. An extension skill is global: install it on each agent with `skill-install` after you enable the extension.
