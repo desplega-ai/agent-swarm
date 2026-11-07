@@ -11,7 +11,11 @@ import {
 import { installSlackEgressScrub } from "./egress-scrub";
 import { installSlackExternalChannelGuard } from "./external-channel-egress";
 import { SwarmHttpReceiver } from "./http-receiver";
-import { recoverSlackInboundAfterRestart, slackInboundOutcomeMiddleware } from "./inbound-dispatch";
+import {
+  ignoreSelfAsIgnored,
+  recoverSlackInboundAfterRestart,
+  slackInboundOutcomeMiddleware,
+} from "./inbound-dispatch";
 import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "./lifecycle-lock";
 import { createBoltInboundDrain, installSocketAckRecovery } from "./socket-ack";
 import { fenceSocketModeClient, type SlackSocketFence } from "./socket-fence";
@@ -361,6 +365,10 @@ export async function initSlackApp(): Promise<App | null> {
       token: botToken,
       receiver: httpReceiver,
       logLevel,
+      // Bolt's own ignoreSelf runs before our outcome middleware and ends a
+      // bot-authored event without dispatching it, which the durable drain
+      // reads as a failure. It is re-added below, after the outcome middleware.
+      ignoreSelf: false,
       deferInitialization: true,
       ...(clientOptions ? { clientOptions } : {}),
     });
@@ -407,6 +415,7 @@ export async function initSlackApp(): Promise<App | null> {
   // First global middleware: every handler below runs inside it, so each
   // delivery resolves to an explicit processed/ignored/failed/uncertain outcome.
   app.use(slackInboundOutcomeMiddleware(config.mode === "http" ? "http" : "socket"));
+  if (config.mode === "http") app.use(ignoreSelfAsIgnored);
 
   // Register handlers
   const { registerMessageHandler } = await import("./handlers");

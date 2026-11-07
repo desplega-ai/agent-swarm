@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import type { AnyMiddlewareArgs, Middleware } from "@slack/bolt";
+import { type AnyMiddlewareArgs, ignoreSelf, type Middleware } from "@slack/bolt";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
 import {
   admitSlackInboundReceipt,
@@ -235,6 +235,25 @@ export function slackInboundOutcomeMiddleware(
     });
   };
 }
+
+/**
+ * Bolt's `ignoreSelf` that records what it drops. Installed after
+ * `slackInboundOutcomeMiddleware` (with the App's own `ignoreSelf` off), so a
+ * bot-authored event is an `ignored` delivery. Left to Bolt, it would end
+ * before this module's middleware and read as "never dispatched", which the
+ * durable drain retries as a failure.
+ */
+export const ignoreSelfAsIgnored: Middleware<AnyMiddlewareArgs> = async (args) => {
+  let passed = false;
+  await ignoreSelf({
+    ...args,
+    next: async () => {
+      passed = true;
+      await args.next();
+    },
+  });
+  if (!passed) ignoreSlackInbound("self_event");
+};
 
 /**
  * Run `fn` as an admitted durable delivery and resolve its outcome. Never

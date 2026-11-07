@@ -13,7 +13,11 @@ import { getSlackInboundReceiptByKey } from "../be/db-queries/slack-inbound";
 import { handleSlackEvents } from "../http/slack-events";
 import { getSlackHttpReceiver, startSlackApp, stopSlackApp } from "../slack/app";
 import { SwarmHttpReceiver } from "../slack/http-receiver";
-import { resetSlackInboundCountersForTests } from "../slack/inbound-dispatch";
+import {
+  ignoreSelfAsIgnored,
+  resetSlackInboundCountersForTests,
+  runAdmittedSlackDelivery,
+} from "../slack/inbound-dispatch";
 import {
   getSlackWorkspaceIdentity,
   resetSlackWorkspaceGuardForTests,
@@ -434,4 +438,35 @@ describe("route and lifecycle", () => {
       await stopSlackMock(slack, false);
     }
   }, 20_000);
+});
+
+describe("ignoreSelfAsIgnored", () => {
+  async function run(event: Record<string, unknown>) {
+    const next = mock(async () => {});
+    const outcome = await runAdmittedSlackDelivery("http", () =>
+      ignoreSelfAsIgnored({
+        context: { botId: "B_SELF", botUserId: "U_SELF" },
+        event,
+        message: event,
+        next,
+      } as never),
+    );
+    return { outcome, next };
+  }
+
+  test("a bot-authored event is ignored, not left undispatched", async () => {
+    const { outcome, next } = await run({
+      type: "message",
+      subtype: "bot_message",
+      bot_id: "B_SELF",
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ state: "ignored", code: "self_event" });
+  });
+
+  test("anyone else's event goes on to the listeners", async () => {
+    const { outcome, next } = await run({ type: "message", user: "U_OTHER" });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(outcome.state).toBe("processed");
+  });
 });
