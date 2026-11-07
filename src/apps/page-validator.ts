@@ -45,7 +45,10 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-// Components whose `id` claims a `/ui/<id>/...` state slot.
+// Components whose `id` claims a `/ui/<id>/...` state slot. Mirrored by the
+// element assembler (`apps/ui/src/lib/json-render/assemble.ts`), which
+// namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
+// two lists equal.
 const UI_STATE_COMPONENTS = new Set([
   "SearchInput",
   "Select",
@@ -54,11 +57,42 @@ const UI_STATE_COMPONENTS = new Set([
   "Chips",
   "Tree",
   "SchemaForm",
+  "SessionThread",
   "Table",
 ]);
 
-// A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
+// A SchemaForm or SessionThread id is spliced into `/ui/<id>/value`, so it must
+// be a plain token.
 const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
+const PLAIN_TOKEN_ID_COMPONENTS = new Set(["SchemaForm", "SessionThread"]);
+
+/** Mirrors `APP_SESSION_KEY_PATTERN` (`src/tasks/context-key.ts`). */
+const SESSION_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * `SessionThread.sessionKey` lands in a server-built context key, so a literal
+ * must be a plain token (a binding is checked by the server at send time).
+ * `scope: "shared"` is reserved for a follow-up PR (planned: an
+ * everyone:write `session_shares` row on the root when it is created).
+ */
+function sessionThreadIssues(
+  props: Record<string, unknown>,
+  propsPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (typeof props.sessionKey === "string" && !SESSION_KEY.test(props.sessionKey)) {
+    issues.push(
+      issue(
+        `${propsPath}.sessionKey`,
+        "SessionThread sessionKey must match ^[A-Za-z0-9_-]{1,128}$",
+      ),
+    );
+  }
+  if (props.scope === "shared") {
+    issues.push(issue(`${propsPath}.scope`, 'scope "shared" is not supported yet'));
+  }
+  return issues;
+}
 const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
@@ -73,6 +107,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
+  SessionThread: ["onDispatch"],
 };
 
 /**
@@ -1485,7 +1520,8 @@ export function validatePage(
         formIds.add(rawElement.props.id);
       }
       if (
-        type === "SchemaForm" &&
+        typeof type === "string" &&
+        PLAIN_TOKEN_ID_COMPONENTS.has(type) &&
         isPlainObject(rawElement.props) &&
         typeof rawElement.props.id === "string" &&
         (!SCHEMA_FORM_ID.test(rawElement.props.id) || RESERVED_UI_IDS.has(rawElement.props.id))
@@ -1493,9 +1529,12 @@ export function validatePage(
         issues.push(
           issue(
             `${propsPath}.id`,
-            "SchemaForm id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+            `${type} id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype`,
           ),
         );
+      }
+      if (type === "SessionThread" && isPlainObject(rawElement.props)) {
+        issues.push(...sessionThreadIssues(rawElement.props, propsPath));
       }
       if (
         typeof type === "string" &&

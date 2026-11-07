@@ -51,13 +51,13 @@ export function TaskOutcome({
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     const json = parseJsonOutput(task.output);
     if (json) return <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />;
-    const prose = (
+    return (
       <OutcomeProse
         text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
         hideCopy={hideCopy}
+        clamp={clamp}
       />
     );
-    return clamp ? <ShowMore>{prose}</ShowMore> : prose;
   }
   // The chain-of-thought above already covers active states — only fall
   // through to the cached summaryLines as a final fallback when nothing
@@ -82,16 +82,29 @@ const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode, "swarm-link": 
  * Successful output — renders inline as plain prose, no border. Hover surfaces
  * a single Copy action top-right so the chrome is invisible until needed.
  */
-function OutcomeProse({ text, hideCopy }: { text: string; hideCopy: boolean }) {
+function OutcomeProse({
+  text,
+  hideCopy,
+  clamp,
+}: {
+  text: string;
+  hideCopy: boolean;
+  clamp: boolean;
+}) {
   const trimmed = text.trim();
   const rehypePlugins = useSwarmLinkPlugins();
+  const prose = (
+    <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
+      <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
+        {normalizeNewlines(trimmed)}
+      </Streamdown>
+    </div>
+  );
+  // The clamp wraps only the text: the absolutely positioned Copy button is
+  // taller than one line, and inside `ShowMore` it would count as overflow.
   return (
     <OutcomeCopyShell copyText={trimmed} hideCopy={hideCopy}>
-      <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
-        <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
-          {normalizeNewlines(trimmed)}
-        </Streamdown>
-      </div>
+      {clamp ? <ShowMore>{prose}</ShowMore> : prose}
     </OutcomeCopyShell>
   );
 }

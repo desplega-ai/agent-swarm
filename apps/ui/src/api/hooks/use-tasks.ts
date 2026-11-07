@@ -16,6 +16,7 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   RoutingReason,
+  SteeringSource,
   SteerMode,
   SteerResult,
   TaskWithLogs,
@@ -505,6 +506,8 @@ export interface SteerTaskInput {
   message: string;
   mode: SteerMode;
   requestedByUserId?: string;
+  /** Originating surface; the client defaults to "ui". App pages send "app-page". */
+  source?: SteeringSource;
 }
 
 /**
@@ -516,8 +519,8 @@ export interface SteerTaskInput {
 export function useSteerTask() {
   const queryClient = useQueryClient();
   return useMutation<SteerResult, Error, SteerTaskInput, TaskMutationContext>({
-    mutationFn: ({ id, message, mode, requestedByUserId }) =>
-      api.steerTask(id, { message, mode, requestedByUserId }),
+    mutationFn: ({ id, message, mode, requestedByUserId, source }) =>
+      api.steerTask(id, { message, mode, requestedByUserId, source }),
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: ["task", id, "steering-messages"] });
       return snapshotTaskQueries(queryClient, id);

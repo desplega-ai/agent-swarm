@@ -32,22 +32,29 @@ function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {
 export function PersonBubble({
   task,
   rootSource,
+  text: givenText,
 }: {
   task: AgentTask;
   /** The root's source: a dashboard message in a Slack session says where it was sent. */
   rootSource: AgentTaskSource;
+  /**
+   * The person's words, when the caller pulls them out of a longer task
+   * prompt (`TurnTimeline`'s `requestText`). Such a message was typed on the
+   * dashboard, so it is not greyed as external. Omitted: `task.task`.
+   */
+  text?: string;
 }) {
   const { userId } = useCurrentUser();
   const { data: users } = useUsers();
   const personId = task.requestedByUserId;
   const mine = !!personId && personId === userId;
   const [raw, setRaw] = useState(false);
-  const text = stripContextFooter(task.task);
+  const text = givenText ?? stripContextFooter(task.task);
   // Slack and chat prompts carry their thread as a wrapper block before the ask.
   const prompt = parsePromptDisplay(text);
   const name = personId ? userName(users, personId) : (prompt.speaker ?? "Someone");
   const via = viaNote(task, rootSource);
-  const external = task.source !== "ui";
+  const external = givenText === undefined && task.source !== "ui";
   return (
     <section
       aria-label={mine ? "Your message" : `Message from ${name}`}
