@@ -256,6 +256,11 @@ export const PERMISSIONS = {
       "Create, update, or delete model profiles (named harness + model + effort). Operator (shared API key) only.",
     namespace: "models",
   },
+  "models.groups.write": {
+    description:
+      "Create, update, reorder, or delete model groups (named, ordered lists of model profiles). Lead, operator, or dashboard user.",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",

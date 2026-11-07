@@ -6,11 +6,11 @@
  * route, no effort and no fallbacks.
  *
  * Idempotent: an existing name is never overwritten, so an operator's edit to a
- * seed survives every boot. Harnesses with no portable tier mapping (acp) get
+ * seed survives every boot. A name a model group already took is skipped. Harnesses with no portable tier mapping (acp) get
  * no seeds.
  */
 import { DEFAULT_MODEL_TIER_MAP, MODEL_TIERS, ProviderNameSchema } from "../types";
-import { createModelProfile } from "./db/model-profiles";
+import { createModelProfile, isModelNameTakenError } from "./db/model-profiles";
 import { getDbClient } from "./db/runtime";
 import { tierConfigKey } from "./model-tier-keys";
 
@@ -24,17 +24,24 @@ export async function seedModelProfiles(): Promise<number> {
         "SELECT value FROM swarm_config WHERE scope = 'global' AND scopeId IS NULL AND key = ? AND isSecret = 0",
         [tierConfigKey(harness, tier)],
       );
-      const created = await createModelProfile({
-        name: `${harness}-${tier}`,
-        harness,
-        model: configured?.value.trim() || fallback,
-        effort: null,
-        // Tier values are free-form today (a `latest:` alias, a gateway id); keep that.
-        allowCustomModel: true,
-        description: `The ${tier} tier on ${harness}, seeded from the tier map.`,
-        seededFrom: `tier:${tier}`,
-      });
-      if (created) inserted++;
+      const name = `${harness}-${tier}`;
+      try {
+        const created = await createModelProfile({
+          name,
+          harness,
+          model: configured?.value.trim() || fallback,
+          effort: null,
+          // Tier values are free-form today (a `latest:` alias, a gateway id); keep that.
+          allowCustomModel: true,
+          description: `The ${tier} tier on ${harness}, seeded from the tier map.`,
+          seededFrom: `tier:${tier}`,
+        });
+        if (created) inserted++;
+      } catch (error) {
+        // A model group already has the name (one name space): skip this seed only.
+        if (!isModelNameTakenError(error)) throw error;
+        console.warn(`[startup] Model profile "${name}" not seeded: a model group has this name`);
+      }
     }
   }
   return inserted;

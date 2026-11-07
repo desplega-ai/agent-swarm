@@ -28543,6 +28543,633 @@
         }
       }
     },
+    "/api/model-groups": {
+      "get": {
+        "summary": "List model groups",
+        "description": "Every model group with its member profiles in order, by name.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "seededFrom": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "members": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description",
+                          "seededFrom",
+                          "members",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "groups"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a model group",
+        "description": "A group is an ordered list of model profiles that may span harnesses. Every member must be an existing profile, listed once. The name may not be a model profile's (groups and profiles share one name space; 409). Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 500
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "Profile names in preference order, first preferred. Any harness; no repeats."
+                  }
+                },
+                "required": [
+                  "name",
+                  "members"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A group or profile with that name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-groups/{name}": {
+      "get": {
+        "summary": "Get one model group",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The model group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a model group",
+        "description": "Changes the description (`null` clears it). The name is fixed; reorder or replace members with `PUT /api/model-groups/{name}/members`. Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "description"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Group updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a model group",
+        "description": "Refused (409) for a shipped tier group (`smol`, `regular`, `smart`, `ultra`; edit it instead, it would come back at the next boot), and while a schedule names the group or a task holds it (unfinished, or superseded and still owed its resume). Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The group is a seed or still in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-groups/{name}/members": {
+      "put": {
+        "summary": "Replace a model group's members",
+        "description": "Replaces the whole ordered member list in one transaction; send the full list to reorder. Every member must be an existing profile, listed once. Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "Profile names in preference order, first preferred. Any harness; no repeats."
+                  }
+                },
+                "required": [
+                  "members"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model-profiles": {
       "get": {
         "summary": "List model profiles",
@@ -28704,7 +29331,7 @@
       },
       "post": {
         "summary": "Create a model profile",
-        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
+        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. The name may not be a model group's (one name space; 409). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28934,7 +29561,7 @@
             }
           },
           "409": {
-            "description": "A profile with that name exists",
+            "description": "A profile or model group with that name exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -29317,7 +29944,7 @@
       },
       "delete": {
         "summary": "Delete a model profile",
-        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, a model group lists it as a member, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],

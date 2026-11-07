@@ -326,6 +326,10 @@
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
       "scenarios": ["platformb-models"]
     },
+    "model-groups": {
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
+      "scenarios": ["platformb-model-groups"]
+    },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
       "scenarios": ["model-harness-guard"]
