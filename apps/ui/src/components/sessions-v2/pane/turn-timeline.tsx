@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
-import { ChainOfThought } from "@/components/sessions/chain-of-thought";
 import { TaskCard } from "@/components/sessions/task-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -261,7 +260,7 @@ function PartView({
         </div>
       ) : null}
       {/* The lead works again: a live line under the latest answer, never in its place. */}
-      {part.live ? <ChainOfThought taskId={part.live.id} status={part.live.status} /> : null}
+      {part.live ? <SwarmReply task={part.live} /> : null}
       {approvals.map((approval) => (
         <ApprovalLine key={approval.id} approval={approval} />
       ))}
