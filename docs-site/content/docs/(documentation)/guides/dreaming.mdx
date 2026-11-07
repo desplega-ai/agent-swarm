@@ -34,7 +34,7 @@ It ships as three pieces:
 | Profile edits (`dreaming-apply`) | `soulMd`, `identityMd`, `claudeMd`, `toolsMd` of any agent | 6 ops, at most 1 per agent | Writes |
 | Memory (`dreaming-apply`) | `manual` memories only: store, edit, delete, rename | 5 stores, 5 edits, 10 deletes | Writes |
 | Trims (`dreaming-trim`) | One shorter rewrite of one profile field per agent, never `heartbeatMd` | 3 trims | Writes |
-| Skills | Update a non-system skill, create one swarm skill | 3 updates, 1 create | Writes |
+| Skills | Update a non-system skill, create a swarm skill. Queued how-to routes are batched into one update per target skill | 6 updates, 2 creates | Writes |
 | Scripts | New `agent`-scope scripts, each proven by a positive and a negative control | 2 builds | Writes |
 | HEARTBEAT (`dreaming-heartbeat`) | The lead's `heartbeatMd`, plus memories for the items it moves out | 10 new memories, 12 drained pins | Report only, except removals through `dreaming-apply` |
 | Long-term memory (`dreaming-memtax-create`) | Documents under `/longterm/`, never `/longterm/facts` | 40 creates, 20 edits, 5 deletes | Report only |
