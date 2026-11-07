@@ -15,6 +15,7 @@ import {
   isAgentEligibleForTask,
   updateAgentProfile,
 } from "../be/db";
+import { getEligibilityScanCap } from "../be/db/tasks/eligibility-scan";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
 import { createPoolStarvationDecisionTask } from "../tasks/worker-follow-up";
 import type { RoutingAffinity } from "../types";
@@ -680,6 +681,16 @@ describe("Pool Affinity", () => {
       afterAll(() => {
         if (originalCap === undefined) delete process.env.ELIGIBILITY_SCAN_CAP;
         else process.env.ELIGIBILITY_SCAN_CAP = originalCap;
+      });
+
+      test("parses only a positive integer and falls back to 500 otherwise", () => {
+        const invalid = ["", "abc", "-1", "0", "1.5", "NaN", "Infinity", "-Infinity"];
+        // One assertion over the whole list, so a regression names every value that slips through.
+        expect(invalid.map((raw) => [raw, getEligibilityScanCap(raw)])).toEqual(
+          invalid.map((raw) => [raw, 500]),
+        );
+        expect(getEligibilityScanCap("30")).toBe(30);
+        expect(getEligibilityScanCap("1000")).toBe(1000);
       });
 
       for (const invalid of ["-1", "0", "NaN", "Infinity", "-Infinity"]) {
