@@ -72,6 +72,10 @@ const RESERVED_KEYS = new Set([
   "CODEX_OAUTH_DEVICE_BASE_URL",
   "DESPLEGA_TELEMETRY_ENDPOINT",
   "CLOUDFLARE_API_BASE_URL",
+  // GitHub host (GHES): the API base receives the PAT, the App JWT and installation
+  // tokens, so only the deployment env may redirect it.
+  "GITHUB_URL",
+  "GITHUB_API_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -414,6 +418,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
     }
   },
+  COMPANY_EMAIL_DOMAINS: (value) =>
+    typeof value === "string" &&
+    value
+      .split(",")
+      .map((domain) => domain.trim())
+      .every((domain) => domain === "" || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))
+      ? null
+      : "Invalid COMPANY_EMAIL_DOMAINS (expected comma-separated domains, e.g. example.com,example.dev)",
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
@@ -465,6 +477,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
+  ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
@@ -567,6 +580,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_LEAVE_THREAD_DISABLE",
     "RBAC_ENABLED",
     "SEED_AUTOMATIONS_ENABLED",
+    "SEED_SCRIPTS_ENABLED",
+    "SEED_SKILLS_ENABLED",
+    "SEED_WORKFLOWS_ENABLED",
+    "SEED_SCHEDULES_ENABLED",
     "RBAC_AUDIT_DISABLED",
     "EXTENSION_ALLOW_INLINE_INSTALL",
     "BUDGET_ADMISSION_DISABLED",
@@ -577,6 +594,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "IMPROVEMENTS_ENABLED",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_QUERY_WORKER_POOL_ENABLED",
     "CLAUDE_TRUST_PRESEED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",

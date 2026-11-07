@@ -414,6 +414,15 @@
     },
     "fallbackHops": {
       "exempt": "JSON hop list written by the API: profile names, an error-class enum, ISO times, and profile-check row text (var names and 5-character key suffixes only)"
+    },
+    "slackParticipants": {
+      "exempt": "JSON participant list written by the API: Slack user ids, users.id identifiers, a trust enum and booleans"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "sourceScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "agentmail_inbox_mappings": {
@@ -736,6 +745,28 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "automation_savings_daily": {
+    "day": { "exempt": "timestamp" },
+    "jobKind": { "exempt": "enum or fixed-format value" },
+    "jobId": { "exempt": "identifier" },
+    "jobKey": { "exempt": "workflow name without the retired suffix" },
+    "jobName": { "exempt": "workflow name" },
+    "subKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
+  },
+  "automation_savings_days": {
+    "day": { "exempt": "timestamp" },
+    "jobKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
+  },
+  "automation_savings_links": {
+    "day": { "exempt": "timestamp" },
+    "parentJobId": { "exempt": "identifier" },
+    "childKind": { "exempt": "enum or fixed-format value" },
+    "childJobId": { "exempt": "workflow id or script name" },
+    "linkKind": { "exempt": "enum or fixed-format value" },
+    "computedAt": { "exempt": "timestamp" }
   },
   "budget_refusal_notifications": {
     "task_id": {
@@ -2446,6 +2477,12 @@
     },
     "followUpGuard": {
       "exempt": "enum or fixed-format value"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "parentScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "script_versions": {
@@ -2767,6 +2804,12 @@
     },
     "lastUsedAt": {
       "exempt": "timestamp"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
+    },
+    "sourceScriptRunId": {
+      "exempt": "identifier"
     }
   },
   "skill_files": {
@@ -3676,6 +3719,9 @@
     },
     "definitionHash": {
       "exempt": "hash or digest"
+    },
+    "sourceStepId": {
+      "exempt": "identifier"
     }
   },
   "workflow_versions": {
@@ -4084,5 +4130,23 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "import_items": {
+    "sourceId": { "exempt": "identifier" },
+    "kind": { "exempt": "enum or fixed-format value" },
+    "itemKey": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "entityId": { "exempt": "identifier" },
+    "createdAt": { "exempt": "timestamp" },
+    "updatedAt": { "exempt": "timestamp" }
+  },
+  "import_pending_assignments": {
+    "sourceId": { "exempt": "identifier" },
+    "agentKey": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "agentId": { "exempt": "identifier" },
+    "agentName": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "instructions": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "instructionsHash": { "exempt": "hash or digest" },
+    "skillKeys": { "exempt": "JSON array of import item keys" },
+    "createdAt": { "exempt": "timestamp" }
   }
 }

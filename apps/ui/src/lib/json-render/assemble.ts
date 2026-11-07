@@ -11,8 +11,8 @@
  *
  *   - **node ids** — prefixed `ref:<instanceKey>:` so two instances of one
  *     element never collide in the flat `elements` map;
- *   - **interaction ids** (`props.id` of `Form` / `SearchInput` / `Select` /
- *     `Tabs` / `Chips` / `Table`, and every `/forms/<id>` + `/ui/<id>` path pointing at them) —
+ *   - **interaction ids** (`props.id` of `Form` and of every `UI_STATE_COMPONENTS`
+ *     entry, and every `/forms/<id>` + `/ui/<id>` path pointing at them) —
  *     rewritten to `instances/<instanceKey>/<origId>`, so instance 1's input
  *     and instance 2's input hold independent state. No `pages/<p>` segment:
  *     the same instanceKey on two pages of one app shares interaction state,
@@ -70,8 +70,25 @@ export const ELEMENT_KEYS = [
 /** Matches `MAX_ELEMENT_REF_DEPTH` in `src/apps/page-validator.ts`. */
 export const MAX_ELEMENT_REF_DEPTH = 5;
 
-/** Components whose `props.id` roots `/ui/<id>/…` interaction state. */
-const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs", "Chips", "Table"]);
+/**
+ * Components whose `props.id` roots `/ui/<id>/…` interaction state. Exactly
+ * the server's `UI_STATE_COMPONENTS` (a root test compares the two): a
+ * component missing here keeps its raw id inside an instance, so two
+ * instances of one element would share (and clobber) one state slot.
+ */
+export const UI_STATE_COMPONENTS: ReadonlySet<string> = new Set([
+  "SearchInput",
+  "Select",
+  "NumberInput",
+  "Tabs",
+  "Chips",
+  "Tree",
+  "SchemaForm",
+  "SessionThread",
+  "Table",
+  "Accordion",
+  "DateRange",
+]);
 
 /** Components whose `props.id` roots `/forms/<id>/…` interaction state. */
 const FORM_COMPONENTS = new Set(["Form"]);
@@ -171,6 +188,11 @@ export interface AssemblyIssue {
 export interface AssembledPage {
   /** `null` when the page does not exist in the definition. */
   spec: AssembledSpec | null;
+  /**
+   * The page's `headerActions` element, emitted into `spec.elements` as a
+   * second root for the sidebar layout's sticky header. `null` when unset.
+   */
+  headerRoot: string | null;
   instances: AssembledInstance[];
   /**
    * Foreign query slots actually referenced by the expanded page:
@@ -212,7 +234,7 @@ export const REWRITE_COVERAGE: RewriteRule[] = [
   {
     field: "props",
     rewrites: ["state-paths", "interaction-ids", "prop-substitution", "action-app-binding"],
-    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions, Table.bulkActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form/SearchInput/Select/Tabs/Chips/Table",
+    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions, Table.bulkActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form and every UI_STATE_COMPONENTS entry (SearchInput/Select/NumberInput/Tabs/Chips/Tree/SchemaForm/SessionThread/Table)",
   },
   {
     field: "children",
@@ -855,8 +877,9 @@ export function assemblePageSpec(
     issues: [],
   };
 
-  const result = (spec: AssembledSpec | null): AssembledPage => ({
+  const result = (spec: AssembledSpec | null, headerRoot: string | null = null): AssembledPage => ({
     spec,
+    headerRoot,
     instances: state.instances,
     boundQueries: Object.fromEntries(
       [...state.boundQueries].map(([appId, names]) => [appId, [...names]]),
@@ -883,7 +906,12 @@ export function assemblePageSpec(
   };
   const root = emitNode(page.root, { elements: page.elements, scope, visiting: new Set() }, state);
   if (!root) return result(null);
-  return result({ root, elements: state.out });
+  const headerActions = (page as { headerActions?: unknown }).headerActions;
+  const headerRoot =
+    typeof headerActions === "string" && Object.hasOwn(page.elements, headerActions)
+      ? emitNode(headerActions, { elements: page.elements, scope, visiting: new Set() }, state)
+      : null;
+  return result({ root, elements: state.out }, headerRoot);
 }
 
 /**

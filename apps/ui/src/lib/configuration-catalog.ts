@@ -1026,6 +1026,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "DB_QUERY_WORKER_POOL_ENABLED",
+        label: "Query worker pool",
+        description:
+          "Reuse long-lived child processes for bounded db-query instead of spawning one per query (saves roughly 65 ms per call). On by default; turn it off to spawn a fresh child per query. Only applies while bounded execution is on.",
+        kind: "boolean",
+        defaultValue: "true",
+      },
+      {
         key: "DB_QUERY_HTTP_BUDGET_MS",
         label: "HTTP query budget",
         description:
@@ -1511,6 +1519,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "COMPANY_EMAIL_DOMAINS",
+        label: "Company email domains",
+        description:
+          "Comma-separated email domains of your company. Slack thread participants with one of these emails count as internal and get a member user row; other people are external and untrusted. Unset falls back to SLACK_ALLOWED_EMAIL_DOMAINS; with both unset no users are auto-created.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#company-email-domains`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:
@@ -1534,6 +1551,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "days",
         defaultValue: "30",
         placeholder: "30",
+      },
+      {
+        key: "BOOT_SCRUB_MODE",
+        label: "Secret redaction of stored rows",
+        description:
+          "When a release adds secret-redaction rules, backfill re-scrubs stored rows in the background, paced by load and resumable across restarts. forward-only applies the rules to new writes only and leaves stored rows alone; switching back to backfill sweeps what was skipped. Stopping a running backfill takes effect at once; starting one takes effect after a restart.",
+        kind: "enum",
+        options: ["backfill", "forward-only"],
+        defaultValue: "backfill",
+        restartRequired: true,
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
@@ -1723,6 +1750,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "SEED_SCRIPTS_ENABLED",
+        label: "Seed built-in scripts",
+        description:
+          "Create the bundled script catalog at boot and via the seed CLI. Turn off for installs whose scripts are managed entirely by an external pipeline. Existing seeded scripts are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SKILLS_ENABLED",
+        label: "Seed built-in skills",
+        description:
+          "Create the bundled skill catalog at boot and via the seed CLI. Turn off for installs whose skills are managed entirely by an external pipeline. Existing seeded skills are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_WORKFLOWS_ENABLED",
+        label: "Seed built-in workflows",
+        description:
+          "Create the bundled workflow catalog at boot and via the seed CLI. Turn off for installs whose workflows are managed entirely by an external pipeline. Existing seeded workflows are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SCHEDULES_ENABLED",
+        label: "Seed built-in schedules",
+        description:
+          "Create the bundled schedule catalog at boot and via the seed CLI. Turn off for installs whose schedules are managed entirely by an external pipeline. Existing seeded schedules are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
       },
       {
         key: "EXTENSION_HANDLER_TIMEOUT_MS",

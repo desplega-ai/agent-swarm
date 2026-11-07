@@ -615,7 +615,16 @@ export const SteeringStatusSchema = z.enum([
 ]);
 export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 
-export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api", "chat"]);
+/** `app-page`: a steer sent from a json-render app page (the `SessionThread` component). */
+export const SteeringSourceSchema = z.enum([
+  "ui",
+  "mcp",
+  "script",
+  "slack",
+  "api",
+  "chat",
+  "app-page",
+]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
 export const SteeringMessageSchema = z
@@ -751,6 +760,34 @@ export const RoutingAffinitySchema = z
   .openapi("RoutingAffinity");
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
 
+// People in a multi-person Slack thread, captured when the task is created.
+// `trust`: internal (company domain or audience override), external (other
+// domain, other Slack team), unknown (no email). External and unknown are
+// untrusted: their messages are information, never instructions.
+export const SlackParticipantTrustSchema = z.enum(["internal", "external", "unknown"]);
+export type SlackParticipantTrust = z.infer<typeof SlackParticipantTrustSchema>;
+
+export const TaskSlackParticipantSchema = z.object({
+  slackUserId: z.string(),
+  userId: z.string().optional(),
+  trust: SlackParticipantTrustSchema,
+  /** Sent the first task in this thread (who started the swarm's work). */
+  starter: z.boolean().optional(),
+  /** Sent the message that triggered this task. */
+  newest: z.boolean().optional(),
+  /** Sent a message in the batch that triggered this task. */
+  asked: z.boolean().optional(),
+});
+export type TaskSlackParticipant = z.infer<typeof TaskSlackParticipantSchema>;
+
+export const TaskSlackParticipantsSchema = z.object({
+  /** At most the cap, primary senders first. */
+  people: z.array(TaskSlackParticipantSchema),
+  /** Humans past the cap, rendered as `<N more...>`. */
+  more: z.number().int().min(0),
+});
+export type TaskSlackParticipants = z.infer<typeof TaskSlackParticipantsSchema>;
+
 export const AgentTaskSchema = z
   .object({
     id: z.uuid(),
@@ -805,6 +842,7 @@ export const AgentTaskSchema = z
     slackThreadTs: z.string().optional(),
     slackTriggerMessageTs: z.string().optional(),
     slackUserId: z.string().optional(),
+    slackParticipants: TaskSlackParticipantsSchema.optional(),
     slackReplySent: z.boolean().default(false),
     slackProgressMessageTs: z.string().optional(),
     slackTreeRootMessageTs: z.string().optional(),
@@ -972,6 +1010,8 @@ export const CreateTaskOptionsSchema = z.object({
   /** Exact Slack message that directly triggered this task; never inherited. */
   slackTriggerMessageTs: z.string().optional(),
   slackUserId: z.string().optional(),
+  /** People in the Slack thread; inherited by children like `slackUserId`. */
+  slackParticipants: TaskSlackParticipantsSchema.optional(),
   /**
    * Opt out of the residual Slack/contextKey normalization (see the
    * "Residual-mismatch guard" comment near the INSERT in src/be/db.ts): a

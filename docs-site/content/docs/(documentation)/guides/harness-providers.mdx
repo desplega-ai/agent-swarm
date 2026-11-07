@@ -494,7 +494,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1793887133-gbf8b08`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1794052841-g6d76b7`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -1142,11 +1142,19 @@ The swarm syncs skill files into each provider's skill dir at container boot and
 
 ### Step 10 — Worker bootstrap (Docker entrypoint)
 
-Edit [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh):
+Provider executable checks live in the standalone Bun module
+[`src/commands/entrypoint-provider-binary.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/entrypoint-provider-binary.ts).
+Add the provider's CLI/SDK check there, or an explicit branch when it needs no
+local executable. The shell calls it after credential preparation, before
+workspace setup; failure stops boot. Both worker image variants ship the helper
+and invoke it with the system Bun binary. The module's dependencies can be
+injected for tests without starting Docker or a harness.
 
-1. Credential validation branch — mirror the pattern used for pi (L7–12), codex (L13–71), or claude (L72–79).
-2. Binary reachability check — add a block similar to the `CODEX_BINARY` / `CLAUDE_BINARY` checks (L87–108).
-3. Skill sync — extend the skill-copy block (L764–803) with your provider's skill directory.
+Wire the worker bootstrap:
+
+1. Credential validation — extend the provider branches in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh).
+2. Binary reachability — add the check in `src/commands/entrypoint-provider-binary.ts` and cover it in the entrypoint tests.
+3. Skill sync — extend the shell's skill-copy block with your provider's skill directory.
 4. If your provider has a CLI binary, install it in [`Dockerfile.worker`](https://github.com/desplega-ai/agent-swarm/blob/main/Dockerfile.worker).
 
 ### Step 11 — Login CLI (only if OAuth)
@@ -1350,7 +1358,7 @@ Manual verification:
 | OAuth (optional) | `src/providers/<foo>-oauth/*`, `src/commands/<foo>-login.ts` |
 | Setup CLI (optional, e.g. claude-managed) | `src/commands/<foo>-setup.ts` |
 | CLI wiring | `src/cli.tsx` (`COMMAND_HELP`, command routing) |
-| Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
+| Docker bootstrap | `docker-entrypoint.sh`, `src/commands/entrypoint-provider-binary.ts`, `Dockerfile.worker` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
 | Models / pricing | `src/providers/<foo>-models.ts`, `src/be/seed-pricing.ts`, `src/be/pricing-normalize.ts` |

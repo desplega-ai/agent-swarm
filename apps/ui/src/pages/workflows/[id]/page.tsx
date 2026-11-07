@@ -43,6 +43,10 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
+import {
+  WorkflowSavingsHeaderAmount,
+  WorkflowSavingsTab,
+} from "@/components/savings/workflow-savings";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
@@ -89,7 +93,7 @@ import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const RUNS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -309,6 +313,10 @@ export default function WorkflowDetailPage() {
           <Badge variant="outline" size="tag">
             {workflow.definition.edges?.length ?? 0} edges
           </Badge>
+          <WorkflowSavingsHeaderAmount
+            workflowId={workflow.id}
+            onOpen={() => setActiveTab("savings")}
+          />
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             <FavoriteButton
               favorite={workflow.favorite}
@@ -375,6 +383,7 @@ export default function WorkflowDetailPage() {
           <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
           <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
+          <TabsTrigger value="savings">Savings</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
@@ -489,6 +498,11 @@ export default function WorkflowDetailPage() {
             }
             emptyLabel="0 runs"
           />
+        </TabsContent>
+
+        {/* Savings tab */}
+        <TabsContent value="savings" className="flex flex-col flex-1 min-h-0">
+          <WorkflowSavingsTab workflowId={workflow.id} />
         </TabsContent>
 
         {/* Versions tab */}
@@ -920,12 +934,11 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
             </div>
             <Editor
               language={language}
-              theme={theme === "dark" ? "github-dark" : "github-light"}
+              theme={MONACO_GITHUB_THEME[theme]}
               value={code}
               height={`${editorHeight}px`}
               beforeMount={(monaco) => {
-                monaco.editor.defineTheme("github-light", monacoLightTheme);
-                monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+                defineGithubThemes(monaco);
               }}
               options={{
                 readOnly: true,
@@ -1512,13 +1525,12 @@ function JsonMonacoEditor({
     <div className="rounded-md overflow-hidden border border-border" data-testid={testId}>
       <Editor
         language="json"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={value}
         height={`${height}px`}
         onChange={(v) => onChange(v ?? "")}
         beforeMount={(monaco) => {
-          monaco.editor.defineTheme("github-light", monacoLightTheme);
-          monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+          defineGithubThemes(monaco);
         }}
         options={{
           readOnly,

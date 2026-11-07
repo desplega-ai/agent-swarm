@@ -199,10 +199,10 @@ describe("checklist defaults and signals", () => {
     expect((await listChecklist(other.id)).filter((row) => row.scope === "user")).toHaveLength(1);
   });
 
-  test("migration 286 applies to a populated database and lists the defaults on its first read", async () => {
+  test("migration 302 applies to a populated database and lists the defaults on its first read", async () => {
     const pageId = await asset("pages", "shared/pre-checklist/");
     await getDbClient().run("DROP TABLE checklist_items");
-    await getDbClient().run("DELETE FROM _migrations WHERE version = 286");
+    await getDbClient().run("DELETE FROM _migrations WHERE version = 302");
     runMigrations(getDb());
     expect(await getDbClient().get("SELECT id FROM pages WHERE id = ?", [pageId])).toEqual({
       id: pageId,

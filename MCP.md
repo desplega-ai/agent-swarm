@@ -332,7 +332,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 **List Model Profiles**
 
-List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. Filter by `harness` to see what an agent on that harness can run.
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. `fallbacks` are the same-harness profiles a task hops to, in order, when a provider error (rate limit, seat, overload, auth, empty key pool) ends it. Filter by `harness` to see what an agent on that harness can run.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

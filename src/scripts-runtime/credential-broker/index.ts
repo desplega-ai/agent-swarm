@@ -1,5 +1,5 @@
 export { CredentialBroker } from "./broker";
-export { DEFAULT_CREDENTIAL_BINDINGS } from "./default-bindings";
+export { defaultCredentialBindings } from "./default-bindings";
 export { patchFetchWithCredentialBroker } from "./fetch-patch";
 export {
   CREDENTIAL_BINDINGS_CONFIG_KEY,

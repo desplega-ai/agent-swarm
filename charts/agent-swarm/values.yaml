@@ -96,6 +96,11 @@ config:
   githubEmail: ""
   # -- Git author name used by agents for commits.
   githubName: ""
+  # -- GitHub Enterprise Server web base, e.g. https://ghe.example.com. Blank = github.com.
+  # Shared by the API and every agent so both target the same host.
+  githubUrl: ""
+  # -- GitHub REST base override. Blank = derived from githubUrl (<githubUrl>/api/v3).
+  githubApiUrl: ""
   # -- Public dashboard URL (`APP_URL` on the API and every pool). Used in
   # Slack message links, and agents link files to Files in the dashboard by
   # default when it is set. Leave blank to omit dashboard links from Slack
@@ -120,6 +125,22 @@ config:
   # running out of the box, not just present. Set false to restore the old
   # "inventory everything, enable nothing automatically" behavior.
   seedAutomationsEnabled: true
+  # -- Create the bundled script catalog at boot and via the seed CLI. Set
+  # false for installs whose scripts are managed entirely by an external
+  # pipeline. Does not retire scripts already seeded.
+  seedScriptsEnabled: true
+  # -- Create the bundled skill catalog at boot and via the seed CLI. Set
+  # false for installs whose skills are managed entirely by an external
+  # pipeline. Does not retire skills already seeded.
+  seedSkillsEnabled: true
+  # -- Create the bundled workflow catalog at boot and via the seed CLI. Set
+  # false for installs whose workflows are managed entirely by an external
+  # pipeline. Does not retire workflows already seeded.
+  seedWorkflowsEnabled: true
+  # -- Create the bundled schedule catalog at boot and via the seed CLI. Set
+  # false for installs whose schedules are managed entirely by an external
+  # pipeline. Does not retire schedules already seeded.
+  seedSchedulesEnabled: true
 
 # API — single-replica StatefulSet running the SQLite-backed control plane.
 # replicas is fixed at 1 (SQLite single-writer); the chart fails to render

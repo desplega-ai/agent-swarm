@@ -1975,6 +1975,13 @@ export interface paths {
                             [key: string]: unknown;
                         };
                         parentTaskId?: string;
+                        followUp?: boolean;
+                        requestedByUserId?: string;
+                        session?: {
+                            key: string;
+                            /** @enum {string} */
+                            scope?: "user" | "shared";
+                        };
                     };
                 };
             };
@@ -2300,6 +2307,7 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 claudeTransport?: "cli" | "sdk";
+                                onDemand?: boolean;
                             })[];
                         };
                     };
@@ -3041,6 +3049,7 @@ export interface paths {
                             };
                             /** @enum {string} */
                             claudeTransport?: "cli" | "sdk";
+                            onDemand?: boolean;
                         };
                     };
                 };
@@ -13140,7 +13149,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.
          */
         get: {
             parameters: {
@@ -13248,6 +13257,10 @@ export interface paths {
                                 tasks_completed: number;
                                 tasks_failed: number;
                                 workflow_runs_completed: number;
+                            };
+                            github?: {
+                                web_url: string;
+                                enterprise: boolean;
                             };
                         };
                     };
@@ -14592,6 +14605,8 @@ export interface paths {
                         dependsOn?: string[];
                         offeredTo?: string;
                         dir?: string;
+                        /** @description A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400. */
+                        vcsRepo?: string;
                         parentTaskId?: string;
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
@@ -14624,7 +14639,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -14903,7 +14918,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
                     };
                 };
@@ -15709,6 +15724,28 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
                                 };
                                 credentialAllowlist?: {
                                     [key: string]: string[];
@@ -17482,6 +17519,28 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
                             } | {
                                 /** @enum {string} */
                                 type: "task_assigned";
@@ -17512,6 +17571,28 @@ export interface paths {
                                     kind: string;
                                     label: string;
                                     href?: string;
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
@@ -20583,6 +20664,669 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings per workflow or script
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    scheduleId?: string;
+                    kind?: "workflow" | "script" | "schedule";
+                    components?: "true" | "false";
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            rows: ({
+                                /** @enum {string} */
+                                kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                scheduleId?: string;
+                                scheduleName?: string;
+                                scheduleEnabled?: boolean;
+                                /** @enum {string} */
+                                scope?: "target-job";
+                                enabledOnlyRule: boolean;
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
+                                measuredUsd: number;
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active. */
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            } | {
+                                /** @enum {string} */
+                                kind: "agent-task-schedule";
+                                scheduleId: string;
+                                scheduleName: string;
+                                scheduleEnabled: boolean;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "measured";
+                                /** @description Agent tasks the schedule created in the window. */
+                                runs: number;
+                                /** @description Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule. */
+                                actualUsd: number;
+                                actualHours: number;
+                                savingUsd: null;
+                            })[];
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            components?: {
+                                /** @enum {string} */
+                                kind: "workflow" | "script" | "task";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+                                depth: number;
+                                /** @description Runs (tasks for a task component) in this tree. Fractional below the first level. */
+                                runs: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`. */
+                                inOwnRow: boolean;
+                            }[];
+                            withComponents?: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow, script or schedule not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings of a workflow, a script or the fleet
+         * @description The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
+                                actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Both workflowId and scriptName, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow or script not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet automation savings
+         * @description What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Fleet savings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            byKind: {
+                                workflows: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                scheduledScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                agentInvokedScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                            } | null;
+                            /** @description Measured session spend of the whole swarm in the window, as on the usage page. */
+                            fleetLlmUsd: number;
+                            /** @description `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total. */
+                            selfOptimizationRatio: number | null;
+                            excluded: {
+                                /** @description Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs. */
+                                enabledOnlyRuns: number;
+                            } | null;
+                            assumptions: string[];
+                        };
+                    };
+                };
+                /** @description An unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The savings curve in use
+         * @description Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The active calibration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            source: "shipped" | "deployment";
+                            active: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                            };
+                            stored: {
+                                valid: boolean;
+                                updatedAt: string;
+                                calibratedAt?: string;
+                                model?: string;
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Derive the savings curve from this deployment's sessions
+         * @description Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default 30 */
+                        days?: number;
+                        /**
+                         * Format: date-time
+                         * @description End of the window (ISO 8601); default now.
+                         */
+                        end?: string;
+                        /** @default false */
+                        apply?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The derived curve, or why there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @description Opus sessions of 1 to 61 turns used. */
+                            sessions: number;
+                            /** @description Why no curve was derived, or why a derived one was not applied. */
+                            refusals: string[];
+                            /** @description The derived curve; null when refused. */
+                            calibration: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                            speed: {
+                                [key: string]: number;
+                            } | null;
+                            repriceMatch: number | null;
+                            /** @description Derived smart-tier mean cost over the shipped one. */
+                            meanRatio: number | null;
+                            gaps: {
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                /** @enum {string} */
+                                key: "usd" | "hrs";
+                                /** @description Median absolute deviation from the shipped curve, as a fraction. */
+                                median: number;
+                                max: number;
+                                /** @description Turn counts more than 5% from the shipped curve. */
+                                over5pct: number;
+                                points: number;
+                                /** @description Session-weighted mean of derived over shipped; 1 means the same price. */
+                                weighted: number;
+                            }[];
+                            applied: boolean;
+                        };
+                    };
+                };
+                /** @description Invalid days, end or apply */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description `apply` without permission to write config */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A session query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Another calibration run is in progress */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The run passed its 120 s deadline */
+                504: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -29109,6 +29853,18 @@ export interface components {
             slackThreadTs?: string;
             slackTriggerMessageTs?: string;
             slackUserId?: string;
+            slackParticipants?: {
+                people: {
+                    slackUserId: string;
+                    userId?: string;
+                    /** @enum {string} */
+                    trust: "internal" | "external" | "unknown";
+                    starter?: boolean;
+                    newest?: boolean;
+                    asked?: boolean;
+                }[];
+                more: number;
+            };
             /** @default false */
             slackReplySent: boolean;
             slackProgressMessageTs?: string;
@@ -29870,7 +30626,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";

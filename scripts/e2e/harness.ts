@@ -141,7 +141,6 @@ function workerEnv(
     MAX_CONCURRENT_TASKS: "1",
     SLACK_DISABLE: "true",
     GITHUB_DISABLE: "true",
-    CONTEXT_MODE_DISABLED: "true",
     DISABLE_AUTOUPDATER: "1",
     STARTUP_SCRIPT_STRICT: "false",
   };

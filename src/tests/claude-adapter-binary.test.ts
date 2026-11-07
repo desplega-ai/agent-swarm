@@ -49,7 +49,11 @@ import {
   resolveClaudeBridgeEnabled,
   resolveClaudeTrustDirs,
 } from "../providers/claude-adapter";
-import { ClaudeSettingsConfigError, userClaudeMdExclude } from "../providers/claude-flag-settings";
+import {
+  ClaudeSettingsConfigError,
+  LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN,
+  userClaudeMdExclude,
+} from "../providers/claude-flag-settings";
 import type { ProviderSessionConfig } from "../providers/types";
 import { setFlockForTests } from "../utils/file-lock";
 import { holdFileLock } from "./fixtures/hold-file-lock";
@@ -784,6 +788,7 @@ describe("CLAUDE_BINARY env override", () => {
     expect(at).toBeGreaterThan(0);
     expect(JSON.parse(argv[at + 1] ?? "")).toEqual({
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, userClaudeMdExclude()],
+      enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
     });
   });
 
@@ -826,6 +831,7 @@ describe("CLAUDE_BINARY env override", () => {
           "/other/CLAUDE.md",
           userClaudeMdExclude(),
         ],
+        enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
       });
       expect(argv[0]).toBe("claude");
       expect(argv.slice(argv.indexOf("--max-turns"), argv.indexOf("--max-turns") + 2)).toEqual([

@@ -10,10 +10,10 @@ import {
 } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { setupStepHref } from "@/components/onboarding/step-status";
+import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,7 +28,7 @@ import { ExternalTextLink } from "../integrations/pane-parts";
 const MAX_ROWS = 8;
 
 /**
- * What the first task waits for. `offline`: no lead is idle or busy.
+ * What the first task waits for. `offline`: no lead is idle, busy or on demand.
  * `unverified`: a lead is online, but no key for its harness passed a check.
  */
 export type LeadReadiness =
@@ -41,15 +41,15 @@ function leadHarness(lead: Agent): string | null {
 }
 
 /**
- * The lead can take work: a lead is idle or busy, and its harness has a
- * verified key. "Verified" is the rollup that completes step 3.
+ * The lead can take work: a lead is idle, busy or on demand (a sent task
+ * starts its runtime), and its harness has a verified key. "Verified" is the rollup that completes step 3.
  */
 export function leadReadiness(
   agents: Agent[] | undefined,
   providers: OnboardingProviderSignal[],
 ): LeadReadiness {
   const online = (agents ?? []).filter(
-    (a) => a.isLead && (a.status === "idle" || a.status === "busy"),
+    (a) => a.isLead && (a.status === "idle" || a.status === "busy" || a.onDemand === true),
   );
   if (online.length === 0) return { state: "offline" };
   // A lead with no reported harness accepts any verified provider.
@@ -280,7 +280,7 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
               </span>
               {/* Fits the common statuses, so the model column lines up. */}
               <span className="flex min-w-15 shrink-0 justify-end">
-                <StatusBadge status={agent.status} />
+                <AgentStatusBadge agent={agent} />
               </span>
               {/* Hidden on a phone: the name gets the room. */}
               <span className="hidden w-14 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground sm:block">

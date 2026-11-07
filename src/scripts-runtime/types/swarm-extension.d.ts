@@ -41,6 +41,19 @@ declare module "swarm-extension" {
     slackThreadTs?: string | undefined;
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
+    slackParticipants?:
+      | {
+          people: {
+            slackUserId: string;
+            trust: "external" | "unknown" | "internal";
+            userId?: string | undefined;
+            starter?: boolean | undefined;
+            newest?: boolean | undefined;
+            asked?: boolean | undefined;
+          }[];
+          more: number;
+        }
+      | undefined;
     overrideSlackContext?: boolean | undefined;
     vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
     vcsRepo?: string | undefined;
@@ -192,6 +205,19 @@ declare module "swarm-extension" {
     slackThreadTs?: string | undefined;
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
+    slackParticipants?:
+      | {
+          people: {
+            slackUserId: string;
+            trust: "external" | "unknown" | "internal";
+            userId?: string | undefined;
+            starter?: boolean | undefined;
+            newest?: boolean | undefined;
+            asked?: boolean | undefined;
+          }[];
+          more: number;
+        }
+      | undefined;
     slackProgressMessageTs?: string | undefined;
     slackTreeRootMessageTs?: string | undefined;
     vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
@@ -318,7 +344,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui";
+  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;

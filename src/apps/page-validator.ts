@@ -45,7 +45,10 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-// Components whose `id` claims a `/ui/<id>/...` state slot.
+// Components whose `id` claims a `/ui/<id>/...` state slot. Mirrored by the
+// element assembler (`apps/ui/src/lib/json-render/assemble.ts`), which
+// namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
+// two lists equal.
 const UI_STATE_COMPONENTS = new Set([
   "SearchInput",
   "Select",
@@ -54,11 +57,44 @@ const UI_STATE_COMPONENTS = new Set([
   "Chips",
   "Tree",
   "SchemaForm",
+  "SessionThread",
   "Table",
+  "Accordion",
+  "DateRange",
 ]);
 
-// A SchemaForm id is spliced into `/ui/<id>/value`, so it must be a plain token.
+// A SchemaForm or SessionThread id is spliced into `/ui/<id>/value`, so it must
+// be a plain token.
 const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
+const PLAIN_TOKEN_ID_COMPONENTS = new Set(["SchemaForm", "SessionThread"]);
+
+/** Mirrors `APP_SESSION_KEY_PATTERN` (`src/tasks/context-key.ts`). */
+const SESSION_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * `SessionThread.sessionKey` lands in a server-built context key, so a literal
+ * must be a plain token (a binding is checked by the server at send time).
+ * `scope: "shared"` is reserved for a follow-up PR (planned: an
+ * everyone:write `session_shares` row on the root when it is created).
+ */
+function sessionThreadIssues(
+  props: Record<string, unknown>,
+  propsPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (typeof props.sessionKey === "string" && !SESSION_KEY.test(props.sessionKey)) {
+    issues.push(
+      issue(
+        `${propsPath}.sessionKey`,
+        "SessionThread sessionKey must match ^[A-Za-z0-9_-]{1,128}$",
+      ),
+    );
+  }
+  if (props.scope === "shared") {
+    issues.push(issue(`${propsPath}.scope`, 'scope "shared" is not supported yet'));
+  }
+  return issues;
+}
 const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
@@ -73,6 +109,10 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
   SchemaForm: ["onChange"],
+  Approval: ["onResolved"],
+  Files: ["onSelect"],
+  Timeline: ["onSelect"],
+  SessionThread: ["onDispatch"],
 };
 
 /**
@@ -87,7 +127,66 @@ const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]>
     ["columns", "onChange"],
   ],
   Drawer: [["actions", "actions"]],
+  Dialog: [["actions", "actions"]],
 };
+
+/** Route-driven panels: open exactly while their declared page `param` is set. */
+const ROUTE_PANEL_TYPES = new Set(["Drawer", "Dialog"]);
+
+/** The `$chain` keys an `Approval.onResolved` chain may read (first path segment). */
+const APPROVAL_CHAIN_KEYS = new Set(["status", "responses", "resolvedBy"]);
+
+/** Every `{ $chain: key }` sentinel nested in `value`, with its path. */
+function collectChainSentinels(
+  value: unknown,
+  path: string,
+  found: { path: string; key: string }[],
+): void {
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      collectChainSentinels(child, appendPath(path, index), found);
+    }
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  if (Object.keys(value).length === 1 && typeof value.$chain === "string") {
+    found.push({ path, key: value.$chain });
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectChainSentinels(child, appendPath(path, key), found);
+  }
+}
+
+/**
+ * Approval publishes `{ status, responses, resolvedBy }` to its own
+ * `props.onResolved` chain. An element-level `on.resolved` is never emitted
+ * (json-render resolves `on` params itself and cannot see `$chain`), and an
+ * unknown `$chain` key stays an unresolved sentinel that fails the step.
+ */
+function approvalIssues(element: Record<string, unknown>, elementPath: string) {
+  const issues: AppValidationIssue[] = [];
+  if (isPlainObject(element.on) && Object.hasOwn(element.on, "resolved")) {
+    issues.push(
+      issue(
+        `${elementPath}.on.resolved`,
+        "Approval runs its resolved chain from props.onResolved, not on.resolved",
+      ),
+    );
+  }
+  const props = isPlainObject(element.props) ? element.props : {};
+  const found: { path: string; key: string }[] = [];
+  collectChainSentinels(props.onResolved, `${elementPath}.props.onResolved`, found);
+  for (const { path, key } of found) {
+    // `$chain` reads a JSON-pointer path: `responses/<questionId>` reaches one answer.
+    const head = key.replace(/^\//, "").split("/")[0]!;
+    if (key === "" || APPROVAL_CHAIN_KEYS.has(head)) continue;
+    issues.push(
+      issue(path, `unknown $chain key "${key}"; Approval publishes status, responses, resolvedBy`),
+    );
+  }
+  return issues;
+}
 
 /** Every `[path, chain]` nested in an element's item-chain props. */
 function itemActionChains(type: unknown, props: Record<string, unknown>, propsPath: string) {
@@ -111,6 +210,7 @@ const DATA_FIELD_PROPS: Record<string, readonly string[]> = {
   Kanban: ["columnField", "titleField", "idField"],
   Calendar: ["startField", "endField", "titleField", "idField"],
   ContributionGraph: ["dateField", "countField"],
+  Chart: ["x"],
 };
 const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
@@ -891,17 +991,25 @@ export function crossPageDefinitionIssues(
     });
 
     if (!isPlainObject(page.elements)) continue;
+    const splitDrawers: string[] = [];
     for (const [elementId, rawElement] of Object.entries(page.elements)) {
       if (!isPlainObject(rawElement)) continue;
       const elementPath = `${pagePath}.elements.${elementId}`;
-      if (rawElement.type === "Drawer" && isPlainObject(rawElement.props)) {
+      const panelType = typeof rawElement.type === "string" ? rawElement.type : "";
+      if (ROUTE_PANEL_TYPES.has(panelType) && isPlainObject(rawElement.props)) {
+        if (panelType === "Drawer" && rawElement.props.presentation === "split") {
+          splitDrawers.push(elementPath);
+        }
         const paramPath = `${elementPath}.props.param`;
         if (
           Object.hasOwn(rawElement.props, "param") &&
           typeof rawElement.props.param !== "string"
         ) {
           issues.push(
-            issue(paramPath, "Drawer param must be a literal route param name (not a binding)"),
+            issue(
+              paramPath,
+              `${panelType} param must be a literal route param name (not a binding)`,
+            ),
           );
         } else if (
           typeof rawElement.props.param === "string" &&
@@ -915,6 +1023,16 @@ export function crossPageDefinitionIssues(
           );
         }
       }
+    }
+    // One detail region per surface: a second split Drawer would fight the
+    // first for the same pane.
+    for (const path of splitDrawers.slice(1)) {
+      issues.push(
+        issue(
+          `${path}.props.presentation`,
+          `only one presentation: "split" Drawer per page (first: ${splitDrawers[0]})`,
+        ),
+      );
     }
 
     const refs: StateRef[] = [];
@@ -1322,6 +1440,249 @@ interface ElementTreeValidationTarget {
   elementProps?: Record<string, unknown>;
 }
 
+const CHART_MAX_SERIES = 8;
+
+/** Chart bounds the generic JSON-schema walker does not evaluate (minItems, pattern, minimum). */
+function chartPropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (Array.isArray(props.series)) {
+    if (props.series.length === 0 || props.series.length > CHART_MAX_SERIES) {
+      issues.push(issue(`${propsPath}.series`, `must list 1-${CHART_MAX_SERIES} series`));
+    }
+    const seen = new Set<string>();
+    for (const [index, entry] of props.series.entries()) {
+      if (!isPlainObject(entry) || typeof entry.key !== "string") continue;
+      if (seen.has(entry.key)) {
+        issues.push(issue(`${propsPath}.series.${index}.key`, `duplicate series "${entry.key}"`));
+      }
+      seen.add(entry.key);
+    }
+  }
+  if (
+    (props.kind === "pie" || props.kind === "donut") &&
+    Array.isArray(props.series) &&
+    props.series.length !== 1
+  ) {
+    issues.push(issue(`${propsPath}.series`, `kind "${props.kind}" takes exactly one series`));
+  }
+  if (
+    typeof props.height === "number" &&
+    (!Number.isInteger(props.height) || props.height < 120 || props.height > 640)
+  ) {
+    issues.push(issue(`${propsPath}.height`, "must be an integer from 120 to 640"));
+  }
+  return issues;
+}
+
+const CURRENCY_CODE = /^[A-Z]{3}$/;
+
+/**
+ * Accordion children are positional (`children[i]` is the body of
+ * `items[i]`), so the counts must match; item keys are unique, and
+ * `defaultOpen` names only declared keys.
+ */
+function accordionIssues(
+  element: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const props = element.props as Record<string, unknown>;
+  if (!Array.isArray(props.items)) return issues;
+  const keys = props.items.map((item) => (isPlainObject(item) ? item.key : undefined));
+  const childCount = Array.isArray(element.children) ? element.children.length : 0;
+  if (childCount !== keys.length) {
+    issues.push(
+      issue(
+        `${elementPath}.children`,
+        `Accordion children are positional: ${keys.length} items need ${keys.length} children (got ${childCount})`,
+      ),
+    );
+  }
+  const seen = new Set<unknown>();
+  for (const [index, key] of keys.entries()) {
+    if (typeof key === "string" && seen.has(key)) {
+      issues.push(issue(`${elementPath}.props.items.${index}.key`, `duplicate item key "${key}"`));
+    }
+    seen.add(key);
+  }
+  if (Array.isArray(props.defaultOpen)) {
+    for (const [index, key] of props.defaultOpen.entries()) {
+      if (typeof key === "string" && !seen.has(key)) {
+        issues.push(
+          issue(`${elementPath}.props.defaultOpen.${index}`, `unknown item key "${key}"`),
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * `currency` must be an ISO 4217 code: on Chart and Metric props, on Table
+ * columns (and their popover fields) and on DetailList fields. The catalog
+ * carries it as a JSON-schema `pattern`, which the generic walker skips.
+ */
+function currencyIssues(
+  type: unknown,
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const check = (value: unknown, path: string) => {
+    if (typeof value === "string" && !CURRENCY_CODE.test(value)) {
+      issues.push(issue(path, `must be an ISO 4217 code like USD (got "${value}")`));
+    }
+  };
+  const propsPath = `${elementPath}.props`;
+  if (type === "Chart" || type === "Metric") check(props.currency, `${propsPath}.currency`);
+  const listProp = type === "Table" ? "columns" : type === "DetailList" ? "fields" : null;
+  if (!listProp || !Array.isArray(props[listProp])) return issues;
+  for (const [index, entry] of (props[listProp] as unknown[]).entries()) {
+    if (!isPlainObject(entry)) continue;
+    const entryPath = `${propsPath}.${listProp}.${index}`;
+    check(entry.currency, `${entryPath}.currency`);
+    const popover = entry.popover;
+    if (isPlainObject(popover) && Array.isArray(popover.fields)) {
+      for (const [fieldIndex, field] of popover.fields.entries()) {
+        if (isPlainObject(field)) {
+          check(field.currency, `${entryPath}.popover.fields.${fieldIndex}.currency`);
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** The `$row` fields `Files.onSelect` publishes. */
+const FILE_ROW_FIELDS = new Set(["path", "name", "type", "size", "modifiedAt"]);
+
+function collectFileRowIssues(value: unknown, path: string, issues: AppValidationIssue[]): void {
+  if (isPlainObject(value) && typeof value.$row === "string") {
+    if (!FILE_ROW_FIELDS.has(value.$row)) {
+      issues.push(
+        issue(
+          appendPath(path, "$row"),
+          `unknown Files row field "${value.$row}" (one of ${[...FILE_ROW_FIELDS].join(", ")})`,
+        ),
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value) || isPlainObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      collectFileRowIssues(child, appendPath(path, key), issues);
+    }
+  }
+}
+
+/**
+ * `File` / `Files`: a literal `path` must be absolute without `..` segments.
+ * Hygiene only: agent-fs drive membership is the access boundary.
+ */
+function agentFsPropIssues(
+  type: "File" | "Files",
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (typeof props.path === "string" && !isAgentFsPath(props.path)) {
+    issues.push(issue(`${propsPath}.path`, 'must be an absolute agent-fs path without ".."'));
+  }
+  if (type === "Files") collectFileRowIssues(props.onSelect, `${propsPath}.onSelect`, issues);
+  return issues;
+}
+
+function isAgentFsPath(value: string): boolean {
+  return value.startsWith("/") && !value.split("/").includes("..");
+}
+
+/**
+ * Form `kind: "file"` fields: `dir` is required unless `source: "pick"`, and
+ * a literal `dir` follows the `File` / `Files` path rules.
+ */
+function formFileFieldIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (!Array.isArray(props.fields)) return issues;
+  for (const [index, field] of props.fields.entries()) {
+    if (!isPlainObject(field) || field.kind !== "file") continue;
+    const fieldPath = `${elementPath}.props.fields.${index}`;
+    if (field.dir === undefined && field.source !== "pick") {
+      issues.push(issue(`${fieldPath}.dir`, 'is required for kind "file" unless source is "pick"'));
+    } else if (typeof field.dir === "string" && !isAgentFsPath(field.dir)) {
+      issues.push(issue(`${fieldPath}.dir`, 'must be an absolute agent-fs path without ".."'));
+    }
+  }
+  return issues;
+}
+
+/** `DateRange`: a plain-token id (it roots `/ui/<id>/from|to`) and a listed `defaultPreset`. */
+function dateRangePropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (
+    typeof props.id === "string" &&
+    (!SCHEMA_FORM_ID.test(props.id) || RESERVED_UI_IDS.has(props.id))
+  ) {
+    issues.push(
+      issue(
+        `${propsPath}.id`,
+        "DateRange id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+      ),
+    );
+  }
+  if (
+    Array.isArray(props.presets) &&
+    typeof props.defaultPreset === "string" &&
+    !props.presets.includes(props.defaultPreset)
+  ) {
+    issues.push(issue(`${propsPath}.defaultPreset`, "must be one of the listed presets"));
+  }
+  return issues;
+}
+
+/**
+ * Sidebar-layout page metadata: `icon` from the catalog icon set, and
+ * `headerActions` / `nav` only where the sidebar layout renders them.
+ */
+export function shellDefinitionIssues(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const iconNames = catalog.components.Icon?.props.properties?.name?.enum ?? [];
+  const sidebar = definition.layout === "sidebar";
+  for (const [pageName, page] of Object.entries(definition.pages)) {
+    const pagePath = appendPath("pages", pageName);
+    if (page.icon !== undefined && !iconNames.includes(page.icon)) {
+      issues.push(issue(appendPath(pagePath, "icon"), `unknown icon "${page.icon}"`));
+    }
+    if (!sidebar) {
+      for (const key of ["headerActions", "nav"] as const) {
+        if (page[key] !== undefined) {
+          issues.push(
+            issue(
+              appendPath(pagePath, key),
+              'only rendered with layout: "sidebar"; set it or drop this',
+            ),
+          );
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 export function validatePage(
   definition: AppDefinition,
   catalog: AppCatalog,
@@ -1418,7 +1779,8 @@ export function validatePage(
         formIds.add(rawElement.props.id);
       }
       if (
-        type === "SchemaForm" &&
+        typeof type === "string" &&
+        PLAIN_TOKEN_ID_COMPONENTS.has(type) &&
         isPlainObject(rawElement.props) &&
         typeof rawElement.props.id === "string" &&
         (!SCHEMA_FORM_ID.test(rawElement.props.id) || RESERVED_UI_IDS.has(rawElement.props.id))
@@ -1426,9 +1788,12 @@ export function validatePage(
         issues.push(
           issue(
             `${propsPath}.id`,
-            "SchemaForm id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype",
+            `${type} id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype`,
           ),
         );
+      }
+      if (type === "SessionThread" && isPlainObject(rawElement.props)) {
+        issues.push(...sessionThreadIssues(rawElement.props, propsPath));
       }
       if (
         typeof type === "string" &&
@@ -1459,6 +1824,14 @@ export function validatePage(
         );
       }
       collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
+      if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
+      issues.push(...currencyIssues(type, rawElement.props, elementPath));
+      if (type === "Accordion") issues.push(...accordionIssues(rawElement, elementPath));
+      if (type === "File" || type === "Files") {
+        issues.push(...agentFsPropIssues(type, rawElement.props, elementPath));
+      }
+      if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
+      if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
       if (type === "Table") {
         // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
         const tableProps = rawElement.props;
@@ -1587,6 +1960,13 @@ export function validatePage(
               }
             }
           }
+          if (type === "Chart" && Array.isArray(props.series)) {
+            for (const [index, entry] of props.series.entries()) {
+              if (isPlainObject(entry)) {
+                fieldNames.push([`${elementPath}.props.series.${index}.key`, entry.key]);
+              }
+            }
+          }
           for (const [fieldPath, fieldName] of fieldNames) {
             if (typeof fieldName !== "string") continue;
             const found = fieldBindingIssue(
@@ -1676,6 +2056,7 @@ export function validatePage(
       issues.push(...onResult.issues);
       stateRefs.push(...onResult.stateRefs);
     }
+    if (type === "Approval") issues.push(...approvalIssues(rawElement, elementPath));
     if (Object.hasOwn(rawElement, "watch")) {
       const watchResult = validateActionMap(
         rawElement.watch,
@@ -1810,6 +2191,19 @@ export function validatePage(
     }
   };
   if (typeof root === "string") markReachable(root);
+  // The sidebar layout renders `headerActions` as a second root in the sticky
+  // page header, so its subtree is reachable too, but never also from `root`.
+  const headerActions = pageName ? definition.pages[pageName]?.headerActions : undefined;
+  if (headerActions !== undefined) {
+    const headerPath = appendPath(pagePath, "headerActions");
+    if (!Object.hasOwn(elements, headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" not found`));
+    } else if (reachable.has(headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" is already rendered from root`));
+    } else {
+      markReachable(headerActions);
+    }
+  }
   for (const elementId of Object.keys(elements)) {
     if (!reachable.has(elementId)) {
       issues.push(issue(`${elementsPath}.${elementId}`, "element is not reachable from root"));

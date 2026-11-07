@@ -227,11 +227,13 @@ jobs:
         run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
+        # Also templates/import/*.schema.json, generated from src/be/import/schema.ts.
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
         # ExtensionManifestSchema is published as templates/extensions/manifest.schema.json.
         run: |
           bun run check:extension-catalog
           bun run check:extension-schema
+          bun run check:import-schema
 
       # scripts/vendor/gitleaks/gitleaks.toml is converted to src/utils/secret-rules.generated.ts;
       # the check also verifies the vendored body against its pinned sha256.

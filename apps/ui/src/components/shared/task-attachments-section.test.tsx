@@ -41,6 +41,7 @@ mock.module("@/components/ui/dialog", () => require("../ui/dialog"));
 mock.module("@/components/ui/middle-truncation", () => require("../ui/middle-truncation"));
 mock.module("@/lib/format-bytes", () => require("../../lib/format-bytes"));
 mock.module("@/lib/scrub-secrets", () => require("../../lib/scrub-secrets"));
+mock.module("@/lib/swarm-links", () => require("../../lib/swarm-links"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { TaskAttachmentsSection, TaskPromptAttachments } = await import(

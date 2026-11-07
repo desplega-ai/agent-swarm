@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hooks/use-repos";
 import type { SwarmRepo } from "@/api/types";
+import { useGitHubWebUrl } from "@/app/status-context";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
@@ -31,6 +32,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Switch } from "@/components/ui/switch";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { githubOrigin } from "@/lib/swarm-links";
 
 interface RepoFormData {
   url: string;
@@ -75,6 +77,7 @@ function RepoDialog({
         }
       : emptyForm,
   );
+  const githubWebUrl = useGitHubWebUrl();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +100,7 @@ function RepoDialog({
               <Label htmlFor="repo-url">Repository URL</Label>
               <Input
                 id="repo-url"
-                placeholder="https://github.com/org/repo"
+                placeholder={`${githubOrigin(githubWebUrl)}/org/repo`}
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 required

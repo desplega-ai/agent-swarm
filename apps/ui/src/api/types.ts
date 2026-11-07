@@ -240,6 +240,8 @@ export interface Agent {
   lastActivityAt?: string;
   /** Runtime pool this agent is bound to. Absent on APIs without runtime pools. */
   runtimePoolId?: string | null;
+  /** Offline, but its runtime pool starts a runtime when a task is sent. Absent otherwise. */
+  onDemand?: boolean;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -589,7 +591,7 @@ export type SteerMode = "steer" | "queue";
 
 export type SteeringStatus = "pending" | "delivered" | "handled" | "promoted" | "cancelled";
 
-export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api";
+export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
 
 /** What the server actually did with the request (the degradation ladder). */
 export type SteerOutcome = "steered" | "queued" | "promoted";
@@ -3763,6 +3765,8 @@ export interface StatusResponse {
   runtime_pools?: { enabled: boolean };
   /** Absent on servers that predate it. */
   instance?: StatusInstance;
+  /** The GitHub web base (`GITHUB_URL`). Absent on servers that predate it; treat absence as github.com. */
+  github?: { web_url: string; enterprise: boolean };
 }
 
 export interface TestConnectionResponse {
@@ -4096,6 +4100,14 @@ export interface AppPageDef {
   /** Display title (breadcrumb / header); defaults to the page name. */
   title?: string;
   params?: Record<string, AppPageParamDef>;
+  /** Sidebar layout: a catalog icon name shown next to the page in the sidebar. */
+  icon?: string;
+  /** Sidebar layout: one line under the title in the sticky page header. */
+  description?: string;
+  /** Sidebar layout: element key rendered in the sticky header's actions slot. */
+  headerActions?: string;
+  /** Sidebar layout: `false` leaves the page out of the sidebar. */
+  nav?: boolean;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -4172,6 +4184,8 @@ export interface AppDefinition {
   theme?: string;
   /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
   icon?: AppIcon;
+  /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
+  layout?: "sidebar";
 }
 
 /**
@@ -4501,4 +4515,196 @@ export interface FleetBenchmarkResponse {
   minFinishedTasks: number;
   generatedAt: string | null;
   comparisons: FleetComparison[];
+}
+
+// ─── Automation savings (GET /api/savings/jobs) ─────────────────────────────
+
+export type SavingsTier = "smol" | "regular" | "smart" | "ultra";
+
+/** An 80% range: p10 and p90 around the p50 point estimate. */
+export interface SavingsBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+/** One workflow or one script (by name; scripts of one name share a row across scopes). */
+export type SavingsTarget = { workflowId: string } | { scriptName: string };
+
+export interface SavingsJobRow {
+  /**
+   * `script-scheduled`: a schedule targets the script, priced as a standalone
+   * agent task. `script-agent-invoked`: priced as the extra turns it adds to
+   * the calling agent's session.
+   */
+  kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+  /** Set on workflow rows. */
+  workflowId?: string;
+  /** Set on script rows. */
+  scriptName?: string;
+  name: string;
+  basis: "modelled";
+  /** True when only the runs with a downstream effect count (an event router). */
+  enabledOnlyRule: boolean;
+  runs: number;
+  substitutedRuns: number;
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  /** Measured spend of every run in the window. */
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured; 0 when recorded. */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate: `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`,
+   * the cost the saving subtracts.
+   */
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`. */
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  agentOnlyUsdPerRun: number;
+}
+
+export interface SavingsTotals {
+  runs: number;
+  substitutedRuns: number;
+  enabledOnlyRuns: number;
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  hoursSaved: SavingsBand;
+}
+
+export interface SavingsJobsResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  /** Newest rollup time of the window; null before the first rollup. */
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  rows: SavingsJobRow[];
+  total: SavingsTotals | null;
+  /** With `components=true`: what the workflow's runs caused, each priced as on its own row. */
+  components?: SavingsComponent[];
+  /** With `components=true`: own runs plus every component. Never part of a list or fleet total. */
+  withComponents?: SavingsTotals | null;
+}
+
+/** A child workflow, nested script or unowned tasks below a workflow's runs. */
+export interface SavingsComponent {
+  kind: "workflow" | "script" | "task";
+  workflowId?: string;
+  scriptName?: string;
+  name: string;
+  linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+  /** 1 for a direct child. */
+  depth: number;
+  /** Runs (tasks for a task component) in this tree; fractional below the first level. */
+  runs: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  hoursSaved: SavingsBand;
+  /** Unowned tasks: their spend is already in the workflow's own row. */
+  inOwnRow: boolean;
+}
+
+/** A schedule's row: the schedule's workflow or script target (runs carry no schedule link), or its measured spend. */
+export interface SavingsScheduleRef {
+  scheduleId: string;
+  scheduleName: string;
+  scheduleEnabled: boolean;
+}
+
+/** The target job's whole row, shared with any other schedule of the same target. */
+export type SavingsTargetRow = SavingsJobRow & SavingsScheduleRef & { scope: "target-job" };
+
+/** An agent-task schedule: what its tasks cost, with no saving to model. */
+export interface SavingsMeasuredRow extends SavingsScheduleRef {
+  kind: "agent-task-schedule";
+  name: string;
+  basis: "measured";
+  /** Agent tasks the schedule created in the window. */
+  runs: number;
+  /** Recorded cost of those tasks; a floor, as their reviews and follow-ups are not linked to the schedule. */
+  actualUsd: number;
+  actualHours: number;
+  savingUsd: null;
+}
+
+export type SavingsScheduleRow = SavingsTargetRow | SavingsMeasuredRow;
+
+export interface SavingsScheduleResponse extends Omit<SavingsJobsResponse, "rows" | "reason"> {
+  /** `target-missing`: the schedule's workflow or script no longer exists. */
+  reason: SavingsJobsResponse["reason"] | "target-missing";
+  rows: SavingsScheduleRow[];
+}
+
+/** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
+export interface SavingsDailyPoint {
+  day: string;
+  savingUsd: number;
+  /** Scaled estimate: the day's measured and estimated spend times the substituted share. */
+  actualUsd: number;
+  /** The day's measured spend. */
+  measuredUsd: number;
+  /** The day's LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+}
+
+export interface SavingsDailyResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  points: SavingsDailyPoint[];
+}
+
+/** One kind of job in the fleet savings summary; p50 values. */
+export interface SavingsKindTotals {
+  jobs: number;
+  runs: number;
+  substitutedRuns: number;
+  savingUsd: number;
+  hoursSaved: number;
+}
+
+/** GET /api/savings/summary: every workflow and script, with the fleet band. */
+export interface SavingsSummaryResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  total: SavingsTotals | null;
+  byKind: {
+    workflows: SavingsKindTotals;
+    scheduledScripts: SavingsKindTotals;
+    agentInvokedScripts: SavingsKindTotals;
+  } | null;
+  /** Measured session spend of the whole swarm in the window. */
+  fleetLlmUsd: number;
+  /** `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`; null without spend or a valid total. */
+  selfOptimizationRatio: number | null;
+  excluded: { enabledOnlyRuns: number } | null;
+  assumptions: string[];
 }

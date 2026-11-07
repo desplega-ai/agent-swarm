@@ -319,6 +319,7 @@ value:getDueScheduledTasks
 value:getDueWaitStates
 value:getExpiredPendingApprovals
 value:getFavoriteItemIdSet
+value:getFirstTaskInThread
 value:getIdleWorkersWithCapacity
 value:getInProgressSlackTasks
 value:getInProgressTasksByContextKey
@@ -683,7 +684,6 @@ const internal = ["value:configureTaskWriteDependencies"];
 const frozenFacadeBodies = `BINARY_SKILL_FILE_PLACEHOLDER
 BUDGETED_IDENTITY_FIELDS
 ELIGIBILITY_SCAN_BATCH_SIZE
-ELIGIBILITY_SCAN_CAP
 GENERATED_PULL_REQUEST_DESCRIPTION
 GENERATED_PULL_REQUEST_INTENT
 GENERATED_PULL_REQUEST_PROVIDER_ID

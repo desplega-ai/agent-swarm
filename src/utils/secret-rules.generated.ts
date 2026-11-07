@@ -41,7 +41,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
   "globalAllowlist": {
     "regexes": [
       {
-        "source": "^true|false|null$", // gitleaks:allow
+        "source": "^(?:true|false|null)$", // gitleaks:allow
         "flags": "i"
       },
       {

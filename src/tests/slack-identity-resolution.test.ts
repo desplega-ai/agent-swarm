@@ -87,14 +87,20 @@ function cleanupDb() {
   }
 }
 
+// The cascade creates users only for company-domain emails.
+const priorCompanyDomains = process.env.COMPANY_EMAIL_DOMAINS;
+
 beforeAll(() => {
   cleanupDb();
   initDb(TEST_DB_PATH);
+  process.env.COMPANY_EMAIL_DOMAINS = "example.com";
 });
 
 afterAll(() => {
   closeDb();
   cleanupDb();
+  if (priorCompanyDomains === undefined) delete process.env.COMPANY_EMAIL_DOMAINS;
+  else process.env.COMPANY_EMAIL_DOMAINS = priorCompanyDomains;
 });
 
 beforeEach(async () => {
@@ -284,6 +290,23 @@ describe("resolveSlackUserId — three-step cascade", () => {
 
     // Audit trail: auto_merge (by email) + identity_added (alias link).
     expect(await identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
+  });
+
+  test("with no company domains configured, an email creates no user", async () => {
+    process.env.COMPANY_EMAIL_DOMAINS = "";
+    try {
+      const { client } = makeMockClient({
+        U_NODOMAIN: { user: { profile: { email: "someone@example.com", real_name: "Someone" } } },
+      });
+      const userId = await resolveSlackUserId(client, "U_NODOMAIN", {
+        sampleEventType: "message",
+        sampleContext: "hi",
+      });
+      expect(userId).toBeUndefined();
+      expect(await countUsers()).toBe(0);
+    } finally {
+      process.env.COMPANY_EMAIL_DOMAINS = "example.com";
+    }
   });
 
   test("concurrent alias enrollment returns the external-ID winner", async () => {

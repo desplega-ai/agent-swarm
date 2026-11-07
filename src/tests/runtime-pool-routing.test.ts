@@ -815,3 +815,55 @@ describe("server pool routing", () => {
     expect((await getTaskById(later.id))?.status).toBe("unassigned");
   });
 });
+
+test("a negative HEARTBEAT_POOL_SCAN_BATCH_SIZE falls back to a bounded page", async () => {
+  process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE = "-1";
+  try {
+    await live();
+    await createTaskExtended("pool task 1");
+    const client = getDbClient();
+    const query = client.query.bind(client);
+    const limits: unknown[] = [];
+    const reads = spyOn(client, "query").mockImplementation(async (sql, params) => {
+      if (sql.includes("status = 'unassigned'") && sql.includes("LIMIT ? OFFSET ?")) {
+        limits.push(params?.[0]);
+      }
+      return await query(sql, params);
+    });
+    try {
+      await routePoolTasks();
+    } finally {
+      reads.mockRestore();
+    }
+    expect(limits.length).toBeGreaterThan(0);
+    expect(limits[0]).toBe(50);
+  } finally {
+    delete process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE;
+  }
+});
+
+test("a positive HEARTBEAT_POOL_SCAN_BATCH_SIZE stays the page size", async () => {
+  process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE = "7";
+  try {
+    await live();
+    await createTaskExtended("pool task 1");
+    const client = getDbClient();
+    const query = client.query.bind(client);
+    const limits: unknown[] = [];
+    const reads = spyOn(client, "query").mockImplementation(async (sql, params) => {
+      if (sql.includes("status = 'unassigned'") && sql.includes("LIMIT ? OFFSET ?")) {
+        limits.push(params?.[0]);
+      }
+      return await query(sql, params);
+    });
+    try {
+      await routePoolTasks();
+    } finally {
+      reads.mockRestore();
+    }
+    expect(limits.length).toBeGreaterThan(0);
+    expect(limits[0]).toBe(7);
+  } finally {
+    delete process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE;
+  }
+});

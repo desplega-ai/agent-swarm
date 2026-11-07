@@ -54,7 +54,12 @@ import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readsRepoSecrets } from "./config";
 import { resolveAppUrl } from "./config-values";
-import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
+import {
+  buildTaskRequestedBy,
+  buildTaskThreadParticipants,
+  TaskRequestedBySchema,
+  TaskThreadParticipantsSchema,
+} from "./requested-by";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -110,6 +115,7 @@ const PollTaskOfferedTriggerSchema = z.object({
   taskId: z.string(),
   task: AgentTaskSchema,
   requestedBy: TaskRequestedBySchema.optional(),
+  threadParticipants: TaskThreadParticipantsSchema.optional(),
 });
 
 const PollTaskAssignedTriggerSchema = z.object({
@@ -133,6 +139,7 @@ const PollTaskAssignedTriggerSchema = z.object({
       href: z.string().optional(),
     })
     .optional(),
+  threadParticipants: TaskThreadParticipantsSchema.optional(),
 });
 
 // `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
@@ -445,12 +452,14 @@ export async function handlePoll(
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
             const offeredRequestedBy = await buildTaskRequestedBy(claimedTask);
+            const offeredThread = await buildTaskThreadParticipants(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
                 taskId: claimedTask.id,
                 task: claimedTask,
                 ...(offeredRequestedBy && { requestedBy: offeredRequestedBy }),
+                ...(offeredThread && { threadParticipants: offeredThread }),
               },
             };
           }
@@ -544,6 +553,7 @@ export async function handlePoll(
             // lives in buildTaskRequestedBy).
             const assignedRequestedBy = await buildTaskRequestedBy(pendingTask);
             const nudge = await buildChecklistNudge(pendingTask, agent);
+            const assignedThread = await buildTaskThreadParticipants(pendingTask);
             // The surface that started the whole chain, so the worker can tag
             // its session events with it (workers cannot read the task tree).
             const assignedTriggerSurface = await resolveTriggerSurface(
@@ -564,6 +574,7 @@ export async function handlePoll(
                 },
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
                 ...(nudge && { checklistNudge: nudge }),
+                ...(assignedThread && { threadParticipants: assignedThread }),
               },
             };
           }
@@ -717,6 +728,7 @@ export async function handlePoll(
                   });
                 });
                 const claimedRequestedBy = await buildTaskRequestedBy(claimed);
+                const claimedThread = await buildTaskThreadParticipants(claimed);
                 const claimedTriggerSurface = await resolveTriggerSurface(
                   claimed.id,
                   claimed.source,
@@ -732,6 +744,7 @@ export async function handlePoll(
                       attachments: await attachmentsForTrigger(claimed.id),
                     },
                     ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
+                    ...(claimedThread && { threadParticipants: claimedThread }),
                   },
                 };
               }

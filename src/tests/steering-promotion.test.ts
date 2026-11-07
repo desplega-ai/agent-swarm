@@ -145,6 +145,30 @@ describe("steering promotion on terminal tasks", () => {
     expect(trigger?.task.modelUnsupported).toBeUndefined();
   });
 
+  test.each([
+    ["app-page", "ui"],
+    ["script", "api"],
+    ["slack", "slack"],
+  ] as const)("a promoted %s steer creates a task with source %s", async (source, expected) => {
+    const task = await createTaskExtended("source mapping parent", { agentId });
+    expect((await startTask(task.id))?.status).toBe("in_progress");
+    await createSteeringMessage({
+      taskId: task.id,
+      body: "carry the source",
+      mode: "queue",
+      source,
+      createdByKind: "user",
+    });
+
+    expect((await completeTask(task.id, "done"))?.status).toBe("completed");
+    const [promoted] = await getSteeringMessagesForTask(task.id);
+    expect(promoted).toMatchObject({ status: "promoted", source });
+    expect(await getTaskById(promoted!.promotedTaskId!)).toMatchObject({
+      parentTaskId: task.id,
+      source: expected,
+    });
+  });
+
   test("promotion bypasses disabled follow-up configuration", async () => {
     const { task } = await taskWithPendingSteer("must still be followed", {
       followUpConfig: { disabled: true },

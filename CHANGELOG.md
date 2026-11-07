@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-11-07
+
+### Added
+- Savings: a fleet savings page at `/usage/savings` (#2779); scripts are priced and show their saving on script pages (#2776); a schedule's saving shows in the rail, header and list (#2777); workflow savings get a daily rollup, a Saved (30d) list column (#2772) and totals with components (#2780).
+- Scripts: a stdlib `retry(fn, opts)` helper, method-aware `ctx.stdlib.fetch` retries, and `ctx.swarm` bridge retries on 429 and transient 5xx (#2790).
+- Slack: threads with several people name every participant, with a trust level; external and unknown people are untrusted (#2767).
+- Tasks: link a task to a registered repo from the Create task dialog (#2804).
+
+### Changed
+- Worker image: context-mode is removed from the image and the Claude, Codex and opencode adapters; `CONTEXT_MODE_DISABLED` and `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` are now ignored (#2812).
+- Docker: bumped codex, amp, grok, kiro, qwen, copilot and the Anthropic SDK (#2788), and amp again (#2818).
+- Docs: small-company playbooks lead with what Agent Swarm does (#2786); task lifecycle grace timer wording (#2787); seed skill patches for swarm-scripts and work-on-task (#2785).
+
+### Fixed
+- Slack: author lines cannot be forged, and every requester lookup carries `userTeam` (#2771).
+- Savings: the fleet savings summary and job lists load in a few statements (#2809).
+- opencode: installed MCP servers use the local command-array stdio shape (#2793); OpenRouter gateway model ids have a catalog entry (#2784).
+- Scrubber: a structural rule match inside a vendor secret redacts the whole secret (#2783); the gitleaks `true|false|null` allowlist is anchored as a whole (#2796).
+- Dreaming: triage docs are sent once, partial cost is labelled, and skill routes carry forward (#2792).
+- Docker: context-mode was pinned to a Node 22 compatible release before its removal (#2789, #2806).
+- Tests: config cleanup settles and the star toast is awaited (#2782).
+
+## [2.8.2] - 2026-11-06
+
+### Added
+- Models: a model profile can list same-harness `fallbacks`; a task that ends on a provider error (rate limit, seat, overload, auth, empty key pool) hops to the next one (#2736).
+- Workflows: the modelled automation saving shows in the workflow header, a Savings tab and a daily chart (#2768); the session cost curve recalibrates from a deployment's own sessions (#2770).
+- Apps: a Chart component, a Metric sparkline and a sidebar app shell (#2769).
+- UI: app icons and agent avatars from an https link or an agent-fs file (#2729); agent-fs style markdown on every Streamdown surface (#2765).
+- Docs: local TEI embeddings with a Compose overlay (#2751), an AI operations governance guide for small companies (#2742) and a small tech team operating model guide (#2744).
+
+### Changed
+- agent-fs pins bumped 0.18.18 -> 0.18.22 (#2761).
+- Docker: bumped amp (#2762).
+- Workflows: definition cleanup is scoped to deleted runs (#2740).
+
+### Fixed
+- CI: prod deploys when newer main commits skip the docker-and-deploy trigger (#2773).
+- Security: starting Linear/Jira OAuth requires admin auth (#2756); feedback endpoint URLs that include credentials are rejected (#2755).
+- Skills: YAML block scalar descriptions parse, and metadata after indented block scalars is kept (#2763, #2764).
+- Seed: template updates land on workflows whose only change is a setting (#2757).
+- Comb: `0.0.0.0` counts as unreachable in browser reachability checks (#2754).
+- Chat: `splitChatMessage` no longer loops on a surrogate pair at a tiny limit (#2753).
+- UI: markdown snippets share the GitHub Monaco theme (#2766).
+- Docs: step replay claim in the worker recovery guide (#2758).
+
 ## [2.8.1] - 2026-11-05
 
 ### Added

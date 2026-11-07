@@ -108,9 +108,9 @@ Use these shapes as a starting point, then confirm them against the current exec
 
 **Before you add the first `system-one-decision` node to a workflow, confirm its key works.** A node with no working key fails its whole run, and a save only warns. Do these in order and stop at the first failure:
 
-1. Pick the provider. `typesafe` (the default) needs the global secret `TYPESAFE_API_KEY`. `openrouter` needs `OPENROUTER_API_KEY`. `laya` needs the global secret `LAYA_API_KEY` and the global config `LAYA_URL`, the base URL of its server. `openai` needs `OPENAI_DECISIONS_API_KEY` (never `OPENAI_API_KEY`). `cloudflare` needs the global secret `CLOUDFLARE_API_TOKEN` and the global config `CLOUDFLARE_ACCOUNT_ID`. Use the provider the requester named. If they named none, use `typesafe`. If its key is missing but another provider's key exists, ask which to use rather than switching, because the accounts bill separately.
+1. Pick the provider. `typesafe` needs the global secret `TYPESAFE_API_KEY`. `openrouter` needs `OPENROUTER_API_KEY`. `laya` needs the global secret `LAYA_API_KEY` and the global config `LAYA_URL`, the base URL of its server. `openai` needs `OPENAI_DECISIONS_API_KEY` (never `OPENAI_API_KEY`). `cloudflare` needs the global secret `CLOUDFLARE_API_TOKEN` and the global config `CLOUDFLARE_ACCOUNT_ID`. Use the provider the requester named. If they named none, omit `provider` to follow `SYSTEM_ONE_DEFAULT_PROVIDER`: the global config row takes precedence over the environment value, with `typesafe` as the fallback when neither names a valid decision provider. Check that setting before choosing the key to verify. If its key is missing but another provider's key exists, ask which to use rather than switching, because the accounts bill separately.
 2. Check the key is set: `get-config` with `key` set to that name and no `includeSecrets`. A masked value (`********`) means a value exists. No entry means it is missing. Never pass `includeSecrets`, and never read the value. For `laya`, check `LAYA_URL` the same way, and for `cloudflare`, `CLOUDFLARE_ACCOUNT_ID`; neither is secret, so the value shows.
-3. Confirm it works with one cheap call. Create a throwaway one-node workflow, trigger it, read the run, then `delete-workflow` it:
+3. Confirm the selected provider works with one cheap call. If the requester explicitly selected a provider, set `config.provider` to that same literal in both the ping node and the actual workflow node. For example, an explicit TypeSafe request needs `"provider": "typesafe"` in the ping even when the configured default is OpenRouter. Omit `provider` in both nodes only when inheriting configuration; the example below uses that inherited configuration. Create a throwaway one-node workflow, trigger it, read the run, then `delete-workflow` it:
 
    ```json
    {
@@ -119,7 +119,6 @@ Use these shapes as a starting point, then confirm them against the current exec
          "id": "ping",
          "type": "system-one-decision",
          "config": {
-           "provider": "typesafe",
            "state": "ping",
            "questions": { "ping": { "type": "noul", "instructions": "Is the state the word ping?" } },
            "returns": { "ping": { "type": "noul" } },
@@ -131,7 +130,7 @@ Use these shapes as a starting point, then confirm them against the current exec
    }
    ```
 
-   A `completed` run means the key works. A `failed` run carries the reason: `<KEY> is not configured` (missing; for `laya` it can name `LAYA_URL` or `LAYA_API_KEY`, or both), or `<KEY> was rejected by <host> (HTTP 401)` (present but refused). To probe `laya`, set `"provider": "laya"` in the ping node. If `create-workflow` says `system-one-decision` is an unregistered executor type, the node is not deployed on this swarm yet: stop and say so.
+   A `completed` run means the key works. A `failed` run carries the reason: `<KEY> is not configured` (missing; for `laya` it can name `LAYA_URL` or `LAYA_API_KEY`, or both), or `<KEY> was rejected by <host> (HTTP 401)` (present but refused). A successful ping verifies only the provider it ran against; it does not verify another provider's credential. If `create-workflow` says `system-one-decision` is an unregistered executor type, the node is not deployed on this swarm yet: stop and say so.
 4. If the key is missing or was rejected, **do not build the node.** Ask a human for it with a `request-human-input` question of type `config`, one question per key, and share the returned URL in the thread:
 
    ```json
@@ -147,8 +146,6 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
   "type": "system-one-decision",
   "inputs": { "pr": "trigger.pullRequest" },
   "config": {
-    "provider": "typesafe",
-    "model": "jev-1.13.0",
     "state": "{{pr}}",
     "questions": {
       "ready": {
@@ -168,7 +165,7 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
 }
 ```
 
-- `provider` is `typesafe` (default), `openrouter`, `laya`, `openai`, or `cloudflare`, and must be a literal, not a `{{token}}`. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`, a checkpoint name such as `multilingual` on `laya`); `gpt-6-luna` on `openai`, `clef` (default) or `clef-flash` on `cloudflare`, which accepts no other id; leave it unset for the provider's default. `laya` has no default and sends no `model`, because it silently ignores one it does not know: leave it unset unless you mean a specific checkpoint. Every provider returns the same output; `openai` gets a translated request, and an OpenAI refusal of any question fails the step. `cloudflare` takes at most 64 questions. There is no fallback between them. Never use OpenRouter's `typesafe/jev-router`, which is a chat router that hands the request to another model.
+- `provider` is optional. Set it when the requester explicitly selects a provider, using the same literal verified by the ping. Omit it only when inheriting configuration to follow `SYSTEM_ONE_DEFAULT_PROVIDER` at run time (global config row, then environment, then `typesafe`). An explicit provider is `typesafe`, `openrouter`, `laya`, `openai`, or `cloudflare`, and must be a literal, not a `{{token}}`. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`, a checkpoint name such as `multilingual` on `laya`); `gpt-6-luna` on `openai`, `clef` (default) or `clef-flash` on `cloudflare`, which accepts no other id; leave it unset for the provider's default. `laya` has no default and sends no `model`, because it silently ignores one it does not know: leave it unset unless you mean a specific checkpoint. Every provider returns the same output; `openai` gets a translated request, and an OpenAI refusal of any question fails the step. `cloudflare` takes at most 64 questions. There is no fallback between them. Never use OpenRouter's `typesafe/jev-router`, which is a chat router that hands the request to another model.
 - `state` is required: text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type. Every question in one call shares the state and cannot see the other answers, so a dependent judgment needs its own node.
 - Each question is `noul` (probability that a claim is true; optional `criteria: { true, false }`), `choice` (2 to 255 options; `criteria: { option: description }`), or `score` (2 to 10 ordered levels; `criteria: [level, ...]`).
 - `returns` repeats every question id and its type. A mismatch is rejected when the workflow is saved.

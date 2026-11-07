@@ -25,6 +25,7 @@
 
 import {
   ActionProvider,
+  createStateStore,
   defineRegistry,
   Renderer,
   StateProvider,
@@ -41,6 +42,11 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import {
+  installChainHaltGuard,
+  withChainOnError,
+  withChainOnErrorHandlers,
+} from "@/lib/json-render/chain-halt";
 
 // Re-exported for backwards compatibility with existing importers of the
 // action schemas / catalog (they now live in `@/lib/json-render`).
@@ -83,10 +89,12 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
   type CompiledErr = { kind: "err"; parseError: string };
   // `ui.toast`'s Undo runs its chain through the current handler map.
   const handlersRef = useRef<ActionHandlerMap | null>(null);
+  // Controlled so a step's `onError: { set }` can write to it (`withChainOnErrorHandlers`).
+  const [store] = useState(() => createStateStore({}));
   const compiled = useMemo<CompiledOk | CompiledErr>(() => {
     let spec: unknown;
     try {
-      spec = JSON.parse(body);
+      spec = withChainOnError(JSON.parse(body));
     } catch (e) {
       return {
         kind: "err",
@@ -124,14 +132,18 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     // handlers factory: pass setState/state getters that the registered
     // action fns ignore — our action fns close over `updateState` directly
     // (the catalog actions don't write into the StateProvider's state model).
-    const handlerMap = handlers(
-      () => () => {
-        /* no-op SetState — we manage UI state via updateState above */
-      },
-      () => ({}),
+    const handlerMap = withChainOnErrorHandlers(
+      handlers(
+        () => () => {
+          /* no-op SetState — we manage UI state via updateState above */
+        },
+        () => ({}),
+      ),
+      { set: (path, value) => store.set(path, value) },
     );
     return { kind: "ok", spec, registry, handlers: handlerMap };
-  }, [body, fetchImpl]);
+  }, [body, fetchImpl, store]);
+  useEffect(() => installChainHaltGuard(), []);
   useEffect(() => {
     handlersRef.current = compiled.kind === "ok" ? compiled.handlers : null;
   }, [compiled]);
@@ -174,7 +186,7 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
           {state.actionError}
         </AlertCallout>
       )}
-      <StateProvider>
+      <StateProvider store={store}>
         <VisibilityProvider>
           <ActionProvider handlers={handlers}>{renderedSpec}</ActionProvider>
         </VisibilityProvider>

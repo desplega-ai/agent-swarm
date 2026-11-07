@@ -4,8 +4,14 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
+import { useSchedulesSavings } from "@/api/hooks/use-savings";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTaskSummary, ScheduledTaskTargetType } from "@/api/types";
+import type {
+  SavingsScheduleRow,
+  ScheduledTaskSummary,
+  ScheduledTaskTargetType,
+} from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
@@ -33,6 +39,7 @@ import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
+import { formatUsd } from "@/pages/usage/usage-format";
 
 function targetLabel(targetType: ScheduledTaskTargetType | undefined): string {
   return targetType === "workflow" ? "Workflow" : targetType === "script" ? "Script" : "Agent Task";
@@ -99,6 +106,14 @@ export default function SchedulesPage() {
     },
     [updateSchedule],
   );
+
+  const { data: savings } = useSchedulesSavings();
+  // One request for the whole list, joined by schedule id.
+  const savingsBySchedule = useMemo(() => {
+    const m = new Map<string, SavingsScheduleRow>();
+    if (savings?.valid) for (const row of savings.rows) m.set(row.scheduleId, row);
+    return m;
+  }, [savings]);
 
   const gridColumns = useDataGridColumns("schedules");
   const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
@@ -273,6 +288,37 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; schedules without a saving sort below every amount.
+        valueGetter: (params) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          return row?.basis === "modelled" ? row.savingUsd.p50 : null;
+        },
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          if (!row) return <span className="text-muted-foreground">—</span>;
+          if (row.basis === "measured") {
+            return (
+              <span
+                className="font-mono tabular-nums text-muted-foreground"
+                title={`Already agent work: ${formatUsd(row.actualUsd)} spent on ${row.runs.toLocaleString("en-US")} tasks, no saving to model`}
+              >
+                {formatUsd(row.actualUsd)}
+              </span>
+            );
+          }
+          const title = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), the saving of the target ${row.kind === "workflow" ? "workflow" : "script"}, shared with any other schedule of it`;
+          return (
+            <span className="font-mono tabular-nums" title={title}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
+          );
+        },
+      },
+      {
         field: "lastRunAt",
         headerName: "Last Run",
         context: HIDE_WHEN_COMPACT,
@@ -315,7 +361,7 @@ export default function SchedulesPage() {
         },
       },
     ],
-    [agentMap, favoriteToggle, handleToggleEnabled, status?.automations],
+    [agentMap, favoriteToggle, handleToggleEnabled, savingsBySchedule, status?.automations],
   );
 
   const onRowClicked = useCallback(

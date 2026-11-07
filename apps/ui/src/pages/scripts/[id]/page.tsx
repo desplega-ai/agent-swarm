@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScript, useScriptTypeDefs, useScriptVersions } from "@/api/hooks/use-scripts";
 import type { ScriptVersion } from "@/api/types";
+import { SavingsHeaderAmount, SavingsTab } from "@/components/savings/workflow-savings";
 import { ScriptApiTab } from "@/components/scripts/script-api-tab";
 import { ScriptRunsGrid } from "@/components/scripts/script-runs-grid";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
@@ -20,7 +21,7 @@ import { formatSmartTime } from "@/lib/utils";
 // Server cap on GET /api/script-runs.
 const RUNS_FETCH_LIMIT = 500;
 
-const TABS = ["source", "runs", "versions", "api"] as const;
+const TABS = ["source", "runs", "savings", "versions", "api"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ScriptDetailPage() {
@@ -127,6 +128,10 @@ export default function ScriptDetailPage() {
                   SCRATCH
                 </Badge>
               )}
+              <SavingsHeaderAmount
+                target={{ scriptName: script.name }}
+                onOpen={() => setParam("tab", "savings", { defaultValue: "source" })}
+              />
             </div>
           }
           description={script.description || undefined}
@@ -141,6 +146,7 @@ export default function ScriptDetailPage() {
         <TabsList>
           <TabsTrigger value="source">Source</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
+          <TabsTrigger value="savings">Savings</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="api">API</TabsTrigger>
         </TabsList>
@@ -181,6 +187,10 @@ export default function ScriptDetailPage() {
             typeDefs={typeDefs}
             className="min-h-[320px] flex-1 lg:min-h-0 lg:flex-[3]"
           />
+        </TabsContent>
+
+        <TabsContent value="savings" className="flex flex-col flex-1 min-h-0 mt-2">
+          <SavingsTab target={{ scriptName: script.name }} />
         </TabsContent>
 
         <TabsContent value="api" className="flex flex-col flex-1 min-h-0 mt-2">

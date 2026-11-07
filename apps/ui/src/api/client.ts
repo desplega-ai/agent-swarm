@@ -127,6 +127,12 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
+  SavingsJobsResponse,
+  SavingsScheduleResponse,
+  SavingsSummaryResponse,
+  SavingsTarget,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -167,6 +173,7 @@ import type {
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
+  SteeringSource,
   SteerMode,
   SteerResult,
   SubmitImprovementInput,
@@ -825,6 +832,8 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+    vcsRepo?: string;
     /**
      * Create in `draft` status (#1240) — visible to the owner but not
      * dispatch-eligible. Used while attachments are still uploading; the
@@ -911,15 +920,21 @@ class ApiClient {
    */
   async steerTask(
     id: string,
-    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+    input: {
+      message: string;
+      mode: SteerMode;
+      requestedByUserId?: string;
+      source?: SteeringSource;
+    },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       // Identify the surface so the steering row is attributed to the dashboard
-      // rather than defaulting to a generic "api" caller.
-      body: JSON.stringify({ ...input, source: "ui" }),
+      // rather than defaulting to a generic "api" caller. A json-render app
+      // page passes "app-page".
+      body: JSON.stringify({ ...input, source: input.source ?? "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
@@ -4086,6 +4101,66 @@ class ApiClient {
     return (await res.json()) as { enabled: false };
   }
 
+  /**
+   * Modelled saving of one workflow or script (`target`), or of every workflow
+   * or script with runs in the window (`{ kind }`), from the hourly rollup.
+   */
+  async getSavingsJobs(
+    target: SavingsTarget | { kind: "workflow" | "script" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
+  ): Promise<SavingsJobsResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
+  }
+
+  /**
+   * The modelled saving of one workflow or script per UTC day, from the same
+   * rollup as `getSavingsJobs`; with no target, of the whole fleet.
+   */
+  async getSavingsDaily(
+    target: SavingsTarget | undefined,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target ?? {}, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load daily savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
+  }
+
+  /** The fleet's modelled saving, spend and assumptions, from the savings rollup. */
+  async getSavingsSummary(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsSummaryResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/summary?${savingsParams({}, opts)}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load the savings summary: ${res.status}`);
+    return (await res.json()) as SavingsSummaryResponse;
+  }
+
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
   async getFleetBenchmark(): Promise<FleetBenchmarkResponse> {
     const url = `${this.getBaseUrl()}/api/fleet-benchmark`;
@@ -4579,12 +4654,30 @@ class ApiClient {
     name: string,
     input?: Record<string, unknown>,
     parentTaskId?: string,
+    /**
+     * Task-kind actions only. `followUp: false` skips the Lead follow-up
+     * (review) of the created task; `requestedByUserId` names the picked
+     * identity, which the server honors only for a shared operator key.
+     * `session` puts the task in a SessionThread session.
+     */
+    options: {
+      followUp?: boolean;
+      requestedByUserId?: string;
+      /** A SessionThread session: the server keys the task by app, key and requester. */
+      session?: { key: string; scope?: "user" | "shared" };
+    } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       {
         method: "POST",
-        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+        body: JSON.stringify({
+          input: input ?? {},
+          ...(parentTaskId ? { parentTaskId } : {}),
+          ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+          ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+          ...(options.session ? { session: options.session } : {}),
+        }),
       },
       `Failed to run action ${name}`,
     );
@@ -4638,3 +4731,14 @@ export interface ExecutorTypeInfo {
 }
 
 export const api = new ApiClient();
+
+function savingsParams(
+  target: Record<string, string>,
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
+): URLSearchParams {
+  const params = new URLSearchParams(target);
+  if (opts.days) params.set("days", String(opts.days));
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
+  return params;
+}

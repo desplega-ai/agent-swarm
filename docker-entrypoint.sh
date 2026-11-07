@@ -297,168 +297,8 @@ else
 fi
 
 # BEGIN verify_provider_binary
-# ---- Verify provider binary is reachable ----
-if [ "$HARNESS_PROVIDER" = "codex" ]; then
-    CODEX_BIN="${CODEX_BINARY:-codex}"
-    if ! command -v "$CODEX_BIN" > /dev/null 2>&1; then
-        echo "FATAL: Codex CLI not found: '$CODEX_BIN'"
-        echo "  PATH=$PATH"
-        exit 1
-    fi
-    echo "Codex CLI: $(command -v "$CODEX_BIN")"
-elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
-    # Cloud sandbox — no local CLI binary, no skills FS, no MCP discovery.
-    echo "Claude Managed Agents: no local CLI required (sessions run in Anthropic cloud)"
-elif [ "$HARNESS_PROVIDER" = "devin" ]; then
-    echo "Devin: cloud API (no local binary required)"
-elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
-    # OpenCode 2 runs in-process from the globally installed @opencode/sdk
-    # (same lookup as resolveOpencodeSdkSpecifier in opencode-adapter.ts).
-    OPENCODE_SDK_ENTRY="${OPENCODE_SDK_PATH:-}"
-    if [ -z "$OPENCODE_SDK_ENTRY" ]; then
-        for root in /usr/lib/node_modules /usr/local/lib/node_modules; do
-            if [ -f "$root/@opencode/sdk/dist/index.js" ]; then
-                OPENCODE_SDK_ENTRY="$root/@opencode/sdk/dist/index.js"
-                break
-            fi
-        done
-    fi
-    if [ -z "$OPENCODE_SDK_ENTRY" ] || [ ! -f "$OPENCODE_SDK_ENTRY" ]; then
-        echo "FATAL: @opencode/sdk not found. Install it with 'npm install -g @opencode/sdk' or set OPENCODE_SDK_PATH."
-        exit 1
-    fi
-    echo "OpenCode SDK: $OPENCODE_SDK_ENTRY"
-elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
-    DSH_BIN="${DSH_BINARY:-dsh}"
-    if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.2-rc.1 during image provisioning."
-        exit 1
-    fi
-    echo "dsh CLI: $(command -v "$DSH_BIN")"
-elif [ "$HARNESS_PROVIDER" = "amp" ]; then
-    AMP_BIN="${AMP_BINARY:-amp}"
-    if ! command -v "$AMP_BIN" >/dev/null 2>&1; then
-        echo "FATAL: amp CLI not found: '$AMP_BIN'. Use worker-full or install @ampcode/cli during image provisioning."
-        exit 1
-    fi
-    echo "amp CLI: $(command -v "$AMP_BIN")"
-elif [ "$HARNESS_PROVIDER" = "grok" ]; then
-    GROK_BIN="${GROK_BINARY:-grok}"
-    if ! command -v "$GROK_BIN" >/dev/null 2>&1; then
-        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.70 during image provisioning."
-        exit 1
-    fi
-    echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
-elif [ "$HARNESS_PROVIDER" = "fx" ]; then
-    # fx ships only in worker-full (Dockerfile.worker FX_VERSION, SHA-512 pinned).
-    FX_BIN="${FX_BINARY:-fx}"
-    if ! command -v "$FX_BIN" >/dev/null 2>&1; then
-        echo "FATAL: fx CLI not found: '$FX_BIN'. Use worker-full, or install the pinned fx release binary (Dockerfile.worker FX_VERSION) during image provisioning."
-        exit 1
-    fi
-    echo "fx CLI: $(command -v "$FX_BIN") ($(FX_AUTO_UPGRADE=0 "$FX_BIN" --version 2>/dev/null))"
-elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
-    # @cursor/sdk runs in-process inside the worker binary; its ripgrep comes
-    # from the platform package installed in worker-full (CURSOR_RIPGREP_PATH).
-    if [ -n "${CURSOR_RIPGREP_PATH:-}" ] && [ ! -x "$CURSOR_RIPGREP_PATH" ]; then
-        echo "FATAL: CURSOR_RIPGREP_PATH is not executable: '$CURSOR_RIPGREP_PATH'"
-        exit 1
-    fi
-    echo "Cursor SDK: in-process (no CLI binary required)"
-elif [ "$HARNESS_PROVIDER" = "acp" ]; then
-    # ACP spawns its own target, not the claude CLI, so resolve the same
-    # command ACPAdapter.createSession would spawn and check THAT binary.
-    # Mirrors resolveAcpTarget / customTargetProfile.command in
-    # src/providers/acp-targets.ts. Every fallback below is unset-only, because
-    # the resolver uses ?? : a set-but-empty value must fail here exactly the
-    # way it fails at task start, not quietly pick a different target.
-    ACP_TARGET_ID="${ACP_TARGET-custom}"
-    if [ "$ACP_TARGET_ID" = "opencode" ]; then
-        # Catalog command for the opencode target (acp-target-catalog.ts) is
-        # `opencode acp`; only "opencode" is the executable, "acp" is argv.
-        ACP_BIN="opencode"
-    elif [ "$ACP_TARGET_ID" = "gemini" ]; then
-        # Catalog command for the gemini target is `gemini --acp`.
-        ACP_BIN="gemini"
-    elif [ "$ACP_TARGET_ID" = "copilot" ]; then
-        # Catalog command for the copilot target is `copilot --acp`. The full
-        # image bakes it; a slim or custom image must install it itself.
-        ACP_BIN="copilot"
-        if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
-            echo "FATAL: ACP target binary not found: 'copilot' (ACP_TARGET='copilot'). Install GitHub Copilot CLI: npm install -g @github/copilot"
-            echo "  PATH=$PATH"
-            exit 1
-        fi
-    elif [ "$ACP_TARGET_ID" = "qwen" ] || [ "$ACP_TARGET_ID" = "kiro" ] || [ "$ACP_TARGET_ID" = "goose" ]; then
-        # Catalog commands: `qwen --acp`, `kiro-cli acp`, `goose acp`. The full
-        # image bakes all three; a slim or custom image must install them itself.
-        case "$ACP_TARGET_ID" in
-            qwen) ACP_BIN="qwen"; ACP_INSTALL_HINT="npm install -g @qwen-code/qwen-code" ;;
-            kiro) ACP_BIN="kiro-cli"; ACP_INSTALL_HINT="curl -fsSL https://cli.kiro.dev/install | bash" ;;
-            goose) ACP_BIN="goose"; ACP_INSTALL_HINT="see https://goose-docs.ai/docs/getting-started/installation" ;;
-        esac
-        if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
-            echo "FATAL: ACP target binary not found: '$ACP_BIN' (ACP_TARGET='$ACP_TARGET_ID'). Install it: $ACP_INSTALL_HINT"
-            echo "  PATH=$PATH"
-            exit 1
-        fi
-    elif [ "$ACP_TARGET_ID" = "custom" ]; then
-        if [ -n "${ACP_TARGET_COMMAND+set}" ]; then
-            ACP_BIN="$ACP_TARGET_COMMAND"
-        elif [ -n "${ACP_COMMAND+set}" ]; then
-            ACP_BIN="$ACP_COMMAND"
-        else
-            echo "FATAL: no ACP target configured. Set ACP_TARGET_COMMAND to an ACP-compatible executable before using HARNESS_PROVIDER=acp."
-            echo "  PATH=$PATH"
-            exit 1
-        fi
-        # Trim the ends only, the way String.trim does. Interior spacing stays.
-        ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{ sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }')
-        if [ -z "$ACP_BIN" ]; then
-            echo "FATAL: ACP target command is empty. Set ACP_TARGET_COMMAND to an ACP-compatible executable."
-            echo "  PATH=$PATH"
-            exit 1
-        fi
-        # parseCommand keeps the whole trimmed command as argv[0] when
-        # ACP_TARGET_ARGS is set and non-blank, and only falls back to splitting
-        # on whitespace when those args are absent or blank. So a command with
-        # interior spaces stays one executable, and splitting it would check a
-        # binary the adapter never spawns.
-        #
-        # "Blank" strips all whitespace, because the guard there is
-        # args?.trim(): a whitespace-only value takes the split path.
-        if [ -z "${ACP_TARGET_ARGS:-}" ] || [ -z "${ACP_TARGET_ARGS//[[:space:]]/}" ]; then
-            ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{print $1}')
-        fi
-    else
-        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, copilot, qwen, kiro, goose, custom."
-        echo "  PATH=$PATH"
-        exit 1
-    fi
-    if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
-        echo "FATAL: ACP target binary not found: '$ACP_BIN' (ACP_TARGET='$ACP_TARGET_ID')"
-        echo "  PATH=$PATH"
-        exit 1
-    fi
-    echo "ACP target: $(command -v "$ACP_BIN") (ACP_TARGET='$ACP_TARGET_ID')"
-elif [ "$HARNESS_PROVIDER" != "pi" ]; then
-    CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
-    # CLAUDE_BINARY may be a whitespace-separated command string. Only
-    # the first token is the executable on PATH; the rest are argv.
-    # Mirrors parseClaudeBinary in src/providers/claude-adapter.ts.
-    CLAUDE_BIN_EXEC=$(echo "$CLAUDE_BIN" | awk '{print $1}')
-    if ! command -v "$CLAUDE_BIN_EXEC" > /dev/null 2>&1; then
-        echo "FATAL: Claude CLI not found: '$CLAUDE_BIN_EXEC' (from CLAUDE_BINARY='$CLAUDE_BIN')"
-        echo "  PATH=$PATH"
-        for loc in /usr/local/bin/claude /usr/bin/claude; do
-            if [ -f "$loc" ]; then
-                echo "  Found at $loc (not in PATH) — set CLAUDE_BINARY=$loc"
-            fi
-        done
-        exit 1
-    fi
-    echo "Claude CLI: $(command -v "$CLAUDE_BIN_EXEC") (CLAUDE_BINARY='$CLAUDE_BIN')"
-fi
+# Standalone Bun step; keep failure fatal before workspace setup.
+/usr/local/bin/bun --no-orphans /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts "$HARNESS_PROVIDER"
 
 # END verify_provider_binary
 
@@ -633,12 +473,51 @@ fi  # /HARNESS_PROVIDER != claude-managed (MCP discovery skip)
 # Configure GitHub authentication if token is provided
 echo ""
 echo "=== GitHub Authentication ==="
+# GITHUB_URL targets a GitHub Enterprise Server instance (default github.com).
+# Same rules as src/utils/github-host.ts. An invalid value stops the boot rather
+# than falling back to github.com and sending a GHES token to the public host.
+# Errors never echo the value: userinfo or a path can carry a token.
+GITHUB_WEB_URL="${GITHUB_URL%/}"
+GITHUB_HOST_BARE="github.com"
+if [ -n "$GITHUB_WEB_URL" ]; then
+    case "$GITHUB_WEB_URL" in
+        https://*|http://*) ;;
+        *) echo "ERROR: GITHUB_URL must start with https://"; exit 1 ;;
+    esac
+    GITHUB_HOST_BARE=$(printf '%s' "${GITHUB_WEB_URL#*://}" | tr '[:upper:]' '[:lower:]')
+    case "$GITHUB_HOST_BARE" in
+        ""|*/*|*@*|*\?*|*#*) echo "ERROR: GITHUB_URL must be the instance root without credentials, e.g. https://ghe.example.com"; exit 1 ;;
+    esac
+    if [ "$GITHUB_HOST_BARE" = "www.github.com" ]; then GITHUB_HOST_BARE="github.com"; fi
+fi
 if [ -n "$GITHUB_TOKEN" ]; then
     echo "Configuring GitHub authentication..."
 
-    # gh CLI will automatically use GITHUB_TOKEN env var for API calls
-    # Just need to configure git to use gh as credential helper
-    gh auth setup-git
+    if [ "$GITHUB_HOST_BARE" != "github.com" ]; then
+        # gh < 2.93.0 sends the auth header to non-GitHub TUF mirror hosts
+        # (CVE-2026-48501, GHSA-8xvp-7hj6-mcj9).
+        GH_VERSION=$(gh --version 2>/dev/null | sed -n 's/^gh version \([0-9][0-9.]*\).*/\1/p' | head -1)
+        if [ -z "$GH_VERSION" ] || [ "$(printf '%s\n2.93.0\n' "$GH_VERSION" | sort -V | head -1)" != "2.93.0" ]; then
+            echo "ERROR: GitHub Enterprise needs gh >= 2.93.0 (found: ${GH_VERSION:-none})"; exit 1
+        fi
+        # gh sends GH_TOKEN/GITHUB_TOKEN to github.com, so the GHES PAT moves to
+        # GH_ENTERPRISE_TOKEN (GHES hosts only) and leaves the exported env.
+        # The shell keeps GITHUB_TOKEN for the checks below. The runner applies
+        # the same rule to session env (scopeGitHubTokenToEnterprise).
+        export GH_HOST="$GITHUB_HOST_BARE"
+        export GH_ENTERPRISE_TOKEN="$GITHUB_TOKEN"
+        export -n GITHUB_TOKEN
+        unset GH_TOKEN
+        # git: env-reading helper (same as GitLab below) in place of
+        # `gh auth setup-git`, scoped to the GHES host; the token never lands in ~/.gitconfig.
+        git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
+            '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN}"; }; f'
+        echo "GitHub Enterprise auth configured (host: $GH_HOST)"
+    else
+        # gh CLI will automatically use GITHUB_TOKEN env var for API calls
+        # Just need to configure git to use gh as credential helper
+        gh auth setup-git
+    fi
 
     # Set git user config for commits (use env vars or defaults)
     GIT_EMAIL="${GITHUB_EMAIL:-worker-agent@desplega.ai}"

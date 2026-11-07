@@ -41,7 +41,8 @@
         "approval-requests",
         "schedules",
         "scheduled-tasks",
-        "webhooks"
+        "webhooks",
+        "savings"
       ],
       "tools": [
         "*-workflow",
@@ -285,6 +286,10 @@
       "description": "swarm_x, WhatsApp send and reply, AgentMail inbox registration with ownership, the Codex device login against a loopback stand-in",
       "scenarios": ["platform-external-tools", "platform-codex-device-login"]
     },
+    "file-import": {
+      "description": "A mounted package imports at boot, a late agent registration resolves its pending assignment, a re-import updates the same row, and a broken second source leaves the API healthy.",
+      "scenarios": ["platform-file-import"]
+    },
     "first-run-onboarding": {
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
@@ -384,6 +389,10 @@
     "script-limits": {
       "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
       "scenarios": ["script-limits"]
+    },
+    "script-retry": {
+      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), and a ctx.swarm call that retries a real 429 from the API.",
+      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge"]
     },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
@@ -512,6 +521,10 @@
         "workflow-engine-system-one",
         "workflow-script-node"
       ]
+    },
+    "workflow-savings": {
+      "description": "A workflow run is priced from the savings rollup with an ordered 80% band, its daily series sums to the same p50, the list route answers, the fleet summary and fleet daily series agree; an idle workflow is not valid, never $0; unknown workflow and bad input are rejected",
+      "scenarios": ["workflow-savings"]
     },
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",

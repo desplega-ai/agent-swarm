@@ -3,7 +3,7 @@ import {
   type CredentialBindingStore,
   type CredentialBindingStoreContext,
   CredentialBroker,
-  DEFAULT_CREDENTIAL_BINDINGS,
+  defaultCredentialBindings,
   type FailedCredentialBinding,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
@@ -123,7 +123,7 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore(),
     (configKey) => configMap.get(configKey) ?? process.env[configKey],
-    DEFAULT_CREDENTIAL_BINDINGS,
+    defaultCredentialBindings(),
     (oauthAuthorizationId) => resolveOAuthBindingToken(oauthAuthorizationId),
   );
 

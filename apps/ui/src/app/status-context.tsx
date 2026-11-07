@@ -12,6 +12,7 @@
 import { createContext, type ReactNode, useContext } from "react";
 import { useStatus } from "@/api/hooks";
 import type { StatusResponse } from "@/api/types";
+import { DEFAULT_GITHUB_WEB_URL } from "@/lib/swarm-links";
 
 interface StatusContextValue {
   /** Latest /status payload, or null if 404 (older API), or undefined while loading. */
@@ -53,4 +54,9 @@ export function useStatusContext(): StatusContextValue {
     throw new Error("useStatusContext must be used within a <StatusProvider>");
   }
   return ctx;
+}
+
+/** The GitHub web base (`GITHUB_URL`): github.com while loading, outside a provider, or on older APIs. */
+export function useGitHubWebUrl(): string {
+  return useContext(StatusContext)?.data?.github?.web_url || DEFAULT_GITHUB_WEB_URL;
 }

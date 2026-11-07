@@ -1,0 +1,180 @@
+{
+  "layout": "sidebar",
+  "models": {
+    "day": {
+      "columns": {
+        "date": { "kind": "date", "required": true },
+        "deploys": { "kind": "number" },
+        "failures": { "kind": "number" },
+        "spend": { "kind": "number" },
+        "passRate": { "kind": "number" }
+      }
+    },
+    "service": {
+      "columns": {
+        "name": { "kind": "string", "required": true },
+        "owner": { "kind": "string" },
+        "spend": { "kind": "number" }
+      }
+    }
+  },
+  "queries": {
+    "days": { "model": "day", "sort": { "column": "date", "dir": "asc" } },
+    "services": { "model": "service" },
+    "serviceById": { "model": "service", "filter": { "id": { "$param": "service" } } }
+  },
+  "defaultPage": "overview",
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "icon": "activity",
+      "description": "Deploys, failures and spend over the last two weeks.",
+      "headerActions": "headerRefresh",
+      "root": "root",
+      "elements": {
+        "root": { "type": "Stack", "props": { "gap": "lg" }, "children": ["tiles", "charts"] },
+        "tiles": {
+          "type": "Grid",
+          "props": { "columns": 3 },
+          "children": ["deploysTile", "failuresTile", "spendTile"]
+        },
+        "deploysTile": {
+          "type": "Metric",
+          "props": {
+            "label": "Deploys today",
+            "value": 14,
+            "icon": "rocket",
+            "tone": "success",
+            "trend": { "direction": "up", "label": "+3 vs yesterday" },
+            "sparkline": { "$state": "/queries/days/data" },
+            "sparklineKey": "deploys"
+          }
+        },
+        "failuresTile": {
+          "type": "Metric",
+          "props": {
+            "label": "Failed runs",
+            "value": 2,
+            "icon": "alert-triangle",
+            "tone": "error",
+            "sparkline": [5, 4, 6, 3, 4, 2, null, 3, 2, 2]
+          }
+        },
+        "spendTile": {
+          "type": "Metric",
+          "props": {
+            "label": "Spend today",
+            "value": "$182",
+            "icon": "dollar-sign",
+            "tone": "info",
+            "sparkline": { "$state": "/queries/days/data" },
+            "sparklineKey": "spend"
+          }
+        },
+        "charts": { "type": "Grid", "props": { "columns": 2 }, "children": ["deploysCard", "passCard"] },
+        "deploysCard": {
+          "type": "Card",
+          "props": { "title": "Deploys and failures", "description": "Stacked, per day" },
+          "children": ["deploysChart"]
+        },
+        "deploysChart": {
+          "type": "Chart",
+          "props": {
+            "kind": "bar",
+            "data": { "$state": "/queries/days/data" },
+            "loading": { "$state": "/queries/days/loading" },
+            "error": { "$state": "/queries/days/error" },
+            "x": "date",
+            "xType": "time",
+            "stacked": true,
+            "series": [
+              { "key": "deploys", "label": "Deploys" },
+              { "key": "failures", "label": "Failures", "color": "error" }
+            ]
+          }
+        },
+        "passCard": {
+          "type": "Card",
+          "props": { "title": "Pass rate" },
+          "children": ["passChart"]
+        },
+        "passChart": {
+          "type": "Chart",
+          "props": {
+            "kind": "area",
+            "data": { "$state": "/queries/days/data" },
+            "loading": { "$state": "/queries/days/loading" },
+            "x": "date",
+            "xType": "time",
+            "format": "percent",
+            "series": [{ "key": "passRate", "label": "Pass rate", "color": "success" }]
+          }
+        },
+        "headerRefresh": {
+          "type": "Button",
+          "props": { "label": "Refresh", "icon": "refresh-cw", "variant": "outline", "size": "sm" },
+          "on": { "press": [{ "action": "app.refresh" }] }
+        }
+      }
+    },
+    "spend": {
+      "title": "Spend",
+      "icon": "dollar-sign",
+      "description": "Daily spend and the services behind it.",
+      "root": "root",
+      "elements": {
+        "root": { "type": "Stack", "props": { "gap": "lg" }, "children": ["spendCard", "table"] },
+        "spendCard": { "type": "Card", "props": { "title": "Daily spend" }, "children": ["spendChart"] },
+        "spendChart": {
+          "type": "Chart",
+          "props": {
+            "kind": "line",
+            "data": { "$state": "/queries/days/data" },
+            "loading": { "$state": "/queries/days/loading" },
+            "x": "date",
+            "xType": "time",
+            "format": "currency",
+            "currency": "USD",
+            "height": 280,
+            "series": [{ "key": "spend", "label": "Spend" }]
+          }
+        },
+        "table": {
+          "type": "Table",
+          "props": {
+            "data": { "$state": "/queries/services/data" },
+            "loading": { "$state": "/queries/services/loading" },
+            "columns": [
+              { "key": "name", "label": "Service" },
+              { "key": "owner", "label": "Owner" },
+              { "key": "spend", "label": "Spend", "kind": "number" }
+            ],
+            "onRowClick": [
+              { "action": "app.navigate", "params": { "page": "service", "params": { "service": { "$row": "id" } } } }
+            ]
+          }
+        }
+      }
+    },
+    "service": {
+      "title": "Service",
+      "params": { "service": { "kind": "string", "required": true } },
+      "root": "detail",
+      "elements": {
+        "detail": {
+          "type": "DetailList",
+          "props": {
+            "data": { "$state": "/queries/serviceById/data/0" },
+            "fields": [{ "key": "name" }, { "key": "owner" }, { "key": "spend", "kind": "number" }]
+          }
+        }
+      }
+    },
+    "settings": {
+      "title": "Settings",
+      "nav": false,
+      "root": "text",
+      "elements": { "text": { "type": "Text", "props": { "content": "Nothing to configure yet." } } }
+    }
+  }
+}

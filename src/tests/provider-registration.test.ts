@@ -210,7 +210,7 @@ describe("provider registration synchronization", () => {
 const entrypoint = await readRepoFile("docker-entrypoint.sh");
 
 const bootstrapStart = 'if [ "$HARNESS_PROVIDER" = "pi" ]; then';
-const bootstrapEnd = "# ---- Verify provider binary is reachable ----";
+const bootstrapEnd = "# BEGIN verify_provider_binary";
 const bootstrapBlock = entrypoint.slice(
   entrypoint.indexOf(bootstrapStart),
   entrypoint.indexOf(bootstrapEnd),
@@ -327,26 +327,38 @@ describe.skipIf(process.platform === "win32")("docker-entrypoint.sh provider cha
 
   // #1463 class: a provider with no branch of its own falls through to the
   // catch-all and gets the claude CLI checked instead of its own binary.
-  const verifyChain = extractMarkedBlock("verify_provider_binary");
+  const verifyChain = extractMarkedBlock("verify_provider_binary")
+    .replace("/usr/local/bin/bun", '"$1"')
+    .replace("/usr/local/lib/agent-swarm/entrypoint-provider-binary.ts", '"$2"');
   for (const provider of ProviderNameSchema.options) {
     test(
       `verify_provider_binary does not route ${provider} through another provider's check`,
       async () => {
         const stubDir = makeBinaryStubDir();
-        const result = await runChild(["bash", "-c", verifyChain], {
-          env: {
-            PATH: [stubDir, "/usr/bin", "/bin"].join(delimiter),
-            HARNESS_PROVIDER: provider,
-            ACP_TARGET: "opencode",
-            OPENCODE_SDK_PATH: join(stubDir, "opencode-sdk.js"),
+        const result = await runChild(
+          [
+            "bash",
+            "-c",
+            verifyChain,
+            "bash",
+            process.execPath,
+            join(repoRoot, "src/commands/entrypoint-provider-binary.ts"),
+          ],
+          {
+            env: {
+              PATH: [stubDir, "/usr/bin", "/bin"].join(delimiter),
+              HARNESS_PROVIDER: provider,
+              ACP_TARGET: "opencode",
+              OPENCODE_SDK_PATH: join(stubDir, "opencode-sdk.js"),
+            },
           },
-        });
+        );
         await rm(stubDir, { recursive: true, force: true });
         expect(result.exitCode).toBe(0);
         const checkedClaude = result.stdout.includes("Claude CLI:");
         if (checkedClaude !== (provider === "claude")) {
           throw new Error(
-            `Provider "${provider}" ${checkedClaude ? "falls through to the claude CLI check" : "skips the claude CLI check"} in docker-entrypoint.sh verify_provider_binary. Give it its own elif, or add it to the final \`!= "pi"\` guard if it has no binary.`,
+            `Provider "${provider}" ${checkedClaude ? "falls through to the claude CLI check" : "skips the claude CLI check"} in entrypoint-provider-binary.ts. Add an explicit check or a no-binary branch for this provider.`,
           );
         }
       },
