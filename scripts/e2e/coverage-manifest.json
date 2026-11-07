@@ -418,6 +418,15 @@
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
       "scenarios": ["platformb-slack-tools", "slack-reply-card"]
     },
+    "slack-chat-sdk-http": {
+      "description": "Chat SDK Slack adapter in webhook mode with the built-in Slack off, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands as channel posts, signed block_actions accepted without a task, and forged, stale, unsigned and replayed requests",
+      "scenarios": [
+        "slack-chat-sdk-mention",
+        "slack-chat-sdk-command",
+        "slack-chat-sdk-interactivity",
+        "slack-chat-sdk-signature"
+      ]
+    },
     "slack-conversations": {
       "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, pre-task-create block",
       "scenarios": [
