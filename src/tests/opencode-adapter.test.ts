@@ -254,7 +254,7 @@ describe("OpencodeAdapter — host and config wiring", () => {
         "X-Context-Key": "ctx-1",
       },
     });
-    expect(config.mcp["context-mode"]).toMatchObject({ type: "local", command: ["context-mode"] });
+    expect(Object.keys(config.mcp)).toEqual(["swarm"]);
 
     const plugins = host.createOptions.plugins as Array<{ id: string; setup: unknown }>;
     expect(plugins.map((p) => p.id)).toEqual(["agent-swarm"]);
@@ -273,11 +273,11 @@ describe("OpencodeAdapter — host and config wiring", () => {
     await session.abort();
   });
 
-  test("context-mode is not wired when CONTEXT_MODE_DISABLED is set", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
+  test("the deprecated CONTEXT_MODE_DISABLED flag is a no-op", async () => {
+    process.env.CONTEXT_MODE_DISABLED = "false";
     try {
       const { host } = await runSession([succeeded]);
-      expect(configOf(host).mcp["context-mode"]).toBeUndefined();
+      expect(Object.keys(configOf(host).mcp)).toEqual(["swarm"]);
     } finally {
       delete process.env.CONTEXT_MODE_DISABLED;
     }

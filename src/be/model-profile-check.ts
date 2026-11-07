@@ -75,11 +75,19 @@ export function runtimeReadsRepoSecrets(agent: { id: string; isLead?: boolean })
  */
 export async function vcsRepoId(vcsRepo: string | null | undefined): Promise<string | null> {
   if (!vcsRepo?.trim()) return null;
-  const repos = await getDbClient().query<{ id: string; url: string }>(
+  const client = getDbClient();
+  const named = await client.query<{ id: string; url: string }>(
     "SELECT id, url FROM swarm_repos WHERE name = ? ORDER BY name ASC",
     [vcsRepoName(vcsRepo)],
   );
-  return repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo))?.id ?? null;
+  const match = named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
+  if (match) return match.id;
+  // A repo registered under a display name (`frontend` for acme/web) has no name hit:
+  // match its URL instead, as fetchRepoConfig falls back to.
+  const all = await client.query<{ id: string; url: string }>(
+    "SELECT id, url FROM swarm_repos ORDER BY name ASC",
+  );
+  return all.find((r) => vcsRepoUrlMatches(r.url, vcsRepo))?.id ?? null;
 }
 
 /** Pooled credential values the worker would get, by var: exported config rows only. */

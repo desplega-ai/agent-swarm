@@ -210,6 +210,7 @@ export default function TasksPage() {
       ...(data.dependsOn.length > 0 && { dependsOn: data.dependsOn }),
       ...(data.modelTier && { modelTier: data.modelTier }),
       ...(data.effort && { effort: data.effort }),
+      ...(data.vcsRepo && { vcsRepo: data.vcsRepo }),
       // Phase 3: attribute the task to the current identity. `source` is left
       // unset so the server's "api" default applies.
       ...(currentUserId && { requestedByUserId: currentUserId }),

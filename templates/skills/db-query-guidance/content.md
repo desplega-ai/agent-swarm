@@ -44,7 +44,7 @@ Run `SELECT name FROM pragma_table_info('<table>')` before you guess a column.
 
 - `agent_tasks`: no cost column and no `metadata` column. Cost is `session_costs.totalCostUsd`, joined on `taskId`. Assignee `agentId`, creator `creatorAgentId`, model `model`, `resolvedModel`, `modelSource`. `parentTaskId` is the only SQL child finder, because `key` is unique per task.
 - `scripts`: the owner is `createdByAgentId`; there is no `agentId`. `isScratch = 1` marks inline `script-run` bodies (`scratch-*` names), and they outnumber named scripts many times over. Add `isScratch = 0` to catalog audits. To find a script's callers, group by `isScratch` instead of dropping scratch rows: inline runs are often the negative tests.
-- `script_runs`: `scriptName`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`.
+- `script_runs`: `scriptName`, `sourceTaskId`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no `scriptId` (the name column is `scriptName`) and no `taskId` (the task column is `sourceTaskId`). There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`. Filter on `scriptName` plus a narrow `startedAt` window; a `GROUP BY agentId` over a wide window can run past the MCP budget.
 - `session_costs`: `taskId`, `agentId`, `totalCostUsd`, `model`, the token columns, `createdAt`.
 
 ## Operator config knobs

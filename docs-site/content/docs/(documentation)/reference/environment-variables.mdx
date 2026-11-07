@@ -290,9 +290,9 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LOG_DIR` | No | `/logs` | Base directory for session `.jsonl` log files (`<LOG_DIR>/<sessionId>/<timestamp>-<taskId8>.jsonl`) |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
-| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to turn context-mode off for local Claude Code, Codex, and opencode workers. Drops the `ctx_*` MCP server and disables the installed Claude Code and Codex context-mode plugins for the session, so their hooks (SessionStart guidance, tool tips, WebFetch redirect) do not run either. |
+| `CONTEXT_MODE_DISABLED` | No | — | **Deprecated, ignored.** context-mode is no longer shipped or wired in, so this flag does nothing. Workers that still set it boot normally; you can remove it. The Claude Code and Codex adapters always turn off a context-mode plugin left over from an older image. |
 | `SCRIPTS_ONLY_MCP` | No | `false` | Experimental code-mode. Set alongside the API server value so worker prompts explain the reduced eight-tool MCP surface; all other swarm operations remain available through `script-run` and the scripts SDK. |
-| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
+| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | — | **Deprecated, ignored.** Tuned the removed context-mode plugin. Workers no longer read or forward it. |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |
 | `CONTEXT_BOUND_NOTE_TOKENS` | No | `0` (off) | Context size (input + cache read + cache write tokens of the latest main-thread request) at which a worker session gets a one-time note to finish the current step and complete or defer. A positive integer turns it on; can be set per agent via `set-config`. See [Configuration](/docs/ui/configuration) |
 | `CONTEXT_PREAMBLE_RESUME_MAX_TOKENS` | No | `4000` | Token budget for the resume-task preamble (2x the regular budget — carries the original task brief plus a tool-call summary so the resumed agent doesn't redo completed work) |

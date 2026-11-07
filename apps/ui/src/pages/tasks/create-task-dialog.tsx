@@ -2,9 +2,11 @@ import { ChevronDown, MessageSquare, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useRepos } from "@/api/hooks/use-repos";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { Combobox } from "@/components/shared/combobox";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +39,8 @@ export interface TaskFormData {
   dependsOn: string[];
   modelTier: string;
   effort: string;
+  /** A registered repo's URL; empty links no repo. */
+  vcsRepo: string;
 }
 
 const emptyTaskForm: TaskFormData = {
@@ -48,6 +52,7 @@ const emptyTaskForm: TaskFormData = {
   dependsOn: [],
   modelTier: "",
   effort: "",
+  vcsRepo: "",
 };
 
 export function CreateTaskDialog({
@@ -65,6 +70,12 @@ export function CreateTaskDialog({
   initialValues?: Partial<TaskFormData>;
 }) {
   const { data: agents } = useAgents();
+  const { data: repos } = useRepos();
+  // Empty while loading or when no repos are registered; the field stays hidden either way.
+  const repoOptions = useMemo(
+    () => (repos ?? []).map((repo) => ({ value: repo.url, label: repo.name })),
+    [repos],
+  );
   const { data: tasksData } = useTasks({ status: "pending", limit: 200 });
   const { data: runningTasksData } = useTasks({ status: "in_progress", limit: 200 });
   const [form, setForm] = useState<TaskFormData>(() => ({ ...emptyTaskForm, ...initialValues }));
@@ -201,6 +212,26 @@ export function CreateTaskDialog({
           <div id={`${fieldsId}-advanced`}>
             <AnimatedReveal open={advancedOpen}>
               <fieldset disabled={isPending} className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2">
+                {repoOptions.length > 0 && (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor={`${fieldsId}-repo`}>Repository</Label>
+                    <Combobox
+                      id={`${fieldsId}-repo`}
+                      options={repoOptions}
+                      value={form.vcsRepo || null}
+                      onChange={(v) => setForm({ ...form, vcsRepo: v ?? "" })}
+                      placeholder="None"
+                      searchPlaceholder="Search repos…"
+                      emptyMessage="No matching repos."
+                      allowClear
+                      clearLabel="None"
+                      triggerClassName="w-full"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The agent works in this repo and reads its CLAUDE.md.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor={`${fieldsId}-type`}>Task type</Label>
                   <Input
