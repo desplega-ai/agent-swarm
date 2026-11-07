@@ -842,4 +842,20 @@ describe("extractSlackMessageText — bot text that repeats its blocks", () => {
     });
     expect(result).toBe("Alert fired\n<https://trace.example.test/1|View trace>");
   });
+
+  test("a block that differs only by an underscore is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Incident in foobar",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "Incident in foo_bar" } }],
+    });
+    expect(result).toBe("Incident in foobar\nIncident in foo_bar");
+  });
+
+  test("a block found only inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "this is fine",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "hi" } }],
+    });
+    expect(result).toBe("this is fine\nhi");
+  });
 });

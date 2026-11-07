@@ -169,6 +169,22 @@ function decodeEntities(text: string): string {
   return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** `needle` occurs in `haystack` without splitting a word at either end. */
+function containsOnWordBoundaries(haystack: string, needle: string): boolean {
+  const isWord = (char: string | undefined) => char !== undefined && /\w/.test(char);
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    const end = at + needle.length;
+    const startOk = !isWord(needle[0]) || !isWord(haystack[at - 1]);
+    const endOk = !isWord(needle.at(-1)) || !isWord(haystack[end]);
+    if (startOk && endOk) return true;
+  }
+  return false;
+}
+
 /**
  * Normalize text for the text-vs-rich_text equality check only (never for
  * output): drop emoji shortcodes, quote and list markers, and mrkdwn style
@@ -330,13 +346,15 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
 
   // A bot message (our own tree and outcome cards, other apps) often repeats its
   // blocks in `text`, joined on one line or with a footer, so neither check
-  // sees the copy. Drop a block part whose content `text` already holds.
+  // sees the copy. Drop a block part whose content `text` already holds. Only
+  // whitespace is normalized here: every other character is content (an `_` in
+  // `foo_bar` is part of the name), and the copy must sit on word boundaries.
   if (topText) {
-    const covered = normalizeForDedupe(decodeEntities(topText));
+    const covered = collapseWhitespace(decodeEntities(topText));
     blockParts.forEach((part, i) => {
       if (tableParts.has(i)) return;
-      const normalized = normalizeForDedupe(decodeEntities(part));
-      if (normalized && covered.includes(normalized)) dropped.add(i);
+      const normalized = collapseWhitespace(decodeEntities(part));
+      if (normalized && containsOnWordBoundaries(covered, normalized)) dropped.add(i);
     });
   }
   const bodyBlockParts = blockParts.filter((_, i) => !dropped.has(i));

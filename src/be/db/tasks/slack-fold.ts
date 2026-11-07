@@ -1,5 +1,6 @@
-import type { TaskSlackParticipants } from "../../../types";
-import { createLogEntry } from "../../db";
+import type { PreparedTaskCreate } from "../../../tasks/sibling-awareness";
+import type { AgentTask, TaskSlackParticipants } from "../../../types";
+import { createLogEntry, createTaskExtended } from "../../db";
 import { getDbClient } from "../runtime";
 
 /**
@@ -81,5 +82,35 @@ export async function foldIntoPendingSlackTask(args: {
       });
     }
     return true;
+  });
+}
+
+/**
+ * Create a Slack task that carries more messages than its trigger (a buffered
+ * burst): the task row and a delivered-message entry per extra message commit
+ * together, so a retry of any message in the burst sees it as delivered. The
+ * entries are the ones a fold or a steer writes, so those messages' reactions
+ * are finalized with the task. `prepared` must come from
+ * `prepareTaskWithSiblingAwareness`, run outside this transaction.
+ */
+export async function createSlackTaskCarryingMessages(
+  prepared: PreparedTaskCreate,
+  carried: { slackChannelId: string; messageTs: readonly string[] },
+): Promise<AgentTask> {
+  return await getDbClient().transaction(async () => {
+    const task = await createTaskExtended(prepared.description, prepared.options);
+    for (const messageTs of carried.messageTs) {
+      await createLogEntry({
+        eventType: "task_steering",
+        taskId: task.id,
+        newValue: "slack_reaction",
+        metadata: {
+          slackChannelId: carried.slackChannelId,
+          slackMessageTs: messageTs,
+          buffered: true,
+        },
+      });
+    }
+    return task;
   });
 }

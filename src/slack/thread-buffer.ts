@@ -53,34 +53,59 @@ interface BufferedMessage {
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
 /** Folds tried before a flush gives up on a pending task that keeps changing under it. */
 const FOLD_ATTEMPTS = 3;
-/**
- * The follow-up header (memory: parsers such as slack-reply-gate anchor on it
- * at the start of the text or right after `</thread_context>`).
- */
-const FOLLOW_UP_HEADER_RE = /(?:^|\n)\[Thread follow-up — (\d+) message\(s\) buffered\]\n/g;
+/** The follow-up header at the start of a task body (see `followUpBodyStart`). */
+const FOLLOW_UP_HEADER_RE = /^\[Thread follow-up — (\d+) message\(s\) buffered\]\n/;
+const SIBLING_CLOSE = "</sibling_tasks_in_progress>";
+const CONTEXT_CLOSE = "\n</thread_context>";
 
 function followUpHeader(count: number): string {
   return `[Thread follow-up — ${count} message(s) buffered]`;
 }
 
 /**
+ * Where a Slack task's own text starts: after the sibling block the creation
+ * path may prepend, then after the `<thread_context>` block. The template
+ * closes the context at column 0, where no quoted message line can start.
+ * This is the one place a follow-up header belongs; slack-reply-gate's
+ * `parseFollowUp` anchors on it there.
+ */
+function followUpBodyStart(description: string): number {
+  let at = 0;
+  const skipBlock = (open: string, close: string) => {
+    if (!description.startsWith(open, at)) return;
+    const end = description.indexOf(close, at);
+    if (end === -1) return;
+    at = end + close.length;
+    while (at < description.length && /\s/.test(description[at]!)) at += 1;
+  };
+  skipBlock("<sibling_tasks_in_progress>", SIBLING_CLOSE);
+  skipBlock("<thread_context>", CONTEXT_CLOSE);
+  return at;
+}
+
+/**
  * Append newly buffered messages to a pending task's text, keeping exactly one
- * follow-up header. A task that already has one (a buffered follow-up, or an
- * earlier fold) gets its count bumped in place and the messages appended after
- * its own; any other task (an @mention) gets a header after its text. The
- * template closes the thread context at column 0, where no quoted message line
- * can start, so a header quoted inside the context is never taken as the task's.
+ * follow-up header, right where a buffered follow-up has it. A task whose body
+ * opens with the header (a buffered follow-up, or an earlier fold) gets its
+ * count bumped in place and the messages appended after its own. Any other
+ * task (an @mention) gets the header in front of its ask, which becomes the
+ * first message under it. A header line inside a user's message is never at
+ * that position, so it is never taken as the task's.
  */
 export function appendFollowUpMessages(description: string, labelled: string, count: number) {
-  const contextEnd = description.indexOf("\n</thread_context>");
-  const own = [...description.matchAll(FOLLOW_UP_HEADER_RE)].at(-1);
-  if (own && own.index > contextEnd) {
-    const start = own.index + (own[0].startsWith("\n") ? 1 : 0);
-    const headerEnd = own.index + own[0].length - 1;
+  const bodyStart = followUpBodyStart(description);
+  const head = description.slice(0, bodyStart);
+  const body = description.slice(bodyStart);
+  const own = FOLLOW_UP_HEADER_RE.exec(body);
+  if (own) {
     const total = Number(own[1]) + count;
-    return `${description.slice(0, start)}${followUpHeader(total)}${description.slice(headerEnd)}\n---\n${labelled}`;
+    return `${head}${followUpHeader(total)}\n${body.slice(own[0].length)}\n---\n${labelled}`;
   }
-  return `${description}\n\n${followUpHeader(count)}\n\n${labelled}`;
+  const before = head.trimEnd() ? `${head.trimEnd()}\n\n` : "";
+  const ask = body.trim();
+  return ask
+    ? `${before}${followUpHeader(count + 1)}\n\n${ask}\n---\n${labelled}`
+    : `${before}${followUpHeader(count)}\n\n${labelled}`;
 }
 
 /**
@@ -431,7 +456,7 @@ async function slackFlush(
     botUserId,
     snapshot?.trust,
   );
-  const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${labelledText}`;
+  const description = `${followUpHeader(items.length)}\n\n${labelledText}`;
   const fullDescription = snapshot?.threadContext
     ? `${snapshot.threadContext}\n\n${description}`
     : description;
@@ -541,7 +566,14 @@ async function slackFlush(
 
   let created: Awaited<ReturnType<typeof createSlackTaskWithFiles>>;
   try {
-    created = await createSlackTaskWithFiles(fullDescription, createOptions, inbound, slackEvent);
+    created = await createSlackTaskWithFiles(
+      fullDescription,
+      createOptions,
+      inbound,
+      slackEvent,
+      // The trigger is the newest message; the task carries the rest too.
+      items.slice(0, -1).map((item) => item.ts),
+    );
   } catch (error) {
     if (!(error instanceof TaskCreationBlockedError)) throw error;
 

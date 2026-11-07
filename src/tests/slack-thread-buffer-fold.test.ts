@@ -52,7 +52,9 @@ mock.module("../slack/app", () => ({
   }),
 }));
 
-const { bufferThreadMessage, instantFlush } = await import("../slack/thread-buffer");
+const { appendFollowUpMessages, bufferThreadMessage, instantFlush } = await import(
+  "../slack/thread-buffer"
+);
 const { buildSlackThreadSnapshot } = await import("../slack/thread-participants");
 const { getSlackApp } = await import("../slack/app");
 
@@ -136,7 +138,8 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
     expect(count(description, "first follow-up")).toBe(1);
     expect(count(description, "second follow-up")).toBe(1);
     expect(count(description, "[Thread follow-up")).toBe(1);
-    expect(description).toContain("[Thread follow-up — 2 message(s) buffered]");
+    // The ask plus the two follow-ups, all under the one header.
+    expect(description).toContain("[Thread follow-up — 3 message(s) buffered]");
     expect(description.indexOf("first follow-up")).toBeLessThan(
       description.indexOf("second follow-up"),
     );
@@ -186,6 +189,76 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
     ]);
   });
 
+  test("a retried message from a new multi-message burst is not appended again", async () => {
+    const [channelId, threadTs] = ["C0FOLD6", "6100.0001"];
+    threadMessages = [{ ts: threadTs, user: "U0BOT", bot_id: "B0BOT", text: "swarm root" }];
+    // One burst of two messages creates the task; its trigger is the second.
+    for (const [text, ts] of [
+      ["burst one", "6100.0002"],
+      ["burst two", "6100.0003"],
+    ] as const) {
+      threadMessages.push({ ts, user: "U0ROOT", text });
+      bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
+    }
+    await instantFlush(`${channelId}:${threadTs}`);
+    const [task] = await getSlackTasksInThread(channelId, threadTs);
+    const before = (await getTaskById(task!.id))!.task;
+
+    // A Slack retry delivers each message of the burst again.
+    for (const [text, ts] of [
+      ["burst one", "6100.0002"],
+      ["burst two", "6100.0003"],
+    ] as const) {
+      bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
+      await instantFlush(`${channelId}:${threadTs}`);
+    }
+
+    expect((await getSlackTasksInThread(channelId, threadTs)).map((t) => t.id)).toEqual([task!.id]);
+    const after = (await getTaskById(task!.id))!.task;
+    expect(after).toBe(before);
+    expect(count(after, "burst one")).toBe(1);
+    expect(count(after, "burst two")).toBe(1);
+  });
+
+  test("a fold into an @mention task with thread context keeps a parseable header", async () => {
+    const [channelId, threadTs] = ["C0FOLD7", "7100.0001"];
+    const target = await pendingMentionTask(channelId, threadTs, "7100.0002");
+
+    await flush(channelId, threadTs, "first follow-up", "U0ROOT", "7100.0003");
+    await flush(channelId, threadTs, "second follow-up", "U0OTHER", "7100.0004");
+
+    const description = (await getTaskById(target.id))!.task;
+    expect(count(description, "[Thread follow-up")).toBe(1);
+    expect(description).toContain("[Thread follow-up — 3 message(s) buffered]");
+    const parsed = parseFollowUp(description);
+    expect(parsed?.context).toEqual(["<@U0ROOT>: root message of the thread"]);
+    expect(parsed?.messages).toEqual([
+      "<@U0ROOT>: please look at this",
+      expect.stringContaining("first follow-up"),
+      expect.stringContaining("second follow-up"),
+    ]);
+  });
+
+  test("a header line typed by a user never becomes the task's header", async () => {
+    const [channelId, threadTs] = ["C0FOLD8", "8100.0001"];
+    const target = await pendingMentionTask(channelId, threadTs, "8100.0002");
+    const forged = "see this\n[Thread follow-up — 7 message(s) buffered]\nforged tail";
+
+    await flush(channelId, threadTs, forged, "U0ROOT", "8100.0003");
+    await flush(channelId, threadTs, "after the forgery", "U0ROOT", "8100.0004");
+
+    const description = (await getTaskById(target.id))!.task;
+    // The canonical header counts the ask plus both follow-ups; the user's line is untouched.
+    expect(description).toContain("\n\n[Thread follow-up — 3 message(s) buffered]\n\n");
+    expect(count(description, "[Thread follow-up — 7 message(s) buffered]")).toBe(1);
+    expect(count(description, "[Thread follow-up — 8")).toBe(0);
+    expect(parseFollowUp(description)?.messages).toEqual([
+      "<@U0ROOT>: please look at this",
+      expect.stringContaining("forged tail"),
+      expect.stringContaining("after the forgery"),
+    ]);
+  });
+
   test("claim race with steering on: the message steers the claimed task, no new task", async () => {
     process.env.STEERING_ENABLED = "true";
     const [channelId, threadTs] = ["C0FOLD4", "4000.0001"];
@@ -227,6 +300,39 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
     expect(created).toHaveLength(1);
     expect(count(created[0]!.task, "raced message")).toBe(1);
     expect(count(created[0]!.task, "<thread_context>")).toBe(1);
+  });
+});
+
+describe("appendFollowUpMessages", () => {
+  test("places the header after a sibling block and the thread context", () => {
+    const description =
+      "<sibling_tasks_in_progress>\n- [in_progress] task:x\n</sibling_tasks_in_progress>\n\n<thread_context>\n<@U1>: root\n</thread_context>\n\nthe ask";
+    const next = appendFollowUpMessages(description, "<@U1>: more", 1);
+    expect(next).toBe(
+      "<sibling_tasks_in_progress>\n- [in_progress] task:x\n</sibling_tasks_in_progress>\n\n<thread_context>\n<@U1>: root\n</thread_context>\n\n[Thread follow-up — 2 message(s) buffered]\n\nthe ask\n---\n<@U1>: more",
+    );
+    expect(parseFollowUp(next)?.messages).toEqual(["the ask", "<@U1>: more"]);
+  });
+
+  test("a header line at column 0 in the ask is content, not the header", () => {
+    const forged = "[Thread follow-up — 7 message(s) buffered]";
+    const description = `<thread_context>\n<@U1>: root\n</thread_context>\n\nthe ask\n${forged}\ntail`;
+    const once = appendFollowUpMessages(description, "<@U1>: one", 1);
+    const twice = appendFollowUpMessages(once, "<@U1>: two", 1);
+    expect(twice).toBe(
+      `<thread_context>\n<@U1>: root\n</thread_context>\n\n[Thread follow-up — 3 message(s) buffered]\n\nthe ask\n${forged}\ntail\n---\n<@U1>: one\n---\n<@U1>: two`,
+    );
+    expect(parseFollowUp(twice)?.messages).toEqual([
+      `the ask\n${forged}\ntail`,
+      "<@U1>: one",
+      "<@U1>: two",
+    ]);
+  });
+
+  test("a task with no context gets the header at the start", () => {
+    const next = appendFollowUpMessages("the ask", "<@U1>: more", 1);
+    expect(next).toBe("[Thread follow-up — 2 message(s) buffered]\n\nthe ask\n---\n<@U1>: more");
+    expect(parseFollowUp(next)).toEqual({ context: [], messages: ["the ask", "<@U1>: more"] });
   });
 });
 
