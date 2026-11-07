@@ -70,7 +70,7 @@ import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { ensure, initialize } from "../utils/business-use";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getConfiguredAppUrls, getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -82,6 +82,7 @@ import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleChecklist } from "./checklist";
 import { handleCodexOAuthAccounts } from "./codex-oauth-accounts";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
@@ -423,6 +424,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
         () => handleUsers(req, res, pathSegments, queryParams),
@@ -832,6 +834,19 @@ httpServer
         scrubSecrets(err instanceof Error ? err.message : String(err)),
       );
     });
+
+    // The shared agent-fs org learns this swarm's URL at boot, for the live
+    // app's "Continue with <swarm>", while the org has none. A URL that an org
+    // admin set stays. Only an explicit APP_URL: the hosted fallback would
+    // point a self-hosted org at another swarm. Not awaited: agent-fs is optional.
+    void import("../be/seed/agent-fs-provision")
+      .then(({ syncAgentFsOrgSwarmUrl }) => syncAgentFsOrgSwarmUrl(getConfiguredAppUrls()[0]))
+      .catch((err: unknown) => {
+        console.warn(
+          "[agent-fs] Failed to set the org swarm URL:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
 
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();

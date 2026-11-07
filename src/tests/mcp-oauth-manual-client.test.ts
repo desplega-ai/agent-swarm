@@ -338,7 +338,7 @@ describe("MCP OAuth manual client flow", () => {
     );
     expect(callbackRes.status).toBe(302);
     expect(callbackRes.headers.location).toBe(
-      `${process.env.APP_URL}/mcp-servers/${mcpServer.id}?oauth=success`,
+      `${process.env.APP_URL}/integrations/tools/mcp-servers/${mcpServer.id}?oauth=success`,
     );
 
     // The stored method is absent, so this legacy manual client must retain

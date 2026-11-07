@@ -2,10 +2,10 @@
  * A container row in the sidebar: a section box (Inbox, Later, Done, No
  * group), a group, or an owner under Shared with me (SPEC R4, R5). It shows
  * its icon, its name, a chevron when it has subgroups (the one fold
- * control), the group menu "⋯" and a "+" on hover or on the keyboard
- * cursor, and the counts. The actions sit next to the counts and never
- * cover them. My groups and No group take dropped rows (plan Phase 5).
- * Source groups are read-only: no menu, no "+", and no drops.
+ * control), a group's star, the group menu "⋯" and a "+" on hover or on
+ * the keyboard cursor, and the counts. The actions sit next to the counts
+ * and never cover them. My groups and No group take dropped rows (plan
+ * Phase 5). Source groups are read-only: no menu, no "+", and no drops.
  */
 
 import {
@@ -20,9 +20,11 @@ import {
   MessagesSquare,
   Plus,
   SquareDashed,
+  Star,
   User,
 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, memo, type ReactNode, useRef, useState } from "react";
+import { useKeyFavorite } from "@/api/hooks/use-favorites";
 import type { SessionSectionCounts } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -33,6 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { modKeyLabel } from "@/lib/approval-shortcuts";
 import type { SessionSection } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
+import { GROUP_STAR_LABELS } from "../group-tab-star";
 import {
   keepTreeFocus,
   NeedsYouBadge,
@@ -41,7 +44,7 @@ import {
   TipKey,
   TreeRow,
 } from "./tree-row";
-import type { ListSelectState, TreeRow as TreeRowModel } from "./tree-rows";
+import { groupStarKey, type ListSelectState, type TreeRow as TreeRowModel } from "./tree-rows";
 import { useGroupDroppable } from "./use-row-drag";
 
 export const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
@@ -272,12 +275,14 @@ function RowAction({
   label,
   shortcut,
   keyName,
+  disabled,
   onClick,
   children,
 }: {
   label: string;
   shortcut?: string;
   keyName?: string;
+  disabled?: boolean;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
@@ -289,12 +294,13 @@ function RowAction({
           tabIndex={-1}
           aria-label={label}
           aria-keyshortcuts={keyName}
+          disabled={disabled}
           onMouseDown={keepTreeFocus}
           onClick={(event) => {
             event.stopPropagation();
             onClick(event);
           }}
-          className="grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted"
+          className="grid size-6 place-items-center rounded-sm bg-accent text-foreground hover:bg-muted disabled:opacity-50"
         >
           {children}
         </button>
@@ -354,7 +360,12 @@ function GroupNodeView({
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
-  const actionCount = renaming ? 0 : Number(Boolean(onMenu)) + Number(Boolean(onNewSession));
+  // Every group can be starred (a use case), read-only source groups too. Threads cannot.
+  const starKey = renaming ? null : groupStarKey(row);
+  const star = useKeyFavorite(starKey);
+  const actionCount = renaming
+    ? 0
+    : Number(starKey !== null) + Number(Boolean(onMenu)) + Number(Boolean(onNewSession));
   return (
     <TreeRow
       ref={dropRef}
@@ -471,7 +482,11 @@ function GroupNodeView({
       <span
         className={cn(
           "relative flex min-w-0 grow basis-0 items-center justify-end",
-          actionCount === 2 ? "min-w-12.5" : actionCount === 1 && "min-w-6",
+          actionCount === 3
+            ? "min-w-19"
+            : actionCount === 2
+              ? "min-w-12.5"
+              : actionCount === 1 && "min-w-6",
           // A thread's name is a session title: it truncates, and its counts stay whole.
           row.type === "group" && row.node.thread && "min-w-max",
         )}
@@ -505,6 +520,21 @@ function GroupNodeView({
                 : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto group-hover/row:opacity-100",
             )}
           >
+            {starKey !== null ? (
+              <RowAction
+                label={star.favorite ? GROUP_STAR_LABELS.remove : GROUP_STAR_LABELS.add}
+                disabled={star.disabled}
+                onClick={star.toggle}
+              >
+                <Star
+                  aria-hidden
+                  className={cn(
+                    "size-3.5",
+                    star.favorite && "fill-current text-status-warning-strong",
+                  )}
+                />
+              </RowAction>
+            ) : null}
             {onMenu ? (
               <RowAction label="Group actions" onClick={(event) => onMenu(row.key, event)}>
                 <Ellipsis aria-hidden className="size-3.5" />

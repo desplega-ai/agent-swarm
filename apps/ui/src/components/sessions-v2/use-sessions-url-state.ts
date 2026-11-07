@@ -6,8 +6,10 @@ import {
   closeUrlTab,
   focusedTab,
   GROUP_TAB,
+  type GroupPane,
   NEW_SESSION_TAB,
   openTab,
+  parseGroupPane,
   parseView,
   replaceTab,
   serializeTabs,
@@ -30,6 +32,8 @@ export interface SessionsUrlState {
   split: string | null;
   /** The list of the group tab (`?view=`): `inbox`, `later`, `done`, `nogroup`, or a group key. */
   view: string | null;
+  /** The group tab's face the URL asks for (`?tab=`): the Overview or the list. */
+  groupPane: GroupPane | null;
   /** The sidebar search (`?q=`). */
   q: string;
   /**
@@ -45,6 +49,8 @@ export interface SessionsUrlState {
   closeTab: (tab: string) => void;
   /** Open (or focus) the group tab on a list ("View all N"). */
   openView: (view: string) => void;
+  /** Focus the group tab on its Overview or its list (`?tab=`). */
+  focusGroupPane: (pane: GroupPane) => void;
   /** Open a session in the split pane. Returns why it cannot, or null. */
   openInSplit: (id: string) => string | null;
   /** Open a session in the split pane in place of the one there (a click in the split pane). */
@@ -76,10 +82,18 @@ export function useSessionsUrlState(): SessionsUrlState {
     [tabsParam, focused, view, splitParam],
   );
   const q = readStringParam(searchParams, "q");
+  const groupPane = parseGroupPane(searchParams.get("tab"));
 
   const go = useCallback(
     (
-      next: { tabs: string[]; focused: string; split?: string | null; view?: string | null },
+      next: {
+        tabs: string[];
+        focused: string;
+        split?: string | null;
+        view?: string | null;
+        /** The group tab's face. Undefined keeps it, null drops it. */
+        pane?: GroupPane | null;
+      },
       replace = false,
     ) => {
       const params = new URLSearchParams(searchParams);
@@ -93,12 +107,15 @@ export function useSessionsUrlState(): SessionsUrlState {
       const nextView = next.view !== undefined ? next.view : view;
       if (nextView) params.set("view", nextView);
       else params.delete("view");
+      const nextPane = next.pane !== undefined ? next.pane : nextView ? groupPane : null;
+      if (nextPane) params.set("tab", nextPane);
+      else params.delete("tab");
       const qs = params.toString();
       void navigate(`${tabPath(next.focused, nextView !== null)}${qs ? `?${qs}` : ""}`, {
         replace,
       });
     },
-    [navigate, searchParams, view, split],
+    [navigate, searchParams, view, split, groupPane],
   );
 
   const openSession = useCallback(
@@ -122,10 +139,21 @@ export function useSessionsUrlState(): SessionsUrlState {
     (tab: string) => go(closeUrlTab(tabs, focused, view, tab), true),
     [go, tabs, focused, view],
   );
-  // One group tab: a second "View all" shows its list in the same tab.
+  // One group tab: a second "View all" shows its list in the same tab. A new
+  // list drops `?tab=`, so a use-case group opens on its Overview.
   const openView = useCallback(
-    (next: string) => go({ tabs: withGroupTab(tabs, focused), focused: GROUP_TAB, view: next }),
-    [go, tabs, focused],
+    (next: string) =>
+      go({
+        tabs: withGroupTab(tabs, focused),
+        focused: GROUP_TAB,
+        view: next,
+        ...(next === view ? {} : { pane: null }),
+      }),
+    [go, tabs, focused, view],
+  );
+  const focusGroupPane = useCallback(
+    (pane: GroupPane) => go({ tabs: tabsWithFocus(tabs, GROUP_TAB), focused: GROUP_TAB, pane }),
+    [go, tabs],
   );
   const openInSplit = useCallback(
     (id: string) => {
@@ -153,12 +181,14 @@ export function useSessionsUrlState(): SessionsUrlState {
     tabs,
     split,
     view,
+    groupPane,
     q,
     openSession,
     replaceNewTab,
     focusTab,
     closeTab,
     openView,
+    focusGroupPane,
     openInSplit,
     replaceSplit,
     closeSplit,

@@ -11,8 +11,10 @@ import {
   getTaskById,
   initDb,
   insertTaskAttachment,
+  listFavorites,
   listRecentSessions,
   moveTaskChainKeyInTx,
+  setFavorite,
   upsertInboxState,
 } from "../be/db";
 import * as sessionMoves from "../be/db/session-moves";
@@ -403,6 +405,74 @@ test("prefix rename preserves subgroups and skips shared sessions without exposi
     (await call("session-moves/prefix", { from: "shared/renamed/", to: null })).body.moved,
   ).toEqual([own.root.id]);
   expect((await getTaskById(own.root.id))?.key).toBe(`shared/task:${own.root.id}/`);
+});
+
+test("prefix rename moves key favorites under the group and keeps a star already on the new key", async () => {
+  await session("shared/favs/a/");
+  const star = (favoriteScope: string, itemId: string) =>
+    setFavorite({ favoriteScope, itemType: "key", itemId, favorite: true });
+  await star(`user:${owner}`, "shared/favs/");
+  await star(`user:${owner}`, "shared/faved/");
+  await star("operator", "shared/favs/a/");
+  await star("operator", "shared/favsx/");
+  await star("operator", "shared/faved-not/");
+
+  const result = await call("session-moves/prefix", { from: "shared/favs/", to: "shared/faved/" });
+  expect(result.status).toBe(200);
+  expect(result.body.moved).toHaveLength(1);
+
+  const ids = async (favoriteScope: string) =>
+    (await listFavorites({ favoriteScope, itemType: "key" })).map((f) => f.itemId).sort();
+  expect(await ids(`user:${owner}`)).toEqual(["shared/faved/"]);
+  expect(await ids("operator")).toEqual(["shared/faved-not/", "shared/faved/a/", "shared/favsx/"]);
+});
+
+test("stars stay while sessions are left under the old key and follow on a retry", async () => {
+  await session("shared/stay/a/");
+  const blocked = await session("shared/stay/b/", other);
+  await share(blocked.root, "write");
+  await setFavorite({
+    favoriteScope: `user:${owner}`,
+    itemType: "key",
+    itemId: "shared/stay/",
+    favorite: true,
+  });
+  const ids = async () =>
+    (await listFavorites({ favoriteScope: `user:${owner}`, itemType: "key" }))
+      .map((f) => f.itemId)
+      .filter((id) => /^shared\/(stay|went)\//.test(id));
+
+  const partial = await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" });
+  expect(partial.body.moved).toHaveLength(1);
+  expect(partial.body.skipped).toHaveLength(1);
+  expect(await ids()).toEqual(["shared/stay/"]);
+
+  // The other owner moves their session away. The retry moves nothing, but the group is empty.
+  await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" }, other);
+  const retry = await call("session-moves/prefix", { from: "shared/stay/", to: "shared/went/" });
+  expect(retry.body).toEqual({ moved: [], skipped: [], remaining: 0 });
+  expect(await ids()).toEqual(["shared/went/"]);
+});
+
+test("a rename that moves no session moves only the caller's own stars", async () => {
+  for (const [scope, itemId] of [
+    [`user:${owner}`, "shared/empty-group/"],
+    [`user:${other}`, "shared/empty-group/"],
+  ]) {
+    await setFavorite({ favoriteScope: scope, itemType: "key", itemId, favorite: true });
+  }
+  const starred = async (user: string) =>
+    (await listFavorites({ favoriteScope: `user:${user}`, itemType: "key" }))
+      .map((f) => f.itemId)
+      .filter((id) => /^shared\/(empty-group|empty-moved)\//.test(id));
+
+  const rename = await call("session-moves/prefix", {
+    from: "shared/empty-group/",
+    to: "shared/empty-moved/",
+  });
+  expect(rename.body).toEqual({ moved: [], skipped: [], remaining: 0 });
+  expect(await starred(owner)).toEqual(["shared/empty-moved/"]);
+  expect(await starred(other)).toEqual(["shared/empty-group/"]);
 });
 
 test("user prefix moves exclude ownerless roots and report only visible roots owned by others", async () => {

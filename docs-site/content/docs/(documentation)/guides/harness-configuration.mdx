@@ -355,9 +355,9 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | m
 | NaN | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Known to support tool calls: `nan/deepseek-v4-flash`, `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`, `nan/gemma4`, `nan/mimo-v2.6-flash`. Other `nan/<id>` catalog ids are accepted but untested |
 | Helmcode | `HELMCODE_API_KEY` | `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`, `helmcode/qwen3.6`, `helmcode/gemma4` |
 
-- **Entering keys**: use the NaN and Helmcode cards on the dashboard Integrations page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
+- **Entering keys**: use the NaN and Helmcode cards on the dashboard Connect → AI providers page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
 - **Alias**: `HELMCODE_API_NAN` is accepted for the NaN key. When both `NAN_API_KEY` and `HELMCODE_API_NAN` are set, `NAN_API_KEY` wins.
-- **Base URL**: `NAN_BASE_URL` and `HELMCODE_BASE_URL` override the default API roots (`https://api.nan.builders/v1`, `https://api.helmcode.com/v1`), for example to go through a proxy. They are not secrets. Set them on the provider's Integrations card (under Advanced) or as env vars; the pi and opencode config blocks and the key check read them per task.
+- **Base URL**: `NAN_BASE_URL` and `HELMCODE_BASE_URL` override the default API roots (`https://api.nan.builders/v1`, `https://api.helmcode.com/v1`), for example to go through a proxy. They are not secrets. Set them on the provider's card on Connect → AI providers (under Advanced) or as env vars; the pi and opencode config blocks and the key check read them per task.
 - **Catalog**: Helmcode is not on models.dev. The swarm builds its catalog section from the five models in the provider registry (see [Adding a provider](#adding-a-provider)). Helmcode's resold Claude, GPT and Gemini models are not in the catalog.
 - **Pricing**: both providers are flat-rate per key. Sessions record $0 marginal cost with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
 - **`latest:` aliases** do not cover these providers. Use concrete model ids.
@@ -412,7 +412,7 @@ NaN and Helmcode are entries in one registry: `packages/model-catalog/src/openai
 
 The new key var is a secret-scrubber rule change: bump `SCRUBBER_RULES_VERSION` in `src/utils/secret-scrubber.ts` and its pin in `src/tests/secret-scrubber.test.ts`, which fails until you do.
 
-Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the Integrations card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
+Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the AI providers card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
 
 ---
 
@@ -729,7 +729,7 @@ A running worker sees a changed key when its idle poll returns, within about a m
 Workers repeat the tests every 10 minutes while a key is rejected.
 A key that the provider rejects with HTTP 401 is skipped until it passes or leaves the pool.
 A key that gets HTTP 403 shows a failed check, but workers keep using it: a valid key can lack the scope that the check endpoint needs.
-The Provider keys page and the setup step show these results.
+The provider keys on Connect → AI providers and the setup step show these results.
 Other users of a pooled key also send one member per call: memory embeddings, internal AI calls (memory rating, session summaries, workflow LLM nodes), audio transcription, and the claude-managed integration test.
 When the memory setup step reuses a pooled key, it tests and saves the first member.
 

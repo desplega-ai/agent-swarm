@@ -218,6 +218,14 @@
       "description": "Agent profile versions and coaching, agent tools over MCP, preferences",
       "scenarios": ["core-agent-profile", "core-agent-tools", "core-preferences"]
     },
+    "agentfs-personal-keys": {
+      "description": "User identity, personal key creation, pending membership and unsupported agent-fs servers",
+      "scenarios": ["platformb-fs-keys"]
+    },
+    "agentfs-continue": {
+      "description": "Continue with your swarm: origin allowlist, org match, a named key in the redirect fragment only, pending membership and unsupported agent-fs servers",
+      "scenarios": ["platformb-fs-continue"]
+    },
     "agentfs-proxy": {
       "description": "Pass-through proxy to agent-fs with header allowlists, registration gate and rate limit, public share and site pages",
       "scenarios": ["platformb-agentfs-proxy"]
@@ -404,7 +412,7 @@
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
-      "scenarios": ["core-sessions"]
+      "scenarios": ["core-sessions", "core-use-case-group"]
     },
     "skills-lifecycle": {
       "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",
@@ -525,6 +533,10 @@
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
+    },
+    "post-onboarding-checklist": {
+      "description": "Checklist defaults, member ownership, admin status changes and custom completion",
+      "scenarios": ["platform-checklist"]
     }
   }
 }

@@ -1,12 +1,14 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Search } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useCreateMcpServer, useMcpServers } from "@/api/hooks";
 import type { McpServer } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +21,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
   SelectContent,
@@ -28,14 +29,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { matchMcpServer } from "@/lib/tools-search";
 import { formatRelativeTime } from "@/lib/utils";
 
 const TRANSPORT_VALUES = ["stdio", "http", "sse"] as const;
 
 /**
  * Minimal create dialog. Supports deep-link prefill via query params:
- * /mcp-servers?new=1&name=<name>&url=<url>&transport=http (used by the
+ * /integrations/tools?tab=mcp&new=1&name=<name>&url=<url>&transport=http (used by the
  * Connections page MCP guidance flow).
  */
 function AddMcpServerDialog({
@@ -82,7 +85,7 @@ function AddMcpServerDialog({
       });
       toast.success(`MCP server ${server.name} created`);
       onOpenChange(false);
-      void navigate(`/mcp-servers/${server.id}`);
+      void navigate(`/integrations/tools/mcp-servers/${server.id}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -181,6 +184,10 @@ function AddMcpServerDialog({
  * - global (emerald) → `status-success`
  * - swarm (amber) → `status-active`
  */
+function installedText(count: number): string {
+  return count === 0 ? "Not installed" : `${count} ${count === 1 ? "agent" : "agents"}`;
+}
+
 function TransportBadge({ transport }: { transport: string }) {
   const colors: Record<string, string> = {
     stdio: "border-action-default/30 text-action-default",
@@ -220,7 +227,18 @@ function ScopeBadge({ scope }: { scope: string }) {
   );
 }
 
-export default function McpServersPage() {
+/**
+ * The MCP servers list: a toolbar row (search, filters, add) over the grid.
+ * Connect › Tools mounts it on its `mcp` tab and passes its tab strip as
+ * `leading`, so the tabs and the search share one row.
+ */
+export function McpServersPanel({
+  leading,
+  trailing,
+}: {
+  leading?: ReactNode;
+  trailing?: ReactNode;
+}) {
   const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
@@ -247,8 +265,12 @@ export default function McpServersPage() {
     return Object.keys(f).length > 0 ? f : undefined;
   }, [scopeFilter, transportFilter]);
 
+  const isMobile = useIsMobile();
   const { data, isLoading } = useMcpServers(filters);
-  const servers = data?.servers ?? [];
+  const servers = useMemo(
+    () => (data?.servers ?? []).filter((server) => matchMcpServer(server, search)),
+    [data, search],
+  );
 
   const columnDefs = useMemo<ColDef<McpServer>[]>(
     () => [
@@ -267,6 +289,37 @@ export default function McpServersPage() {
         width: 100,
         cellRenderer: (params: ICellRendererParams<McpServer>) =>
           params.value ? <TransportBadge transport={params.value} /> : null,
+      },
+      {
+        field: "isEnabled",
+        headerName: "Status",
+        width: 90,
+        cellRenderer: (params: ICellRendererParams<McpServer>) => (
+          <Badge
+            variant="outline"
+            size="tag"
+            className={`${
+              params.value
+                ? "border-status-success/30 text-status-success-strong"
+                : "border-status-error/30 text-status-error-strong"
+            }`}
+          >
+            {params.value ? "Enabled" : "Disabled"}
+          </Badge>
+        ),
+      },
+      {
+        headerName: "Installed on",
+        width: 130,
+        valueGetter: (params) => params.data?.installCount ?? 0,
+        cellRenderer: (params: ICellRendererParams<McpServer>) => {
+          const count = params.data?.installCount ?? 0;
+          return (
+            <span className={count === 0 ? "text-muted-foreground" : undefined}>
+              {installedText(count)}
+            </span>
+          );
+        },
       },
       {
         field: "scope",
@@ -289,24 +342,6 @@ export default function McpServersPage() {
         minWidth: 200,
       },
       {
-        field: "isEnabled",
-        headerName: "Status",
-        width: 90,
-        cellRenderer: (params: ICellRendererParams<McpServer>) => (
-          <Badge
-            variant="outline"
-            size="tag"
-            className={`${
-              params.value
-                ? "border-status-success/30 text-status-success-strong"
-                : "border-status-error/30 text-status-error-strong"
-            }`}
-          >
-            {params.value ? "Enabled" : "Disabled"}
-          </Badge>
-        ),
-      },
-      {
         field: "createdAt",
         headerName: "Created",
         width: 140,
@@ -318,76 +353,108 @@ export default function McpServersPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<McpServer>) => {
-      if (event.data) void navigate(`/mcp-servers/${event.data.id}`);
+      if (event.data) void navigate(`/integrations/tools/mcp-servers/${event.data.id}`);
     },
     [navigate],
   );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="MCP Servers" className="shrink-0" />
-
-      <div className="flex items-center gap-3 shrink-0">
-        <Input
-          placeholder="Search servers..."
-          value={search}
-          onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
-          className="max-w-xs"
-        />
-        <Select
-          value={transportFilter}
-          onValueChange={(value) =>
-            setParam("transport", value, {
-              defaultValue: "all",
-              reset: ["mcpServersPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Transport" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Transports</SelectItem>
-            <SelectItem value="stdio">stdio</SelectItem>
-            <SelectItem value="http">http</SelectItem>
-            <SelectItem value="sse">sse</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={scopeFilter}
-          onValueChange={(value) =>
-            setParam("scope", value, {
-              defaultValue: "all",
-              reset: ["mcpServersPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Scope" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Scopes</SelectItem>
-            <SelectItem value="global">Global</SelectItem>
-            <SelectItem value="swarm">Swarm</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-          </SelectContent>
-        </Select>
-        {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add server
-        </Button>
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+        {leading}
+        <div className="flex w-full items-center gap-2 md:ml-auto md:w-auto">
+          <div className="relative min-w-0 flex-1 md:w-56 md:flex-none">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search servers"
+              aria-label="Search servers"
+              value={search}
+              onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
+              className="pl-9"
+            />
+          </div>
+          <FiltersPopover
+            activeCount={(transportFilter === "all" ? 0 : 1) + (scopeFilter === "all" ? 0 : 1)}
+          >
+            <FilterField label="Transport">
+              <Select
+                value={transportFilter}
+                onValueChange={(value) =>
+                  setParam("transport", value, {
+                    defaultValue: "all",
+                    reset: ["mcpServersPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Transport" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All transports</SelectItem>
+                  <SelectItem value="stdio">stdio</SelectItem>
+                  <SelectItem value="http">http</SelectItem>
+                  <SelectItem value="sse">sse</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Scope">
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, {
+                    defaultValue: "all",
+                    reset: ["mcpServersPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All scopes</SelectItem>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="swarm">Swarm</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+          </FiltersPopover>
+          {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+          <Button size="sm" className="shrink-0" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            <span className="max-md:sr-only">Add server</span>
+          </Button>
+          {trailing}
+        </div>
       </div>
 
-      <DataGrid
-        rowData={servers}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No MCP servers found"
-        paginationQueryKey="mcpServers"
-      />
+      {isMobile ? (
+        <MobileList
+          label="MCP servers"
+          loading={isLoading}
+          emptyMessage={search ? "No MCP servers match your search" : "No MCP servers yet"}
+        >
+          {servers.map((server) => (
+            <MobileListRow
+              key={server.id}
+              to={`/integrations/tools/mcp-servers/${server.id}`}
+              title={server.name}
+              status={server.isEnabled ? undefined : "Disabled"}
+              meta={[server.transport, installedText(server.installCount ?? 0)]}
+            />
+          ))}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={servers}
+          columnDefs={columnDefs}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage={search ? "No MCP servers match your search" : "No MCP servers yet"}
+          paginationQueryKey="mcpServers"
+        />
+      )}
 
       <AddMcpServerDialog
         open={Boolean(newParam)}

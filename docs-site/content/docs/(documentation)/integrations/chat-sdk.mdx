@@ -27,7 +27,7 @@ Telegram and Discord ran against real bots. **Slack and Microsoft Teams are expe
 
 ## Configuration
 
-The fastest path is the dashboard: **Settings → Integrations → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows the setup steps for each adapter, each webhook URL with a copy button, the adapter health, and a **Register webhook** button for Telegram. The setup steps start expanded, and collapse when the adapter already runs healthy.
+The fastest path is the dashboard: **Connect → Channels → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows the setup steps for each adapter, each webhook URL with a copy button, the adapter health, and a **Register webhook** button for Telegram. The setup steps start expanded, and collapse when the adapter already runs healthy.
 
 The channel reads these keys from the environment or from global swarm config:
 
@@ -122,7 +122,7 @@ In a group with BotFather privacy mode on (the default), Telegram sends the bot 
 Experimental. The Chat SDK Slack adapter has not run against a real workspace yet ([#2149](https://github.com/desplega-ai/agent-swarm/issues/2149)). The built-in [Slack](/docs/integrations/slack) integration stays the verified path.
 </Callout>
 
-The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) integration cannot run together. Set `SLACK_DISABLE=true` to use this adapter. Without it, the API logs the conflict at boot and starts no Chat SDK adapter. The Integrations card shows a **Slack conflict** banner.
+The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) integration cannot run together. Set `SLACK_DISABLE=true` to use this adapter. Without it, the API logs the conflict at boot and starts no Chat SDK adapter. The Chat SDK card shows a **Slack conflict** banner.
 
 1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps).
 2. Add the bot scopes `app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `groups:history`, `groups:read`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `users:read` and `files:read`.
@@ -288,7 +288,7 @@ In a Telegram group or supergroup, the bot takes a message only when it is meant
 
 ## Voice notes
 
-Voice notes and other audio files are transcribed through ElevenLabs `/speech-to-text`, OpenAI `/audio/transcriptions`, or Groq's OpenAI-compatible endpoint. Self-hosted whisper servers work with `openai`. Deepgram and AssemblyAI are not supported. Configure it under **Settings → Integrations → Transcription**, which also shows the active provider and where its key came from.
+Voice notes and other audio files are transcribed through ElevenLabs `/speech-to-text`, OpenAI `/audio/transcriptions`, or Groq's OpenAI-compatible endpoint. Self-hosted whisper servers work with `openai`. Deepgram and AssemblyAI are not supported. Configure it under **Connect → AI providers → Transcription**, which also shows the active provider and where its key came from.
 
 Transcription picks its key in this order:
 

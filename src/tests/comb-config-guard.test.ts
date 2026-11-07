@@ -48,6 +48,27 @@ describe("Comb config keys", () => {
     }
   });
 
+  test("APP_URL accepts blank or comma-separated http(s) URLs", () => {
+    for (const value of [
+      "",
+      "https://app.example.com",
+      "http://localhost:5274/",
+      " https://app.example.com, http://localhost:5274 ",
+    ]) {
+      expect(validateConfigValue("APP_URL", value)).toBeNull();
+    }
+    for (const value of [
+      "app.example.com",
+      "ftp://app.example.com",
+      "https://app.example.com/?x=1",
+      "https://app.example.com,",
+      "https://app.example.com, nope",
+      true,
+    ]) {
+      expect(validateConfigValue("APP_URL", value)).toContain("Invalid APP_URL");
+    }
+  });
+
   test("OPENROUTER_BASE_URL keeps its rules after sharing the URL validator", () => {
     expect(validateConfigValue("OPENROUTER_BASE_URL", "")).toBeNull();
     expect(validateConfigValue("OPENROUTER_BASE_URL", "https://api.example.com/v1")).toBeNull();

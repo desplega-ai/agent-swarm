@@ -1364,7 +1364,39 @@ export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 // User Favorites (principal-scoped stars for app navigation)
 // ============================================================================
 
-export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule", "agent-fs-path"]);
+export const ChecklistItemSchema = z
+  .object({
+    id: z.string(),
+    scope: z.enum(["swarm", "user"]),
+    userId: z.string().nullable(),
+    kind: z.enum(["channel", "tool", "use_case", "custom"]),
+    label: z.string(),
+    href: z.string().nullable(),
+    meta: z.record(z.string(), z.unknown()).nullable(),
+    sortOrder: z.number(),
+    status: z.enum(["open", "done", "removed"]),
+    statusChangedAt: z.string().nullable(),
+    statusChangedBy: z.string().nullable(),
+    statusChangedByName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    nudgedAt: z.string().nullable(),
+    nudgedTaskId: z.string().nullable(),
+    signal: z.boolean().nullable(),
+    done: z.boolean(),
+    editable: z.boolean(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("ChecklistItem");
+export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
+
+export const FavoriteItemTypeSchema = z.enum([
+  "page",
+  "workflow",
+  "schedule",
+  "agent-fs-path",
+  "key",
+]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
 export const UserFavoriteSchema = z

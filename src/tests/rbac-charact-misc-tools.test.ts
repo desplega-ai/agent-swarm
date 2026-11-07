@@ -455,6 +455,37 @@ describe("credential-bindings per-action RBAC verb (mirrors HTTP route gates)", 
   });
 });
 
+describe("usecase:* KV is lead-only (a use case's report thread)", () => {
+  // A worker must not point the Lead's run summaries at a thread of its choosing.
+  // kv-set shares this guard (kv-write-auth.ts); this file registers kv-incr / kv-delete.
+  test("worker cannot write a use case namespace", async () => {
+    const namespace = "usecase:shared/charact-uc/";
+    const result = await callTool("kv-incr", WORKER_ID, { key: "thread", namespace });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toBe("writes to this namespace require lead");
+    expect(await getKv(namespace, "thread")).toBeNull();
+  });
+
+  test("worker cannot kv-delete a use case thread the Lead stored", async () => {
+    const namespace = "usecase:shared/charact-uc-del/";
+    await upsertKv({ namespace, key: "thread", value: "{}", valueType: "json" });
+
+    const result = await callTool("kv-delete", WORKER_ID, { key: "thread", namespace });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(await getKv(namespace, "thread")).not.toBeNull();
+  });
+
+  test("lead can write a use case namespace", async () => {
+    const namespace = "usecase:shared/charact-uc-lead/";
+    const result = await callTool("kv-incr", LEAD_ID, { key: "thread", namespace });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(await getKv(namespace, "thread")).not.toBeNull();
+  });
+});
+
 describe("kv-delete / kv-incr namespace gates (characterization)", () => {
   // kv-delete.ts:17 — cross-agent task:agent:* writes require lead
   // (kv-set's identical guard is covered by kv-tool.test.ts:178)

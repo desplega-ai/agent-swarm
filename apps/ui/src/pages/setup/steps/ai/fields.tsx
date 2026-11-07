@@ -1,16 +1,13 @@
-import { Check, Copy } from "lucide-react";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import { AutosaveSecretField } from "@/components/onboarding/autosave-secret-field";
 import { PoolKeysList, type PoolKeysListProps } from "@/components/onboarding/pool-keys-list";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
-import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutosave } from "@/hooks/use-autosave";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
 /** Title classes of a step 3 disclosure (`CollapsibleSection`): sentence case, not small caps. */
 export const DISCLOSURE_TITLE = "text-xs font-medium normal-case tracking-normal";
@@ -256,20 +253,5 @@ export function TextField({
         />
       </WithIndicator>
     </KeyField>
-  );
-}
-
-export function CopyIconButton({ value, label }: { value: string; label: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="icon-sm"
-      onClick={() => void copy(value)}
-      aria-label={copied ? "Copied" : label}
-    >
-      {copied ? <Check /> : <Copy />}
-    </Button>
   );
 }

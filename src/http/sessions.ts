@@ -28,6 +28,7 @@ import { getResourceSessionLabels, getSessionLabels } from "../be/db/session-lab
 import {
   listPrefixRoots,
   listSharedPrefixRoots,
+  moveKeyFavorites,
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
@@ -80,6 +81,7 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
+import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { createListTotalCache } from "./list-total-cache";
 import { agentFirstPrincipal, authUserId, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
@@ -1242,6 +1244,21 @@ export async function handleSessions(
           if (roots.length < SESSION_MOVE_LIMIT) break;
         }
         const moved = await moveSessionChains({ moves, changedBy });
+        // Stars on the group follow a rename only when no session of any owner is
+        // left under the old key: nothing skipped, nothing remaining. Every user's
+        // stars move only when this request moved sessions, which proves the caller
+        // could move every root. A rename that moves nothing (an emptied group, or a
+        // retry) moves only the caller's own stars. A delete leaves the stars in place.
+        if (
+          key !== null &&
+          skipped.length === 0 &&
+          remaining === 0 &&
+          (await listPrefixRoots({ from, limit: 1 })).length === 0
+        ) {
+          const scope =
+            moved.length > 0 ? undefined : (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+          if (moved.length > 0 || scope) await moveKeyFavorites({ from, to: key, scope });
+        }
         moveSessionPrefix.respond(res, 200, { moved, skipped, remaining });
       },
     );

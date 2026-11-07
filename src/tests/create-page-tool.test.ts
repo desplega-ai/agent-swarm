@@ -14,7 +14,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, getPageBySlug, getPageVersions, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDbClient,
+  getPageBySlug,
+  getPageVersions,
+  initDb,
+} from "../be/db";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
 import { registerCreatePageTool } from "../tools/create-page";
 
@@ -105,6 +114,97 @@ describe("create_page MCP tool", () => {
     expect(row).not.toBeNull();
     expect(row!.body).toBe("<h1>hello</h1>");
     expect(row!.authMode).toBe("authed");
+  });
+
+  test.each([
+    { name: "source group", taskKey: "shared/research/", inherited: true },
+    { name: "current task group", taskKey: "shared/research/", current: true, inherited: true },
+    { name: "resource leaf", taskKey: "shared/task:abc/" },
+    { name: "chat source group", taskKey: "shared/slack/c1/" },
+    { name: "chat source thread", taskKey: "shared/slack/c1/thread:1/" },
+    { name: "namespace root", taskKey: "shared/" },
+    { name: "personal root", taskKey: "personal-root" },
+    { name: "explicit override", taskKey: "shared/research/", key: "shared/override/" },
+    { name: "another agent's task", taskKey: "shared/research/", spoof: true },
+    { name: "own personal group", taskKey: "personal-own", inherited: true },
+    { name: "another user's personal group", taskKey: "personal-other", denied: true },
+    {
+      name: "explicit personal mismatch",
+      taskKey: "shared/research/",
+      key: "personal-other",
+      denied: true,
+    },
+  ])("key default: $name", async (entry) => {
+    const caller = await createAgent({ name: entry.name, status: "idle" });
+    const requester = await createUser({ name: "Page requester" });
+    const other = await createUser({ name: "Other page user" });
+    const resolveKey = (key: string) =>
+      key === "personal-own"
+        ? `personal/${requester.id}/research/`
+        : key === "personal-other"
+          ? `personal/${other.id}/research/`
+          : key === "personal-root"
+            ? `personal/${requester.id}/`
+            : key;
+    const source = await createTaskExtended("Page source", {
+      agentId: entry.spoof ? crypto.randomUUID() : caller.id,
+      requestedByUserId: requester.id,
+      key: resolveKey(entry.taskKey),
+    });
+    if (entry.current) {
+      await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+        source.id,
+      ]);
+    }
+    const slug = crypto.randomUUID();
+    const result = (await buildServer().handler(
+      {
+        title: "Key default",
+        slug,
+        body: "content",
+        contentType: "text/html",
+        ...(entry.key ? { key: resolveKey(entry.key) } : {}),
+      },
+      {
+        requestInfo: {
+          headers: {
+            "x-agent-id": caller.id,
+            ...(!entry.current ? { "x-source-task-id": source.id } : {}),
+          },
+        },
+      },
+    )) as { isError?: boolean; structuredContent: { id: string; message: string } };
+    const page = await getPageBySlug(caller.id, slug);
+    if (entry.denied) {
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.message).toContain("matching trusted user");
+      expect(page).toBeNull();
+    } else {
+      expect(result.isError).not.toBe(true);
+      expect(page?.key).toBe(
+        entry.key
+          ? resolveKey(entry.key)
+          : entry.inherited
+            ? source.key
+            : `shared/page:${page?.id}/`,
+      );
+    }
+  });
+
+  test("updating a page without a key preserves its existing group", async () => {
+    const caller = await createAgent({ name: "Page updater", status: "idle" });
+    const source = await createTaskExtended("Update source", {
+      agentId: caller.id,
+      key: "shared/new-group/",
+    });
+    const meta = {
+      requestInfo: { headers: { "x-agent-id": caller.id, "x-source-task-id": source.id } },
+    };
+    const tool = buildServer();
+    const input = { title: "Keep page group", body: "v1", contentType: "text/html" };
+    await tool.handler({ ...input, key: "shared/original/" }, meta);
+    await tool.handler({ ...input, body: "v2" }, meta);
+    expect((await getPageBySlug(caller.id, "keep-page-group"))?.key).toBe("shared/original/");
   });
 
   test("explicit public auth mode is preserved", async () => {

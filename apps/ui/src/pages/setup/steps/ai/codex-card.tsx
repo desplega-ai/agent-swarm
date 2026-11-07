@@ -1,38 +1,24 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink } from "lucide-react";
-import { useEffect, useState } from "react";
-import { api } from "@/api/client";
-import { CODEX_ACCOUNTS_QUERY_KEY } from "@/api/hooks/use-codex-accounts";
-import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
+import { AlertCircle } from "lucide-react";
+import { useState } from "react";
 import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
-import type { CodexDeviceStartResponse } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { CodexAccountsList } from "@/components/onboarding/codex-accounts-list";
+import { DeviceCodePanel } from "@/components/providers/codex-device-code";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { CopyIconButton } from "@/components/shared/copy-icon-button";
 import { StatusLine } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
+import { useCodexDeviceFlow } from "@/hooks/use-codex-device-flow";
 import { useConfig } from "@/hooks/use-config";
-import { CopyIconButton, DISCLOSURE_TITLE } from "./fields";
+import { DISCLOSURE_TITLE } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
 
-type CodexFlow =
-  | { phase: "idle" }
-  | { phase: "starting" }
-  | { phase: "start_error"; error: string }
-  | { phase: "polling"; flow: CodexDeviceStartResponse }
-  | { phase: "complete"; slot?: number }
-  | { phase: "failed"; error: string };
-
 /** Global rows the CLI and the device flow write (`codex_oauth` is the legacy slot 0). */
 const CODEX_SLOT_KEY = /^codex_oauth(_\d+)?$/i;
-
-const EXPIRED_MESSAGE = "The code expired. Start again to get a new one.";
-/** Consecutive failed poll requests before the card stops and offers "Try again". */
-const MAX_POLL_ERRORS = 3;
 
 export function CodexCard({
   configs,
@@ -41,9 +27,8 @@ export function CodexCard({
   onSaved: _onSaved,
   ...card
 }: AiCardProps & { onDeviceComplete: () => void }) {
-  const queryClient = useQueryClient();
   const { config } = useConfig();
-  const [flow, setFlow] = useState<CodexFlow>({ phase: "idle" });
+  const { flow, start: startFlow, reset } = useCodexDeviceFlow(onDeviceComplete);
   const accountsSupport = usePoolKeysSupport();
   // Remounts the CLI fallback open after a failed start, and keeps it open.
   const [cliKey, setCliKey] = useState(0);
@@ -55,71 +40,8 @@ export function CodexCard({
     configs.some((c) => c.scope === "global" && CODEX_SLOT_KEY.test(c.key));
 
   async function start() {
-    setFlow({ phase: "starting" });
-    try {
-      setFlow({ phase: "polling", flow: await api.startCodexDevice() });
-    } catch (err) {
-      setFlow({
-        phase: "start_error",
-        error: err instanceof Error ? err.message : "Could not start the sign-in.",
-      });
-      setCliKey((k) => k + 1);
-    }
+    if (!(await startFlow())) setCliKey((k) => k + 1);
   }
-
-  // Poll while the card is mounted, until the code expires. The API calls
-  // upstream at most once per interval, so a faster tick only returns `pending`.
-  useEffect(() => {
-    if (flow.phase !== "polling") return;
-    const { flowId, intervalSeconds, expiresAt } = flow.flow;
-    const delayMs = Math.max(2, intervalSeconds || 5) * 1000;
-    const expiresAtMs = Date.parse(expiresAt);
-    let cancelled = false;
-    let errors = 0;
-    let timer: number | undefined;
-
-    const tick = async () => {
-      if (Date.now() >= expiresAtMs) {
-        setFlow({ phase: "failed", error: EXPIRED_MESSAGE });
-        return;
-      }
-      try {
-        const res = await api.pollCodexDevice(flowId);
-        if (cancelled) return;
-        errors = 0;
-        if (res.status === "complete") {
-          setFlow({ phase: "complete", slot: res.slot });
-          onDeviceComplete();
-          void queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
-          void queryClient.invalidateQueries({ queryKey: ["configs"] });
-          void queryClient.invalidateQueries({ queryKey: CODEX_ACCOUNTS_QUERY_KEY });
-          return;
-        }
-        if (res.status === "failed" || res.status === "expired") {
-          const fallback = res.status === "expired" ? EXPIRED_MESSAGE : "Sign-in failed.";
-          setFlow({ phase: "failed", error: res.error || fallback });
-          void queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
-          return;
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // One failed request can be transient. Several in a row mean the API is gone.
-        errors += 1;
-        if (errors >= MAX_POLL_ERRORS) {
-          const detail = err instanceof Error ? ` ${err.message}` : "";
-          setFlow({ phase: "failed", error: `Could not check the sign-in.${detail}` });
-          return;
-        }
-      }
-      if (!cancelled) timer = window.setTimeout(tick, delayMs);
-    };
-
-    timer = window.setTimeout(tick, delayMs);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [flow, onDeviceComplete, queryClient]);
 
   const startButton = (label: string) => (
     <Button type="button" onClick={start}>
@@ -141,7 +63,7 @@ export function CodexCard({
         <CodexAccountsList
           onRemoved={(accounts) => {
             // The last account is gone: the card offers the first sign-in again.
-            if (accounts.length === 0 && flow.phase === "complete") setFlow({ phase: "idle" });
+            if (accounts.length === 0 && flow.phase === "complete") reset();
           }}
         />
       ) : null}
@@ -214,36 +136,5 @@ export function CodexCard({
         </div>
       </CollapsibleSection>
     </ProviderCard>
-  );
-}
-
-function DeviceCodePanel({ flow }: { flow: CodexDeviceStartResponse }) {
-  const urlLabel = flow.verificationUrl.replace(/^https?:\/\//, "");
-  // Re-read on every render; the step re-renders on each onboarding poll.
-  const minutes = Math.ceil((Date.parse(flow.expiresAt) - Date.now()) / 60_000);
-  return (
-    <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-      <div className="flex items-center justify-center gap-3">
-        <span className="font-mono text-[28px] leading-none font-bold tracking-[0.18em]">
-          {flow.userCode}
-        </span>
-        <CopyIconButton value={flow.userCode} label="Copy code" />
-      </div>
-      <p className="text-center text-sm text-muted-foreground">
-        Enter this one-time code.
-        {minutes > 0 ? ` It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.` : null}
-      </p>
-      <div className="flex justify-center">
-        <Button asChild variant="outline" size="sm">
-          <a href={flow.verificationUrl} target="_blank" rel="noreferrer noopener">
-            Open {urlLabel}
-            <ExternalLink />
-          </a>
-        </Button>
-      </div>
-      <output className="block border-t border-dashed border-border pt-3">
-        <StatusLine tone="busy">Waiting for you to approve in ChatGPT…</StatusLine>
-      </output>
-    </div>
   );
 }

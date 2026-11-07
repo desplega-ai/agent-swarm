@@ -13,13 +13,6 @@ export interface HealthResponse {
   features?: string[];
 }
 
-/** `POST /auth/register` (public). */
-export interface RegisterResponse {
-  apiKey: string;
-  userId: string;
-  orgId: string;
-}
-
 /** `GET /auth/me`. */
 export interface MeResponse {
   displayName?: string | null;

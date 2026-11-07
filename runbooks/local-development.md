@@ -76,6 +76,14 @@ Full guides:
 
 OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md](./oauth-tokens.md).
 
+## Files (Comb) and agent-fs
+
+Files in the dashboard (Comb) needs `AGENT_FS_API_URL`. Unset, `COMB_ENABLED` defaults on when `AGENT_FS_PUBLIC_URL` is set or the proxy is on. `COMB_ENABLED=false` turns it off. There is no browser-reachability check anymore. The browser address of agent-fs is `AGENT_FS_PUBLIC_URL` when it is set (direct browser access), else `<PUBLIC_MCP_BASE_URL>/agentfs` through the API proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`). With the proxy explicitly off and no public URL, Comb stays off unless `COMB_ENABLED=true`, and then the browser gets `AGENT_FS_API_URL` itself.
+
+Each browser gets its own named agent-fs key with no click: the dashboard calls `POST /api/fs/keys` (label `Swarm dashboard · <browser> on <OS> · <date>`) when it has no saved key or agent-fs rejects the saved one, and keeps the key in localStorage. The swarm stores none of these keys. A key that a browser already holds keeps working. An agent-fs older than 0.18.17 answers `501`, and Files falls back to the paste-key form. Local QA: run `ghcr.io/desplega-ai/agent-fs:0.18.17` on a free port and set `AGENT_FS_API_URL` to it.
+
+File links: with `APP_URL` set, agents and task attachments link files to `APP_URL/file/~/<org>/<drive>/<path>` by default (attachments also need Comb on). Without `APP_URL`, they use the live app (`AGENT_FS_LIVE_URL`), with `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set. `AGENT_FS_LINK_TARGET=dashboard|live` overrides the default. `APP_URL` is in the reloadable set, so a global `swarm_config` row reaches running workers at their next poll. Set `APP_URL` in `.env` to your local dashboard (for example `http://localhost:5274`) to get dashboard links in local runs.
+
 ## Chat SDK channel
 
 With `CHAT_SDK_ENABLED=true`, the API starts the Chat SDK adapters in `CHAT_SDK_ADAPTERS` at boot, in the background. Each adapter calls its platform API while it initializes (Telegram `getMe`, Slack `auth.test`, Discord Gateway login), so the API host needs outbound network to those platforms. Webhook-mode adapters also need a public HTTPS `PUBLIC_MCP_BASE_URL`; point it at a tunnel in dev. Telegram `mode: "polling"` and Slack `mode: "socket"` need no public URL. For tests and local QA without real platforms, set the env-only `CHAT_SDK_API_URL_OVERRIDES` (for example `{"telegram":"http://127.0.0.1:<port>"}` with `bun scripts/dev/telegram-bot-api-mock.ts`). Full guide: [docs-site/.../integrations/chat-sdk.mdx](../docs-site/content/docs/(documentation)/integrations/chat-sdk.mdx).

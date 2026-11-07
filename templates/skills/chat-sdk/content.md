@@ -68,6 +68,16 @@ The task text already holds the earlier swarm messages of the thread, so read th
 - `chat-post { adapter, threadId | channelId, text }` posts outside your task's thread. Lead only. Use it only when the task asks you to message another thread or channel.
 - `chat-open-dm { adapter, userId }` returns the direct-message thread id for a user. Lead only. Then post to it with `chat-post`.
 
+## Leads: use-case thread
+
+A use case (a schedule and its runs under one key, see the `scheduling` skill) can post a summary of each run to one chat thread.
+
+1. When you handle the follow-up of the first run (the planning session has usually ended by then), read `kv-get { namespace: "usecase:<key>", key: "thread" }`. A stored value means that you offered before: do not offer again.
+2. Offer once: "Do you want a summary of each run in a chat channel? Tell me the channel."
+3. On no: `kv-set { namespace: "usecase:<key>", key: "thread", value: { declined: true } }`.
+4. On yes: `chat-post { adapter, channelId, text }` with a one-line title, for example "Competitor watch: one summary per run". Then `kv-set { namespace: "usecase:<key>", key: "thread", value: { adapter, channelId, threadId: "<threadId from chat-post>" } }`.
+5. When you finish or review a run of the use case (the run itself, or the follow-up of a worker's run): `kv-get` the thread. When it has a `threadId`, `chat-post { adapter, threadId, text }` with the run summary and the link to its result file.
+
 ## Leads: `register-chat-channel`
 
 By default every message addressed to the swarm goes to the lead. A lead can route one channel to a fixed agent or workflow:

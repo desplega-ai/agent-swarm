@@ -101,8 +101,10 @@ config:
   githubUrl: ""
   # -- GitHub REST base override. Blank = derived from githubUrl (<githubUrl>/api/v3).
   githubApiUrl: ""
-  # -- Public dashboard URL referenced in Slack message links. Leave blank
-  # to omit dashboard links from Slack notifications.
+  # -- Public dashboard URL (`APP_URL` on the API and every pool). Used in
+  # Slack message links, and agents link files to Files in the dashboard by
+  # default when it is set. Leave blank to omit dashboard links from Slack
+  # notifications and keep file links on the agent-fs live app.
   appUrl: ""
   # -- Public, browser/externally-reachable API origin for OAuth redirect URIs + registered webhooks.
   # Leave blank to derive from ingress.host when ingress is enabled, otherwise
@@ -346,8 +348,8 @@ agentFs:
   # -- Serve agent-fs through the API at `/agentfs` (`AGENT_FS_PROXY=true`), so
   # the browser reaches agent-fs with no agent-fs ingress. Needs
   # `PUBLIC_MCP_BASE_URL` (derived from `ingress.host`). Also exposes agent-fs's
-  # public `/share/*` and `/site/*` pages on the API origin. Off by default.
-  proxy: false
+  # public `/share/*` and `/site/*` pages on the API origin. On by default.
+  proxy: true
   # -- Bucket name for agent-fs's object storage backend (storageProvider=s3).
   bucket: ""
   resources: {}

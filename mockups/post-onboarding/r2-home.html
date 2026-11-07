@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home · Round 2 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<style>
+.hb { display: flex; flex-direction: column; gap: 16px; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* admin nudge banner (AlertCallout tone="warning") */
+.nudge2 { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border: 1px solid color-mix(in oklch, var(--color-status-warning) 40%, var(--color-border)); background: color-mix(in oklch, var(--color-status-warning) 5%, var(--color-card)); border-radius: var(--radius-xl); }
+.nudge2 > .ic { color: var(--color-status-warning-strong); }
+.nudge2 .tx { flex: 1; min-width: 0; }
+.nudge2 .t1 { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.nudge2 .t2 { font-size: 13px; color: var(--color-muted-foreground); }
+.nudge2 .tag { height: 18px; }
+.nudge2 .acts { display: flex; align-items: center; gap: 4px; flex: none; }
+
+/* widget header extras */
+.w-h .pill { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; display: grid; place-items: center; font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 700; background: var(--color-primary); color: var(--color-primary-foreground); }
+.w-h .bar2 { width: 56px; height: 4px; border-radius: 2px; background: var(--color-muted); overflow: hidden; }
+.w-h .bar2 i { display: block; height: 100%; background: var(--color-status-success-solid); }
+.w-h .st.done { width: 16px; height: 16px; }
+
+/* needs you */
+.nyi { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface); border: 1px solid var(--color-border-subtle); }
+.nyi .ic { width: 14px; height: 14px; color: var(--color-foreground); }
+
+/* in progress, grouped by use case */
+.ipg { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 16px; font-size: 13px; font-weight: 600; }
+.ipg + .ips { margin-top: -2px; }
+.ipg .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.ipg .ic.star { color: var(--color-primary); }
+.ipg .n { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; color: var(--color-muted-foreground); }
+.ipg .go { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--radius-md); }
+.ipg .go:hover { background: var(--color-accent); }
+.ipb + .ipb { border-top: 1px solid var(--color-border-subtle); }
+.ipb { padding-bottom: 6px; }
+.ips { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; height: 36px; padding: 0 16px 0 38px; font-size: 13px; }
+.ips:hover { background: var(--color-accent); }
+.ips .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ips .who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-muted-foreground); }
+.ips .el { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); width: 28px; text-align: right; }
+.st.sm { width: 14px; height: 14px; }
+.av.a1 { background: color-mix(in oklch, var(--color-status-info) 35%, var(--color-muted)); }
+.av.a2 { background: color-mix(in oklch, var(--color-status-success) 35%, var(--color-muted)); }
+.av.a3 { background: color-mix(in oklch, var(--color-status-paused) 35%, var(--color-muted)); }
+.av.a4 { background: color-mix(in oklch, var(--color-status-warning) 35%, var(--color-muted)); }
+.av.a5 { background: color-mix(in oklch, var(--color-primary) 30%, var(--color-muted)); }
+
+/* checklist */
+.ck { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; }
+.ck + .ck { border-top: 1px solid var(--color-border-subtle); }
+.ck .st { margin-top: 2px; }
+.ck .tx { flex: 1; min-width: 0; }
+.ck .t1 { font-size: 14px; font-weight: 500; line-height: 1.35; }
+.ck .t2 { font-size: 12px; color: var(--color-muted-foreground); line-height: 1.45; margin-top: 2px; }
+.ck.done { align-items: center; padding-top: 10px; padding-bottom: 10px; }
+.ck.done .st { margin-top: 0; }
+.ck.done .t1 { color: var(--color-muted-foreground); font-weight: 400; }
+.ck .meta { font-size: 12px; color: var(--color-muted-foreground); white-space: nowrap; }
+.ck .btn { flex: none; }
+
+/* favorites */
+.fv { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; }
+.fv + .fv { border-top: 1px solid var(--color-border-subtle); }
+.fv:hover { background: var(--color-accent); }
+.fv > .ic { color: var(--color-muted-foreground); }
+.fv .t { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fv .t.mono { font-size: 13px; }
+.fv .m { font-size: 12px; color: var(--color-muted-foreground); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.fv .k { width: 64px; font-size: 12px; color: var(--color-muted-foreground); }
+
+/* timeline (agent lanes over a time axis) */
+.tl2 { display: grid; grid-template-columns: var(--gut, 208px) minmax(0, 1fr); }
+.tl-g { background: color-mix(in oklch, var(--color-muted) 35%, transparent); border-right: 1px solid var(--color-border); }
+.tl-gh { height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--color-border); }
+.tl-gh .z { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); padding: 0 6px; }
+.tl-gh .btn { color: var(--color-muted-foreground); }
+.tl-l { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--color-border-subtle); min-width: 0; }
+.tl-l .nm { font-size: 12px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-l .rl { font-size: var(--text-meta); color: var(--color-muted-foreground); line-height: 1.2; }
+.tl-idle { height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: var(--text-meta); color: var(--color-muted-foreground); background: color-mix(in oklch, var(--color-muted) 60%, transparent); }
+.tl-idle .ic { width: 12px; height: 12px; }
+.tl-c { position: relative; overflow: hidden; }
+.tl-ax { height: 40px; position: relative; border-bottom: 1px solid var(--color-border); }
+.tl-tk { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in oklch, var(--color-border) 80%, transparent); padding: 8px 0 0 8px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); white-space: nowrap; }
+.tl-row { height: 36px; position: relative; border-bottom: 1px solid var(--color-border-subtle); }
+.tl-row.idle { height: 32px; border-bottom: 0; background: color-mix(in oklch, var(--color-muted) 40%, transparent); }
+.tl-gl { position: absolute; top: 40px; bottom: 0; border-left: 1px solid var(--color-border-subtle); }
+.tl-bar { position: absolute; top: 6px; height: 24px; border: 1px solid; border-radius: 4px; padding: 0 6px; font-size: var(--text-meta); line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-bar.ok { border-color: var(--color-status-success); background: color-mix(in oklch, var(--color-status-success) 80%, transparent); color: var(--color-status-success-foreground); }
+.tl-bar.run { border-color: var(--color-status-active); background: color-mix(in oklch, var(--color-status-active) 85%, transparent); color: var(--color-status-active-foreground); }
+.tl-bar.err { border-color: var(--color-status-error); background: color-mix(in oklch, var(--color-status-error) 80%, transparent); color: var(--color-status-error-foreground); }
+.tl-bar.rev { border-color: var(--color-status-paused); background: color-mix(in oklch, var(--color-status-paused) 80%, transparent); color: var(--color-status-paused-foreground); }
+.tl-bar.can { border-color: var(--color-status-neutral); background: color-mix(in oklch, var(--color-status-neutral) 75%, transparent); color: var(--color-status-neutral-foreground); }
+.tl-now { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--color-primary); z-index: 2; }
+.tl-now span { position: absolute; top: 4px; left: 4px; padding: 1px 6px; border-radius: 4px; background: var(--color-primary); color: var(--color-primary-foreground); font-size: var(--text-meta); font-weight: 500; white-space: nowrap; }
+
+/* ghost tile: the later "build your own widget" idea */
+.ghost { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border: 1px dashed var(--color-border); border-radius: var(--radius-xl); font-size: 13px; color: var(--color-muted-foreground); background: transparent; width: 100%; }
+.ghost:hover { color: var(--color-foreground); border-color: color-mix(in oklch, var(--color-foreground) 25%, var(--color-border)); }
+.ghost .ic { width: 14px; height: 14px; }
+
+/* phone */
+.phone .hb { gap: 12px; }
+.phone .pbody { padding: 12px 12px 24px; }
+.phone .nudge2 { flex-wrap: wrap; align-items: flex-start; }
+.phone .nudge2 .tx { flex-basis: calc(100% - 30px); }
+.phone .nudge2 .acts { width: 100%; display: flex; gap: 8px; padding-left: 28px; }
+.phone .li { flex-wrap: wrap; }
+.phone .li .tx { flex-basis: calc(100% - 44px); }
+.phone .li .t1 { white-space: normal; }
+.phone .li .acts { width: 100%; padding-left: 40px; }
+.phone .li .acts .btn { flex: 1; height: 36px; }
+.phone .ck .btn { height: 36px; }
+.phone .ips { padding-left: 16px; grid-template-columns: 14px minmax(0, 1fr) auto; }
+.phone .ips .who { display: none; }
+.phone .fv .k { display: none; }
+.scrolled { margin-top: -760px; }
+</style>
+</head>
+<body>
+<header class="x-top" data-page="home"></header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Home: two columns of widgets, timeline below</h1>
+    <p>Every section is a widget with one anatomy: icon, title, a count or status, one action on the right, then the body. The left column is what to act on, the right column is what to set up and come back to. The columns share one width, one top edge and one 16px gap, and every widget is as tall as its content.</p>
+    <ul>
+      <li><b>Rows, not cards in cards.</b> Needs you, In progress, the checklist and Favorites are lists with hairline rules. Only Approve uses the amber fill.</li>
+      <li><b>In progress groups by use case,</b> with the star on favorites, so the swarm reads as a set of jobs, not a flat task list.</li>
+      <li><b>The timeline keeps the real look:</b> agent lanes, an hourly axis, status-colored bars and the amber now-line. Zoom sits in the empty gutter corner, so the header matches the other widgets.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone frames follow.</p>
+
+  <section class="x-state x-desk">
+    <h2>Admin, checklist open</h2>
+    <p class="x-cap">Day two after setup. The nudge banner is for admins only and names the fix. The ghost tile at the end hints at user-built widgets.</p>
+    <div class="app" style="--h: 1124px"><nav class="side" data-active="home" data-badge="3" aria-label="Main navigation, checklist open"></nav><div class="main" data-home="open"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>Checklist done, a quiet day</h2>
+    <p class="x-cap">All five items are done: the checklist collapses to its header, with Show to open it again. One approval is waiting. The columns still end within a row of each other.</p>
+    <div class="app" style="--h: 846px"><nav class="side" data-active="home" data-badge="1" aria-label="Main navigation, checklist done"></nav><div class="main" data-home="done"></div></div>
+  </section>
+
+  <section class="x-state">
+    <h2>Phone</h2>
+    <p class="x-cap">One column in the order Needs you, Checklist, In progress, Favorites, Timeline. The second frame is the same page scrolled down.</p>
+    <div class="x-row">
+      <div class="x-col"><h3>Top of the page</h3><div class="phone p760" data-phone="top"></div></div>
+      <div class="x-col"><h3>Scrolled</h3><div class="phone p760" data-phone="scrolled"></div></div>
+    </div>
+  </section>
+</main>
+
+<script src="./r2-kit.js"></script>
+<script>
+(function () {
+  var I = R2.icon;
+  function head(icon, title, extra, action) {
+    return '<div class="w-h">' + icon + '<h3 class="w-t">' + title + "</h3>" + (extra || "") + (action ? '<a class="w-a" href="#">' + action + "</a>" : "") + "</div>";
+  }
+
+  function banner() {
+    return '<div class="nudge2" role="status">' + I("i-alert") + '<div class="tx"><div class="t1">Competitor scan cannot post to #market-intel<span class="tag">Admins</span></div>' +
+      '<div class="t2">The Slack bot is not in that channel. Invite it with /invite @swarm, or pick another channel.</div></div>' +
+      '<div class="acts"><button class="btn xs" type="button">Fix in Channels</button><button class="btn xs ghost sq" type="button" aria-label="Dismiss">' + I("i-x") + "</button></div></div>";
+  }
+
+  function needs(state) {
+    var rows = [
+      ["i-clipboard-check", "Post the competitor digest to #market-intel", "Approval · competitor-research · Researcher, 2h ago", '<button class="btn xs ghost" type="button">Reject</button><button class="btn xs primary" type="button">Approve</button>'],
+      ["i-message-circle", "Should the scan also track Plane's self-hosted pricing?", "Question · competitor-research · Lead, 40m ago", '<button class="btn xs" type="button">Reply</button>'],
+      ["i-key", "The pricing-scraper key expires in 3 days", "Script connection · used by Pricing page diff: Linear", '<button class="btn xs" type="button">Renew</button>'],
+    ];
+    if (state === "done") rows = rows.slice(0, 1);
+    return '<section class="w" aria-label="Needs you">' + head(I("i-circle-alert"), "Needs you", '<span class="pill">' + rows.length + "</span>", "All sessions") +
+      '<div class="w-b">' + rows.map(function (r) {
+        return '<div class="li"><span class="nyi">' + I(r[0]) + '</span><div class="tx"><div class="t1">' + r[1] + '</div><div class="t2">' + r[2] + '</div></div><div class="acts">' + r[3] + "</div></div>";
+      }).join("") + '</div><div class="w-f">' + I("i-check") + "No blocked agents and no failed runs in the last 24h.</div></section>";
+  }
+
+  function progress(state) {
+    var groups = [
+      ["competitor-research", true, [["Competitor scan · manual run", "R", "a1", "Researcher", "4m"]]],
+      ["release-notes", false, [["Draft the v2.6 changelog", "W", "a2", "Writer", "12m"], ["Collect merged PRs since v2.5", "V", "a3", "Reviewer", "3m"]]],
+      ["No group", false, [["Fix flaky e2e in ui-e2e", "C", "a4", "Coder", "27m"]]],
+    ];
+    if (state === "done") groups = [groups[0], groups[2]];
+    var n = groups.reduce(function (a, g) { return a + g[2].length; }, 0);
+    return '<section class="w" aria-label="In progress">' + head(I("i-activity"), "In progress", '<span class="w-n">' + n + " running</span>", "All sessions") +
+      '<div class="w-b">' + groups.map(function (g) {
+        return '<div class="ipb"><div class="ipg">' + I(g[1] ? "i-star-fill star" : g[0] === "No group" ? "i-message-square" : "i-folder-open") + '<span class="' + (g[0] === "No group" ? "" : "") + '">' + g[0] + '</span><span class="n">' + g[2].length + '</span><a class="go" href="#" aria-label="Open ' + g[0] + '">' + I("i-chevron-right") + "</a></div>" +
+          g[2].map(function (s) {
+            return '<a class="ips" href="#"><span class="st runn sm" title="Running"></span><span class="t">' + s[0] + '</span><span class="who"><span class="av ' + s[2] + '">' + s[1] + "</span>" + s[3] + '</span><span class="el">' + s[4] + "</span></a>";
+          }).join("") + "</div>";
+      }).join("") + "</div></section>";
+  }
+
+  function checklist(state) {
+    if (state === "done") {
+      return '<section class="w" aria-label="Setup checklist">' + head('<span class="st done">' + I("i-check") + "</span>", "Setup complete", '<span class="w-n">5 of 5</span>', "Show") + "</section>";
+    }
+    var done = [["Connect a chat channel", "Slack · 1d ago"], ["Add an AI provider key", "Anthropic · 1d ago"]];
+    var open = [
+      ["Connect work tools", "GitHub, Linear, Jira or Gmail, so agents act where you work.", "Open"],
+      ["Plan your first use case", "Ask the Lead to plan a recurring job, with a schedule and a home for its outputs.", "Start"],
+      ["Set a daily budget", "Cap what agents can spend in a day. Usage shows the trend.", "Set"],
+    ];
+    return '<section class="w" aria-label="Setup checklist">' + head(I("i-list-todo"), "Get the swarm working", '<span class="w-n">2 of 5</span><span class="bar2"><i style="width:40%"></i></span>', "Edit") +
+      '<div class="w-b">' + done.map(function (d) {
+        return '<div class="ck done"><span class="st done">' + I("i-check") + '</span><div class="tx"><div class="t1">' + d[0] + '</div></div><span class="meta">' + d[1] + "</span></div>";
+      }).join("") + open.map(function (o) {
+        return '<div class="ck"><span class="st open"></span><div class="tx"><div class="t1">' + o[0] + '</div><div class="t2">' + o[1] + '</div></div><button class="btn xs" type="button">' + o[2] + "</button></div>";
+      }).join("") + "</div></section>";
+  }
+
+  function favorites(state) {
+    var rows = [
+      ["i-folder-open", "competitor-research", "", '<span class="st runn sm"></span>1 running', "Use case"],
+      ["i-globe", "Weekly competitor digest", "", "Updated 2d ago", "Page"],
+      ["i-clock", "Competitor scan", "", "Next Thu 09:00", "Schedule"],
+      ["i-folder-open", "shared/competitor-research/", "mono", "12 files", "Folder"],
+    ];
+    if (state === "done") rows = rows.concat([["i-folder-open", "release-notes", "", "2 running", "Use case"], ["i-layout-grid", "Oncall board", "", "Updated 1h ago", "App"]]);
+    return '<section class="w" aria-label="Favorites">' + head(I("i-star"), "Favorites", '<span class="w-n num">' + rows.length + "</span>", "Manage") +
+      '<div class="w-b">' + rows.map(function (r) {
+        return '<a class="fv" href="#">' + I(r[0]) + '<span class="t ' + r[2] + '">' + r[1] + '</span><span class="m">' + r[3] + '</span><span class="k">' + r[4] + "</span></a>";
+      }).join("") + "</div></section>";
+  }
+
+  /* timeline data: hours as decimals, status: ok run err rev can */
+  var LANES = [
+    ["Lead", "Coordinates", "L", "a5", [[8.67, 8.92, "ok", "Plan: competitor research follow-up"], [10.95, 11.1, "ok", "Answer in Slack #eng"], [14.15, 14.5, "ok", "Route: release notes"], [15.33, 99, "run", "Triage new Slack asks"]]],
+    ["Researcher", "Web research", "R", "a1", [[9, 9.18, "ok", "Competitor scan · Mon"], [11.5, 12.67, "ok", "Collect pricing pages"], [13.17, 13.42, "err", "Scrape Height roadmap"], [15.6, 99, "run", "Competitor scan · manual run"]]],
+    ["Writer", "Docs and digests", "W", "a2", [[10, 10.67, "ok", "Weekly digest draft"], [13.5, 13.85, "rev", "Digest: waiting for approval"], [15.47, 99, "run", "Draft the v2.6 changelog"]]],
+    ["Coder", "Coding agent", "C", "a4", [[9.33, 11.17, "ok", "Fix login redirect loop"], [12, 12.33, "can", "Bump agent-fs pin"], [15.22, 99, "run", "Fix flaky e2e in ui-e2e"]]],
+    ["Reviewer", "Code review", "V", "a3", [[11.25, 11.75, "ok", "Review PR #2668"], [14, 14.67, "ok", "Review PR #2675"], [15.62, 99, "run", "Collect merged PRs since v2.5"]]],
+  ];
+  function timeline(o) {
+    var span = o.end - o.start, NOW = 15.67;
+    function x(h) { return ((Math.min(h, NOW) - o.start) / span * 100).toFixed(3) + "%"; }
+    var g = '<div class="tl-g"><div class="tl-gh"><button class="btn xs ghost sq" type="button" aria-label="Zoom out">' + I("i-zoom-out") + '</button><span class="z">' + o.label + '</span><button class="btn xs ghost sq" type="button" aria-label="Zoom in">' + I("i-zoom-in") + "</button></div>" +
+      LANES.map(function (l) {
+        return '<div class="tl-l"><span class="av ' + l[3] + '">' + l[2] + '</span><div class="nmw"><div class="nm">' + l[0] + "</div>" + (o.compact ? "" : '<div class="rl">' + l[1] + "</div>") + "</div></div>";
+      }).join("") + '<div class="tl-idle">' + I("i-chevron-right") + "2 idle agents</div></div>";
+    var c = '<div class="tl-c"><div class="tl-ax">';
+    for (var t = Math.ceil(o.start / o.step) * o.step; t < o.end; t += o.step) {
+      var hh = Math.floor(t), mm = Math.round((t - hh) * 60);
+      var near = Math.abs(NOW - t) / span * (o.compact ? 230 : 864) < 56;
+      c += '<span class="tl-tk" style="left:' + x(t) + '">' + (near ? "" : (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm) + "</span>";
+    }
+    c += "</div>";
+    for (t = Math.ceil(o.start / o.step) * o.step; t < o.end; t += o.step) c += '<span class="tl-gl" style="left:' + x(t) + '"></span>';
+    LANES.forEach(function (l) {
+      c += '<div class="tl-row">' + l[4].filter(function (b) { return b[1] > o.start && b[0] < o.end; }).map(function (b) {
+        var s = Math.max(b[0], o.start);
+        var w = ((Math.min(b[1], NOW) - s) / span * 100);
+        var px = w / 100 * (o.compact ? 230 : 864);
+        return '<span class="tl-bar ' + b[2] + '" style="left:' + x(s) + ";width:" + Math.max(w, 0.9).toFixed(3) + '%" title="' + b[3] + '">' + (px >= 64 ? b[3] : "") + "</span>";
+      }).join("") + "</div>";
+    });
+    c += '<div class="tl-row idle"></div><span class="tl-now" style="left:' + x(NOW) + '"><span>now</span></span></div>';
+    return '<section class="w" aria-label="Swarm activity">' + head(I("i-activity"), o.compact ? "Activity" : "Swarm activity", '<span class="dchip run">Live</span><span class="w-n">' + o.count + "</span>", "Open timeline") +
+      '<div class="tl2" style="--gut:' + o.gut + '">' + g + c + "</div></section>";
+  }
+  var DESK_TL = { start: 8.33, end: 16.33, step: 1, label: "8h", count: "38 tasks in 8h", gut: "208px" };
+  var PHONE_TL = { start: 13.67, end: 16, step: 0.5, label: "2h", count: "12 tasks in 2h", gut: "124px", compact: true };
+  function ghost() { return '<button class="ghost" type="button">' + I("i-plus") + "Add a widget</button>"; }
+
+  document.querySelectorAll("[data-home]").forEach(function (m) {
+    var s = m.getAttribute("data-home");
+    m.innerHTML = '<div class="topbar"><div class="crumbs"><b>Good morning, Taras</b></div><span class="sp"></span><span class="search">' + I("i-search") + 'Search or jump to<kbd>⌘K</kbd></span><span class="me">TY</span></div>' +
+      '<div class="body"><div class="hb">' + (s === "open" ? banner() : "") +
+      '<div class="cols"><div class="col">' + needs(s) + progress(s) + '</div><div class="col">' + checklist(s) + favorites(s) + "</div></div>" +
+      timeline(DESK_TL) + ghost() + "</div></div>";
+  });
+  document.querySelectorAll("[data-phone]").forEach(function (p) {
+    var scrolled = p.getAttribute("data-phone") === "scrolled";
+    p.innerHTML = '<div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop">' + I("i-menu") + '<span class="crumbs"><b>Good morning, Taras</b></span><span class="sp"></span><span class="me">TY</span></div>' +
+      '<div class="pbody"><div class="hb' + (scrolled ? " scrolled" : "") + '">' + banner() + needs("open") + checklist("open") + progress("open") + favorites("open") + timeline(PHONE_TL) + ghost() + "</div></div>";
+  });
+})();
+</script>
+</body>
+</html>

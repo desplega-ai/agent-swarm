@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home A · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<style>
+.hm { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+.hm-cols { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.hm-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.phone .hm { gap: 12px; }
+.phone .hm-cols { grid-template-columns: 1fr; gap: 12px; }
+.phone .hm-col { gap: 12px; }
+</style>
+</head>
+<body>
+<header class="chrome">
+  <span class="badge">Post-onboarding · step-16</span>
+  <h1>Home <span>· A · two columns, timeline below</span></h1>
+  <span class="sp"></span>
+  <a class="back" href="./index.html">All variants</a>
+  <button class="theme-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="page">
+  <div class="lede">
+    <div><b>Idea</b>A command center split by verb. Left: what to act on (Needs you, In progress). Right: what to set up and revisit (checklist, Favorites). The activity timeline runs full width below the fold.</div>
+    <div><b>Trade-off</b>Everything important sits above the fold on a laptop. The two columns have uneven height, and the checklist competes with Needs you for attention while onboarding is open. Phone stacks left column first.</div>
+  </div>
+  <p class="narrow-note">Desktop states are hidden on narrow screens. Widen the window to see them.</p>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>admin, checklist open</em> · DashboardNudges banner on top</h2>
+    <div class="desk"><div class="app tall">
+      <nav class="sb" aria-label="Main navigation, mockup 1"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav on" href="#home" title="Home" aria-current="page"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><a class="nav" href="#connect" title="Connect"><span class="ic i-plug" aria-hidden="true"></span><span class="lab">Connect</span></a></div><details class="grp"><summary class="grp-l"><span class="ic i-chevron-right" aria-hidden="true"></span>Build<span class="cnt">8</span></summary><a class="nav" href="#agents" title="Agents"><span class="ic i-bot" aria-hidden="true"></span><span class="lab">Agents</span></a><a class="nav" href="#schedules" title="Schedules"><span class="ic i-clock" aria-hidden="true"></span><span class="lab">Schedules</span></a><a class="nav" href="#workflows" title="Workflows"><span class="ic i-workflow" aria-hidden="true"></span><span class="lab">Workflows</span></a><a class="nav" href="#scripts" title="Scripts"><span class="ic i-file-code" aria-hidden="true"></span><span class="lab">Scripts</span></a><a class="nav" href="#skills" title="Skills"><span class="ic i-book-open" aria-hidden="true"></span><span class="lab">Skills</span></a><a class="nav" href="#templates" title="Templates"><span class="ic i-file-text" aria-hidden="true"></span><span class="lab">Templates</span></a><a class="nav" href="#memory" title="Memory"><span class="ic i-database" aria-hidden="true"></span><span class="lab">Memory</span></a><a class="nav" href="#tasks" title="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span><span class="lab">Tasks</span></a></details></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Good morning, Taras</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content"><div class="hm">
+        <div class="nudge"><span class="nic"><span class="ic i-alert" aria-hidden="true"></span></span><div class="nb"><div class="nt">Automations waiting on setup <span class="note">Admin only</span></div><div class="nd">Competitor scan posts to Slack #market-intel, but the bot is not in that channel yet.</div></div><a class="btn xs" href="#fix">Fix in Connect</a><button class="btn ghost xs sq" type="button" aria-label="Dismiss"><span class="ic i-x" aria-hidden="true"></span></button></div>
+
+        <div class="hm-cols">
+          <div class="hm-col"><section class="card">
+  <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3><span class="sp"></span><span class="muted meta wide-only">approvals · sessions · credentials · failures</span></div>
+  <div class="card-b">
+    <div class="needrow">
+      <span class="ic i-clipboard-check" aria-hidden="true"></span>
+      <div class="nr"><div class="t">Post the competitor digest to #market-intel</div><div class="s">Approval · competitor-research · Researcher asked 2h ago</div></div>
+      <a class="btn xs" href="#reject">Reject</a><a class="btn xs primary" href="#approve">Approve</a>
+    </div>
+    <div class="quiet"><span class="ic i-check" aria-hidden="true"></span>No agents blocked on credentials · no failed runs in 24h</div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3><span class="sp"></span><a class="link" href="#sessions">All sessions <span class="ic i-arrow-right" aria-hidden="true"></span></a></div>
+  <div class="card-b">
+    <a class="prow" href="#group">
+      <div class="nr"><div class="t">competitor-research <span class="tag run">1 running</span></div><div class="s shimmer">Competitor scan · manual run · Researcher · 4m</div></div>
+      <span class="ic i-chevron-right muted" aria-hidden="true"></span>
+    </a>
+  </div>
+</section>
+</div>
+          <div class="hm-col"><section class="card">
+  <div class="card-h"><h3 class="card-t">Get the swarm working</h3><span class="sp"></span><span class="muted meta mono">1 of 3</span></div>
+  <div class="card-b">
+    <div class="bar"><i class="u-w33"></i></div>
+    <div class="chk done"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div class="nr"><div class="t">Connect a chat channel</div><div class="s">Slack connected by Taras · 1d ago</div></div><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chk"><span class="st open"></span><div class="nr"><div class="t">Connect work tools</div><div class="s">GitHub, Linear, Jira or Gmail, so agents can act where you work</div></div><a class="btn xs" href="#tools">Open</a><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chk"><span class="st open"></span><div class="nr"><div class="t">First use case, planned</div><div class="s">Ask the Lead to plan a recurring job with a schedule and a home for its outputs</div></div><a class="btn xs" href="#plan">Start</a><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chkf"><button class="btn ghost xs" type="button"><span class="ic i-plus" aria-hidden="true"></span>Add item</button><span class="sp"></span><button class="btn ghost xs" type="button">Show removed (0)</button></div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="ic i-star muted" aria-hidden="true"></span><h3 class="card-t">Favorites</h3></div>
+  <div class="card-b favs">
+    <a class="fav" href="#f1"><span class="ic i-message-square" aria-hidden="true"></span><span class="nr"><span class="t">competitor-research</span><span class="s">Use case · 1 running</span></span></a>
+    <a class="fav" href="#f2"><span class="ic i-globe" aria-hidden="true"></span><span class="nr"><span class="t">Weekly competitor digest</span><span class="s">Page · updated 2d ago</span></span></a>
+    <a class="fav" href="#f3"><span class="ic i-clock" aria-hidden="true"></span><span class="nr"><span class="t">Competitor scan</span><span class="s">Schedule · Thu 09:00</span></span></a>
+    <a class="fav" href="#f4"><span class="ic i-folder-open" aria-hidden="true"></span><span class="nr"><span class="t mono data">shared/competitor-research/</span><span class="s">Folder · 3 files</span></span></a>
+  </div>
+</section>
+</div>
+        </div>
+        <section class="card">
+  <div class="card-h"><span class="ic i-activity muted" aria-hidden="true"></span><h3 class="card-t">Activity</h3><span class="sp"></span><span class="muted meta">today</span></div>
+  <div class="card-b tl">
+    <div class="tlr"><span class="tm mono">10:58</span><span class="st runn"></span><span class="tx"><b>Researcher</b> started Competitor scan · manual run</span></div>
+    <div class="tlr"><span class="tm mono">10:57</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Taras</b> pressed Run now on competitor-research</span></div>
+    <div class="tlr"><span class="tm mono">09:12</span><span class="st need">!</span><span class="tx"><b>Researcher</b> asked to post the digest to #market-intel</span></div>
+    <div class="tlr"><span class="tm mono">09:11</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Researcher</b> wrote <span class="mono data">report-2026-11-04.md</span></span></div>
+    <div class="tlr"><span class="tm mono">08:40</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Lead</b> answered in Slack #eng</span></div>
+  </div>
+</section>
+
+      </div></div></div>
+    </div></div>
+  </section>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>checklist all done</em> · it collapses to one line, Favorites move up</h2>
+    <div class="desk"><div class="app short">
+      <nav class="sb" aria-label="Main navigation, mockup 2"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav on" href="#home" title="Home" aria-current="page"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><a class="nav" href="#connect" title="Connect"><span class="ic i-plug" aria-hidden="true"></span><span class="lab">Connect</span></a></div><details class="grp"><summary class="grp-l"><span class="ic i-chevron-right" aria-hidden="true"></span>Build<span class="cnt">8</span></summary><a class="nav" href="#agents" title="Agents"><span class="ic i-bot" aria-hidden="true"></span><span class="lab">Agents</span></a><a class="nav" href="#schedules" title="Schedules"><span class="ic i-clock" aria-hidden="true"></span><span class="lab">Schedules</span></a><a class="nav" href="#workflows" title="Workflows"><span class="ic i-workflow" aria-hidden="true"></span><span class="lab">Workflows</span></a><a class="nav" href="#scripts" title="Scripts"><span class="ic i-file-code" aria-hidden="true"></span><span class="lab">Scripts</span></a><a class="nav" href="#skills" title="Skills"><span class="ic i-book-open" aria-hidden="true"></span><span class="lab">Skills</span></a><a class="nav" href="#templates" title="Templates"><span class="ic i-file-text" aria-hidden="true"></span><span class="lab">Templates</span></a><a class="nav" href="#memory" title="Memory"><span class="ic i-database" aria-hidden="true"></span><span class="lab">Memory</span></a><a class="nav" href="#tasks" title="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span><span class="lab">Tasks</span></a></details></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Good morning, Taras</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content"><div class="hm">
+        <div class="hm-cols">
+          <div class="hm-col"><section class="card">
+  <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3><span class="sp"></span><span class="muted meta wide-only">approvals · sessions · credentials · failures</span></div>
+  <div class="card-b">
+    <div class="needrow">
+      <span class="ic i-clipboard-check" aria-hidden="true"></span>
+      <div class="nr"><div class="t">Post the competitor digest to #market-intel</div><div class="s">Approval · competitor-research · Researcher asked 2h ago</div></div>
+      <a class="btn xs" href="#reject">Reject</a><a class="btn xs primary" href="#approve">Approve</a>
+    </div>
+    <div class="quiet"><span class="ic i-check" aria-hidden="true"></span>No agents blocked on credentials · no failed runs in 24h</div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3><span class="sp"></span><a class="link" href="#sessions">All sessions <span class="ic i-arrow-right" aria-hidden="true"></span></a></div>
+  <div class="card-b">
+    <a class="prow" href="#group">
+      <div class="nr"><div class="t">competitor-research <span class="tag run">1 running</span></div><div class="s shimmer">Competitor scan · manual run · Researcher · 4m</div></div>
+      <span class="ic i-chevron-right muted" aria-hidden="true"></span>
+    </a>
+  </div>
+</section>
+</div>
+          <div class="hm-col"><section class="card chkdone"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Setup checklist · all 3 done</span><span class="sp"></span><button class="btn ghost xs" type="button">Show <span class="ic i-chevron-down" aria-hidden="true"></span></button></section>
+<section class="card">
+  <div class="card-h"><span class="ic i-star muted" aria-hidden="true"></span><h3 class="card-t">Favorites</h3></div>
+  <div class="card-b favs">
+    <a class="fav" href="#f1"><span class="ic i-message-square" aria-hidden="true"></span><span class="nr"><span class="t">competitor-research</span><span class="s">Use case · 1 running</span></span></a>
+    <a class="fav" href="#f2"><span class="ic i-globe" aria-hidden="true"></span><span class="nr"><span class="t">Weekly competitor digest</span><span class="s">Page · updated 2d ago</span></span></a>
+    <a class="fav" href="#f3"><span class="ic i-clock" aria-hidden="true"></span><span class="nr"><span class="t">Competitor scan</span><span class="s">Schedule · Thu 09:00</span></span></a>
+    <a class="fav" href="#f4"><span class="ic i-folder-open" aria-hidden="true"></span><span class="nr"><span class="t mono data">shared/competitor-research/</span><span class="s">Folder · 3 files</span></span></a>
+  </div>
+</section>
+</div>
+        </div>
+      </div></div></div>
+    </div></div>
+  </section>
+
+  <section class="state">
+    <h2>Phone · <em>one column</em>: left column first, then right, then timeline</h2>
+    <div class="phones">
+      <div class="phone-col"><h3>Admin, checklist open</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Home</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody"><div class="hm">
+            <div class="nudge"><span class="nic"><span class="ic i-alert" aria-hidden="true"></span></span><div class="nb"><div class="nt">Automations waiting on setup <span class="note">Admin only</span></div><div class="nd">Competitor scan posts to Slack #market-intel, but the bot is not in that channel yet.</div></div><a class="btn xs" href="#fix">Fix in Connect</a><button class="btn ghost xs sq" type="button" aria-label="Dismiss"><span class="ic i-x" aria-hidden="true"></span></button></div>
+
+            <div class="hm-cols"><div class="hm-col"><section class="card">
+  <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3><span class="sp"></span><span class="muted meta wide-only">approvals · sessions · credentials · failures</span></div>
+  <div class="card-b">
+    <div class="needrow">
+      <span class="ic i-clipboard-check" aria-hidden="true"></span>
+      <div class="nr"><div class="t">Post the competitor digest to #market-intel</div><div class="s">Approval · competitor-research · Researcher asked 2h ago</div></div>
+      <a class="btn xs" href="#reject">Reject</a><a class="btn xs primary" href="#approve">Approve</a>
+    </div>
+    <div class="quiet"><span class="ic i-check" aria-hidden="true"></span>No agents blocked on credentials · no failed runs in 24h</div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3><span class="sp"></span><a class="link" href="#sessions">All sessions <span class="ic i-arrow-right" aria-hidden="true"></span></a></div>
+  <div class="card-b">
+    <a class="prow" href="#group">
+      <div class="nr"><div class="t">competitor-research <span class="tag run">1 running</span></div><div class="s shimmer">Competitor scan · manual run · Researcher · 4m</div></div>
+      <span class="ic i-chevron-right muted" aria-hidden="true"></span>
+    </a>
+  </div>
+</section>
+</div><div class="hm-col"><section class="card">
+  <div class="card-h"><h3 class="card-t">Get the swarm working</h3><span class="sp"></span><span class="muted meta mono">1 of 3</span></div>
+  <div class="card-b">
+    <div class="bar"><i class="u-w33"></i></div>
+    <div class="chk done"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div class="nr"><div class="t">Connect a chat channel</div><div class="s">Slack connected by Taras · 1d ago</div></div><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chk"><span class="st open"></span><div class="nr"><div class="t">Connect work tools</div><div class="s">GitHub, Linear, Jira or Gmail, so agents can act where you work</div></div><a class="btn xs" href="#tools">Open</a><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chk"><span class="st open"></span><div class="nr"><div class="t">First use case, planned</div><div class="s">Ask the Lead to plan a recurring job with a schedule and a home for its outputs</div></div><a class="btn xs" href="#plan">Start</a><button class="btn ghost xs sq" type="button" aria-label="More"><span class="ic i-more" aria-hidden="true"></span></button></div>
+    <div class="chkf"><button class="btn ghost xs" type="button"><span class="ic i-plus" aria-hidden="true"></span>Add item</button><span class="sp"></span><button class="btn ghost xs" type="button">Show removed (0)</button></div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="ic i-star muted" aria-hidden="true"></span><h3 class="card-t">Favorites</h3></div>
+  <div class="card-b favs">
+    <a class="fav" href="#f1"><span class="ic i-message-square" aria-hidden="true"></span><span class="nr"><span class="t">competitor-research</span><span class="s">Use case · 1 running</span></span></a>
+    <a class="fav" href="#f2"><span class="ic i-globe" aria-hidden="true"></span><span class="nr"><span class="t">Weekly competitor digest</span><span class="s">Page · updated 2d ago</span></span></a>
+    <a class="fav" href="#f3"><span class="ic i-clock" aria-hidden="true"></span><span class="nr"><span class="t">Competitor scan</span><span class="s">Schedule · Thu 09:00</span></span></a>
+    <a class="fav" href="#f4"><span class="ic i-folder-open" aria-hidden="true"></span><span class="nr"><span class="t mono data">shared/competitor-research/</span><span class="s">Folder · 3 files</span></span></a>
+  </div>
+</section>
+</div></div>
+            <section class="card">
+  <div class="card-h"><span class="ic i-activity muted" aria-hidden="true"></span><h3 class="card-t">Activity</h3><span class="sp"></span><span class="muted meta">today</span></div>
+  <div class="card-b tl">
+    <div class="tlr"><span class="tm mono">10:58</span><span class="st runn"></span><span class="tx"><b>Researcher</b> started Competitor scan · manual run</span></div>
+    <div class="tlr"><span class="tm mono">10:57</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Taras</b> pressed Run now on competitor-research</span></div>
+    <div class="tlr"><span class="tm mono">09:12</span><span class="st need">!</span><span class="tx"><b>Researcher</b> asked to post the digest to #market-intel</span></div>
+    <div class="tlr"><span class="tm mono">09:11</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Researcher</b> wrote <span class="mono data">report-2026-11-04.md</span></span></div>
+    <div class="tlr"><span class="tm mono">08:40</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Lead</b> answered in Slack #eng</span></div>
+  </div>
+</section>
+
+          </div></div>
+        </div>
+      </div>
+      <div class="phone-col"><h3>Checklist all done, no banner</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Home</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody"><div class="hm">
+            <div class="hm-cols"><div class="hm-col"><section class="card">
+  <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3><span class="sp"></span><span class="muted meta wide-only">approvals · sessions · credentials · failures</span></div>
+  <div class="card-b">
+    <div class="needrow">
+      <span class="ic i-clipboard-check" aria-hidden="true"></span>
+      <div class="nr"><div class="t">Post the competitor digest to #market-intel</div><div class="s">Approval · competitor-research · Researcher asked 2h ago</div></div>
+      <a class="btn xs" href="#reject">Reject</a><a class="btn xs primary" href="#approve">Approve</a>
+    </div>
+    <div class="quiet"><span class="ic i-check" aria-hidden="true"></span>No agents blocked on credentials · no failed runs in 24h</div>
+  </div>
+</section>
+<section class="card">
+  <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3><span class="sp"></span><a class="link" href="#sessions">All sessions <span class="ic i-arrow-right" aria-hidden="true"></span></a></div>
+  <div class="card-b">
+    <a class="prow" href="#group">
+      <div class="nr"><div class="t">competitor-research <span class="tag run">1 running</span></div><div class="s shimmer">Competitor scan · manual run · Researcher · 4m</div></div>
+      <span class="ic i-chevron-right muted" aria-hidden="true"></span>
+    </a>
+  </div>
+</section>
+</div><div class="hm-col"><section class="card chkdone"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Setup checklist · all 3 done</span><span class="sp"></span><button class="btn ghost xs" type="button">Show <span class="ic i-chevron-down" aria-hidden="true"></span></button></section>
+<section class="card">
+  <div class="card-h"><span class="ic i-star muted" aria-hidden="true"></span><h3 class="card-t">Favorites</h3></div>
+  <div class="card-b favs">
+    <a class="fav" href="#f1"><span class="ic i-message-square" aria-hidden="true"></span><span class="nr"><span class="t">competitor-research</span><span class="s">Use case · 1 running</span></span></a>
+    <a class="fav" href="#f2"><span class="ic i-globe" aria-hidden="true"></span><span class="nr"><span class="t">Weekly competitor digest</span><span class="s">Page · updated 2d ago</span></span></a>
+    <a class="fav" href="#f3"><span class="ic i-clock" aria-hidden="true"></span><span class="nr"><span class="t">Competitor scan</span><span class="s">Schedule · Thu 09:00</span></span></a>
+    <a class="fav" href="#f4"><span class="ic i-folder-open" aria-hidden="true"></span><span class="nr"><span class="t mono data">shared/competitor-research/</span><span class="s">Folder · 3 files</span></span></a>
+  </div>
+</section>
+</div></div>
+            <section class="card">
+  <div class="card-h"><span class="ic i-activity muted" aria-hidden="true"></span><h3 class="card-t">Activity</h3><span class="sp"></span><span class="muted meta">today</span></div>
+  <div class="card-b tl">
+    <div class="tlr"><span class="tm mono">10:58</span><span class="st runn"></span><span class="tx"><b>Researcher</b> started Competitor scan · manual run</span></div>
+    <div class="tlr"><span class="tm mono">10:57</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Taras</b> pressed Run now on competitor-research</span></div>
+    <div class="tlr"><span class="tm mono">09:12</span><span class="st need">!</span><span class="tx"><b>Researcher</b> asked to post the digest to #market-intel</span></div>
+    <div class="tlr"><span class="tm mono">09:11</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Researcher</b> wrote <span class="mono data">report-2026-11-04.md</span></span></div>
+    <div class="tlr"><span class="tm mono">08:40</span><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="tx"><b>Lead</b> answered in Slack #eng</span></div>
+  </div>
+</section>
+
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("theme");
+  var q = new URLSearchParams(location.search).get("theme"), t = "light";
+  try { t = q || localStorage.getItem("swarmMock") || "light"; } catch (e) { t = q || "light"; }
+  function set(v) {
+    t = v; root.classList.toggle("dark", v === "dark"); root.setAttribute("data-theme", v);
+    btn.innerHTML = '<span class="ic i-' + (v === "dark" ? "sun" : "moon") + '" aria-hidden="true"></span>';
+    try { localStorage.setItem("swarmMock", v); } catch (e) { /* file:// without storage */ }
+  }
+  set(t);
+  btn.addEventListener("click", function () { set(t === "dark" ? "light" : "dark"); });
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    list.querySelectorAll("[role=tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        list.querySelectorAll("[role=tab]").forEach(function (o) {
+          var on = o === tab; o.setAttribute("aria-selected", String(on));
+          document.getElementById(o.getAttribute("aria-controls")).hidden = !on;
+        });
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
