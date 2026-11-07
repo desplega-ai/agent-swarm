@@ -53,6 +53,7 @@ import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { formatBytes } from "@/lib/format-bytes";
 import { scrubSecretText } from "@/lib/scrub-secrets";
+import { githubHostOf } from "@/lib/swarm-links";
 import { cn } from "@/lib/utils";
 
 /**
@@ -212,11 +213,14 @@ function hostOf(url: string | undefined): string | null {
  * A GitHub or GitLab PR, MR or issue link, read from its URL: a short label
  * ("PR #2593") and the repo. Null for any other link.
  */
-function vcsRef(url: string | undefined): { label: string; repo: string } | null {
+function vcsRef(
+  url: string | undefined,
+  githubWebUrl: string | null | undefined,
+): { label: string; repo: string } | null {
   let path: string;
   let host: string;
   try {
-    ({ pathname: path, hostname: host } = new URL(url ?? ""));
+    ({ pathname: path, host } = new URL(url ?? ""));
   } catch {
     return null;
   }
@@ -228,7 +232,9 @@ function vcsRef(url: string | undefined): { label: string; repo: string } | null
   // GitLab's `/-/` paths are its own on any host; the GitHub shape is not
   // (Sentry has `/organizations/<org>/issues/<n>`), so it needs GitHub's host.
   const github =
-    host === "github.com" ? /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/.exec(path) : null;
+    host === githubHostOf(githubWebUrl)
+      ? /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/.exec(path)
+      : null;
   if (github) {
     const label = github[2] === "pull" ? `PR #${github[3]}` : `Issue #${github[3]}`;
     return { label, repo: github[1] };
@@ -607,7 +613,7 @@ function AttachmentRow({
   }
 
   // A PR or issue link reads "PR #2593"; the stored name is its tooltip.
-  const ref = attachment.kind === "url" ? vcsRef(attachment.url) : null;
+  const ref = attachment.kind === "url" ? vcsRef(attachment.url, origins.github) : null;
   const name = ref?.label ?? attachment.name;
   const { meta, note } = rowMeta(attachment, previewKind, ref);
   return (

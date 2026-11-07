@@ -91,6 +91,7 @@ import {
   resolveCredentialPools,
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
+import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
@@ -1050,6 +1051,8 @@ export async function fetchResolvedEnv(
   // runtime key and the opencode key splice only ever read the canonical
   // name. An explicit canonical value wins.
   normalizeProviderKeyAliases(env);
+  // GHES: a GITHUB_TOKEN row must not reach gh as a github.com token.
+  scopeGitHubTokenToEnterprise(env);
   // Rows admitted after boot and pool members live only in this env, never in
   // process.env, so the scrubber's env pass cannot see them. Register them
   // before any adapter can echo one into a log or failure reason.
@@ -3182,7 +3185,11 @@ export async function detectVcsForTask(
       vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    } else if (
+      remoteUrl.includes("github.com") ||
+      remoteUrl.includes("github") ||
+      isGitHubUrl(remoteUrl)
+    ) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()

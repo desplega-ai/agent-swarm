@@ -72,6 +72,10 @@ const RESERVED_KEYS = new Set([
   "CODEX_OAUTH_DEVICE_BASE_URL",
   "DESPLEGA_TELEMETRY_ENDPOINT",
   "CLOUDFLARE_API_BASE_URL",
+  // GitHub host (GHES): the API base receives the PAT, the App JWT and installation
+  // tokens, so only the deployment env may redirect it.
+  "GITHUB_URL",
+  "GITHUB_API_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over

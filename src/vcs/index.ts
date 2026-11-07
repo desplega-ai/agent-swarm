@@ -2,6 +2,7 @@
  * VCS Provider utilities.
  */
 
+import { getGitHubLinkConfig, isGitHubUrl } from "../utils/github-host";
 import { isAzureDevOpsUrl } from "./azure-devops";
 import { isBitbucketUrl } from "./bitbucket";
 import type { VcsProvider } from "./types";
@@ -15,6 +16,8 @@ export type { VcsProvider } from "./types";
 export function detectVcsProvider(url: string): VcsProvider | null {
   if (isAzureDevOpsUrl(url)) return "azure-devops";
   if (isBitbucketUrl(url)) return "bitbucket";
+  // The configured GHES host wins over the loose gitlab substring checks below.
+  if (getGitHubLinkConfig().enterprise && isGitHubUrl(url)) return "github";
   if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
   if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
   return null;

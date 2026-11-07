@@ -5,6 +5,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { parseEnvFlag } from "../utils/env-flag";
+import { getGitHubGraphqlUrl, githubApiUrl } from "../utils/github-host";
 import { getInstallationToken } from "./app";
 import {
   detectMention,
@@ -1056,7 +1057,9 @@ async function fetchReviewScopedComments(
   reviewId: number,
   headers: Record<string, string>,
 ): Promise<FetchReviewCommentsResult> {
-  const url = `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
+  const url = githubApiUrl(
+    `/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`,
+  );
 
   let result = await fetchPaginatedReviewComments(url, headers);
   if (result.degraded || result.comments.length > 0) {
@@ -1080,7 +1083,7 @@ async function fetchPrLevelReviewComments(
   reviewId: number,
   headers: Record<string, string>,
 ): Promise<FetchReviewCommentsResult> {
-  const url = `https://api.github.com/repos/${repo}/pulls/${prNumber}/comments?per_page=100`;
+  const url = githubApiUrl(`/repos/${repo}/pulls/${prNumber}/comments?per_page=100`);
   const result = await fetchPaginatedReviewComments(url, headers);
   return {
     comments: result.comments.filter((comment) => comment.pull_request_review_id === reviewId),
@@ -1208,7 +1211,7 @@ async function fetchPrReviewActionCounts(
   if (!token || !owner || !name) return null;
 
   try {
-    const response = await fetch("https://api.github.com/graphql", {
+    const response = await fetch(getGitHubGraphqlUrl(), {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({

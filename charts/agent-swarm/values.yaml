@@ -96,6 +96,11 @@ config:
   githubEmail: ""
   # -- Git author name used by agents for commits.
   githubName: ""
+  # -- GitHub Enterprise Server web base, e.g. https://ghe.example.com. Blank = github.com.
+  # Shared by the API and every agent so both target the same host.
+  githubUrl: ""
+  # -- GitHub REST base override. Blank = derived from githubUrl (<githubUrl>/api/v3).
+  githubApiUrl: ""
   # -- Public dashboard URL referenced in Slack message links. Leave blank
   # to omit dashboard links from Slack notifications.
   appUrl: ""

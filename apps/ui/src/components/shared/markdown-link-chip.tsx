@@ -124,13 +124,21 @@ function useLinkName(link: SwarmLink | null): string | undefined {
 
 /** The origins this dashboard knows: its own, the swarm's configured dashboard, and agent-fs. */
 export function useSwarmLinkOrigins(): SwarmLinkOrigins {
-  const configuredDashboard = useOptionalStatusContext()?.data?.identity.dashboard_url ?? null;
+  const status = useOptionalStatusContext()?.data;
+  const configuredDashboard = status?.identity.dashboard_url ?? null;
+  const github = status?.github?.web_url ?? null;
   const agentFs = useOptionalAgentFs();
   const agentFsLive = agentFs?.liveUrl ?? null;
   const agentFsApi = agentFs?.endpoint ?? null;
   return useMemo(
-    () => ({ dashboard: window.location.origin, configuredDashboard, agentFsLive, agentFsApi }),
-    [configuredDashboard, agentFsLive, agentFsApi],
+    () => ({
+      dashboard: window.location.origin,
+      configuredDashboard,
+      agentFsLive,
+      agentFsApi,
+      github,
+    }),
+    [configuredDashboard, agentFsLive, agentFsApi, github],
   );
 }
 

@@ -1,6 +1,6 @@
 import {
   CredentialBroker,
-  DEFAULT_CREDENTIAL_BINDINGS,
+  defaultCredentialBindings,
   type FailedCredentialBinding,
   patchFetchWithCredentialBroker,
   type ResolvedCredentialBinding,
@@ -12,7 +12,7 @@ export async function buildEgressSecrets(): Promise<EgressSecretEntry[]> {
   const broker = new CredentialBroker(
     { listActiveBindings: async () => [] },
     (configKey) => process.env[configKey],
-    DEFAULT_CREDENTIAL_BINDINGS,
+    defaultCredentialBindings(),
   );
   return await broker.resolveBindings({});
 }

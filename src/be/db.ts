@@ -149,6 +149,7 @@ import {
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { getGitHubHostForSql } from "../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import { validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
 import {
@@ -5584,6 +5585,7 @@ export async function getAttributionByPerson(opts: {
     }
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
+  const githubHost = getGitHubHostForSql();
 
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = await getDbClient().query<RootRow>(
@@ -5624,7 +5626,7 @@ export async function getAttributionByPerson(opts: {
            OR (
              ta.kind = 'url'
              AND (
-               ta.url LIKE '%github.com/%/pull/%'
+               ta.url LIKE '%${githubHost}/%/pull/%'
                OR ta.url LIKE '%/-/merge_requests/%'
              )
            )
@@ -5636,7 +5638,7 @@ export async function getAttributionByPerson(opts: {
         -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
         -- planner scans every task's output and probes the tree instead.
         CROSS JOIN agent_tasks described ON described.id = tree.taskId
-        WHERE described.output LIKE '%github.com/%/pull/%'
+        WHERE described.output LIKE '%${githubHost}/%/pull/%'
            OR described.output LIKE '%/-/merge_requests/%'
       )
       SELECT

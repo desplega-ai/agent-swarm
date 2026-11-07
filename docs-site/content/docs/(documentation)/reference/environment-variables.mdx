@@ -322,6 +322,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_TOKEN` | — | GitHub token for git operations |
 | `GITHUB_EMAIL` | `worker-agent@desplega.ai` | Git commit email |
 | `GITHUB_NAME` | `Worker Agent` | Git commit name |
+| `GITHUB_URL` | `https://github.com` | GitHub Enterprise Server host for git, `gh` and API calls; must match the API server |
 
 ## Slack Integration
 
@@ -366,6 +367,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
+| `GITHUB_URL` | GitHub Enterprise Server web base, e.g. `https://ghe.example.com` (default `https://github.com`). Set on the API and every worker. Deployment env only. See [GitHub Enterprise Server](/docs/integrations/github#github-enterprise-server) |
+| `GITHUB_API_URL` | GitHub REST base override (default derived from `GITHUB_URL`, `<GITHUB_URL>/api/v3` on GHES). Deployment env only |
 
 ## GitLab Integration
 
