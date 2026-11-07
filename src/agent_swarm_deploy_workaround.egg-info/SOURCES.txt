@@ -1,7 +1,0 @@
-LICENSE
-README.md
-pyproject.toml
-src/agent_swarm_deploy_workaround.egg-info/PKG-INFO
-src/agent_swarm_deploy_workaround.egg-info/SOURCES.txt
-src/agent_swarm_deploy_workaround.egg-info/dependency_links.txt
-src/agent_swarm_deploy_workaround.egg-info/top_level.txt
