@@ -330,7 +330,8 @@ export const PERMISSIONS = {
     namespace: "mcp-oauth",
   },
   "kv.write.any": {
-    description: "Write another agent's task:agent: KV namespace.",
+    description:
+      "Write another agent's task:agent: KV namespace, or a lead-only family (usecase:*).",
     namespace: "kv",
   },
   "comb.presence": {
