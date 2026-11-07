@@ -9,10 +9,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, initDb, upsertKv } from "../be/db";
 import {
   createRequestComposition,
+  getTokenRatio,
   MAX_REQUEST_COMPOSITIONS_PER_TASK,
+  nextTokenRatio,
+  recordTokenRatio,
+  TOKEN_RATIO_KV_NAMESPACE,
+  tokenRatioKey,
 } from "../be/db/request-composition";
 import { postRequestComposition, requestToolLoading } from "../commands/runner";
 import { handleCore } from "../http/core";
@@ -300,5 +305,143 @@ describe("worker side", () => {
       postRequestComposition(`http://localhost:${port}`, API_KEY, agentId, "missing", body),
     ).not.toThrow();
     await Bun.sleep(50);
+  });
+});
+
+describe("harness-hook manifests and token ratio calibration", () => {
+  const hookBody = (sessionId: string, provider: string, promptTokens: number) => ({
+    sessionId,
+    provider,
+    model: "m",
+    source: "harness-hook",
+    toolLoading: "none",
+    parts: [
+      { kind: "tool_schemas", id: "mcp:agent-swarm", label: "swarm tool schemas (2)", chars: 800 },
+      { kind: "skills_listing", id: "harness:skills", label: "skills listing", chars: 100 },
+    ],
+    // System: 501 chars of ours + 100 of skills + 1,000 of harness base.
+    harness: { systemChars: 1601, payloadChars: 4401, promptTokens },
+  });
+
+  test("merges with the session's worker manifest: exact base, exact tools", async () => {
+    expect(
+      (
+        await post({
+          sessionId: "sess-hook-1",
+          provider: "pi-merge",
+          toolLoading: "core",
+          parts: workerParts,
+        })
+      ).status,
+    ).toBe(200);
+    const res = await post(hookBody("sess-hook-1", "pi-merge", 1320));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { seq: number }).seq).toBe(1);
+
+    const hook = (await manifests()).find(
+      (m) => m.sessionId === "sess-hook-1" && m.source === "harness-hook",
+    )!;
+    const byId = Object.fromEntries(hook.parts.map((part) => [part.id, part]));
+    // Worker parts carry over; the estimated tool schemas give way to exact ones.
+    expect(byId.persona?.chars).toBe(400);
+    expect(byId.task_prompt?.chars).toBe(2000);
+    expect(hook.parts.filter((part) => part.kind === "tool_schemas")).toEqual([
+      expect.objectContaining({ id: "mcp:agent-swarm", chars: 800, fidelity: "exact" }),
+    ]);
+    expect(byId["harness:base"]).toMatchObject({ chars: 1000, fidelity: "exact" });
+    // Parts cover the payload: 400 + 101 + 2000 + 1000 + 800 + 100 = 4401.
+    expect(hook.parts.reduce((sum, part) => sum + part.chars, 0)).toBe(4401);
+    // Own ratio: 1320 / (4401 / 4) = 1.1997...
+    expect(hook.tokenRatio).toBeCloseTo(1320 / (4401 / 4), 6);
+  });
+
+  test("first-call message text beyond the task prompt is harness context", async () => {
+    await post({
+      sessionId: "sess-hook-msg",
+      provider: "oc-msg",
+      toolLoading: "all",
+      parts: workerParts,
+    });
+    const body = hookBody("sess-hook-msg", "oc-msg", 1400);
+    await post({ ...body, harness: { ...body.harness, firstMessageChars: 2300 } });
+    const hook = (await manifests()).find(
+      (m) => m.sessionId === "sess-hook-msg" && m.source === "harness-hook",
+    )!;
+    expect(hook.parts.find((part) => part.id === "harness:messages")).toMatchObject({
+      chars: 300,
+      fidelity: "exact",
+    });
+  });
+
+  test("without a worker manifest the system prompt stays one exact part", async () => {
+    await post(hookBody("sess-hook-orphan", "pi-orphan", 1100));
+    const hook = (await manifests()).find((m) => m.sessionId === "sess-hook-orphan")!;
+    expect(hook.seq).toBe(0);
+    expect(hook.parts.find((part) => part.id === "harness:system")).toMatchObject({
+      kind: "system_section",
+      chars: 1501,
+      fidelity: "exact",
+    });
+  });
+
+  test("EMA: seeded by the first observation, alpha 0.2, bounded 0.5 to 2.0", async () => {
+    const provider = "pi-ema";
+    const ratioOf = async (sessionId: string) => {
+      await post({ sessionId, provider, toolLoading: "none", parts: workerParts });
+      return (await manifests()).find((m) => m.sessionId === sessionId)!.tokenRatio;
+    };
+    expect(await ratioOf("sess-ema-before")).toBe(1);
+
+    // 4401 chars / 4 = 1100.25 est. tokens; 1320 real tokens → 1.1997.
+    await post(hookBody("sess-ema-1", provider, 1320));
+    const seeded = 1320 / 1100.25;
+    expect(await ratioOf("sess-ema-after-1")).toBeCloseTo(seeded, 6);
+
+    // An absurd observation clamps to 2.0 before the EMA step.
+    await post(hookBody("sess-ema-2", provider, 100_000));
+    const stepped = seeded + 0.2 * (2 - seeded);
+    expect(await ratioOf("sess-ema-after-2")).toBeCloseTo(stepped, 6);
+    const clampedHook = (await manifests()).find((m) => m.sessionId === "sess-ema-2")!;
+    expect(clampedHook.tokenRatio).toBe(2);
+
+    // Other providers are untouched: claude and codex stay at 1.0.
+    expect(await getTokenRatio("claude")).toBe(1);
+  });
+
+  test("an operator-set ratio applies to worker manifests", async () => {
+    await upsertKv({
+      namespace: TOKEN_RATIO_KV_NAMESPACE,
+      key: tokenRatioKey("codex-operator"),
+      value: 1.3,
+      valueType: "json",
+    });
+    await post({
+      sessionId: "sess-operator",
+      provider: "codex-operator",
+      toolLoading: "none",
+      parts: workerParts,
+    });
+    expect((await manifests()).find((m) => m.sessionId === "sess-operator")!.tokenRatio).toBe(1.3);
+    await upsertKv({
+      namespace: TOKEN_RATIO_KV_NAMESPACE,
+      key: tokenRatioKey("codex-operator"),
+      value: 9,
+      valueType: "json",
+    });
+    expect(await getTokenRatio("codex-operator")).toBe(2);
+  });
+
+  test("harness-hook without harness totals is a 400", async () => {
+    const { harness: _omit, ...body } = hookBody("sess-hook-bad", "pi", 1);
+    expect((await post(body)).status).toBe(400);
+  });
+
+  test("concurrent observations all land in the sample count", async () => {
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) => post(hookBody(`sess-fan-${i}`, "pi-fan", 1100))),
+    );
+    expect(nextTokenRatio(null, 1).samples).toBe(1);
+    const stored = await recordTokenRatio("pi-fan", 1);
+    expect(stored.samples).toBe(9);
   });
 });

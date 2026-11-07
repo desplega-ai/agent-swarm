@@ -152,6 +152,11 @@ export interface ProviderSessionConfig {
    */
   resumeSessionId?: string;
   iteration?: number;
+  /**
+   * The runner's session id, the key of the session's request composition
+   * manifests. Adapters with a payload hook (pi, opencode) post theirs under it.
+   */
+  runnerSessionId?: string;
   logFile: string;
   /** Extra CLI args — used by Claude adapter, ignored by others. */
   additionalArgs?: string[];

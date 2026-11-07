@@ -552,6 +552,17 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models })` (`models` follows `PI_CODEMODE_MODELS`, default off, only with codemode on; the usage of a script's `models.*` calls reaches `getSessionStats()` cost, proven in `src/tests/providers/pi-cost.test.ts`), wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
+## Request composition hooks
+
+Pi and OpenCode post an exact `harness-hook` request composition manifest from the request they are about to send. The shared measurement and reporter live in `src/providers/request-composition-hook.ts`; the server merges the manifest and calibrates the token ratio (see the cost-and-context guide, section "Request composition and cache-hit ratio").
+
+| Provider | Hook | Usage that triggers the post | Notes |
+|---|---|---|---|
+| `pi` | `before_provider_request` in `pi-mono-extension.ts` (reads `event.payload`, returns `undefined` so the payload is unchanged) | next assistant `message_end` (`input + cacheRead + cacheWrite`) | Tool-less requests (compaction summaries) are skipped. Tool groups come from `pi.getAllTools()` namespaces. Do not register `context_with_system`. |
+| `opencode` | the plugin's `context` hook, after the lead's concurrent-context push (`onContext` option) | next `session.step.ended` (`input + cache.read + cache.write`) | Fires on every primary call. Events from other session ids (subagents) are ignored. Tool groups come from the `<server>_` prefix. |
+
+Both post only when the system prompt or tool set changed, and only with a `runnerSessionId` (`ProviderSessionConfig`), which keys the manifest to the worker's own. A failed POST is logged and dropped.
+
 ## Live task steering
 
 `ProviderSession.deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>` is the optional live-input seam. `ProviderTraits.steerModes` advertises the modes an adapter can provide; an absent field means `[]`.
