@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Group header · Round 2 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<style>
+/* sessions shell: tree, tab strip, status bar */
+.shell { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--color-border); }
+.shell-row { flex: 1; min-height: 0; display: flex; }
+.stree { width: 264px; flex: none; display: flex; flex-direction: column; background: var(--color-surface); border-right: 1px solid var(--color-border); }
+.stree-h { height: 40px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--color-border-subtle); }
+.stree-h h2 { margin: 0; flex: 1; font-size: 14px; font-weight: 600; }
+.stree-b { padding: 8px; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
+.stree-b .field { margin-bottom: 6px; background: var(--color-background); }
+.tsec { display: flex; align-items: center; gap: 6px; height: 28px; margin-top: 10px; padding: 0 8px; font-size: var(--text-meta); font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--color-muted-foreground); }
+.tsec .c { margin-left: auto; font-family: var(--font-mono); letter-spacing: 0; }
+.trow { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: var(--radius-md); font-size: 13px; white-space: nowrap; }
+.trow .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.trow .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trow .c { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); }
+.trow.on { background: var(--color-accent); font-weight: 500; }
+.trow:hover { background: var(--color-accent); }
+.trow .ic.star { color: var(--color-primary); }
+.trow .needs { height: 16px; padding: 0 5px; }
+.pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.tabstrip { height: 40px; flex: none; display: flex; align-items: stretch; background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.tab { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; max-width: 240px; font-size: 13px; color: var(--color-muted-foreground); border-right: 1px solid var(--color-border-subtle); white-space: nowrap; }
+.tab .ic { width: 14px; height: 14px; }
+.tab .ic.i-x { width: 12px; height: 12px; opacity: .7; }
+.tab.on { background: var(--color-background); color: var(--color-foreground); font-weight: 500; margin-bottom: -1px; }
+.tab .lab { overflow: hidden; text-overflow: ellipsis; }
+.tabstrip .add { width: 40px; display: grid; place-items: center; color: var(--color-muted-foreground); }
+.sbar { height: 28px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--text-meta); color: var(--color-muted-foreground); }
+.sbar kbd { font-family: var(--font-mono); border: 1px solid var(--color-border); border-radius: 3px; padding: 0 3px; }
+
+/* the group tab */
+.gt { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 12px; }
+.gt-h { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.gt-h h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.gt-h .ic { color: var(--color-muted-foreground); }
+.gt-h .n { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+.gt-h .starb { width: 28px; height: 28px; display: grid; place-items: center; border: 0; background: transparent; border-radius: var(--radius-md); }
+.gt-h .starb:hover { background: var(--color-accent); }
+.gt-h .starb .ic { color: var(--color-primary); }
+.gt-h .key { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+
+/* the strip: one 48px row, segments are buttons */
+.strip { display: flex; align-items: stretch; height: 48px; flex: none; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; }
+.strip.open { border-radius: var(--radius-lg) var(--radius-lg) 0 0; border-bottom-color: var(--color-border-subtle); }
+.sg { display: flex; align-items: center; gap: 8px; padding: 0 16px; border: 0; background: transparent; font-size: 13px; color: var(--color-muted-foreground); white-space: nowrap; position: relative; }
+.sg + .sg, .sg.r { border-left: 1px solid var(--color-border-subtle); }
+.sg .ic { width: 14px; height: 14px; }
+.sg b { color: var(--color-foreground); font-weight: 500; }
+.sg .tnum { font-family: var(--font-mono); font-size: 12px; color: var(--color-foreground); font-variant-numeric: tabular-nums; }
+button.sg:hover { background: var(--color-accent); color: var(--color-foreground); }
+button.sg[aria-expanded="true"] { background: var(--color-background); color: var(--color-foreground); }
+button.sg[aria-expanded="true"]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--color-primary); }
+.sg.run { padding: 0 10px; }
+.split { display: inline-flex; }
+.split .btn { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+.split .btn + .btn { border-radius: 0 var(--radius-md) var(--radius-md) 0; border-left: 0; width: 24px; padding: 0; }
+.sg.ask { flex: 1; min-width: 0; padding: 0 8px; }
+.sg.ask .askf .ic { margin-right: 8px; }
+.sg.ask .askf .ph { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sg.ask .asko { display: none; }
+button.sg.ask[aria-expanded="true"] .asko { display: inline; padding-left: 8px; }
+.sg.ask .askf { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--color-input); border-radius: var(--radius-md); background: var(--color-background); color: var(--color-muted-foreground); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--shadow-xs); }
+html.dark .sg.ask .askf { background: oklch(1 0 0 / 4.5%); }
+button.sg.ask[aria-expanded="true"] .askf { display: none; }
+.sg .chev { width: 14px; height: 14px; margin-left: -2px; transition: transform 150ms var(--ease-snappy); }
+button.sg[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+/* the drawer, attached under the strip */
+.drawer { flex: none; border: 1px solid var(--color-border); border-top: 0; border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: var(--color-background); overflow: hidden; }
+.dbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--color-border-subtle); }
+.dbar .field { width: 280px; }
+.dbar .path { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+.dbar .w-a .ic { width: 12px; height: 12px; margin-left: 4px; }
+.dfoot { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-top: 1px solid var(--color-border-subtle); font-size: 12px; color: var(--color-muted-foreground); }
+.dfoot .sp { flex: 1; }
+.vwrap { position: relative; }
+.vlist { height: 296px; overflow: auto; }
+.vlist .gr.hd { position: sticky; top: 0; z-index: 1; background: var(--color-surface); }
+.vwrap::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(to bottom, transparent, var(--color-background)); pointer-events: none; }
+.sch { --cols: minmax(0, 1.7fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .8fr) 92px 92px; min-height: 36px; }
+.sch .runb { justify-self: end; }
+.sch .runb .rl { display: none; }
+.sch.hov .runb { width: auto; padding: 0 8px; border-color: var(--color-border); background: var(--color-background); box-shadow: var(--shadow-xs); color: var(--color-foreground); }
+.sch.hov .runb .rl { display: inline; }
+.sch .runb { color: var(--color-muted-foreground); }
+.sch mark { background: color-mix(in oklch, var(--color-primary) 25%, transparent); color: inherit; border-radius: 2px; }
+.outs2 { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 340px; }
+.olist { border-right: 1px solid var(--color-border-subtle); overflow: auto; }
+.orow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 44px; padding: 6px 14px; }
+.orow + .orow { border-top: 1px solid var(--color-border-subtle); }
+.orow .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.orow .n { font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orow .who { font-size: var(--text-meta); color: var(--color-muted-foreground); }
+.orow .tm { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); }
+.orow.on { background: var(--color-accent); }
+.orow:hover { background: var(--color-accent); }
+.prev { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.prev-h { display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 12px 0 20px; border-bottom: 1px solid var(--color-border-subtle); }
+.prev-h .n { font-family: var(--font-mono); font-size: 12px; }
+.prev-h .m { font-size: 12px; color: var(--color-muted-foreground); }
+.prev-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; font-size: 13px; line-height: 1.6; max-width: 72ch; }
+.prev-b h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+.prev-b h4 { margin: 14px 0 4px; font-size: 13px; font-weight: 600; }
+.prev-b p { margin: 0 0 8px; color: var(--color-foreground); }
+.prev-b ul { margin: 0 0 8px; padding-left: 18px; }
+.prev-b li + li { margin-top: 2px; }
+.prev-b .mute { color: var(--color-muted-foreground); font-size: 12px; }
+.chat { padding: 12px; }
+.chat .ta { min-height: 76px; padding: 10px 12px; border: 1px solid var(--color-input); border-radius: var(--radius-lg); font-size: 14px; color: var(--color-muted-foreground); background: var(--color-background); box-shadow: var(--shadow-xs); display: flex; flex-direction: column; }
+.chat .ta .tb { margin-top: auto; display: flex; align-items: center; gap: 6px; }
+.chat .ta .tb .sp { flex: 1; }
+.chat .hint { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.chat .hint .btn { font-weight: 400; color: var(--color-muted-foreground); }
+.sendb { width: 28px; height: 28px; border-radius: var(--radius-md); display: grid; place-items: center; background: var(--color-primary); color: var(--color-primary-foreground); border: 0; }
+.sendb .ic { width: 14px; height: 14px; }
+
+/* today's list chrome */
+.lfb { display: flex; align-items: center; gap: 8px; flex: none; }
+.lfb .field { flex: 1; max-width: 384px; min-width: 192px; }
+.sess { --cols: minmax(0, 1fr) 180px 120px 104px 80px; }
+.sess .ttl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sess .ttl .rm { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.sess .ttl .rm.u { background: var(--color-foreground); }
+.sess .ttl .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-muted-foreground); }
+.sess .ttl.u .tx { color: var(--color-foreground); font-weight: 500; }
+.sess .ttl .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.sess .tm { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-muted-foreground); }
+.avs { display: flex; }
+.avs .av { box-shadow: 0 0 0 2px var(--color-background); }
+.avs .av + .av { margin-left: -5px; }
+.st.sm { width: 14px; height: 14px; }
+.pager { display: flex; align-items: center; gap: 8px; height: 32px; flex: none; font-size: 12px; color: var(--color-muted-foreground); }
+.pager .sp { flex: 1; }
+.pager .sel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-foreground); }
+.pager .sel .ic { width: 12px; height: 12px; }
+.av.a1 { background: color-mix(in oklch, var(--color-status-info) 35%, var(--color-muted)); }
+.av.a2 { background: color-mix(in oklch, var(--color-status-success) 35%, var(--color-muted)); }
+
+/* phone */
+.phone .gt { padding: 12px 16px; gap: 10px; overflow: hidden; }
+.phone .strip { height: auto; flex-wrap: wrap; }
+.phone .strip .sg { height: 44px; padding: 0 12px; }
+.phone .strip .sg.sched { flex: 1 1 60%; }
+.phone .strip .sg.run { flex: 0 0 auto; }
+.phone .strip .sg.outs { flex: 0 0 auto; border-left: 0; border-top: 1px solid var(--color-border-subtle); }
+.phone .strip .sg.ask { flex: 1 1 0; min-width: 0; border-top: 1px solid var(--color-border-subtle); }
+.phone .strip .sg.ask { padding: 0 6px; }
+.phone .strip .sg .chev { display: none; }
+.phone .strip .sg.sched { padding-right: 8px; }
+.phone .lfb { flex-direction: column; align-items: stretch; }
+.phone .lfb .field { max-width: none; height: 44px; font-size: 16px; }
+.phone .lfb .seg { height: 44px; }
+.phone .lfb .seg button { flex: 1; justify-content: center; }
+.phone .gt-h .key { display: none; }
+.mrows > * + * { border-top: 1px solid var(--color-border-subtle); }
+.mrow { padding: 10px 2px; }
+.mrow .l1 { display: flex; align-items: center; gap: 8px; }
+.mrow .l1 .t { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); }
+.mrow.u .l1 .t { color: var(--color-foreground); font-weight: 500; }
+.mrow .l1 .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.mrow .l2 { margin-top: 2px; font-size: 12px; color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bsheet.tall { top: 150px; display: flex; flex-direction: column; padding: 8px 0 0; }
+.bsheet.tall.fit { top: auto; padding-bottom: 24px; }
+.bs-h { display: flex; align-items: center; gap: 8px; padding: 0 16px 10px; }
+.bs-h h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.bs-h .n { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+.bs-h .x { margin-left: auto; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--color-muted); }
+.bs-h .x .ic { width: 14px; height: 14px; }
+.bs-s { padding: 0 16px 8px; }
+.bs-s .field { height: 44px; font-size: 16px; }
+.bs-b { flex: 1; min-height: 0; overflow: hidden; padding: 0 16px; }
+.prow { display: flex; align-items: center; gap: 10px; min-height: 56px; }
+.prow + .prow { border-top: 1px solid var(--color-border-subtle); }
+.prow .tx { flex: 1; min-width: 0; }
+.prow .t1 { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .t2 { font-size: 12px; color: var(--color-muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.prow .pb { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--radius-md); border: 1px solid var(--color-border); flex: none; }
+.prow .pb .ic { width: 14px; height: 14px; }
+.prow > .ic { color: var(--color-muted-foreground); }
+.pvw { margin: 4px 0 8px; padding: 12px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); background: var(--color-surface); font-size: 13px; line-height: 1.55; }
+.pvw b { display: block; font-size: 14px; margin-bottom: 4px; }
+.pvw p { margin: 0; color: var(--color-muted-foreground); }
+</style>
+</head>
+<body>
+<header class="x-top" data-page="group"></header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Group header: the compact strip</h1>
+    <p>A use case is a Sessions group. Its header is one 48px strip under the group title: the schedules, a Run now button, the outputs and a way to ask the Lead. A click on a segment opens a drawer under the strip, in the page, not in a modal. The session list under it keeps today's chrome, so the page still reads as a session list first.</p>
+    <ul>
+      <li><b>Scales to 50+ schedules.</b> The strip shows a count and the next run. The drawer has search, a status filter and one row per schedule with its own Run now.</li>
+      <li><b>Outputs</b> are the files under the group key, newest first, with an inline preview. <b>Ask the Lead</b> opens a composer scoped to the group.</li>
+      <li><b>Unchanged:</b> the filter bar (All, Unread, Running, Needs you), the grid columns and the pager.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone frames follow.</p>
+
+  <section class="x-state x-desk">
+    <h2>1. Strip closed (default)</h2>
+    <p class="x-cap">A typical use case: 3 schedules. The list starts 60px lower than today. Click any segment to open its drawer.</p>
+    <div class="app" style="--h: 760px"><nav class="side" data-active="sessions" aria-label="Main navigation, strip closed"></nav><div class="main" data-gframe="none" data-count="3"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>2. Schedules drawer, 50 schedules</h2>
+    <p class="x-cap">A big swarm. The drawer is a fixed-height list that scrolls inside itself, with a sticky header. Search matches names and agents. The row under the pointer shows its Run now label.</p>
+    <div class="app" style="--h: 1010px"><nav class="side" data-active="sessions" aria-label="Main navigation, schedules open"></nav><div class="main" data-gframe="schedules" data-count="50"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>3. Outputs drawer</h2>
+    <p class="x-cap">Files under <span class="mono">shared/competitor-research/</span>, newest first. The first file opens in the preview. Open in Files goes to the full viewer.</p>
+    <div class="app" style="--h: 1010px"><nav class="side" data-active="sessions" aria-label="Main navigation, outputs open"></nav><div class="main" data-gframe="outputs" data-count="3"></div></div>
+  </section>
+
+  <section class="x-state">
+    <h2>Phone</h2>
+    <p class="x-cap">The strip wraps to two rows of 44px targets. A segment opens a bottom sheet over the list.</p>
+    <div class="x-row">
+      <div class="x-col"><h3>Strip closed</h3><div class="phone" data-pframe="none"></div></div>
+      <div class="x-col"><h3>Schedules sheet</h3><div class="phone" data-pframe="schedules"></div></div>
+      <div class="x-col"><h3>Outputs sheet</h3><div class="phone" data-pframe="outputs"></div></div>
+    </div>
+  </section>
+</main>
+
+<script src="./r2-kit.js"></script>
+<script>
+(function () {
+  var I = R2.icon;
+  var KINDS = ["Pricing page diff", "Changelog watch", "Docs diff", "Hiring page scan", "Social mentions"];
+  var CO = ["Linear", "Notion", "Plane", "Height", "Shortcut", "Asana", "ClickUp", "Jira", "Monday", "Trello"];
+  var CAD = ["Mon, Thu 09:00", "Daily 07:30", "Every 6 hours", "Weekdays 18:00", "Sun 20:00", "Hourly"];
+  var NEXT = ["in 2h 14m", "in 3h", "in 5h 40m", "tomorrow 07:30", "Thu 09:00", "in 46m"];
+  var AG = ["Researcher", "Writer", "Researcher", "Reviewer", "Lead"];
+  var SCHED = [["Competitor scan", "Mon, Thu 09:00", "in 2h 14m", "Researcher", true]];
+  KINDS.forEach(function (k, ki) { CO.forEach(function (c, ci) {
+    var n = ki * 10 + ci;
+    SCHED.push([k + ": " + c, CAD[n % 6], NEXT[(n + 1) % 6], AG[(n + ki) % 5], n % 6 !== 4]);
+  }); });
+  SCHED = SCHED.slice(0, 50);
+  var SMALL = [SCHED[0], ["Weekly digest to #market-intel", "Fri 16:00", "Fri 16:00", "Writer", true], ["Pricing page diff: Linear", "Daily 07:30", "tomorrow 07:30", "Researcher", false]];
+
+  var OUTS = [
+    ["report-2026-11-04.md", "Researcher", "2h"], ["digest-2026-11-04.md", "Writer", "2h"], ["report-2026-11-02.md", "Researcher", "2d"],
+    ["pricing-linear-2026-11-02.md", "Researcher", "2d"], ["report-2026-10-30.md", "Researcher", "5d"], ["digest-2026-10-28.md", "Writer", "Oct 28"],
+    ["report-2026-10-27.md", "Researcher", "Oct 27"], ["scope.md", "Lead", "Oct 23"],
+  ];
+  var SESS = [
+    [1, "Competitor scan · manual run", "run", "4m", null],
+    [1, "Competitor scan · manual run", "needs", "2h", null],
+    [0, "Competitor scan · Mon 09:00", "", "2d", null],
+    [0, "Add Linear's pricing page to the scan", "", "3d", "slack"],
+    [0, "Planning: competitor research", "", "5d", null],
+    [0, "Competitor scan · Thu 09:00", "", "6d", null],
+    [0, "Competitor scan · Mon 09:00", "", "Oct 27", null],
+    [0, "Competitor scan · Thu 09:00", "", "Oct 23", null],
+    [0, "Competitor scan · Mon 09:00", "", "Oct 20", null],
+  ];
+
+  function tree() {
+    return '<aside class="stree"><div class="stree-h"><h2>Sessions</h2><button class="btn xs ghost" type="button">' + I("i-history") + 'Legacy sessions</button></div>' +
+      '<div class="stree-b"><span class="field sm">' + I("i-search") + 'Search sessions<kbd>/</kbd></span>' +
+      '<a class="trow" href="#new">' + I("i-plus") + '<span class="lab">New session</span></a>' +
+      '<div class="tsec">My groups<span class="c">5</span></div>' +
+      '<a class="trow on" href="#g1">' + I("i-star-fill star") + '<span class="lab">competitor-research</span><span class="needs">1</span></a>' +
+      '<a class="trow" href="#g2">' + I("i-folder-open") + '<span class="lab">release-notes</span><span class="c">5</span></a>' +
+      '<a class="trow" href="#g3">' + I("i-folder-open") + '<span class="lab">oncall-triage</span><span class="c">8</span></a>' +
+      '<a class="trow" href="#g4">' + I("i-folder-open") + '<span class="lab">ui-e2e</span><span class="c">14</span></a>' +
+      '<a class="trow" href="#g5">' + I("i-message-square") + '<span class="lab">No group</span><span class="c">31</span></a>' +
+      '<div class="tsec">Shared with me<span class="c">1</span></div>' +
+      '<a class="trow" href="#g6">' + I("i-folder-open") + '<span class="lab">design-reviews</span><span class="c">3</span></a>' +
+      "</div></aside>";
+  }
+
+  function strip(open, count, phone) {
+    function seg(id, cls, inner) {
+      return '<button type="button" class="sg ' + cls + '" data-seg="' + id + '" aria-expanded="' + (open === id) + '">' + inner + I("i-chevron-down chev") + "</button>";
+    }
+    return '<div class="strip' + (open !== "none" ? " open" : "") + '">' +
+      seg("schedules", "sched", I("i-clock") + "<b>" + count + " schedules</b><span>next in <span class=\"tnum\">2h 14m</span></span>") +
+      '<div class="sg run"><span class="split"><button class="btn xs" type="button">' + I("i-play") + 'Run now</button><button class="btn xs" type="button" title="Pick a schedule">' + I("i-chevron-down") + "</button></span></div>" +
+      seg("outputs", "outs", I("i-file-text") + "<b>12 outputs</b><span>latest 2h ago</span>") +
+      '<button type="button" class="sg ask r" data-seg="chat" aria-expanded="' + (open === "chat") + '">' + '<span class="askf">' + I("i-message-circle") + '<span class="ph">' + (phone ? "Ask the Lead" : "Ask the Lead about this use case") + '</span></span>'  + '<b class="asko">Ask the Lead</b></button></div>';
+  }
+
+  function hl(name, q) { if (!q) return name; var i = name.toLowerCase().indexOf(q.toLowerCase()); return i < 0 ? name : name.slice(0, i) + "<mark>" + name.slice(i, i + q.length) + "</mark>" + name.slice(i + q.length); }
+
+  function schedDrawer(count) {
+    var rows = (count > 3 ? SCHED : SMALL);
+    var h = '<div class="dbar"><span class="field sm">' + I("i-search") + "Search " + count + ' schedules</span><button class="btn xs" type="button">' + I("i-filter") + 'All states</button><span class="sp"></span>' +
+      '<a class="w-a" href="#/schedules">Open in Schedules' + I("i-external") + '</a><button class="btn xs" type="button">' + I("i-plus") + "New schedule</button></div>";
+    h += '<div class="vwrap"><div class="vlist"><div class="gr hd sch"><span>Name</span><span>Runs</span><span>Next run</span><span>Agent</span><span>Status</span><span></span></div>';
+    rows.forEach(function (s, i) {
+      h += '<div class="gr sch' + (i === 2 ? " hov" : "") + '"><span>' + s[0] + '</span><span class="dim">' + s[1] + '</span><span class="dim">' + (s[4] ? s[2] : "Paused") + '</span><span class="dim">' + s[3] + "</span>" +
+        "<span>" + (s[4] ? '<span class="dchip ok">Enabled</span>' : '<span class="dchip">Paused</span>') + "</span>" +
+        '<button class="btn xs ghost runb" type="button" title="Run now">' + I("i-play") + '<span class="rl">Run now</span></button></div>';
+    });
+    h += "</div></div>";
+    var on = rows.filter(function (s) { return s[4]; }).length;
+    h += '<div class="dfoot"><span>' + rows.length + " schedules · " + on + " enabled · " + (rows.length - on) + ' paused</span><span class="sp"></span><span>Sorted by next run</span></div>';
+    return h;
+  }
+
+  function outDrawer() {
+    var h = '<div class="dbar"><span class="path">shared/competitor-research/</span><span class="field sm">' + I("i-search") + 'Search 12 outputs</span><span class="sp"></span><a class="w-a" href="#/file">Open in Files' + I("i-external") + "</a></div>";
+    h += '<div class="outs2"><div class="olist">' + OUTS.map(function (o, i) {
+      return '<a class="orow' + (i === 0 ? " on" : "") + '" href="#o' + i + '">' + I("i-file-text") + '<span><span class="n">' + o[0] + '</span><br><span class="who">' + o[1] + '</span></span><span class="tm">' + o[2] + "</span></a>";
+    }).join("") + "</div>";
+    h += '<div class="prev"><div class="prev-h"><span class="n">report-2026-11-04.md</span><span class="m">Researcher · 2h ago · 3.1 KB</span><span class="sp"></span><button class="btn xs" type="button">Open</button></div>' +
+      '<div class="prev-b"><h3>Competitor scan, Tuesday 4 November</h3><p class="mute">Manual run, asked by Taras in Slack #market-intel.</p>' +
+      "<h4>What changed</h4><ul><li><b>Linear</b> raised the Business plan from $14 to $16 per seat. The free tier keeps 250 issues.</li><li><b>Plane</b> shipped time tracking in its open-source edition.</li><li><b>Height</b> removed the public roadmap page.</li></ul>" +
+      "<h4>Worth a look</h4><p>Two of three competitors now bundle an AI agent with the paid plan. Linear calls it Triage Intelligence and limits it to Business.</p>" +
+      "<h4>Next</h4><p>The digest for #market-intel is waiting for approval. The next scheduled scan is Thursday at 09:00.</p></div></div></div>";
+    return h;
+  }
+
+  function chatDrawer() {
+    return '<div class="chat"><div class="ta">Ask the Lead about competitor-research…<div class="tb"><button class="btn xs ghost" type="button">' + I("i-plus") + 'Attach an output</button><span class="sp"></span><span class="meta muted">Starts a session in this group</span><button class="sendb" type="button" aria-label="Send">' + I("i-arrow-up") + "</button></div></div>" +
+      '<div class="hint"><button class="btn xs" type="button">Add a competitor to the scan</button><button class="btn xs" type="button">Move the scan to Mondays only</button><button class="btn xs" type="button">Summarize the last 3 reports</button></div></div>';
+  }
+
+  function list() {
+    var h = '<div class="lfb"><span class="field">' + I("i-search") + 'Search this group</span><div class="seg" role="radiogroup" aria-label="Show">' +
+      '<button type="button" role="radio" aria-checked="true">All</button><button type="button" role="radio" aria-checked="false">Unread</button><button type="button" role="radio" aria-checked="false">Running</button><button type="button" role="radio" aria-checked="false">Needs you</button></div></div>';
+    h += '<div class="grid"><div class="gr hd sess"><span>Title</span><span>Group</span><span>People</span><span>Activity</span><span>Time</span></div>';
+    SESS.forEach(function (s) {
+      var act = s[2] === "run" ? '<span class="st runn sm" title="Running"></span>' : s[2] === "needs" ? '<span class="needs">Needs you</span>' : "";
+      h += '<div class="gr sess"><span class="ttl' + (s[0] ? " u" : "") + '"><span class="rm' + (s[0] ? " u" : "") + '"></span>' + (s[4] ? I("i-message-circle") : "") + '<span class="tx">' + s[1] + '</span></span><span class="dim">competitor-research</span>' +
+        '<span><span class="avs"><span class="av a1">R</span>' + (s[4] || s[1].indexOf("Planning") === 0 ? '<span class="av a2">L</span>' : "") + "</span></span><span>" + act + '</span><span class="tm">' + s[3] + "</span></div>";
+    });
+    h += '</div><div class="pager"><span>1–12 of 12</span><span class="sp"></span><span>Rows per page</span><span class="sel">50' + I("i-chevron-down") + '</span><button class="btn xs sq" type="button" disabled aria-label="Previous page">' + I("i-chevron-right flip") + '</button><button class="btn xs sq" type="button" disabled aria-label="Next page">' + I("i-chevron-right") + "</button></div>";
+    return h;
+  }
+
+  function desk(main, open) {
+    var count = +main.getAttribute("data-count");
+    var drawer = open === "schedules" ? schedDrawer(count) : open === "outputs" ? outDrawer() : open === "chat" ? chatDrawer() : "";
+    main.innerHTML = '<div class="topbar"><div class="crumbs">Sessions' + I("i-chevron-right") + '<b>competitor-research</b></div><span class="sp"></span><span class="search">' + I("i-search") + 'Search or jump to<kbd>⌘K</kbd></span><span class="me">TY</span></div>' +
+      '<div class="shell"><div class="shell-row">' + tree() + '<section class="pane"><div class="tabstrip"><span class="tab on">' + I("i-folder-open") + '<span class="lab">competitor-research</span>' + I("i-x") + '</span><span class="tab">' + I("i-message-square") + '<span class="lab">Fix flaky e2e in ui-e2e</span>' + I("i-x") + '</span><span class="add">' + I("i-plus") + "</span></div>" +
+      '<div class="gt"><div class="gt-h">' + I("i-folder-open") + '<h2>competitor-research</h2><span class="n">12</span><button class="starb" type="button" aria-label="Unstar group" title="Starred: shows on Home">' + I("i-star-fill") + '</button><span class="key">shared/competitor-research/</span></div>' +
+      '<div class="hdr">' + strip(open, count) + (drawer ? '<div class="drawer">' + drawer + "</div>" : "") + "</div>" + list() + "</div></section></div>" +
+      '<div class="sbar"><span><kbd>/</kbd> search</span><span><kbd>?</kbd> keys</span><span class="sp"></span><span>2 tabs</span></div></div>';
+    main.querySelectorAll("button.sg").forEach(function (b) {
+      b.addEventListener("click", function () { var s = b.getAttribute("data-seg"); desk(main, open === s ? "none" : s); });
+    });
+  }
+
+  function phone(el, open) {
+    var h = '<div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>' +
+      '<div class="ptop">' + I("i-menu") + '<span class="crumbs">Sessions' + I("i-chevron-right") + '<b>competitor-research</b></span></div>';
+    h += '<div class="gt"><div class="gt-h">' + I("i-folder-open") + '<h2>competitor-research</h2><span class="n">12</span><button class="starb" type="button" aria-label="Unstar group">' + I("i-star-fill") + "</button></div>" + strip("none", 3, true);
+    h += '<div class="lfb"><span class="field">' + I("i-search") + 'Search this group</span><div class="seg" role="radiogroup" aria-label="Show"><button type="button" role="radio" aria-checked="true">All</button><button type="button" role="radio" aria-checked="false">Unread</button><button type="button" role="radio" aria-checked="false">Running</button><button type="button" role="radio" aria-checked="false">Needs you</button></div></div>';
+    h += '<div class="mrows">' + SESS.slice(0, 6).map(function (s) {
+      var act = s[2] === "run" ? '<span class="st runn sm"></span>' : s[2] === "needs" ? '<span class="needs">Needs you</span>' : "";
+      return '<div class="mrow' + (s[0] ? " u" : "") + '"><div class="l1"><span class="t">' + s[1] + "</span>" + act + I("i-chevron-right") + '</div><div class="l2">Researcher · ' + s[3] + "</div></div>";
+    }).join("") + "</div></div>";
+    if (open === "schedules") {
+      h += '<div class="scrim"></div><div class="bsheet tall fit"><div class="grab"></div><div class="bs-h"><h3>Schedules</h3><span class="n">3</span><button class="x" type="button" aria-label="Close">' + I("i-x") + "</button></div>" +
+        '<div class="bs-s"><span class="field">' + I("i-search") + "Search 3 schedules</span></div><div class=\"bs-b\">" + SMALL.map(function (s) {
+          return '<div class="prow"><div class="tx"><div class="t1">' + s[0] + '</div><div class="t2">' + (s[4] ? '<span class="dchip ok">Enabled</span>' : '<span class="dchip">Paused</span>') + s[1] + "</div></div>" +
+            '<button class="pb" type="button" aria-label="Run ' + s[0] + ' now">' + I("i-play") + "</button></div>";
+        }).join("") + '<div class="prow"><div class="tx"><div class="t2">Next run: Competitor scan, in 2h 14m</div></div></div></div></div>';
+    }
+    if (open === "outputs") {
+      h += '<div class="scrim"></div><div class="bsheet tall"><div class="grab"></div><div class="bs-h"><h3>Outputs</h3><span class="n">12</span><button class="x" type="button" aria-label="Close">' + I("i-x") + "</button></div>" +
+        '<div class="bs-s"><span class="field">' + I("i-search") + 'Search 12 outputs</span></div><div class="bs-b">' +
+        '<div class="prow">' + I("i-file-text") + '<div class="tx"><div class="t1 mono">report-2026-11-04.md</div><div class="t2">Researcher · 2h ago</div></div>' + I("i-chevron-down") + "</div>" +
+        '<div class="pvw"><b>Competitor scan, Tuesday 4 November</b><p>Linear raised the Business plan to $16 per seat. Plane shipped time tracking. Height removed its public roadmap.</p></div>' +
+        OUTS.slice(1, 5).map(function (o) { return '<div class="prow">' + I("i-file-text") + '<div class="tx"><div class="t1 mono">' + o[0] + '</div><div class="t2">' + o[1] + " · " + o[2] + "</div></div>" + I("i-chevron-right") + "</div>"; }).join("") + "</div></div>";
+    }
+    el.innerHTML = h;
+  }
+
+  document.querySelectorAll("[data-gframe]").forEach(function (m) { desk(m, m.getAttribute("data-gframe")); });
+  document.querySelectorAll("[data-pframe]").forEach(function (p) { phone(p, p.getAttribute("data-pframe")); });
+})();
+</script>
+</body>
+</html>

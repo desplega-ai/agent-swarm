@@ -45,6 +45,7 @@ import { useSessionsFilter } from "@/lib/sessions-show";
 import { sidebarListParams, userName } from "@/lib/sessions-v2";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "./group-crumb-icon";
+import { GroupTabStar } from "./group-tab-star";
 import { ActivityMark, activityOf, shortAgo } from "./sidebar/session-row";
 import { ReadMark, UNREAD_TITLE } from "./sidebar/tree-row";
 import { sectionTab } from "./tabs/tab-info";
@@ -273,21 +274,24 @@ function GroupList({
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col gap-3 px-5 pt-4 pb-3", className)}>
-      <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
-        {SectionIcon ? (
-          <SectionIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <GroupCrumbIcon
-            groupKey={view}
-            noGroup={false}
-            className="size-4 text-muted-foreground"
-          />
-        )}
-        <span className="truncate">{title}</span>
-        <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
-          {list.data ? total : ""}
-        </span>
-      </h2>
+      <div className="flex min-w-0 items-center gap-1">
+        <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
+          {SectionIcon ? (
+            <SectionIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <GroupCrumbIcon
+              groupKey={view}
+              noGroup={false}
+              className="size-4 text-muted-foreground"
+            />
+          )}
+          <span className="truncate">{title}</span>
+          <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
+            {list.data ? total : ""}
+          </span>
+        </h2>
+        <GroupTabStar groupKey={section ? null : view} />
+      </div>
       <ListFilterBar
         searchValue={text}
         onSearchChange={setText}

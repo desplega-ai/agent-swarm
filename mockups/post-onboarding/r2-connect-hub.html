@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect hub · Round 2 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<style>
+.hub-head { display: flex; align-items: center; gap: 12px; margin: 8px 0 16px; }
+.hub-head .field { width: 280px; height: 36px; margin-left: auto; }
+.body.scroll { overflow: auto; }
+.more-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--color-muted-foreground); }
+.more-row .names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.sec { margin-top: 28px; }
+details.sec + details.sec { margin-top: 0; }
+summary.sec-h { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 2px; border-top: 1px solid var(--color-border); list-style: none; }
+summary.sec-h::-webkit-details-marker { display: none; }
+summary.sec-h > .ic.i-chevron-right { width: 14px; height: 14px; color: var(--color-muted-foreground); transition: transform 150ms var(--ease-snappy); }
+details[open] > summary.sec-h > .ic.i-chevron-right { transform: rotate(90deg); }
+summary.sec-h h3 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+summary.sec-h .n { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+summary.sec-h .d { font-size: 13px; color: var(--color-muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+summary.sec-h .btn { margin-left: auto; }
+details.sec[open] { padding-bottom: 16px; }
+.conn { --cols: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 96px 120px 24px; }
+.conn .mono { font-size: 12px; }
+.conn .ic.i-more { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.phone .hub-head { flex-direction: column; align-items: stretch; margin: 0 0 12px; gap: 10px; }
+.phone .hub-head .field { width: 100%; margin: 0; height: 44px; font-size: 16px; }
+.phone .conn { --cols: minmax(0, 1fr) auto; }
+.phone .conn .hp-hide { display: none; }
+.phone summary.sec-h .d { display: none; }
+.phone .more-row { flex-wrap: wrap; }
+.phone .pbody { padding: 12px 16px 24px; }
+</style>
+</head>
+<body>
+<header class="x-top" data-page="connect"></header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Connect hub: Channels, Tools, AI providers</h1>
+    <p>One page at <span class="mono">/integrations</span> with three tabs that carry the same names as the sidebar entries. Every provider is one card with the same anatomy: mark, name, one-line purpose, status chip, then a footer with the detail and one action.</p>
+    <ul>
+      <li><b>No subtitle, no page title.</b> The breadcrumb names the tab. The search filters the cards of the open tab.</li>
+      <li><b>Color only for state.</b> Status is a dot chip. Every card action is an outline button, so a column of unconnected tools does not turn orange.</li>
+      <li><b>Tools</b> keeps Script connections and MCP servers as collapsible sections under the grid. <b>AI providers</b> puts the keys and an inline add-key row in the card.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone frames follow.</p>
+
+  <section class="x-state x-desk">
+    <h2>Tools tab</h2>
+    <p class="x-cap">Opened from Connect, Tools in the sidebar or from a checklist link (<span class="mono">?tab=tools</span>). Connected tools sort first. Script connections is open, MCP servers is closed.</p>
+    <div class="app" style="--h: 960px">
+      <nav class="side" data-active="tools" aria-label="Main navigation, Tools tab"></nav>
+      <div class="main"><div class="topbar"><div class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b data-crumb>Tools</b></div><span class="sp"></span><span class="search"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<kbd>⌘K</kbd></span><span class="me">TY</span></div>
+        <div class="body scroll" data-hub="tools"></div></div>
+    </div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>AI providers tab</h2>
+    <p class="x-cap">Keys and health in one card per provider. The chip sums up the keys. Add a key in place: the card checks it and shows the result on the new row.</p>
+    <div class="app" style="--h: 620px">
+      <nav class="side" data-active="ai" aria-label="Main navigation, AI providers tab"></nav>
+      <div class="main"><div class="topbar"><div class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b data-crumb>AI providers</b></div><span class="sp"></span><span class="search"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<kbd>⌘K</kbd></span><span class="me">TY</span></div>
+        <div class="body scroll" data-hub="ai"></div></div>
+    </div>
+  </section>
+
+  <section class="x-state">
+    <h2>Phone</h2>
+    <p class="x-cap">The tabs take the full width, the search is 44px tall, and the cards stack. Grid rows drop to name and status.</p>
+    <div class="x-row">
+      <div class="x-col"><h3>Tools</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+          <div class="ptop"><span class="ic i-menu" aria-hidden="true"></span><span class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b data-crumb>Tools</b></span><span class="sp"></span><span class="me">TY</span></div>
+          <div class="pbody" data-hub="tools"></div></div></div>
+      <div class="x-col"><h3>AI providers</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+          <div class="ptop"><span class="ic i-menu" aria-hidden="true"></span><span class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b data-crumb>AI providers</b></span><span class="sp"></span><span class="me">TY</span></div>
+          <div class="pbody" data-hub="ai"></div></div></div>
+      <div class="x-col"><h3>Channels (checklist deep link)</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+          <div class="ptop"><span class="ic i-menu" aria-hidden="true"></span><span class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b data-crumb>Channels</b></span><span class="sp"></span><span class="me">TY</span></div>
+          <div class="pbody" data-hub="channels"></div></div></div>
+    </div>
+  </section>
+</main>
+
+<template id="t-channels">
+  <div class="pcs">
+    <article class="pc"><div class="pc-h"><span class="mark">S</span><div><h3>Slack</h3><p>The swarm answers in channels and threads.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">Socket mode · #market-intel, #eng, #ops</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">T</span><div><h3>Telegram</h3><p>Talk to the Lead from a Telegram bot.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Bot token from BotFather</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">D</span><div><h3>Discord</h3><p>Mention the bot in a server channel.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Application ID and bot token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">T</span><div><h3>Microsoft Teams</h3><p>Chat with the swarm in Teams channels.</p></div><span class="tag">Beta</span></div><div class="pc-f"><span class="m">Azure bot registration</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">W</span><div><h3>WhatsApp</h3><p>Message the Lead through a Kapso number.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Kapso API key</span><button class="btn xs" type="button">Connect</button></div></article>
+  </div>
+</template>
+
+<template id="t-tools">
+  <div class="pcs">
+    <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitHub</h3><p>Repositories, pull requests and issues for coding agents.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">GitHub App · 2 script connections</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">L</span><div><h3>Linear</h3><p>Pick up issues and post status updates back.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">OAuth · 1 script connection</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">M</span><div><h3>Gmail</h3><p>Read and send mail from a connected account.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">OAuth · taras@acme.dev</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">A</span><div><h3>agent-fs</h3><p>The shared drive where agents keep results and files.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">Drive default · 214 files</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">J</span><div><h3>Jira</h3><p>Sync tickets with your Jira site.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">OAuth, about 2 minutes</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitLab</h3><p>Merge requests and pipelines for coding agents.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Personal or group token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">O</span><div><h3>Microsoft 365</h3><p>Outlook mail and calendar for a work account.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">OAuth app required</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">S</span><div><h3>Sentry</h3><p>Let agents read issues and stack traces.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Auth token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">B</span><div><h3>Bitbucket</h3><p>Repositories and pull requests on Bitbucket Cloud.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">App password</span><button class="btn xs" type="button">Connect</button></div></article>
+  </div>
+  <div class="more-row"><button class="btn xs ghost" type="button"><span class="ic i-chevron-down" aria-hidden="true"></span>Show 5 more</button><span class="names">Attio, AgentMail, Composio, Serply, Search Console</span></div>
+
+  <details class="sec" open>
+    <summary class="sec-h"><span class="ic i-chevron-right" aria-hidden="true"></span><h3>Script connections</h3><span class="n">4</span><span class="d">Credentials your scripts call through the broker. Scripts never see the secret.</span><button class="btn xs" type="button"><span class="ic i-plus" aria-hidden="true"></span>New connection</button></summary>
+    <div class="grid conn">
+      <div class="gr hd"><span>Name</span><span>Provider</span><span class="hp-hide">Auth</span><span class="hp-hide">Used by</span><span>Status</span><span class="hp-hide"></span></div>
+      <div class="gr"><span class="mono">github-acme</span><span class="dim">GitHub</span><span class="dim hp-hide">OAuth app, org</span><span class="dim hp-hide">6 scripts</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+      <div class="gr"><span class="mono">github-readonly</span><span class="dim">GitHub</span><span class="dim hp-hide">Token</span><span class="dim hp-hide">2 scripts</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+      <div class="gr"><span class="mono">gmail-taras</span><span class="dim">Gmail</span><span class="dim hp-hide">OAuth, user</span><span class="dim hp-hide">1 script</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+      <div class="gr"><span class="mono">pricing-scraper</span><span class="dim">Custom HTTP</span><span class="dim hp-hide">API key</span><span class="dim hp-hide">1 script</span><span><span class="dchip warn">Expires in 3d</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    </div>
+  </details>
+  <details class="sec">
+    <summary class="sec-h"><span class="ic i-chevron-right" aria-hidden="true"></span><h3>MCP servers</h3><span class="n">2</span><span class="d">Extra tools that every agent can call.</span><button class="btn xs" type="button"><span class="ic i-plus" aria-hidden="true"></span>Add server</button></summary>
+    <div class="grid conn">
+      <div class="gr hd"><span>Name</span><span>Transport</span><span class="hp-hide">Scope</span><span class="hp-hide">Tools</span><span>Status</span><span class="hp-hide"></span></div>
+      <div class="gr"><span class="mono">playwright</span><span class="dim">stdio</span><span class="dim hp-hide">All agents</span><span class="dim hp-hide">21 tools</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+      <div class="gr"><span class="mono">context7</span><span class="dim">HTTP</span><span class="dim hp-hide">All agents</span><span class="dim hp-hide">2 tools</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    </div>
+  </details>
+</template>
+
+<template id="t-ai">
+  <div class="pcs">
+    <article class="pc"><div class="pc-h"><span class="mark">A</span><div><h3>Anthropic</h3><p>Claude models for Claude Code and pi agents.</p></div><span class="dchip warn">1 rate limited</span></div>
+      <div class="pc-k">
+        <div class="k"><span class="dot"></span><span class="nm">team-max<span class="mono">sk-ant-…a91f</span></span><span class="u">42% of week</span></div>
+        <div class="k"><span class="dot warn"></span><span class="nm">taras-backup<span class="mono">sk-ant-…77c2</span></span><span class="u warn">Limited, 12m</span></div>
+      </div>
+      <div class="pc-add"><span class="field sm"><span class="ic i-key" aria-hidden="true"></span>Paste an Anthropic key</span><button class="btn xs" type="button">Add key</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">O</span><div><h3>OpenRouter</h3><p>One key for many model vendors.</p></div><span class="dchip ok">Healthy</span></div>
+      <div class="pc-k">
+        <div class="k"><span class="dot"></span><span class="nm">default<span class="mono">sk-or-…3e0b</span></span><span class="u">$41.20 this week</span></div>
+      </div>
+      <div class="pc-add"><span class="field sm"><span class="ic i-key" aria-hidden="true"></span>Paste an OpenRouter key</span><button class="btn xs" type="button">Add key</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">C</span><div><h3>Codex</h3><p>Sign in with a ChatGPT plan for Codex agents.</p></div><span class="dchip ok">Signed in</span></div>
+      <div class="pc-k">
+        <div class="k"><span class="dot"></span><span class="nm">taras@acme.dev<span class="mono">Pro</span></span><span class="u">Refreshed 1h ago</span></div>
+      </div>
+      <div class="pc-add"><button class="btn xs" type="button"><span class="ic i-plus" aria-hidden="true"></span>Sign in another account</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">O</span><div><h3>OpenAI</h3><p>GPT models and embeddings for memory search.</p></div><span class="dchip">No key</span></div>
+      <p class="pc-empty">Memory search falls back to local embeddings until a key is added.</p>
+      <div class="pc-add"><span class="field sm"><span class="ic i-key" aria-hidden="true"></span>Paste an OpenAI key</span><button class="btn xs" type="button">Add key</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>Google Gemini</h3><p>Gemini models for Gemini CLI agents.</p></div><span class="dchip">No key</span></div>
+      <p class="pc-empty">No Gemini agents yet.</p>
+      <div class="pc-add"><span class="field sm"><span class="ic i-key" aria-hidden="true"></span>Paste a Gemini key</span><button class="btn xs" type="button">Add key</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">B</span><div><h3>AWS Bedrock</h3><p>Claude models through your own AWS account.</p></div><span class="dchip">No key</span></div>
+      <p class="pc-empty">Needs a region, an access key ID and a secret.</p>
+      <div class="pc-add"><span class="field sm"><span class="ic i-key" aria-hidden="true"></span>Access key ID</span><button class="btn xs" type="button">Set up</button></div></article>
+  </div>
+</template>
+
+<script src="./r2-kit.js"></script>
+<script>
+(function () {
+  var TABS = [["channels", "i-message-circle", "Channels"], ["tools", "i-wrench", "Tools"], ["ai", "i-cpu", "AI providers"]];
+  var SEARCH = { channels: "Search channels", tools: "Search tools", ai: "Search providers" };
+  function render(host, tab) {
+    var frame = host.closest(".app, .phone");
+    var head = '<div class="hub-head"><div class="tabs2" role="tablist" aria-label="Connect">' + TABS.map(function (t) {
+      return '<button type="button" role="tab" data-tab="' + t[0] + '" aria-selected="' + (t[0] === tab) + '">' + R2.icon(t[1]) + t[2] +
+        (t[0] === "ai" ? '<span class="tdot" title="1 key is rate limited"></span>' : "") + "</button>";
+    }).join("") + '</div><span class="field sm"><span class="ic i-search" aria-hidden="true"></span>' + SEARCH[tab] + "</span></div>";
+    host.innerHTML = head;
+    host.appendChild(document.getElementById("t-" + tab).content.cloneNode(true));
+    var crumb = frame.querySelector("[data-crumb]");
+    if (crumb) crumb.textContent = TABS.filter(function (t) { return t[0] === tab; })[0][2];
+    var side = frame.querySelector("nav.side");
+    if (side) side.querySelectorAll(".ni").forEach(function (a) {
+      var on = a.getAttribute("href").indexOf("tab=" + (tab === "ai" ? "ai-providers" : tab)) > -1;
+      a.classList.toggle("on", on);
+      if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+    host.querySelectorAll("[role=tab]").forEach(function (b) {
+      b.addEventListener("click", function () { render(host, b.getAttribute("data-tab")); });
+    });
+  }
+  document.querySelectorAll("[data-hub]").forEach(function (h) { render(h, h.getAttribute("data-hub")); });
+})();
+</script>
+</body>
+</html>

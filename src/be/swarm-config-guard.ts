@@ -193,6 +193,14 @@ export const SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS = [
   "cloudflare",
 ] as const;
 
+/**
+ * Extraction hosts `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_EXTRACT_PROVIDER_IDS`
+ * in `src/workflows/executors/system-one-providers.ts`, listed here because that
+ * module's credential readers would pull the LLM stack into every `db.ts` import.
+ * A test keeps the two lists equal.
+ */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS = ["cloudflare"] as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -453,6 +461,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ),
   // Where people-facing file links point. Blank keeps the automatic choice.
   ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
+  // Dashboard origin(s), comma-separated; the first is the link base.
+  APP_URL: (value) => {
+    const invalid =
+      "Invalid APP_URL (must be comma-separated http(s) URLs with no query string or fragment, e.g. https://app.example.com)";
+    if (typeof value !== "string") return invalid;
+    const entries = value.split(",").map((entry) => entry.trim());
+    if (value.trim() && entries.some((entry) => !entry)) return invalid;
+    return entries.some((entry) => validateHttpBaseUrl(entry, invalid)) ? invalid : null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -478,6 +495,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
   },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
+  ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
+    ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
+  ]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {

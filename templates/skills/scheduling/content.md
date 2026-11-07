@@ -41,6 +41,33 @@ The template is the whole task the agent receives. It must state:
 
 Tasks created by a schedule are automatic tasks. Their completed output is not stored as memory unless the agent calls `store-progress` with `persistMemory: true`.
 
+## Use cases: one key for the schedule and its results
+
+A recurring job that a person comes back to is a use case. Its planning session, the schedule, the runs, pages, and result files share one asset key, so the dashboard shows them as one Sessions group.
+
+- The key is `shared/<slug>/`, or `personal/<user>/<slug>/` for private work. Agree the short slug with the requester, for example `shared/competitor-watch/`.
+- `create-schedule` and `create-page` use the key of the calling task when that key is a use-case group. Otherwise pass `key` explicitly. Runs get the schedule's key.
+- The task template tells each run to write its result under the key in the shared drive, for example `shared/competitor-watch/report-<YYYY-MM-DD>.md`, and to compare with the earlier reports in that folder.
+- End the planning reply with the "lives in" line: `This use case lives in Sessions → competitor-watch: <APP_URL>/sessions?view=shared/competitor-watch/`.
+
+### One-time ask or lasting change
+
+In a use-case session, decide what the request changes:
+
+- A request for one time only ("also check Acme today"): a normal task in the key. Do not change the schedule.
+- A request that changes the future runs ("from now on also include pricing"): change the schedule. Read the current template with `list-schedules` (`key` is the use-case key), then call `update-schedule` with the full new `taskTemplate`:
+
+```
+update-schedule { scheduleId: "<id>", taskTemplate: "Research the 5 competitors in shared/competitor-watch/competitors.md. Include their pricing. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report." }
+```
+
+Then show the change as a `diff` block in your reply, and ask the requester to confirm it:
+
+```diff
+- Research the 5 competitors in shared/competitor-watch/competitors.md. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report.
++ Research the 5 competitors in shared/competitor-watch/competitors.md. Include their pricing. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report.
+```
+
 ## Check back later
 
 A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt`, a `summary` of what you did so far, and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The task reaches its final state (`completed`) on this call, and the `summary` becomes its output. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.

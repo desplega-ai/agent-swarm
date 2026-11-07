@@ -45,6 +45,12 @@ export interface OAuthPreset {
   extraParams?: Record<string, string>;
   /** Operator-facing quirk notes surfaced in pickers + the creation response. */
   setupHints: string[];
+  /**
+   * Leave this preset out of the "add" pickers. The provider has one
+   * canonical flow elsewhere (Linear and Jira: their tracker integration
+   * page). Lookups by id still resolve, so existing rows keep working.
+   */
+  hiddenInCatalog?: boolean;
 }
 
 /**
@@ -139,6 +145,7 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
   },
   {
     id: "jira",
+    hiddenInCatalog: true,
     displayName: "Jira (Atlassian)",
     provider: "jira",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -158,6 +165,7 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
   },
   {
     id: "linear",
+    hiddenInCatalog: true,
     displayName: "Linear",
     provider: "linear",
     authorizeUrl: "https://linear.app/oauth/authorize",

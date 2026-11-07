@@ -13,13 +13,7 @@ import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { isOnboardingFinished, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useApiVersion } from "@/api/hooks/use-stats";
 import { useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
-import type {
-  MilestoneId,
-  ProviderName,
-  SetupMilestone,
-  StatusHealth,
-  StatusResponse,
-} from "@/api/types";
+import type { ProviderName, StatusHealth, StatusResponse } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BorderBeam } from "@/components/shared/border-beam";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
@@ -40,6 +34,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { type FailingCheck, failingChecks } from "@/lib/setup-checks";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import {
@@ -70,42 +65,6 @@ const TARGET_NOTE: Record<WorkerTarget, string> = {
   docker: "Replace your-api-key with the swarm API key. MCP_BASE_URL must reach this API.",
   kubernetes: "Release, namespace and values file as in the Kubernetes guide.",
 };
-
-interface FailingCheck {
-  /** A setup milestone, or `lead`: no lead can take work (`activity.leads_ready`). */
-  milestone: Omit<SetupMilestone, "id"> & { id: MilestoneId | "lead" };
-  /** `true` turns the badge red: no task can run. */
-  blocks: boolean;
-}
-
-/** The checks behind a red or amber badge, by the rules of `computeHealth` in src/http/status.ts. */
-function failingChecks({ setup, activity }: StatusResponse): FailingCheck[] {
-  const checks = setup.flatMap((milestone): FailingCheck[] => {
-    const { id, state } = milestone;
-    if ((id === "harness" || id === "workers") && state === "unverified") {
-      return [{ milestone, blocks: true }];
-    }
-    if (["harness", "slack", "github", "linear", "jira"].includes(id) && state === "configured") {
-      return [{ milestone, blocks: false }];
-    }
-    return [];
-  });
-  // With no agents at all, the workers check already says it.
-  const noAgents = setup.some((m) => m.id === "workers" && m.state === "unverified");
-  if (activity.leads_ready === 0 && !noAgents) {
-    checks.push({
-      milestone: {
-        id: "lead",
-        label: "No lead online",
-        state: "unverified",
-        hint: "Start the lead. New tasks wait until it is online.",
-        action_url: "/agents",
-      },
-      blocks: false,
-    });
-  }
-  return checks;
-}
 
 export function HealthBadge({
   status,

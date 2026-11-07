@@ -82,6 +82,20 @@ async function favorites(ctx: ScenarioContext, userId: string) {
     "The favorite survived unfavoriting",
   );
 
+  // A starred Sessions group: the id is stored as the normalized asset key.
+  const groupKey = `shared/core-group-${ctx.nonce}/`;
+  response = await put(true, {}, `Shared/core-group-${ctx.nonce}`, "key");
+  expectStatus(response, [200], "operator stars a group key");
+  expect(asRecord(response.json).itemId === groupKey, `Key favorite id ${response.text}`);
+  response = await ctx.api("GET", "/api/favorites?itemType=key");
+  expect(
+    (asRecord(response.json).favoriteIds as string[]).includes(groupKey),
+    `The key favorite is missing: ${response.text}`,
+  );
+  response = await put(false, {}, groupKey, "key");
+  expectStatus(response, [200], "operator unstars a group key");
+  expectStatus(await put(true, {}, "elsewhere/x/", "key"), [400], "invalid group key");
+
   expectStatus(
     await ctx.api("PUT", "/api/favorites", {
       body: { itemType: "dashboard", itemId: "x", favorite: true },

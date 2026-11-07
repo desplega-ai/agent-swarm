@@ -24,7 +24,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
-import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { resolveTaskAuditUserId, resolveTaskGroupKey } from "@/be/audit-user";
+import { fileCallerSessionIntoGroup } from "@/be/caller-session-group";
 import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
 import { getPageEditCounter } from "@/be/db/page-versions";
 import { classAttributeValues, countColorLiterals } from "@/pages/color-literals";
@@ -101,7 +102,7 @@ export const registerCreatePageTool = (server: McpServer) => {
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         key: AssetKeySchema.optional().describe(
-          "Logical namespace. Defaults to a shared/page:<id>/ resource key.",
+          "Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key.",
         ),
         title: z.string().min(1).describe("Human-readable title shown in listings."),
         slug: z
@@ -174,6 +175,7 @@ export const registerCreatePageTool = (server: McpServer) => {
         colorLiteralCount: z.number().optional(),
         usesDesignSystem: z.boolean().optional(),
         lightOnlyColors: z.boolean().optional(),
+        movedSessionRootId: z.string().optional(),
       }),
     },
     async (input, requestInfo, _meta) => {
@@ -211,7 +213,11 @@ export const registerCreatePageTool = (server: McpServer) => {
       let assetKey: string | undefined;
       try {
         if (input.key !== undefined || !existing) {
-          assetKey = input.key ? await authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
+          const resolvedKey =
+            input.key ?? (await resolveTaskGroupKey(requestInfo.sourceTaskId, requestInfo.agentId));
+          assetKey = resolvedKey
+            ? await authorizeAssetKeyWrite(resolvedKey, trustedUserId)
+            : undefined;
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -303,12 +309,22 @@ export const registerCreatePageTool = (server: McpServer) => {
             }
           : {};
       const { ignored } = themeFields;
+      const movedSessionRootId =
+        input.key !== undefined && assetKey
+          ? await fileCallerSessionIntoGroup({
+              sourceTaskId: requestInfo.sourceTaskId,
+              agentId: requestInfo.agentId,
+              key: assetKey,
+              changedBy: trustedUserId ?? undefined,
+            })
+          : null;
 
       return toolOk(
         `Page "${input.title}" saved (slug=${finalSlug}, version=${version}, designVersion=${fresh.designVersion}).` +
           (ignored.length > 0
             ? " Some theme tokens were ignored (outside the page token contract or referencing a variable outside it)."
-            : ""),
+            : "") +
+          (movedSessionRootId ? ` This session moved into ${assetKey}.` : ""),
         {
           details:
             `API: ${apiUrl}\n  App: ${appUrl}` +
@@ -323,6 +339,7 @@ export const registerCreatePageTool = (server: McpServer) => {
             designVersion: fresh.designVersion,
             ...(ignored.length > 0 ? { ignoredTokens: ignored } : {}),
             ...designFlags,
+            ...(movedSessionRootId ? { movedSessionRootId } : {}),
           },
         },
       );

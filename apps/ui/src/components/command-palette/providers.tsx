@@ -336,7 +336,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProvider> = {
         title: server.name,
         detail: server.transport,
         keywords: [server.description ?? ""],
-        href: `/mcp-servers/${server.id}`,
+        href: `/integrations/tools/mcp-servers/${server.id}`,
       }),
     ),
   },
