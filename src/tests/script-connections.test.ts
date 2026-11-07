@@ -695,6 +695,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "284_model_profile_fallbacks.sql");
       // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
       markMigrationApplied(database, "293_savings_component_links.sql");
+      // 301 references model_profiles (made by the skipped 220) and alters
+      // scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "301_model_groups.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

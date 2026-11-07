@@ -14,6 +14,7 @@ import {
   createModelProfile,
   deleteModelProfile,
   getModelProfileByName,
+  isModelNameTakenError,
   listModelProfiles,
   MAX_MODEL_PROFILE_FALLBACKS,
   modelProfileFallbacksError,
@@ -74,7 +75,7 @@ const createProfile = route({
   pattern: ["api", "model-profiles"],
   summary: "Create a model profile",
   description:
-    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
+    "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. The name may not be a model group's (one name space; 409). Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   body: z.object({
@@ -91,7 +92,7 @@ const createProfile = route({
     201: { description: "Profile created", schema: ModelProfileSchema },
     400: { description: "Validation error" },
     403: { description: "Forbidden" },
-    409: { description: "A profile with that name exists" },
+    409: { description: "A profile or model group with that name exists" },
   },
 });
 
@@ -127,7 +128,7 @@ const deleteProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Delete a model profile",
   description:
-    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, a model group lists it as a member, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -266,13 +267,27 @@ export async function handleModelProfiles(
     const userId = await resolveHttpAuditUserId(req, myAgentId);
     // The fallback graph check and the write share one transaction, so two
     // concurrent saves cannot each pass and together form a cycle.
-    const outcome = await getDbClient().transaction(async () => {
-      const fallbackError = body.fallbacks
-        ? await modelProfileFallbacksError(body.name, body.harness, body.fallbacks)
-        : null;
-      if (fallbackError) return { error: fallbackError };
-      return { created: await createModelProfile(body, { userId }) };
-    });
+    const outcome = await getDbClient()
+      .transaction(async () => {
+        const fallbackError = body.fallbacks
+          ? await modelProfileFallbacksError(body.name, body.harness, body.fallbacks)
+          : null;
+        if (fallbackError) return { error: fallbackError };
+        return { created: await createModelProfile(body, { userId }) };
+      })
+      .catch((error: unknown) => {
+        // Migration 301's trigger: a model group has this name.
+        if (isModelNameTakenError(error)) return { nameTaken: true as const };
+        throw error;
+      });
+    if ("nameTaken" in outcome) {
+      jsonError(
+        res,
+        `"${body.name}" is a model group; profiles and groups share one name space.`,
+        409,
+      );
+      return true;
+    }
     if (typeof outcome.error === "string") {
       jsonError(res, outcome.error, 400);
       return true;
@@ -350,13 +365,15 @@ export async function handleModelProfiles(
       refs.agentIds.length > 0 ||
       refs.openTaskCount > 0 ||
       refs.scheduleIds.length > 0 ||
-      refs.fallbackOf.length > 0
+      refs.fallbackOf.length > 0 ||
+      refs.groups.length > 0
     ) {
       const schedules = refs.scheduleIds.length > 0 ? ` (${refs.scheduleIds.join(", ")})` : "";
       const fallbackOf = refs.fallbackOf.length > 0 ? ` (${refs.fallbackOf.join(", ")})` : "";
+      const groups = refs.groups.length > 0 ? ` (${refs.groups.join(", ")})` : "";
       jsonError(
         res,
-        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), held by ${refs.openTaskCount} unfinished or awaiting-resume task(s), named by ${refs.scheduleIds.length} schedule(s)${schedules}, a fallback of ${refs.fallbackOf.length} profile(s)${fallbackOf}.`,
+        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), held by ${refs.openTaskCount} unfinished or awaiting-resume task(s), named by ${refs.scheduleIds.length} schedule(s)${schedules}, a fallback of ${refs.fallbackOf.length} profile(s)${fallbackOf}, a member of ${refs.groups.length} model group(s)${groups}.`,
         409,
       );
       return true;
@@ -367,7 +384,7 @@ export async function handleModelProfiles(
     if (outcome === "in-use") {
       jsonError(
         res,
-        `"${current.name}" is in use by a task, a schedule, an agent default or a fallback list written just now.`,
+        `"${current.name}" is in use by a task, a schedule, an agent default, a fallback list or a model group written just now.`,
         409,
       );
       return true;
