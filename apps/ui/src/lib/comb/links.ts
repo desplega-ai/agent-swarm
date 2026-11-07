@@ -17,6 +17,7 @@
 // Keep this module dependency-free (types only), so shared renderers such as
 // `MarkdownView` can use it without loading Comb.
 
+import type { AutoConnectOutcome } from "../../components/comb/connect-flow";
 import type { AgentFsState } from "../agent-fs/state";
 import type { DrivePath } from "./paths";
 
@@ -27,9 +28,21 @@ const ID_RE = /^[\w-]+$/;
 /** A "." or ".." path segment in any spelling (`%2e`), ended by "/", "\", or the end. */
 const DOT_SEGMENT_RE = /(?:^|[/\\])(?:\.|%2e){1,2}(?=[/\\]|$)/i;
 
-/** Comb links open in the same tab only when the human is connected. */
-export function isCombNavigable(state: AgentFsState): boolean {
-  return state === "ready";
+/**
+ * Comb links open in the same tab while Comb can show the file: connected, or
+ * about to be (`loading`, and `needs-connect` / `invalid-key` while the
+ * browser mints its own key). `disabled` and `unreachable` keep the link's
+ * own target. So do `needs-connect` / `invalid-key` once this page load's
+ * automatic connect settled without a key (`autoConnect`: unsupported,
+ * pending, or failed), because Comb would only show the paste-key card.
+ */
+export function isCombNavigable(
+  state: AgentFsState,
+  autoConnect: AutoConnectOutcome | null = null,
+): boolean {
+  if (state === "ready" || state === "loading") return true;
+  if (state !== "needs-connect" && state !== "invalid-key") return false;
+  return autoConnect === null || autoConnect.kind === "connected";
 }
 
 function parseUrl(value: string, base?: string): URL | null {
@@ -136,17 +149,19 @@ export function combPathForLink(
 }
 
 /**
- * The Comb route for a link while Comb is connected (`ready`). Null in every
- * other state, so the link keeps its target (a new tab). While Comb is loading
- * the link stays too: a click never goes to Comb before the key is checked.
+ * The Comb route for a link while Comb is navigable ({@link isCombNavigable}).
+ * Null otherwise, so the link keeps its target (a new tab).
  */
 export function combLinkFor(
   state: AgentFsState,
   liveUrl: string | null | undefined,
   appOrigin: string,
   href: string | null | undefined,
+  autoConnect: AutoConnectOutcome | null = null,
 ): string | null {
-  return isCombNavigable(state) && href ? combPathForLink(href, { liveUrl, appOrigin }) : null;
+  return isCombNavigable(state, autoConnect) && href
+    ? combPathForLink(href, { liveUrl, appOrigin })
+    : null;
 }
 
 /**

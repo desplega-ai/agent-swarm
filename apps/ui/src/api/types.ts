@@ -778,6 +778,8 @@ export interface ChatSdkAdapterStatus {
   enabled: boolean;
   /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
   health: "ok" | "error" | "disabled" | "incomplete";
+  /** `configured && enabled && health === "ok"`. Absent from APIs before Connect › Channels. */
+  connected?: boolean;
   error?: string;
   webhookUrl: string;
   mode?: string;
@@ -1082,7 +1084,7 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path";
+export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
 
 export interface UserFavorite {
   id: string;
@@ -1105,6 +1107,56 @@ export interface FavoriteSetResponse {
   itemType: FavoriteItemType;
   itemId: string;
   row?: UserFavorite | null;
+}
+
+/** Post-onboarding checklist. Mirrors `ChecklistItemSchema` in `src/types.ts`. */
+export type ChecklistScope = "swarm" | "user";
+export type ChecklistKind = "channel" | "tool" | "use_case" | "custom";
+export type ChecklistStatus = "open" | "done" | "removed";
+export type ChecklistAction = "remove" | "restore" | "done" | "reorder";
+
+export interface ChecklistItem {
+  id: string;
+  scope: ChecklistScope;
+  userId: string | null;
+  kind: ChecklistKind;
+  label: string;
+  href: string | null;
+  meta: Record<string, unknown> | null;
+  sortOrder: number;
+  status: ChecklistStatus;
+  statusChangedAt: string | null;
+  statusChangedBy: string | null;
+  statusChangedByName: string | null;
+  statusReason: string | null;
+  nudgedAt: string | null;
+  nudgedTaskId: string | null;
+  /** Null for custom items: they have no signal. */
+  signal: boolean | null;
+  /** `status === "done"` or the signal is true. */
+  done: boolean;
+  editable: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface ChecklistResponse {
+  items: ChecklistItem[];
+  canEditSwarm: boolean;
+}
+
+export interface ChecklistAddRequest {
+  kind: ChecklistKind;
+  label: string;
+  scope: ChecklistScope;
+  href?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface ChecklistUpdateRequest {
+  action: ChecklistAction;
+  reason?: string;
+  sortOrder?: number;
 }
 
 /**
@@ -2511,6 +2563,8 @@ export interface OAuthPreset {
   requiresRefreshTokenRotation?: boolean;
   extraParams?: Record<string, string>;
   setupHints: string[];
+  /** Left out of the "add" pickers (Linear, Jira: use their integration page). */
+  hiddenInCatalog?: boolean;
 }
 
 export interface UpsertOAuthAppResult {
@@ -2809,7 +2863,11 @@ export type ApprovalRequestSummary = Omit<
   | "approvals"
   | "resolutionReason"
   | "notificationChannels"
-> & { questionCount: number };
+> & {
+  questionCount: number;
+  /** Pending rows only: the viewer may answer (server rule of the respond route). */
+  viewerCanRespond?: boolean;
+};
 
 export interface ApprovalRequestSummariesResponse {
   approvalRequests: ApprovalRequestSummary[];
@@ -3011,6 +3069,8 @@ export interface McpServer {
   version: number;
   createdAt: string;
   lastUpdatedAt: string;
+  /** Agents with an active install. Set by the list route only. */
+  installCount?: number;
 }
 
 export type McpOAuthStatus = "connected" | "expired" | "error" | "revoked";
@@ -3574,14 +3634,11 @@ export interface StatusActivity {
 
 /** Comb, the agent-fs review space in the dashboard (`/file`). */
 export interface StatusComb {
-  /**
-   * Files is on: `AGENT_FS_API_URL` is set and `COMB_ENABLED` is not `false`,
-   * and (when `COMB_ENABLED` is unset) a browser can reach agent-fs.
-   */
+  /** Files is on: `AGENT_FS_API_URL` is set and `COMB_ENABLED` is not `false`. */
   enabled: boolean;
   /** What is missing while Files is off. Null when on. Absent on older APIs. */
   reason?: string | null;
-  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else `AGENT_FS_API_URL`). */
+  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else the API's `/agentfs` proxy). */
   api_url: string | null;
   /** agent-fs live UI host, for "Open in agent-fs" links. */
   live_url: string;
@@ -3593,6 +3650,31 @@ export interface StatusComb {
    * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
    */
   service_user_id?: string | null;
+}
+
+/**
+ * `GET /api/fs/me`: the current swarm user's agent-fs account. The dashboard
+ * takes the identity of a minted key from here, because a minted key is
+ * scoped to the shared org.
+ */
+export interface FsMeResponse {
+  status: "ready" | "pending" | "off" | "unsupported";
+  agentFsUserId?: string;
+  email?: string;
+  displayName?: string;
+  orgId?: string;
+  driveId?: string;
+  reason?: string;
+}
+
+/** `POST /api/fs/keys`: a named agent-fs key for this browser, returned once. */
+export interface MintedFsKey {
+  apiKey: string;
+  keyId: string;
+  label: string;
+  agentFsUserId: string;
+  orgId: string;
+  driveId: string;
 }
 
 /** Why "Send to swarm" left a comment out (`POST /api/comb/review-batches`). */

@@ -155,6 +155,7 @@ interface StatusBody {
     configured: boolean;
     enabled: boolean;
     health: string;
+    connected: boolean;
     error?: string;
     webhookUrl: string;
     mode?: string;
@@ -179,20 +180,27 @@ describe("GET /api/integrations/chat/status", () => {
     expect(byName.telegram).toMatchObject({
       configured: true,
       health: "ok",
+      connected: true,
       mode: "webhook",
       webhookUrl: `${PUBLIC_URL}/api/integrations/chat/telegram/webhook`,
     });
     expect(byName.telegram?.error).toBeUndefined();
 
-    expect(byName.slack).toMatchObject({ configured: true, health: "error", mode: "socket" });
+    expect(byName.slack).toMatchObject({
+      configured: true,
+      health: "error",
+      connected: false,
+      mode: "socket",
+    });
     expect(byName.slack?.error).toContain("invalid_auth");
 
     expect(byName.discord).toMatchObject({
       configured: false,
       health: "disabled",
+      connected: false,
       webhookUrl: `${PUBLIC_URL}/api/integrations/chat/discord/webhook`,
     });
-    expect(byName.teams).toMatchObject({ configured: false, health: "disabled" });
+    expect(byName.teams).toMatchObject({ configured: false, health: "disabled", connected: false });
   });
 
   test("flags the Slack clash when SLACK_DISABLE is not true", async () => {
@@ -275,7 +283,12 @@ describe("GET /api/integrations/chat/status", () => {
       async () => {
         const body = await getStatus();
         const entry = body.adapters.find((a) => a.name === "discord");
-        expect(entry).toMatchObject({ configured: true, enabled: false, health: "disabled" });
+        expect(entry).toMatchObject({
+          configured: true,
+          enabled: false,
+          health: "disabled",
+          connected: false,
+        });
         expect(entry?.error).toContain("configuration is kept");
         expect(body.adapters.find((a) => a.name === "telegram")?.enabled).toBe(true);
       },

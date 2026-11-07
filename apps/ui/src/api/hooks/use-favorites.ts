@@ -16,6 +16,8 @@ const ENTITY_QUERY_KEYS: Record<FavoriteItemType, string[]> = {
   schedule: ["scheduled-tasks", "scheduled-task"],
   // Comb pins: no entity list carries a favorite flag.
   "agent-fs-path": [],
+  // Starred Sessions groups: read from the favorites list only.
+  key: [],
 };
 
 /**
@@ -117,4 +119,30 @@ export function favoriteToggleOptions(queryClient: QueryClient, itemType: Favori
 export function useFavoriteToggle(itemType: FavoriteItemType) {
   const queryClient = useQueryClient();
   return useMutation(favoriteToggleOptions(queryClient, itemType));
+}
+
+/**
+ * The star of a Sessions group (a `key` favorite). Every star reads one
+ * shared list of `key` favorites. While a toggle is in flight the star shows
+ * the new state, and a failed toggle toasts. `null` (no group) reads nothing.
+ */
+export function useKeyFavorite(groupKey: string | null) {
+  const list = useFavorites("key", undefined, { enabled: groupKey !== null });
+  const toggle = useFavoriteToggle("key");
+  const pending = toggle.isPending && toggle.variables?.itemId === groupKey;
+  const favorite = pending
+    ? Boolean(toggle.variables?.favorite)
+    : groupKey !== null && (list.data?.favoriteIds.includes(groupKey) ?? false);
+  return {
+    favorite,
+    disabled: groupKey === null || !list.data,
+    toggle: () => {
+      if (groupKey === null) return;
+      const next = !favorite;
+      toggle.mutate(
+        { itemId: groupKey, favorite: next },
+        { onError: () => toast.error(next ? "Could not star." : "Could not unstar.") },
+      );
+    },
+  };
 }

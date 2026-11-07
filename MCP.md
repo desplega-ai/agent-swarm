@@ -1123,7 +1123,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/schedule:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key, so the planning session, the schedule and its runs share one key. |
 | `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
 | `targetType` | `agent-task \| workflow \| script` | No | "agent-task" | Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; use 'script' + scriptName/scriptArgs when it only runs a catalog script; use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script. |
@@ -1985,7 +1985,7 @@ Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are u
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/page:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key. |
 | `title` | `string` | Yes | - | Human-readable title shown in listings. |
 | `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
 | `body` | `string` | Yes | - | Full page body (HTML document, SVG image, or JSON-render spec, per contentType). |

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Group header C · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<style>
+.gc { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; height: 100%; min-height: 0; }
+.gc-list { display: flex; flex-direction: column; min-height: 0; }
+.gc-list .scrollarea { flex: 1; min-height: 0; overflow: auto; }
+.gc-list .dock { flex: none; padding-top: 10px; }
+.gc-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.rail { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; padding-top: 4px; }
+.rail .card-h { padding-bottom: 6px; }
+.rail .lbl { flex: 1; }
+.app .content.flush { padding-bottom: 16px; overflow: hidden; }
+.quick { display: flex; gap: 6px; margin: 10px 0 12px; }
+.quick button, .quick a { flex: 1; display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); font-size: 12px; min-width: 0; }
+.quick .x { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone .gtitle { flex-wrap: wrap; }
+.phone .gtitle .gname { font-size: 16px; }
+.phone .gtitle .key { display: none; }
+</style>
+</head>
+<body>
+<header class="chrome">
+  <span class="badge">Post-onboarding · step-16</span>
+  <h1>Group header <span>· C · right rail beside the list, chat at the bottom</span></h1>
+  <span class="sp"></span>
+  <a class="back" href="./index.html">All variants</a>
+  <button class="theme-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="page">
+  <div class="lede">
+    <div><b>Idea</b>The session list keeps its full height. Schedule and Outputs live in a 300px right rail (the detail-page rail pattern). The chat box docks at the bottom of the list, like a conversation you add to.</div>
+    <div><b>Trade-off</b>Best use of a wide screen and the list never moves. But it narrows the list on laptops, collides with the Sessions split view (a third column), and on phone the rail has to turn into chips plus a sheet.</div>
+  </div>
+  <p class="narrow-note">Desktop states are hidden on narrow screens. Widen the window to see them.</p>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>rail open</em> · chat docked under the list</h2>
+    <div class="desk"><div class="app">
+      <nav class="sb" aria-label="Main navigation, mockup 1"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav" href="#home" title="Home"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav on" href="#sessions" title="Sessions" aria-current="page"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><a class="nav" href="#connect" title="Connect"><span class="ic i-plug" aria-hidden="true"></span><span class="lab">Connect</span></a></div><details class="grp"><summary class="grp-l"><span class="ic i-chevron-right" aria-hidden="true"></span>Build<span class="cnt">8</span></summary><a class="nav" href="#agents" title="Agents"><span class="ic i-bot" aria-hidden="true"></span><span class="lab">Agents</span></a><a class="nav" href="#schedules" title="Schedules"><span class="ic i-clock" aria-hidden="true"></span><span class="lab">Schedules</span></a><a class="nav" href="#workflows" title="Workflows"><span class="ic i-workflow" aria-hidden="true"></span><span class="lab">Workflows</span></a><a class="nav" href="#scripts" title="Scripts"><span class="ic i-file-code" aria-hidden="true"></span><span class="lab">Scripts</span></a><a class="nav" href="#skills" title="Skills"><span class="ic i-book-open" aria-hidden="true"></span><span class="lab">Skills</span></a><a class="nav" href="#templates" title="Templates"><span class="ic i-file-text" aria-hidden="true"></span><span class="lab">Templates</span></a><a class="nav" href="#memory" title="Memory"><span class="ic i-database" aria-hidden="true"></span><span class="lab">Memory</span></a><a class="nav" href="#tasks" title="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span><span class="lab">Tasks</span></a></details></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb">Sessions <span class="ic i-chevron-right" aria-hidden="true"></span> <b>competitor-research</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content flush">
+        <div class="gc">
+          <div class="gc-list">
+            <div class="gc-head"><span class="gtitle"><button class="btn ghost xs sq" type="button" aria-label="Unstar use case"><span class="ic i-star-fill star" aria-hidden="true"></span></button><strong class="gname">competitor-research</strong><span class="key">shared/competitor-research/</span><span class="m">· 12 sessions · 1 running</span></span>
+</div>
+            <div class="fbar"><button class="f on" type="button">All <span class="n">12</span></button><button class="f" type="button">Unread <span class="n">2</span></button><button class="f" type="button">Running <span class="n">1</span></button><button class="f" type="button">Needs you <span class="n">1</span></button><span class="sp"></span><button class="btn ghost sq" type="button" aria-label="Search"><span class="ic i-search" aria-hidden="true"></span></button><button class="btn ghost xs fbtn" type="button"><span class="ic i-filter" aria-hidden="true"></span><span class="fl">Filters</span></button></div>
+
+            <div class="scrollarea"><div class="srows">
+  <div class="srow"><span class="st runn"></span><div><div class="t shimmer">Competitor scan · manual run</div><div class="s">Researcher · reading plane.so/changelog</div></div><div class="r"><span class="tag run">Running</span>4m</div></div>
+  <div class="srow unread"><span class="st need">!</span><div><div class="t">Competitor scan · manual run</div><div class="s">Wrote report-2026-11-04.md · waiting for approval to post the digest</div></div><div class="r"><span class="tag pend">Needs you</span>2h</div></div>
+  <div class="srow unread"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Mon 09:00</div><div class="s">Wrote report-2026-11-02.md · posted digest to #market-intel</div></div><div class="r">2d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Add Linear's pricing page to the scan</div><div class="s">From Slack #market-intel · Lead updated the schedule</div></div><div class="r">3d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Planning: competitor research</div><div class="s">Lead · created the schedule and the folder</div></div><div class="r">5d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Thu 09:00</div><div class="s">Wrote report-2026-10-29.md</div></div><div class="r">6d</div></div>
+  <div class="older">6 older sessions</div>
+</div>
+</div>
+            <div class="dock"><div class="composer"><span class="ph">Ask the Lead about this use case…</span><button class="btn xs primary" type="button">Send <span class="ic i-send" aria-hidden="true"></span></button></div></div>
+          </div>
+          <aside class="rail" aria-label="Use case details">
+            <section class="card"><div class="card-h"><span class="lbl">Schedule</span><button class="btn xs primary" type="button"><span class="ic i-play" aria-hidden="true"></span>Run now</button></div><div class="card-b"><div class="sched">
+  <div class="nm">Competitor scan · Mon &amp; Thu 09:00</div>
+  <div class="ln"><span>Next run <b>Thu 09:00</b> · in 22h</span><span class="tag ok">Enabled</span><span>Researcher</span></div>
+  <details class="tpl"><summary><span class="ic i-chevron-right" aria-hidden="true"></span><span class="nw">Template (read-only)</span> · <a class="link" href="#schedule">/schedules/8f3c2a1e</a></summary>
+    <div class="tplb surface">Scan the pricing and changelog pages of Linear, Height and Plane.
+Write the report to shared/competitor-research/report-&lt;date&gt;.md.
+Ask before you post a 5-line digest to #market-intel.
+agent: Researcher · tier: regular</div>
+  </details>
+</div>
+</div></section>
+            <section class="card"><div class="card-h"><span class="lbl">Outputs</span><a class="link" href="#files">Open in Files <span class="ic i-arrow-right" aria-hidden="true"></span></a></div><div class="card-b"><div class="outs">
+  <a class="out" href="#o1"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-11-04.md</span><span class="w"><span class="who">Researcher · </span>2h ago</span></a>
+  <a class="out" href="#o2"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-11-02.md</span><span class="w"><span class="who">Researcher · </span>2d ago</span></a>
+  <a class="out" href="#o3"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-10-29.md</span><span class="w"><span class="who">Researcher · </span>6d ago</span></a>
+</div>
+</div></section>
+            <section class="card"><div class="card-h"><span class="lbl">Related</span></div><div class="card-b rows">
+              <div class="row"><span class="ic i-globe muted" aria-hidden="true"></span><span class="t">Weekly competitor digest</span><span class="m">page</span></div>
+              <div class="row"><span class="ic i-bot muted" aria-hidden="true"></span><span class="t">Researcher</span><span class="m">agent</span></div>
+            </div></section>
+          </aside>
+        </div>
+      </div></div>
+    </div></div>
+  </section>
+
+  <section class="state">
+    <h2>Phone · <em>rail becomes two chips</em> that open a sheet · chat docked at the bottom</h2>
+    <div class="phones">
+      <div class="phone-col"><h3>Group open</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb">Sessions <span class="ic i-chevron-right" aria-hidden="true"></span> <b>competitor-research</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody">
+            <span class="gtitle"><button class="btn ghost xs sq" type="button" aria-label="Unstar use case"><span class="ic i-star-fill star" aria-hidden="true"></span></button><strong class="gname">competitor-research</strong><span class="key">shared/competitor-research/</span><span class="m">· 12 sessions · 1 running</span></span>
+
+            <div class="quick"><button type="button"><span class="ic i-clock muted" aria-hidden="true"></span><span class="x">Thu 09:00 · in 22h</span></button><button type="button"><span class="ic i-file-text muted" aria-hidden="true"></span><span class="x">3 outputs · 2h</span></button></div>
+            <div class="fbar"><button class="f on" type="button">All <span class="n">12</span></button><button class="f" type="button">Unread <span class="n">2</span></button><button class="f" type="button">Running <span class="n">1</span></button><button class="f" type="button">Needs you <span class="n">1</span></button><span class="sp"></span><button class="btn ghost sq" type="button" aria-label="Search"><span class="ic i-search" aria-hidden="true"></span></button><button class="btn ghost xs fbtn" type="button"><span class="ic i-filter" aria-hidden="true"></span><span class="fl">Filters</span></button></div>
+
+            <div class="srows">
+  <div class="srow"><span class="st runn"></span><div><div class="t shimmer">Competitor scan · manual run</div><div class="s">Researcher · reading plane.so/changelog</div></div><div class="r"><span class="tag run">Running</span>4m</div></div>
+  <div class="srow unread"><span class="st need">!</span><div><div class="t">Competitor scan · manual run</div><div class="s">Wrote report-2026-11-04.md · waiting for approval to post the digest</div></div><div class="r"><span class="tag pend">Needs you</span>2h</div></div>
+  <div class="srow unread"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Mon 09:00</div><div class="s">Wrote report-2026-11-02.md · posted digest to #market-intel</div></div><div class="r">2d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Add Linear's pricing page to the scan</div><div class="s">From Slack #market-intel · Lead updated the schedule</div></div><div class="r">3d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Planning: competitor research</div><div class="s">Lead · created the schedule and the folder</div></div><div class="r">5d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Thu 09:00</div><div class="s">Wrote report-2026-10-29.md</div></div><div class="r">6d</div></div>
+  <div class="older">6 older sessions</div>
+</div>
+
+          </div>
+          <div class="pfoot"><div class="composer"><span class="ph">Ask the Lead about this use case…</span><button class="btn xs primary sq" type="button" aria-label="Send"><span class="ic i-send" aria-hidden="true"></span></button></div></div>
+        </div>
+      </div>
+      <div class="phone-col"><h3>Schedule chip tapped: bottom sheet</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb">Sessions <span class="ic i-chevron-right" aria-hidden="true"></span> <b>competitor-research</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody">
+            <span class="gtitle"><button class="btn ghost xs sq" type="button" aria-label="Unstar use case"><span class="ic i-star-fill star" aria-hidden="true"></span></button><strong class="gname">competitor-research</strong><span class="key">shared/competitor-research/</span><span class="m">· 12 sessions · 1 running</span></span>
+
+            <div class="quick"><button type="button"><span class="ic i-clock muted" aria-hidden="true"></span><span class="x">Thu 09:00 · in 22h</span></button><button type="button"><span class="ic i-file-text muted" aria-hidden="true"></span><span class="x">3 outputs · 2h</span></button></div>
+            <div class="srows">
+  <div class="srow"><span class="st runn"></span><div><div class="t shimmer">Competitor scan · manual run</div><div class="s">Researcher · reading plane.so/changelog</div></div><div class="r"><span class="tag run">Running</span>4m</div></div>
+  <div class="srow unread"><span class="st need">!</span><div><div class="t">Competitor scan · manual run</div><div class="s">Wrote report-2026-11-04.md · waiting for approval to post the digest</div></div><div class="r"><span class="tag pend">Needs you</span>2h</div></div>
+  <div class="srow unread"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Mon 09:00</div><div class="s">Wrote report-2026-11-02.md · posted digest to #market-intel</div></div><div class="r">2d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Add Linear's pricing page to the scan</div><div class="s">From Slack #market-intel · Lead updated the schedule</div></div><div class="r">3d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Planning: competitor research</div><div class="s">Lead · created the schedule and the folder</div></div><div class="r">5d</div></div>
+  <div class="srow"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><div><div class="t">Competitor scan · Thu 09:00</div><div class="s">Wrote report-2026-10-29.md</div></div><div class="r">6d</div></div>
+  <div class="older">6 older sessions</div>
+</div>
+
+          </div>
+          <div class="scrim"></div>
+          <div class="bsheet"><div class="grab"></div>
+            <div class="u-hrow"><span class="lbl">Schedule</span><span class="sp"></span><button class="btn xs primary" type="button"><span class="ic i-play" aria-hidden="true"></span>Run now</button></div>
+            <div class="sched">
+  <div class="nm">Competitor scan · Mon &amp; Thu 09:00</div>
+  <div class="ln"><span>Next run <b>Thu 09:00</b> · in 22h</span><span class="tag ok">Enabled</span><span>Researcher</span></div>
+  <details class="tpl"><summary><span class="ic i-chevron-right" aria-hidden="true"></span><span class="nw">Template (read-only)</span> · <a class="link" href="#schedule">/schedules/8f3c2a1e</a></summary>
+    <div class="tplb surface">Scan the pricing and changelog pages of Linear, Height and Plane.
+Write the report to shared/competitor-research/report-&lt;date&gt;.md.
+Ask before you post a 5-line digest to #market-intel.
+agent: Researcher · tier: regular</div>
+  </details>
+</div>
+
+            <div class="u-mlbl lbl">Outputs</div>
+            <div class="outs">
+  <a class="out" href="#o1"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-11-04.md</span><span class="w"><span class="who">Researcher · </span>2h ago</span></a>
+  <a class="out" href="#o2"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-11-02.md</span><span class="w"><span class="who">Researcher · </span>2d ago</span></a>
+  <a class="out" href="#o3"><span class="ic i-file-text" aria-hidden="true"></span><span class="n">report-2026-10-29.md</span><span class="w"><span class="who">Researcher · </span>6d ago</span></a>
+</div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("theme");
+  var q = new URLSearchParams(location.search).get("theme"), t = "light";
+  try { t = q || localStorage.getItem("swarmMock") || "light"; } catch (e) { t = q || "light"; }
+  function set(v) {
+    t = v; root.classList.toggle("dark", v === "dark"); root.setAttribute("data-theme", v);
+    btn.innerHTML = '<span class="ic i-' + (v === "dark" ? "sun" : "moon") + '" aria-hidden="true"></span>';
+    try { localStorage.setItem("swarmMock", v); } catch (e) { /* file:// without storage */ }
+  }
+  set(t);
+  btn.addEventListener("click", function () { set(t === "dark" ? "light" : "dark"); });
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    list.querySelectorAll("[role=tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        list.querySelectorAll("[role=tab]").forEach(function (o) {
+          var on = o === tab; o.setAttribute("aria-selected", String(on));
+          document.getElementById(o.getAttribute("aria-controls")).hidden = !on;
+        });
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

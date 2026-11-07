@@ -2,16 +2,12 @@ import { AlertCircle, ArrowUpRight, FolderOpen, RotateCw } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { StatusProvider } from "@/app/status-context";
-import { PasteKeyForm } from "@/components/comb/connect-card";
-import {
-  type ConnectOutcome,
-  connectWithKey,
-  createAndConnect,
-} from "@/components/comb/connect-flow";
+import { AGENT_FS_UPGRADE_HINT, PasteKeyForm } from "@/components/comb/connect-card";
+import { connectWithKey } from "@/components/comb/connect-flow";
+import { useAutoConnect } from "@/components/comb/use-auto-connect";
 import { useConnectFlowDeps } from "@/components/comb/use-connect-flow-deps";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { setupStepHref } from "@/components/onboarding/step-status";
-import { CopyButton } from "@/components/shared/copy-button";
 import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -23,16 +19,6 @@ import type { StepProps } from "../step-contract";
 import { CombPreview } from "./files/comb-preview";
 
 type FilesMethod = "created" | "connected";
-
-type Phase =
-  | { kind: "idle" }
-  | { kind: "running" }
-  | { kind: "done" }
-  // Register answered 409: the email has an account, so the person pastes its key.
-  | { kind: "email-taken" }
-  // A fresh key that could not finish. agent-fs shows it once.
-  | { kind: "new-key"; apiKey: string; message: string }
-  | { kind: "failed"; message: string };
 
 /**
  * `/setup` runs outside the app shell, so it has neither the `/status`
@@ -54,35 +40,35 @@ function isForbidden(err: unknown): boolean {
 }
 
 /**
- * Files: create the person's agent-fs account with their step 1 email and
- * connect this browser to Comb. Runs Comb's own flow (`createAndConnect`)
- * once, with no click: register, invite to the swarm drive, save the key.
+ * Files: get this browser its own named agent-fs key through the swarm, with
+ * no click (Comb's own `useAutoConnect`). The swarm makes the person's agent-fs
+ * account ready on the way. The paste-key form shows only when agent-fs is too
+ * old for named keys.
  */
 export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps) {
-  const { state, endpoint, orgId, driveId, retry } = useAgentFs();
+  const { state, endpoint, orgId, driveId, retry: recheck } = useAgentFs();
   const deps = useConnectFlowDeps();
+  const auto = useAutoConnect();
   const { user } = useCurrentUser();
   const email = user?.email?.trim() || null;
   const stepDone = onboarding.state.steps.files.status === "done";
   const driveReady = orgId !== null && driveId !== null;
 
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [pasteKey, setPasteKey] = useState("");
   const [pasteBusy, setPasteBusy] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
-  // One run per endpoint and email: re-renders and strict mode must not register twice.
-  const handled = useRef<string | null>(null);
-  const runKey = endpoint && email ? `${endpoint}|${email}` : null;
+  // `complete` runs once per mount, for the first `ready`.
+  const completed = useRef(false);
+  const minting =
+    auto.running ||
+    (auto.outcome === null && (state === "needs-connect" || state === "invalid-key"));
 
-  useContinueBlocker(
-    setContinueBlocker,
-    phase.kind === "running" ? "Creating your files account…" : null,
-    { busy: phase.kind === "running" },
-  );
+  useContinueBlocker(setContinueBlocker, minting ? "Creating your files account…" : null, {
+    busy: minting,
+  });
 
   const complete = useCallback(
     async (method: FilesMethod) => {
-      setPhase({ kind: "done" });
       try {
         await act({ action: "complete", step: "files", method });
       } catch (err) {
@@ -93,35 +79,12 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
     [act],
   );
 
-  const settle = useCallback(
-    async (outcome: ConnectOutcome, method: FilesMethod) => {
-      if (outcome.kind === "connected") {
-        await complete(method);
-      } else if (outcome.kind === "email-taken") {
-        setPhase({ kind: "email-taken" });
-      } else if (outcome.newKey) {
-        setPhase({ kind: "new-key", apiKey: outcome.newKey, message: outcome.message });
-      } else {
-        setPhase({ kind: "failed", message: outcome.message });
-      }
-    },
-    [complete],
-  );
-
-  const create = useCallback(async () => {
-    if (!deps || !email) return;
-    setPhase({ kind: "running" });
-    await settle(await createAndConnect(deps, email), "created");
-  }, [deps, email, settle]);
-
-  /** Retry with the key a fresh registration returned: the account is new. */
-  async function retryNewKey(apiKey: string) {
-    if (!deps) return;
-    setPhase({ kind: "running" });
-    const outcome = await connectWithKey(deps, apiKey);
-    if (outcome.kind === "failed") setPhase({ kind: "new-key", apiKey, message: outcome.message });
-    else await settle(outcome, "created");
-  }
+  const minted = auto.outcome?.kind === "connected";
+  useEffect(() => {
+    if (state !== "ready" || completed.current || !endpoint) return;
+    completed.current = true;
+    if (!stepDone) void complete(minted ? "created" : "connected");
+  }, [state, endpoint, stepDone, minted, complete]);
 
   async function onPaste(event: FormEvent) {
     event.preventDefault();
@@ -131,34 +94,13 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
     setPasteError(null);
     const outcome = await connectWithKey(deps, key);
     setPasteBusy(false);
-    if (outcome.kind === "connected") await complete("connected");
-    else if (outcome.kind === "failed") setPasteError(outcome.message);
+    if (outcome.kind === "failed") setPasteError(outcome.message);
   }
 
-  useEffect(() => {
-    if (state === "ready") {
-      // Connected in this browser already (on entry, not after our own run): nothing to create.
-      if (handled.current !== null || !endpoint) return;
-      handled.current = `${endpoint}|ready`;
-      if (stepDone) setPhase({ kind: "done" });
-      else void complete("connected");
-      return;
-    }
-    if (state !== "needs-connect" || !runKey || handled.current === runKey) return;
-    // Also when the step is done: this browser has no key yet (another browser finished it).
-    if (!deps || !driveReady) return;
-    handled.current = runKey;
-    void create();
-  }, [runKey, endpoint, state, deps, driveReady, stepDone, complete, create]);
-
-  // The step is done for the swarm, but this browser is connected only when agent-fs says ready.
-  const done = phase.kind === "done" || (stepDone && phase.kind === "idle" && state === "ready");
-  // A saved key agent-fs rejects means the account exists: paste its key, as Comb does.
-  const pasting =
-    phase.kind === "email-taken" || (phase.kind === "idle" && state === "invalid-key");
+  const done = state === "ready";
+  const outcome = minting ? null : auto.outcome;
   // The picture explains the step. A state that needs the person's action shows alone.
-  const showPreview =
-    !pasting && phase.kind !== "new-key" && phase.kind !== "failed" && state !== "disabled";
+  const showPreview = state !== "disabled" && (done || minting);
 
   return (
     <div className="flex flex-col gap-4">
@@ -173,7 +115,7 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
         <SetupCard
           icon={<FolderOpen className="size-5" />}
           title="Your files account is ready."
-          description={email ? `Connected as ${email}.` : "Files is connected in this browser."}
+          description="This browser has its own named agent-fs key. Revoke it any time in agent-fs."
           actions={
             <Button asChild variant="outline" size="sm">
               {/* A new tab keeps setup open in this one. */}
@@ -191,6 +133,17 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
           }
           status={<StatusIcon tone="done" label="Connected" />}
         />
+      ) : state === "disabled" ? (
+        <AlertCallout tone="warning" icon={AlertCircle}>
+          Files is off on this swarm. Skip this step.
+        </AlertCallout>
+      ) : state === "unreachable" ? (
+        <AlertCallout tone="error" icon={AlertCircle} title="Cannot reach agent-fs">
+          <Button variant="outline" size="sm" className="mt-1" onClick={recheck}>
+            <RotateCw />
+            Retry
+          </Button>
+        </AlertCallout>
       ) : !email ? (
         <AlertCallout tone="info" icon={AlertCircle}>
           <p>
@@ -200,15 +153,8 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
             </Link>
           </p>
         </AlertCallout>
-      ) : pasting ? (
-        <SetupCard
-          title={
-            phase.kind === "email-taken"
-              ? "This email already has an agent-fs account"
-              : "agent-fs no longer accepts your saved key"
-          }
-          description="Paste its key to connect this browser."
-        >
+      ) : outcome?.kind === "unsupported" ? (
+        <SetupCard title="Paste an agent-fs key" description={AGENT_FS_UPGRADE_HINT}>
           <PasteKeyForm
             notice={null}
             apiKey={pasteKey}
@@ -223,47 +169,23 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
             </AlertCallout>
           ) : null}
         </SetupCard>
-      ) : phase.kind === "new-key" ? (
-        <SetupCard title="Save this key now. It is shown once.">
-          <div className="relative rounded-md border border-border bg-muted/40 py-2 pr-10 pl-3 font-mono text-xs break-all">
-            {phase.apiKey}
-            <CopyButton value={phase.apiKey} ariaLabel="Copy key" />
-          </div>
-          <AlertCallout tone="error" icon={AlertCircle} className="mt-3">
-            {phase.message}
-          </AlertCallout>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            onClick={() => void retryNewKey(phase.apiKey)}
-          >
-            <RotateCw />
-            Retry
-          </Button>
-        </SetupCard>
-      ) : phase.kind === "failed" ? (
+      ) : outcome?.kind === "pending" ? (
+        <AlertCallout tone="warning" icon={AlertCircle} title="Your files account is not ready yet">
+          <p>{outcome.reason}</p>
+          <RetryButton onRetry={auto.retry} />
+        </AlertCallout>
+      ) : outcome?.kind === "failed" ? (
         <AlertCallout tone="error" icon={AlertCircle} title="Could not create your files account">
-          <p>{phase.message}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => void create()}>
-            <RotateCw />
-            Retry
-          </Button>
+          <p>{outcome.message}</p>
+          <RetryButton onRetry={auto.retry} />
         </AlertCallout>
-      ) : state === "unreachable" ? (
-        <AlertCallout tone="error" icon={AlertCircle} title="Cannot reach agent-fs">
-          <Button variant="outline" size="sm" className="mt-1" onClick={retry}>
-            <RotateCw />
-            Retry
-          </Button>
-        </AlertCallout>
-      ) : state === "disabled" ? (
-        <AlertCallout tone="warning" icon={AlertCircle}>
-          Files is off on this swarm. Skip this step.
-        </AlertCallout>
-      ) : state === "needs-connect" && !driveReady ? (
-        <AlertCallout tone="warning" icon={AlertCircle}>
-          The swarm drive is not set up yet. Ask a swarm admin to check the agent-fs setup.
+      ) : outcome?.kind === "connected" && state === "invalid-key" ? (
+        <AlertCallout
+          tone="warning"
+          icon={AlertCircle}
+          title="agent-fs no longer accepts this browser's key"
+        >
+          <RetryButton onRetry={auto.retry} />
         </AlertCallout>
       ) : (
         <SetupCard
@@ -277,5 +199,14 @@ export function StepFilesBody({ onboarding, act, setContinueBlocker }: StepProps
       {/* Stays mounted from creating to done, so its beats play once. */}
       {showPreview ? <CombPreview /> : null}
     </div>
+  );
+}
+
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+      <RotateCw />
+      Retry
+    </Button>
   );
 }

@@ -92,8 +92,12 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   },
 };
 
-/** Step 1 says what to do next: get a swarm, pick who you are, or move on. */
-function connectDescription(configured: boolean, pickIdentity: boolean): string {
+/**
+ * Step 1 says what to do next: get a swarm, pick who you are, or move on. A
+ * deep link (`deepLink`) arrives with a swarm that runs: it only connects.
+ */
+function connectDescription(configured: boolean, pickIdentity: boolean, deepLink: boolean): string {
+  if (!configured && deepLink) return "Connect to your swarm to open the page you followed.";
   if (!configured) return "Start a swarm with your coding agent, or connect one that runs.";
   if (pickIdentity) return "You are connected. Now tell the swarm who you are.";
   return STEP_COPY.connect.description;
@@ -276,6 +280,9 @@ function SetupFlow() {
   const queryClient = useQueryClient();
   // Captured once: `?step=` syncs replace the history entry and drop its state.
   const [from] = useState(() => resolveFrom(location.state));
+  // The layout sent a deep link here (for example `/fs/continue`) because this
+  // browser has no connection. Step 1 connects, then returns to that page.
+  const deepLink = from !== "/";
   const [mountedAt] = useState(Date.now);
   const query = useOnboarding({ refetchInterval: 5000, enabled: isConfigured });
   const { mutateAsync: act } = useOnboardingAction();
@@ -405,8 +412,23 @@ function SetupFlow() {
     // A finished setup leaves for the dashboard (`handleConnected`).
     if (isOnboardingFinished(data.state)) return;
     setAfterConnect(false);
+    if (deepLink && !identityPick.needed) {
+      leaving.current = true;
+      void navigate(from, { replace: true });
+      return;
+    }
     goTo(resumeStep);
-  }, [afterConnect, data, identityPick.resolving, resumeStep, goTo]);
+  }, [
+    afterConnect,
+    data,
+    identityPick.resolving,
+    identityPick.needed,
+    resumeStep,
+    goTo,
+    deepLink,
+    from,
+    navigate,
+  ]);
 
   /** `via` names the control that left; a Continue or Skip already in flight keeps its spinner. */
   async function leave(via: SetupBusyAction = "primary") {
@@ -424,6 +446,12 @@ function SetupFlow() {
   }
 
   function goNext() {
+    // A deep link waited only for "Who are you?": go back to it, not to step 2.
+    if (stepId === "connect" && deepLink) {
+      leaving.current = true;
+      void navigate(from, { replace: true });
+      return;
+    }
     const next = steps[stepNumber(stepId, steps)];
     if (next) goTo(next.id);
     else void leave();
@@ -565,7 +593,9 @@ function SetupFlow() {
               stepId !== "connect"
                 ? undefined
                 : connecting
-                  ? INSTALL_TIP
+                  ? deepLink
+                    ? undefined
+                    : INSTALL_TIP
                   : identityPick.needed
                     ? undefined
                     : CONNECTED_TIP
@@ -580,7 +610,7 @@ function SetupFlow() {
                 title={copy.title}
                 description={
                   stepId === "connect"
-                    ? connectDescription(!connecting, identityPick.needed)
+                    ? connectDescription(!connecting, identityPick.needed, deepLink)
                     : copy.description
                 }
               />
@@ -589,8 +619,9 @@ function SetupFlow() {
                   // Centered in the height under the header, like step 7.
                   <div className="flex flex-1 flex-col justify-center gap-4 pt-2 pb-16 short:pb-2">
                     {/* No swarm yet: the landing's install prompt is the first way in.
-                        An install link already fills the form, so it skips the prompt. */}
-                    {!isConfigured && !setupLink ? (
+                        An install link already fills the form, and a deep link has a
+                        swarm that runs, so both skip the prompt. */}
+                    {!isConfigured && !setupLink && !deepLink ? (
                       <>
                         <InstallPromptCard />
                         <OrDivider>Or connect a swarm that runs</OrDivider>

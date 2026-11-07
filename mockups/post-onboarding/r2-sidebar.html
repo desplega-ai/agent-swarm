@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar · Round 2 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<style>
+.spec { height: 760px; display: flex; position: relative; background: var(--color-background); border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; box-shadow: var(--frame-shadow); }
+.spec.w-exp { width: 258px; }
+.spec.w-rail { width: 300px; }
+.spec .rest { flex: 1; background: var(--color-background); }
+.fly.at-build { left: 54px; top: 343px; }
+.fly.at-settings { left: 250px; bottom: 10px; }
+.legend { margin: 12px 0 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.5; color: var(--color-muted-foreground); max-width: 300px; }
+.legend li + li { margin-top: 4px; }
+.legend b { color: var(--color-foreground); font-weight: 500; }
+.phone.p760 { height: 760px; }
+.phone .sheet { width: 300px; padding-top: 44px; }
+.phone .sheet nav.side { width: 100%; border: 0; flex: 1; }
+.home-mini { display: flex; flex-direction: column; gap: 12px; }
+.hub-head { display: flex; align-items: center; gap: 12px; margin: 8px 0 16px; }
+.hub-head .field { width: 280px; height: 36px; margin-left: auto; }
+</style>
+</head>
+<body>
+<header class="x-top" data-page="sidebar"></header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Sidebar: Work, Connect, Build</h1>
+    <p>Connect now holds three real destinations, so it reads as a group, not as a label above one link. The labels are quiet, the rows keep one rhythm, and only two things get color: the Needs-you count on Home and a warning dot when a provider needs attention.</p>
+    <ul>
+      <li><b>Connect has three entries.</b> Channels, Tools and AI providers open the matching tab of <span class="mono">/integrations</span>. The tab names are the same words.</li>
+      <li><b>Build is collapsed</b> on a fresh browser and keeps its open state after that. In the icon rail it is one icon with a flyout.</li>
+      <li><b>Settings and Usage stay in the footer.</b> People and Servers move into the Settings flyout. Secrets sits under Advanced.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone sheet follows.</p>
+
+  <section class="x-state">
+    <h2>Three states</h2>
+    <p class="x-cap">Expanded with Build collapsed, the icon rail with the Build flyout open, and the phone sheet. Same order, same icons in all three.</p>
+    <div class="x-row">
+      <div class="x-col x-desk">
+        <h3>Expanded</h3>
+        <div class="spec w-exp"><nav class="side" data-active="home" aria-label="Main navigation, expanded"></nav></div>
+        <ul class="legend">
+          <li><b>3</b> on Home: sessions that need you (approvals, questions, blocked credentials).</li>
+          <li><b>Dot</b> on AI providers: one key is rate limited. It clears when the key is healthy.</li>
+        </ul>
+      </div>
+      <div class="x-col x-desk">
+        <h3>Icon rail, Build flyout</h3>
+        <div class="spec w-rail">
+          <nav class="side" data-rail data-active="home" data-hover="build" aria-label="Main navigation, icon rail"></nav>
+          <div class="rest"></div>
+          <div class="fly at-build" role="menu" aria-label="Build">
+            <div class="fh">Build</div>
+            <a class="fi" href="#/agents" role="menuitem"><span class="ic i-bot" aria-hidden="true"></span>Agents</a>
+            <a class="fi hl" href="#/schedules" role="menuitem"><span class="ic i-clock" aria-hidden="true"></span>Schedules</a>
+            <a class="fi" href="#/workflows" role="menuitem"><span class="ic i-workflow" aria-hidden="true"></span>Workflows</a>
+            <a class="fi" href="#/scripts" role="menuitem"><span class="ic i-file-code" aria-hidden="true"></span>Scripts</a>
+            <a class="fi" href="#/skills" role="menuitem"><span class="ic i-book-open" aria-hidden="true"></span>Skills</a>
+            <a class="fi" href="#/templates" role="menuitem"><span class="ic i-file-text" aria-hidden="true"></span>Templates</a>
+            <a class="fi" href="#/memory" role="menuitem"><span class="ic i-database" aria-hidden="true"></span>Memory</a>
+            <a class="fi" href="#/tasks" role="menuitem"><span class="ic i-list-todo" aria-hidden="true"></span>Tasks</a>
+          </div>
+        </div>
+        <ul class="legend">
+          <li>A short rule separates the groups. Home shows a dot, not a number, at this size.</li>
+        </ul>
+      </div>
+      <div class="x-col">
+        <h3>Phone, menu open</h3>
+        <div class="phone p760">
+          <div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+          <div class="ptop"><span class="ic i-menu" aria-hidden="true"></span><span class="crumbs"><b>Good morning, Taras</b></span></div>
+          <div class="pbody">
+            <div class="home-mini">
+              <div class="w"><div class="w-h"><span class="ic i-clipboard-check" aria-hidden="true"></span><h3 class="w-t">Needs you</h3><span class="w-n num">3</span></div>
+                <div class="li"><div class="tx"><div class="t1">Post the competitor digest</div><div class="t2">Approval · competitor-research</div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet"><nav class="side" data-active="home" aria-label="Main navigation, phone"></nav></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>In context: a Connect entry is a deep link</h2>
+    <p class="x-cap">Tools is active in the sidebar and selected as the hub tab. Build is open, so the state is kept. The pointer rests on Settings, which shows its flyout.</p>
+    <div class="app" style="--h: 800px">
+      <nav class="side" data-active="tools" data-build-open data-hover="settings" aria-label="Main navigation, in context"></nav>
+      <div class="main">
+        <div class="topbar"><div class="crumbs">Connect<span class="ic i-chevron-right" aria-hidden="true"></span><b>Tools</b></div><span class="sp"></span><span class="search"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<kbd>⌘K</kbd></span><span class="me">TY</span></div>
+        <div class="body">
+          <div class="hub-head">
+            <div class="tabs2" role="tablist" aria-label="Connect">
+              <button type="button" role="tab" aria-selected="false"><span class="ic i-message-circle" aria-hidden="true"></span>Channels</button>
+              <button type="button" role="tab" aria-selected="true"><span class="ic i-wrench" aria-hidden="true"></span>Tools</button>
+              <button type="button" role="tab" aria-selected="false"><span class="ic i-cpu" aria-hidden="true"></span>AI providers<span class="tdot" title="1 key is rate limited"></span></button>
+            </div>
+            <span class="field sm"><span class="ic i-search" aria-hidden="true"></span>Search tools</span>
+          </div>
+          <div class="pcs">
+            <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitHub</h3><p>Repositories, pull requests and issues for coding agents.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">GitHub App · 2 script connections</span><button class="btn xs" type="button">Manage</button></div></article>
+            <article class="pc"><div class="pc-h"><span class="mark">L</span><div><h3>Linear</h3><p>Pick up issues and post status updates back.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">OAuth · 1 script connection</span><button class="btn xs" type="button">Manage</button></div></article>
+            <article class="pc"><div class="pc-h"><span class="mark">M</span><div><h3>Gmail</h3><p>Read and send mail from a connected account.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">OAuth · taras@acme.dev</span><button class="btn xs" type="button">Manage</button></div></article>
+            <article class="pc"><div class="pc-h"><span class="mark">J</span><div><h3>Jira</h3><p>Sync tickets with your Jira site.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">OAuth, about 2 minutes</span><button class="btn xs" type="button">Connect</button></div></article>
+            <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitLab</h3><p>Merge requests and pipelines for coding agents.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Personal or group token</span><button class="btn xs" type="button">Connect</button></div></article>
+            <article class="pc"><div class="pc-h"><span class="mark">S</span><div><h3>Sentry</h3><p>Let agents read issues and stack traces.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Auth token</span><button class="btn xs" type="button">Connect</button></div></article>
+          </div>
+        </div>
+      </div>
+      <div class="fly at-settings" role="menu" aria-label="Settings">
+        <div class="fh">Settings</div>
+        <a class="fi" href="#/settings/appearance" role="menuitem"><span class="ic i-palette" aria-hidden="true"></span>Appearance</a>
+        <a class="fi hl" href="#/people" role="menuitem"><span class="ic i-users" aria-hidden="true"></span>People</a>
+        <a class="fi" href="#/servers" role="menuitem"><span class="ic i-server" aria-hidden="true"></span>Servers</a>
+        <a class="fi" href="#/settings/repos" role="menuitem"><span class="ic i-git-branch" aria-hidden="true"></span>Repos</a>
+        <a class="fi" href="#/settings/configuration" role="menuitem"><span class="ic i-settings" aria-hidden="true"></span>Configuration</a>
+        <a class="fi" href="#/settings/extensions" role="menuitem"><span class="ic i-blocks" aria-hidden="true"></span>Extensions</a>
+        <div class="fsep"></div>
+        <div class="fl">Advanced</div>
+        <a class="fi" href="#/settings/secrets" role="menuitem"><span class="ic i-shield" aria-hidden="true"></span>Secrets</a>
+        <a class="fi" href="#/settings/debug" role="menuitem"><span class="ic i-wrench" aria-hidden="true"></span>Debug</a>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="./r2-kit.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 import { emitRunFinished } from "./db/workflow-runs";
-import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
+import { getOAuthApp, hasOAuthTokens } from "./db-queries/oauth";
 import { scrubJsonValue } from "./scrub-json";
 
 export type AutomationKind = "schedule" | "workflow";
@@ -135,13 +135,13 @@ function automationUrl(input: AutomationPreflightInput): string {
 }
 
 const INTEGRATION_FIX_URL: Record<AutomationIntegrationId, string> = {
-  slack: "/settings/integrations/slack",
-  github: "/settings/integrations/github",
-  linear: "/settings/integrations/linear",
-  jira: "/settings/integrations/jira",
-  agentmail: "/settings/integrations/agentmail",
-  gsc: "/settings/integrations/gsc",
-  agentfs: "/settings/integrations/agentfs",
+  slack: "/integrations/slack",
+  github: "/integrations/github",
+  linear: "/integrations/linear",
+  jira: "/integrations/jira",
+  agentmail: "/integrations/agentmail",
+  gsc: "/integrations/gsc",
+  agentfs: "/integrations/agentfs",
 };
 
 // Requiring one of these bindings is the persisted signal that the v4 matrix
@@ -263,8 +263,8 @@ function present(value: string | undefined): boolean {
 /** Shared integration truth used by both runtime preflight and GET /status. */
 export async function getAutomationSetupStates(): Promise<AutomationSetupStates> {
   const [linearTokens, jiraTokens, jiraApp] = await Promise.all([
-    getOAuthTokens("linear"),
-    getOAuthTokens("jira"),
+    hasOAuthTokens("linear"),
+    hasOAuthTokens("jira"),
     getOAuthApp("jira"),
   ]);
   let jiraCloudId = false;
@@ -455,4 +455,16 @@ export async function recordWorkflowPreflightFailure(input: {
       recorded: await isFirstWorkflowPreflightFailureToday(input.workflowId, runId, now),
     };
   });
+}
+
+/** Integration flags shared by onboarding and the checklist. */
+export function setupIntegrationFlags(setup: AutomationSetupStates) {
+  return {
+    slack: setup.slack === "configured",
+    github: Boolean(process.env.GITHUB_TOKEN?.trim()) || setup.github === "verified",
+    gitlab: Boolean(process.env.GITLAB_TOKEN?.trim()),
+    bitbucket: Boolean(process.env.BITBUCKET_TOKEN?.trim()),
+    linear: setup.linear === "verified",
+    jira: setup.jira === "verified",
+  };
 }

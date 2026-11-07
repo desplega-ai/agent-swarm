@@ -21,7 +21,7 @@ describe("automation integration configure surfaces", () => {
     for (const [id, requiredKeys] of cases) {
       const integration = INTEGRATIONS.find((candidate) => candidate.id === id);
       expect(integration).toBeDefined();
-      expect(`/settings/integrations/${integration?.id}`).toBe(`/settings/integrations/${id}`);
+      expect(`/integrations/${integration?.id}`).toBe(`/integrations/${id}`);
       expect(
         getIntegrationFields(integration!)
           .filter((field) => field.required)

@@ -803,12 +803,12 @@ export function EmbeddingsSetup({
                 Search by meaning stays off. Add a key later in{" "}
                 {/* A new tab keeps setup open in this one. */}
                 <Link
-                  to={setupExitHref("/settings/integrations/memory")}
+                  to={setupExitHref("/integrations/memory")}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-medium text-primary underline-offset-4 hover:underline"
                 >
-                  Settings, Integrations, Memory
+                  Connect, AI providers, Memory
                 </Link>
                 . Earlier memories are indexed then.
               </p>
