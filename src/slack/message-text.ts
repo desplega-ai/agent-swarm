@@ -175,16 +175,18 @@ function collapseWhitespace(text: string): string {
 
 /** `needle` occurs in `haystack` without splitting a word at either end. */
 function containsOnWordBoundaries(haystack: string, needle: string): boolean {
-  // Unicode-aware: `/\w/` is ASCII-only, so `café` would match inside `caféteria`.
+  // Unicode-aware and code-point based: `/\w/` is ASCII-only (so `café` would
+  // match inside `caféteria`), and UTF-16 indexing splits an astral letter
+  // like `𝒜` into surrogates that fail the property class.
+  const WORD = "[\\p{L}\\p{N}\\p{M}_]";
   const isWord = (char: string | undefined) =>
-    char !== undefined && /[\p{L}\p{N}\p{M}_]/u.test(char);
-  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
-    const end = at + needle.length;
-    const startOk = !isWord(needle[0]) || !isWord(haystack[at - 1]);
-    const endOk = !isWord(needle.at(-1)) || !isWord(haystack[end]);
-    if (startOk && endOk) return true;
-  }
-  return false;
+    char !== undefined && new RegExp(WORD, "u").test(char);
+  const first = needle.codePointAt(0);
+  const startsWord = first !== undefined && isWord(String.fromCodePoint(first));
+  const endsWord = isWord(Array.from(needle).at(-1));
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const pattern = `${startsWord ? `(?<!${WORD})` : ""}${escaped}${endsWord ? `(?!${WORD})` : ""}`;
+  return new RegExp(pattern, "u").test(haystack);
 }
 
 /**
