@@ -29,7 +29,8 @@ This file is the authoring guide.
 |---|---|
 | `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, computes coverage, applies gates, writes reports. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
-| `slack.ts` | `@desplega.ai/slack-mock` lifecycle. |
+| `slack.ts` | `@desplega.ai/slack-mock` lifecycle (Socket Mode, started before the SUT). |
+| `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. |
 | `mocks/llm.ts` | Mock inference host: OpenAI chat + responses + embeddings, SystemOne decisions and extraction. |
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
@@ -108,6 +109,7 @@ Rules, enforced by the registry, the boundary check, or review:
 | `ctx.llm` | Mock inference host. `requests` journal, `requestsTo("/chat/completions")`, `setChatResponder(fn)`, `setSystemOneResponder(fn)`. Responders are reset after every scenario. |
 | `ctx.startAgent({ name, role, onTask, onTrigger, progress })` | A simulated agent polling `/api/poll`. Default completes each task with `done <taskId>`. `waitForTask(id)`, `waitForTasks(n)`, `handled`, `stop()`. Stopped automatically at scenario end. |
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
+| `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut()` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
@@ -122,6 +124,7 @@ Rules, enforced by the registry, the boundary check, or review:
 | SystemOne decisions | Global config `LAYA_URL` = `ctx.llm.origin`, `LAYA_API_KEY` = any value, node `provider: "laya"` | `/v1/systemone` answers each question. Script responses with `ctx.llm.setSystemOneResponder`. |
 | Cloudflare Clairic extraction | Deployment env `CLOUDFLARE_API_BASE_URL` = `ctx.llm.origin`, global config `CLOUDFLARE_ACCOUNT_ID`, secret `CLOUDFLARE_API_TOKEN`, node `provider: "cloudflare"` | The account path ends in `/ai/run/@cf/cloudflare/clairic`. The mock returns the Workers AI `{ success, errors, result }` envelope. Script responses with `ctx.llm.setSystemOneResponder`. |
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
+| Chat SDK Slack | Built-in Slack off (`SLACK_DISABLE`), `CHAT_SDK_ADAPTERS.slack` in webhook mode, and the env `CHAT_SDK_API_URL_OVERRIDES.slack` port the scenario binds a second `SlackMock` to | The mock posts signed events, commands and `block_actions` to `/api/integrations/chat/slack/webhook`. `enableChatSdkSlack` flips and its `undo` restores Socket Mode. |
 | Chat SDK Telegram | `CHAT_SDK_ENABLED=true`, deployment env `CHAT_SDK_API_URL_OVERRIDES`, and adapter config with fake credentials | `platform-chat-sdk` starts a loopback Telegram API. It checks tool discovery, permissions, channel mappings, messages, and thread history. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 
