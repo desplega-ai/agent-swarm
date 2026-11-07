@@ -254,6 +254,75 @@ describe("chat-reply", () => {
   });
 });
 
+describe("cards bound for Slack through the Chat SDK tools", () => {
+  // 20 categories x 12 series with a 51-character axis label: valid for the
+  // spec, but Slack's adapter draws it as a code block cut at 3,000 characters.
+  const chartCard = (xLabelLength: number) => ({
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Load" }, children: ["c"] },
+      c: {
+        type: "Chart",
+        props: {
+          title: "Requests",
+          chart: {
+            type: "bar",
+            xLabel: "x".repeat(xLabelLength),
+            categories: Array.from({ length: 20 }, (_, i) => `cat ${i}`),
+            series: Array.from({ length: 12 }, (_, s) => ({
+              name: `s${s}`,
+              values: Array.from({ length: 20 }, (_, i) => i + s),
+            })),
+          },
+        },
+        children: [],
+      },
+    },
+  });
+  const slackThread = "slack:C0B3CARDS:1700000000.000100";
+
+  const entryPoints = [
+    [
+      "chat-post",
+      async () => ({
+        headers: { "x-agent-id": lead.id },
+        args: { adapter: "slack", threadId: slackThread },
+      }),
+    ],
+    [
+      "chat-reply",
+      async () => {
+        const task = await createTaskExtended("a slack chat task with a card", {
+          agentId: worker.id,
+          source: "chat",
+          contextKey: chatSdkContextKey(slackThread),
+        });
+        return { headers: { "x-agent-id": worker.id, "x-source-task-id": task.id }, args: {} };
+      },
+    ],
+  ] as const;
+
+  test.each(
+    entryPoints,
+  )("%s refuses a chart Slack cannot draw natively, before any send", async (tool, target) => {
+    const { headers, args } = await target();
+    const refused = await callTool(tool, headers, {
+      ...args,
+      text: "never sent",
+      card: chartCard(51),
+    });
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toStartWith("Invalid card spec.");
+    expect(refused.structuredContent.message).toContain("Chart: Slack cannot render it natively");
+
+    // Control: a 50-character label passes validation and reaches the
+    // adapter, which is not running in this test.
+    const accepted = await callTool(tool, headers, { ...args, card: chartCard(50) });
+    expect(accepted.structuredContent.message).not.toContain("Invalid card spec.");
+    expect(accepted.structuredContent.message).toContain("'slack' is not running");
+  });
+});
+
 describe("register-chat-channel", () => {
   test("is refused for a non-lead agent", async () => {
     const result = await callTool(

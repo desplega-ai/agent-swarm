@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { cardIssuesMessage, cardSpecInputSchema, renderCard } from "@/integrations/cards";
+import { cardIssuesMessage, cardSpecInputSchema, renderCardFor } from "@/integrations/cards";
 import { CHAT_SDK_ADAPTER_NAMES } from "@/integrations/chat-sdk/config";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import {
@@ -66,7 +66,7 @@ export const registerChatPostTool = (server: McpServer) => {
           { data },
         );
       }
-      const rendered = card ? renderCard(card) : undefined;
+      const rendered = card ? await renderCardFor(adapter, card) : undefined;
       if (rendered && "issues" in rendered) {
         return toolErr(cardIssuesMessage(rendered.issues), {
           data: { ...data, issues: rendered.issues },

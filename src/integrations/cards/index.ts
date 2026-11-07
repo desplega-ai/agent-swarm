@@ -128,6 +128,21 @@ export async function cardToSlack(
 }
 
 /**
+ * `renderCard` plus the native check for the adapter the card goes to. The Chat
+ * SDK tools call this before they send anything: on Slack the adapter turns a
+ * table or chart it cannot draw into a fallback cut at 3,000 characters.
+ */
+export async function renderCardFor(
+  adapter: string,
+  spec: CardSpecInput,
+): Promise<{ card: CardElement } | { issues: string[] }> {
+  const rendered = renderCard(spec);
+  if ("issues" in rendered || adapter !== "slack") return rendered;
+  const slack = await cardToSlack(rendered.card);
+  return "issues" in slack ? slack : rendered;
+}
+
+/**
  * Notification text for a message posted with a card: both, message first, so
  * notifications and screen readers do not lose the message.
  */

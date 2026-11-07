@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentCurrentTask, getTaskById } from "@/be/db";
-import { cardIssuesMessage, cardSpecInputSchema, renderCard } from "@/integrations/cards";
+import { cardIssuesMessage, cardSpecInputSchema, renderCardFor } from "@/integrations/cards";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import {
   ChatAdapterUnavailableError,
@@ -45,12 +45,6 @@ export const registerChatReplyTool = (server: McpServer) => {
       if (!requestInfo.agentId) return toolErr("Agent ID not found.");
       const data = { yourAgentId: requestInfo.agentId };
       if (!text && !card) return toolErr("Provide text or a card.", { data });
-      const rendered = card ? renderCard(card) : undefined;
-      if (rendered && "issues" in rendered) {
-        return toolErr(cardIssuesMessage(rendered.issues), {
-          data: { ...data, issues: rendered.issues },
-        });
-      }
 
       // The header names the task this session works on; without it, the
       // agent's current in-progress task.
@@ -68,6 +62,13 @@ export const registerChatReplyTool = (server: McpServer) => {
           `Task ${task.id} did not come from a chat thread (no task:chat-sdk contextKey). Use the tool of the channel the task came from.`,
           { data },
         );
+      }
+      // Validated for the thread's adapter, before anything is sent.
+      const rendered = card ? await renderCardFor(thread.adapter, card) : undefined;
+      if (rendered && "issues" in rendered) {
+        return toolErr(cardIssuesMessage(rendered.issues), {
+          data: { ...data, issues: rendered.issues },
+        });
       }
 
       const resolved = await resolveChatAttachmentRefs(
