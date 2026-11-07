@@ -26,23 +26,20 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
   return (
     <TextGate file={file} stat={stat}>
       {(text) => (
-        <article
-          className={cn(
-            "prose-doc mx-auto px-6 py-5",
-            fullWidth ? "max-w-none md:px-12" : "max-w-[72ch]",
-          )}
-        >
-          <CombMarkdown
-            text={text}
-            doc={file}
-            DriveImage={DriveImage}
-            AssetFrame={AssetFrame}
-            liveUrl={liveUrl}
-            codeTheme={theme}
-            propertiesOpen={propertiesOpen}
-            onPropertiesOpenChange={setPropertiesOpen}
-          />
-        </article>
+        <div className={cn("px-6 py-5", fullWidth && "md:px-12")}>
+          <article className={cn("prose-doc mx-auto", fullWidth ? "max-w-none" : "max-w-3xl")}>
+            <CombMarkdown
+              text={text}
+              doc={file}
+              DriveImage={DriveImage}
+              AssetFrame={AssetFrame}
+              liveUrl={liveUrl}
+              codeTheme={theme}
+              propertiesOpen={propertiesOpen}
+              onPropertiesOpenChange={setPropertiesOpen}
+            />
+          </article>
+        </div>
       )}
     </TextGate>
   );
