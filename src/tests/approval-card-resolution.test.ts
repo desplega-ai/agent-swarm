@@ -155,6 +155,52 @@ describe("resolved approval Slack card", () => {
     expect(cardText(updates[0]!)).toContain("❌ *Rejected by operator*");
   });
 
+  for (const status of ["approved", "rejected"] as const) {
+    for (const identity of ["email", "name", "unknown", "missing"] as const) {
+      test(`${status}: operator vote displays ${identity} claim`, async () => {
+        const user = await createUser({
+          name: `Card user ${crypto.randomUUID()}`,
+          email: `${crypto.randomUUID()}@example.com`,
+        });
+        const claim = {
+          email: user.email!,
+          name: user.name,
+          unknown: "Guest <@U123> & visitor",
+          missing: undefined,
+        }[identity];
+        // An email match takes precedence over a different user's matching name.
+        if (identity === "email") await createUser({ name: user.email! });
+        const vote = (responder: string, claimedRespondedBy?: string) => ({
+          responder,
+          claimedRespondedBy,
+          approved: status === "approved",
+          responses: { q1: { approved: status === "approved" } },
+          respondedAt: new Date().toISOString(),
+        });
+        const approval = await createPosted();
+        const resolved = await resolveApprovalRequest(approval.id, {
+          status,
+          resolvedBy: "operator",
+          approvals: [vote("operator", "Earlier operator"), vote("operator", claim), vote(user.id)],
+        });
+        await settle(1);
+
+        const expected =
+          identity === "unknown"
+            ? "Guest &lt;@U123&gt; &amp; visitor"
+            : identity === "missing"
+              ? "operator"
+              : user.name;
+        expect(updates).toHaveLength(1);
+        expect(cardText(updates[0]!)).toContain(
+          `*${status === "approved" ? "Approved" : "Rejected"} by ${expected}*`,
+        );
+        expect(resolved?.resolvedBy).toBe("operator");
+        expect(resolved?.approvals?.[1]?.responder).toBe("operator");
+      });
+    }
+  }
+
   test("timeout: header says no response", async () => {
     const approval = await createPosted();
     await resolveApprovalRequest(approval.id, { status: "timeout", resolutionReason: "expired" });

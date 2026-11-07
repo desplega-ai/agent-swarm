@@ -4,6 +4,7 @@ import {
   claimApprovalCancellationNotification,
   completeApprovalCancellationNotificationClaim,
   createTaskExtended,
+  getAllUsers,
   getApprovalRequestById,
   getTaskById,
   getUserById,
@@ -367,7 +368,18 @@ export async function buildResolvedApprovalCard(
   approval: ApprovalRequest,
 ): Promise<{ text: string; blocks: unknown[] } | null> {
   if (approval.status === "pending") return null;
-  const by = await describeResolver(approval.resolvedBy);
+  let by = await describeResolver(approval.resolvedBy);
+  if (approval.resolvedBy === "operator") {
+    const claim = approval.approvals?.findLast(
+      (vote) => vote.responder === "operator",
+    )?.claimedRespondedBy;
+    if (claim) {
+      const users = await getAllUsers();
+      const user =
+        users.find((user) => user.email === claim) ?? users.find((user) => user.name === claim);
+      by = user?.name ?? claim;
+    }
+  }
   const byText = by ? ` by ${escapeSlackMrkdwn(by)}` : "";
   const reason = (approval.resolutionReason ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
   const outcome = {
