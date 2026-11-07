@@ -11300,6 +11300,9 @@
                                   "cli",
                                   "sdk"
                                 ]
+                              },
+                              "onDemand": {
+                                "type": "boolean"
                               }
                             },
                             "required": [
@@ -12589,6 +12592,9 @@
                             "cli",
                             "sdk"
                           ]
+                        },
+                        "onDemand": {
+                          "type": "boolean"
                         }
                       },
                       "required": [

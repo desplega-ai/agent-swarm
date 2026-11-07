@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createServer, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -18,14 +19,20 @@ import {
   createRuntimePool,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
-import { isAgentReachable, isRuntimePoolWakeable } from "../be/runtime-pools/reachability";
+import {
+  isAgentOnDemand,
+  isAgentReachable,
+  isRuntimePoolWakeable,
+} from "../be/runtime-pools/reachability";
 import { codeLevelTriage, gatherSystemStatus, getBootTriageFindings } from "../heartbeat/heartbeat";
+import { handleAgentsRest } from "../http/agents";
 import { routeMessage } from "../slack/router";
 import { resolveLeadOnlyRecoveryAssignment } from "../tasks/worker-follow-up";
 import { registerGetSwarmTool } from "../tools/get-swarm";
 import { sendTaskHandler } from "../tools/send-task";
 import { userCtx } from "../tools/task-tool-ctx";
 import type { RuntimePool } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const dbPath = "./test-runtime-pool-reachability.sqlite";
 const savedFlag = process.env.RUNTIME_POOLS_ENABLED;
@@ -361,5 +368,65 @@ describe("pool agent reachability", () => {
       enabled,
     );
     expect(text).toContain("gone (offline)");
+  });
+  test.each([
+    ["the pool is enabled with capacity", null, true],
+    ["MULTI_RUNTIME_ENABLED is off", "multi-runtime-off", false],
+    ["the pool is at maxRuntimes", "pool-full", false],
+    ["maxTasks is below slotsPerRuntime", "slots-too-big", false],
+  ] as const)("on demand when %s: %p", async (_label, state, expected) => {
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker", maxTasks: 2 });
+    if (state === "multi-runtime-off") process.env.MULTI_RUNTIME_ENABLED = "false";
+    if (state === "pool-full") {
+      await updateRuntimePool(pool.id, { maxRuntimes: 1 });
+      const other = await createPoolAgent(pool.id, { name: "busy-worker" });
+      await getDbClient().run(
+        "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+        [crypto.randomUUID(), other.id, pool.id],
+      );
+    }
+    if (state === "slots-too-big") await updateRuntimePool(pool.id, { slotsPerRuntime: 4 });
+    expect(await isAgentOnDemand(worker)).toBe(expected);
+    // The heartbeat/routing predicate keeps its broader answer.
+    expect(await isAgentReachable(worker)).toBe(true);
+  });
+  test("a pool under maxRuntimes is on demand", async () => {
+    await updateRuntimePool(pool.id, { maxRuntimes: 2 });
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+      [crypto.randomUUID(), worker.id, pool.id],
+    );
+    expect(await isAgentOnDemand(worker)).toBe(true);
+  });
+  test("GET /api/agents and /api/agents/{id} flag on-demand pool agents", async () => {
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    const gone = await createAgent({ name: "gone", isLead: false, status: "offline" });
+    const server: Server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const segments = url.pathname.split("/").filter(Boolean);
+      void handleAgentsRest(req, res, segments, url.searchParams, undefined).then((handled) => {
+        if (!handled) res.writeHead(404).end("{}");
+      });
+    });
+    const base = `http://localhost:${await listenOnFreePort(server)}`;
+    try {
+      const list = (await (await fetch(`${base}/api/agents`)).json()) as {
+        agents: { id: string; onDemand?: boolean }[];
+      };
+      expect(list.agents.find((a) => a.id === worker.id)?.onDemand).toBe(true);
+      expect(list.agents.find((a) => a.id === gone.id)?.onDemand).toBeUndefined();
+      const one = (await (await fetch(`${base}/api/agents/${worker.id}`)).json()) as {
+        onDemand?: boolean;
+      };
+      expect(one.onDemand).toBe(true);
+      process.env.MULTI_RUNTIME_ENABLED = "false";
+      const off = (await (await fetch(`${base}/api/agents/${worker.id}`)).json()) as {
+        onDemand?: boolean;
+      };
+      expect(off.onDemand).toBeUndefined();
+    } finally {
+      server.close();
+    }
   });
 });

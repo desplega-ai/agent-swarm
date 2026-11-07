@@ -240,6 +240,8 @@ export interface Agent {
   lastActivityAt?: string;
   /** Runtime pool this agent is bound to. Absent on APIs without runtime pools. */
   runtimePoolId?: string | null;
+  /** Offline, but its runtime pool starts a runtime when a task is sent. Absent otherwise. */
+  onDemand?: boolean;
   createdAt: string;
   lastUpdatedAt: string;
 }

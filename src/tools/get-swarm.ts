@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAllAgents } from "@/be/db";
-import { isAgentReachable } from "@/be/runtime-pools/reachability";
+import { isAgentOnDemand } from "@/be/runtime-pools/reachability";
 import { createToolRegistrar, swarmToolOutputSchema, toolOk } from "@/tools/utils";
 import { AgentStatusSchema, ProviderNameSchema } from "@/types";
 
@@ -16,7 +16,7 @@ const agentOutputShape = z.looseObject({
     .boolean()
     .optional()
     .describe(
-      "True when the agent is offline but bound to a runtime pool that can wake it. send-task to it starts a runtime.",
+      "True when the agent is offline but its runtime pool will start a runtime for it (multi-runtime on, pool capacity left, maxTasks fits one runtime). send-task to it starts a runtime.",
     ),
   description: z.string().optional(),
   role: z.string().optional(),
@@ -68,9 +68,7 @@ export const registerGetSwarmTool = (server: McpServer) => {
       // to it starts a runtime. Mark it, so a Lead does not read it as unavailable.
       const agents = await Promise.all(
         (await getAllAgents({ slim: !includeFull })).map(async (a) =>
-          a.status === "offline" && a.runtimePoolId && (await isAgentReachable(a))
-            ? { ...a, onDemand: true }
-            : a,
+          (await isAgentOnDemand(a)) ? { ...a, onDemand: true } : a,
         ),
       );
 

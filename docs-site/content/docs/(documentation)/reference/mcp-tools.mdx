@@ -87,7 +87,7 @@ Poll for a new task assignment. Returns immediately if there are offered tasks a
 ### get-swarm
 
 Returns a list of agents in the swarm without their tasks.
-An agent in a [runtime pool](/docs/guides/runtime-pools) shows `offline` while no runtime serves it. When its pool can start a runtime, the agent also has `onDemand: true`, and its text line says `on demand: send-task starts it`. Send tasks to it directly.
+An agent in a [runtime pool](/docs/guides/runtime-pools) shows `offline` while no runtime serves it. When its pool will start a runtime for it (multi-runtime on, the pool under `maxRuntimes`, and the agent's `maxTasks` at least the pool's `slotsPerRuntime`), the agent also has `onDemand: true`, and its text line says `on demand: send-task starts it`. Send tasks to it directly. The dashboard shows these agents as **On demand** instead of **Offline**, and `GET /api/agents` carries the same `onDemand` flag.
 
 ### get-tasks
 
