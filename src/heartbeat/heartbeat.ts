@@ -148,14 +148,19 @@ function stallThresholdMinutes(): number {
   return Number.isInteger(value) && value > 0 ? value : 30;
 }
 
-/** Stall threshold: tasks with no active session (worker clearly dead) */
-function stallThresholdNoSessionMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+/** Stall threshold: tasks with no active session (worker clearly dead). A
+ * positive integer, or 5: an invalid value would flag every task with any age
+ * as stalled immediately. */
+export function stallThresholdNoSessionMin(): number {
+  const value = Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN);
+  return Number.isInteger(value) && value > 0 ? value : 5;
 }
 
-/** Stall threshold: tasks with stale worker heartbeat */
-function stallThresholdStaleHeartbeatMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+/** Stall threshold: tasks with stale worker heartbeat. A positive integer, or
+ * 15: an invalid value would flag every task with any age as stalled. */
+export function stallThresholdStaleHeartbeatMin(): number {
+  const value = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN);
+  return Number.isInteger(value) && value > 0 ? value : 15;
 }
 
 /** Grace window for a fresh pending steering message before normal stall remediation resumes. */
