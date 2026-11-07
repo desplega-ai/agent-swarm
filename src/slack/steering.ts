@@ -68,6 +68,11 @@ export async function requestSlackThreadSteering(
   return { task, result };
 }
 
+/** Thread acknowledgement for buffered messages added to a task Lead has not started. */
+export function formatSlackFoldAck(count: number): string {
+  return `:speech_balloon: _${count === 1 ? "Your message was" : `${count} messages were`} added to the queued task._`;
+}
+
 /** Build an honest thread acknowledgement for the core service outcome. */
 export function formatSlackSteeringAck(result: SteerResult): string {
   if (result.outcome === "promoted") {

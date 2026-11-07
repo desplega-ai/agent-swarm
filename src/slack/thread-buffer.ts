@@ -1,32 +1,42 @@
 import {
   getAgentById,
   getLatestActiveTaskInThread,
+  getLatestLeadTaskInThread,
   getLeadAgent,
   getMostRecentTaskInThread,
 } from "../be/db";
+import { foldIntoPendingSlackTask, getDeliveredSlackMessageTs } from "../be/db/tasks/slack-fold";
 import { SteeringBlockedError } from "../be/steering";
 import { findUserByExternalId } from "../be/users";
+import { applyPreTaskCreate } from "../extensions/apply-task-create";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
+import type { Agent, AgentTask, CreateTaskOptions, TaskSlackParticipants } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { ackSlackMessage, skipSlackMessageReaction } from "./ack";
+import { ackSlackMessage, reactionName, skipSlackMessageReaction } from "./ack";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import type { SlackFile } from "./files";
 import {
+  attachSlackFilesToDraft,
   bufferedFileFailures,
   buildEffectiveText,
   createSlackTaskWithFiles,
   fetchSlackFiles,
   notifySlackFileFailures,
+  type SlackFileFailure,
 } from "./inbound-files";
 import { isSlackThreadLeft } from "./left-threads";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
-import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
-import { buildSlackThreadSnapshot, formatAuthoredMessage } from "./thread-participants";
+import { formatSlackFoldAck, formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
+import {
+  buildSlackThreadSnapshot,
+  formatAuthoredMessage,
+  SLACK_PARTICIPANT_CAP,
+} from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
 
 interface BufferedMessage {
@@ -41,6 +51,97 @@ interface BufferedMessage {
 }
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
+/** Folds tried before a flush gives up on a pending task that keeps changing under it. */
+const FOLD_ATTEMPTS = 3;
+/**
+ * The follow-up header (memory: parsers such as slack-reply-gate anchor on it
+ * at the start of the text or right after `</thread_context>`).
+ */
+const FOLLOW_UP_HEADER_RE = /(?:^|\n)\[Thread follow-up — (\d+) message\(s\) buffered\]\n/g;
+
+function followUpHeader(count: number): string {
+  return `[Thread follow-up — ${count} message(s) buffered]`;
+}
+
+/**
+ * Append newly buffered messages to a pending task's text, keeping exactly one
+ * follow-up header. A task that already has one (a buffered follow-up, or an
+ * earlier fold) gets its count bumped in place and the messages appended after
+ * its own; any other task (an @mention) gets a header after its text. The
+ * template closes the thread context at column 0, where no quoted message line
+ * can start, so a header quoted inside the context is never taken as the task's.
+ */
+export function appendFollowUpMessages(description: string, labelled: string, count: number) {
+  const contextEnd = description.indexOf("\n</thread_context>");
+  const own = [...description.matchAll(FOLLOW_UP_HEADER_RE)].at(-1);
+  if (own && own.index > contextEnd) {
+    const start = own.index + (own[0].startsWith("\n") ? 1 : 0);
+    const headerEnd = own.index + own[0].length - 1;
+    const total = Number(own[1]) + count;
+    return `${description.slice(0, start)}${followUpHeader(total)}${description.slice(headerEnd)}\n---\n${labelled}`;
+  }
+  return `${description}\n\n${followUpHeader(count)}\n\n${labelled}`;
+}
+
+/**
+ * The thread's pending Lead task, if buffered messages can be folded into it:
+ * a Slack-path task (no taskType: never a worker follow-up or a resume) for
+ * this thread's contextKey that no worker has claimed yet. A `!now` flush asks
+ * for an immediate run, so it never joins a task queued behind another one.
+ */
+function isFoldTarget(
+  task: AgentTask | null,
+  channelId: string,
+  threadTs: string,
+  leadId: string | undefined,
+  immediate: boolean,
+): task is AgentTask {
+  if (
+    !leadId ||
+    !task ||
+    task.status !== "pending" ||
+    task.agentId !== leadId ||
+    task.source !== "slack" ||
+    task.taskType ||
+    task.offeredTo ||
+    task.contextKey !== slackContextKey({ channelId, threadTs })
+  ) {
+    return false;
+  }
+  return !(immediate && task.dependsOn.length > 0);
+}
+
+/**
+ * The folded task's people: its own, then the new senders. The trigger stays
+ * the task's, so `newest` is never moved; new senders are marked `asked`.
+ */
+function foldParticipants(
+  previous: TaskSlackParticipants | undefined,
+  snapshot: TaskSlackParticipants,
+): TaskSlackParticipants {
+  const people = [...(previous?.people ?? [])];
+  const index = new Map(people.map((person, at) => [person.slackUserId, at]));
+  // shortcut: `more` is approximate (max of both counts plus overflow); count distinct ids if the prompt ever shows it exactly.
+  let more = Math.max(previous?.more ?? 0, snapshot.more);
+  for (const { newest: _newest, ...person } of snapshot.people) {
+    const at = index.get(person.slackUserId);
+    if (at !== undefined) {
+      const current = people[at]!;
+      people[at] = {
+        ...current,
+        trust: person.trust,
+        ...(person.userId && { userId: person.userId }),
+        ...(person.asked && { asked: true }),
+      };
+    } else if (people.length < SLACK_PARTICIPANT_CAP) {
+      index.set(person.slackUserId, people.length);
+      people.push(person);
+    } else {
+      more += 1;
+    }
+  }
+  return { people, more };
+}
 
 function makeKey(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
@@ -108,15 +209,56 @@ export async function instantFlush(key: string): Promise<void> {
 }
 
 /**
+ * Slack feedback for messages folded into a pending task: each message is
+ * acknowledged, and the thread shows the task's tree (render v2) or a short
+ * note (legacy). The task already has its own tree card, so none is added.
+ */
+async function postFoldFeedback(args: {
+  channelId: string;
+  threadTs: string;
+  taskId: string;
+  items: BufferedMessage[];
+  unattached: SlackFileFailure[];
+  lead: Agent | null | undefined;
+}): Promise<void> {
+  const { channelId, threadTs, items, lead } = args;
+  const app = getSlackApp();
+  if (app) {
+    for (const item of items) {
+      await ackSlackMessage(app.client, channelId, item.ts, reactionName("accepted"), "accepted");
+    }
+    await notifySlackFileFailures(app.client, channelId, threadTs, args.unattached);
+  }
+  if (isSlackRenderV2Enabled()) {
+    await ensureSlackThreadTree([args.taskId]);
+    return;
+  }
+  if (!app) return;
+  try {
+    await app.client.chat.postMessage({
+      channel: channelId,
+      thread_ts: threadTs,
+      text: formatSlackFoldAck(items.length),
+      unfurl_links: false,
+      unfurl_media: false,
+      ...(lead ? { username: getAgentDisplayName(lead), ...getAgentSlackIcon(lead) } : {}),
+    });
+  } catch (error) {
+    console.error("[Slack] Failed to post buffer fold feedback:", error);
+  }
+}
+
+/**
  * Flush the Slack thread buffer: concatenate messages, create task with optional
  * dependency chaining.
  */
 async function slackFlush(
-  items: BufferedMessage[],
+  bufferedItems: BufferedMessage[],
   key: string,
   immediate: boolean,
+  foldAttempts = FOLD_ATTEMPTS,
 ): Promise<void> {
-  if (items.length === 0) return;
+  if (bufferedItems.length === 0) return;
 
   const split = splitKey(key);
   if (!split) {
@@ -127,9 +269,26 @@ async function slackFlush(
   // The thread was left (slack-leave-thread) while these replies waited. Only
   // non-mentions are buffered, so none of them rejoins it.
   if (await isSlackThreadLeft(channelId, threadTs)) {
-    console.log(`[Slack] Buffer flush: dropping ${items.length} message(s) in left thread ${key}`);
+    console.log(
+      `[Slack] Buffer flush: dropping ${bufferedItems.length} message(s) in left thread ${key}`,
+    );
     return;
   }
+  // A message a task in this thread already carries (its trigger, or one
+  // steered or folded into it) is never delivered again: a Slack retry after a
+  // restart buffers the same message a second time.
+  const delivered = await getDeliveredSlackMessageTs(channelId, threadTs);
+  const items = bufferedItems.filter((item) => {
+    if (delivered.has(item.ts)) return false;
+    delivered.add(item.ts);
+    return true;
+  });
+  if (items.length < bufferedItems.length) {
+    console.log(
+      `[Slack] Buffer flush: skipping ${bufferedItems.length - items.length} already delivered message(s) in ${key}`,
+    );
+  }
+  if (items.length === 0) return;
   // Buffer is guaranteed to have at least one item — the first carries the
   // original requester's userId (same semantics as the pre-refactor version).
   const originalRequesterId = items[0]!.userId;
@@ -180,6 +339,10 @@ async function slackFlush(
       })
     : (await findUserByExternalId("slack", originalRequesterId))?.id;
 
+  // What steering is about to see: if this task is claimed while the thread is
+  // read below, the messages steer it instead of becoming a second task.
+  const leadTaskAtSteer = await getLatestLeadTaskInThread(channelId, threadTs);
+
   // A steering row has one sender. Keep consecutive messages from that sender
   // together, then flush the remaining senders in order after successful delivery.
   const nextSenderIndex = items.findIndex((item) => item.userId !== originalRequesterId);
@@ -215,7 +378,7 @@ async function slackFlush(
       }
     }
     if (nextSenderIndex !== -1) {
-      await slackFlush(items.slice(nextSenderIndex), key, immediate);
+      await slackFlush(items.slice(nextSenderIndex), key, immediate, foldAttempts);
     }
     return;
   }
@@ -242,7 +405,7 @@ async function slackFlush(
       }
     }
     if (nextSenderIndex !== -1) {
-      await slackFlush(items.slice(nextSenderIndex), key, immediate);
+      await slackFlush(items.slice(nextSenderIndex), key, immediate, foldAttempts);
     }
     return;
   }
@@ -283,37 +446,102 @@ async function slackFlush(
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
   const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
+  const createOptions: CreateTaskOptions = {
+    agentId: lead?.id,
+    routingReason:
+      lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
+    source: "slack",
+    slackChannelId: channelId,
+    slackThreadTs: threadTs,
+    slackTriggerMessageTs: items.at(-1)!.ts,
+    slackUserId: newestSenderId,
+    slackParticipants: snapshot?.participants,
+    requestedByUserId: newestRequesterId,
+    dependsOn,
+    parentTaskId: mostRecentTask?.id,
+    // A human message in the thread: never answer it in the latest thread
+    // task's structured-output contract.
+    inheritParentOutputSchema: false,
+    // An unregistered sender never inherits the parent's requester.
+    inheritParentRequester: false,
+    contextKey: slackContextKey({ channelId, threadTs }),
+  };
+  const slackEvent = {
+    trigger: "thread-buffer" as const,
+    messages: items.map(({ ts, userId, text }) => ({ ts, userId, text })),
+  };
+
+  // Lead has not started the thread's latest task yet: add the messages to it
+  // instead of a second task that repeats the whole thread context.
+  const foldTarget = foldAttempts > 0 ? await getLatestLeadTaskInThread(channelId, threadTs) : null;
+  if (
+    foldTarget &&
+    foldTarget.id === leadTaskAtSteer?.id &&
+    leadTaskAtSteer.status === "pending" &&
+    foldTarget.status === "in_progress"
+  ) {
+    console.log(`[Slack] Task ${foldTarget.id} was claimed during the flush; retrying to steer it`);
+    await slackFlush(items, key, immediate, foldAttempts - 1);
+    return;
+  }
+  if (isFoldTarget(foldTarget, channelId, threadTs, lead?.id, immediate)) {
+    // The messages must pass the same pre.task.create gate a new task would.
+    const gate = await applyPreTaskCreate({
+      description: fullDescription,
+      options: createOptions,
+      origin: "slack",
+      slack: slackEvent,
+    });
+    if (gate.kind === "blocked") {
+      console.info("[Slack] pre.task.create blocked:", gate.extension.name, gate.reason);
+      if (app) await skipSlackMessageReaction(app.client, channelId, items.at(-1)!.ts);
+      return;
+    }
+    // shortcut: a hook that rewrites the follow-up gets a task of its own; merge its edits into the fold if hooks start rewriting Slack follow-ups.
+    if (
+      gate.description === fullDescription &&
+      JSON.stringify(gate.options) === JSON.stringify(createOptions)
+    ) {
+      const landed = await foldIntoPendingSlackTask({
+        taskId: foldTarget.id,
+        expectedTask: foldTarget.task,
+        nextTask: appendFollowUpMessages(foldTarget.task, labelledText, items.length),
+        toDraft: inbound.fetched.length > 0,
+        slackChannelId: channelId,
+        messageTs: items.map((item) => item.ts),
+        slackParticipants: snapshot
+          ? foldParticipants(foldTarget.slackParticipants, snapshot.participants)
+          : undefined,
+      });
+      if (!landed) {
+        // A worker claimed it (steer it now) or another flush changed it (fold again).
+        console.log(`[Slack] Buffer fold lost the race for task ${foldTarget.id}; retrying flush`);
+        await slackFlush(items, key, immediate, foldAttempts - 1);
+        return;
+      }
+      const unattached =
+        inbound.fetched.length > 0
+          ? [...inbound.failed, ...(await attachSlackFilesToDraft(foldTarget.id, inbound))]
+          : inbound.failed;
+      console.log(
+        `[Slack] Buffer flushed → folded ${items.length} message(s) into ${foldTarget.id}`,
+      );
+      await postFoldFeedback({
+        channelId,
+        threadTs,
+        taskId: foldTarget.id,
+        items,
+        unattached,
+        lead,
+      });
+      return;
+    }
+  }
+
   let created: Awaited<ReturnType<typeof createSlackTaskWithFiles>>;
   try {
-    created = await createSlackTaskWithFiles(
-      fullDescription,
-      {
-        agentId: lead?.id,
-        routingReason:
-          lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
-        routingSource: lead ? "engine_default" : undefined,
-        source: "slack",
-        slackChannelId: channelId,
-        slackThreadTs: threadTs,
-        slackTriggerMessageTs: items.at(-1)!.ts,
-        slackUserId: newestSenderId,
-        slackParticipants: snapshot?.participants,
-        requestedByUserId: newestRequesterId,
-        dependsOn,
-        parentTaskId: mostRecentTask?.id,
-        // A human message in the thread: never answer it in the latest thread
-        // task's structured-output contract.
-        inheritParentOutputSchema: false,
-        // An unregistered sender never inherits the parent's requester.
-        inheritParentRequester: false,
-        contextKey: slackContextKey({ channelId, threadTs }),
-      },
-      inbound,
-      {
-        trigger: "thread-buffer",
-        messages: items.map(({ ts, userId, text }) => ({ ts, userId, text })),
-      },
-    );
+    created = await createSlackTaskWithFiles(fullDescription, createOptions, inbound, slackEvent);
   } catch (error) {
     if (!(error instanceof TaskCreationBlockedError)) throw error;
 

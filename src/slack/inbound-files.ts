@@ -335,23 +335,33 @@ export async function createSlackTaskWithFiles(
     { ...options, status: "draft" },
     context,
   );
-  const unattached = [...inbound.failed];
+  const unattached = [...inbound.failed, ...(await attachSlackFilesToDraft(task.id, inbound))];
+  return { task, unattached };
+}
+
+/**
+ * Attach a user's fetched Slack files to a task held in `draft`, then promote
+ * it, whatever the uploads did. Returns the files that could not be stored.
+ */
+export async function attachSlackFilesToDraft(
+  taskId: string,
+  inbound: InboundSlackFiles,
+): Promise<SlackFileFailure[]> {
   // Uploads run one after another and can outlast the abandoned-draft sweep's
   // window; renewing the lease keeps the sweep from promoting a live batch.
   const lease = setInterval(() => {
-    void refreshDraftTaskLease(task.id).catch((error) =>
+    void refreshDraftTaskLease(taskId).catch((error) =>
       console.warn(
-        `[Slack] could not renew the draft lease of task ${task.id}: ${errorText(error)}`,
+        `[Slack] could not renew the draft lease of task ${taskId}: ${errorText(error)}`,
       ),
     );
   }, draftLeaseRefreshMs);
   try {
-    unattached.push(...(await attachSlackFilesToTask(task.id, inbound.fetched, null)).unattached);
+    return (await attachSlackFilesToTask(taskId, inbound.fetched, null)).unattached;
   } finally {
     clearInterval(lease);
-    await promoteDraftTask(task.id);
+    await promoteDraftTask(taskId);
   }
-  return { task, unattached };
 }
 
 /** Tests shorten the draft lease renewal to observe it; returns the previous interval. */
