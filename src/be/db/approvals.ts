@@ -210,3 +210,29 @@ export async function listUndeliveredCancelledApprovalRequestIds(
   }
   return ids;
 }
+
+/**
+ * Every terminal transition passes through here: once it commits, edit each
+ * request's Slack card to show the outcome. Fire and forget; a Slack failure
+ * never touches the resolution.
+ */
+export function scheduleApprovalCardUpdates(
+  approvals: Array<{ id: string; notificationChannels: unknown[] | null }>,
+): void {
+  const posted = approvals.filter((approval) =>
+    (approval.notificationChannels as Array<{ channel?: string; messageTs?: string }> | null)?.some(
+      (n) => n.channel === "slack" && n.messageTs,
+    ),
+  );
+  if (posted.length === 0) return;
+  getDbClient().afterCommit(() =>
+    import("../../workflows/approval-notifications")
+      .then(({ updateResolvedApprovalCards }) => updateResolvedApprovalCards(posted))
+      .catch((err) =>
+        console.error(
+          "[HITL] Slack card update not run:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      ),
+  );
+}

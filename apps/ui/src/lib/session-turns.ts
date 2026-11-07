@@ -93,10 +93,29 @@ function isRetryOf(task: AgentTask, parent: AgentTask | undefined): boolean {
   );
 }
 
-function kindOf(task: AgentTask, parent: AgentTask | undefined, isLead: boolean): Kind {
+/**
+ * Options for `buildTurns`. `personText` names more tasks a person wrote: a
+ * task it returns text for opens a turn whatever its source (a json-render
+ * app page sends its messages as `api` tasks). Tasks it returns null for keep
+ * the source rules.
+ */
+export interface BuildTurnsOptions {
+  personText?: (task: AgentTask) => string | null;
+}
+
+function isPersonTask(task: AgentTask, options: BuildTurnsOptions): boolean {
+  return PERSON_SOURCES.has(task.source) || (options.personText?.(task) ?? null) !== null;
+}
+
+function kindOf(
+  task: AgentTask,
+  parent: AgentTask | undefined,
+  isLead: boolean,
+  options: BuildTurnsOptions,
+): Kind {
   if (isRetryOf(task, parent)) return "continue";
   // A dashboard message with no picked user is still a person writing.
-  if (PERSON_SOURCES.has(task.source)) return "person";
+  if (isPersonTask(task, options)) return "person";
   if (task.taskType === "deferred") return isLead ? "wake" : "continue";
   // A worker's resume is the same work in a new session; its superseded try did not pass.
   if (!isLead && (task.taskType === "resume" || task.status === "superseded")) return "continue";
@@ -114,7 +133,7 @@ interface Draft extends TurnPart {
   byAgent: Map<string, TurnWorker>;
 }
 
-export function buildTurns(chain: AgentTask[]): SessionTurns {
+export function buildTurns(chain: AgentTask[], options: BuildTurnsOptions = {}): SessionTurns {
   const byId = new Map<string, AgentTask>();
   for (const task of chain) byId.set(task.id, task);
   const tasks = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -130,7 +149,7 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
   const kinds = new Map<string, Kind>();
   for (const task of tasks) {
     const parent = task.parentTaskId ? byId.get(task.parentTaskId) : undefined;
-    kinds.set(task.id, task === root ? "person" : kindOf(task, parent, isLead(task)));
+    kinds.set(task.id, task === root ? "person" : kindOf(task, parent, isLead(task), options));
   }
 
   const turns: DraftTurn[] = [];
@@ -154,7 +173,7 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
     if (kinds.get(task.id) !== "person" || (task !== root && !task.parentTaskId)) continue;
     const turn: DraftTurn = {
       id: task.id,
-      ...(task !== root || PERSON_SOURCES.has(task.source) ? { person: task } : {}),
+      ...(task !== root || isPersonTask(task, options) ? { person: task } : {}),
       parts: [],
     };
     turns.push(turn);

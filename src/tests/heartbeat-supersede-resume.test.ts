@@ -591,4 +591,77 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(children[0]!.id).toBe(resumeId);
     expect((await getTaskById(resumeId))?.status).toBe("pending");
   });
+
+  describe("HEARTBEAT_MAX_RESUME_GENERATIONS", () => {
+    const originalLimit = process.env.HEARTBEAT_MAX_RESUME_GENERATIONS;
+
+    afterAll(() => {
+      if (originalLimit === undefined) delete process.env.HEARTBEAT_MAX_RESUME_GENERATIONS;
+      else process.env.HEARTBEAT_MAX_RESUME_GENERATIONS = originalLimit;
+    });
+
+    async function crashTaskWithStaleSession(tags: string[] = []) {
+      const agent = await createAgent({ name: "crashed-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Crashed worker's task", {
+        agentId: agent.id,
+        ...(tags.length ? { taskType: "resume", tags } : {}),
+      });
+      await startTask(task.id);
+      await insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+      const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
+      await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        oldTime,
+        task.id,
+      ]);
+      return task;
+    }
+
+    test("falls back to 3 unless it is a positive integer", () => {
+      for (const raw of ["-1", "0", "NaN", "Infinity", "-Infinity", "1.5", ""]) {
+        process.env.HEARTBEAT_MAX_RESUME_GENERATIONS = raw;
+        expect(maxResumeGenerations()).toBe(3);
+      }
+      delete process.env.HEARTBEAT_MAX_RESUME_GENERATIONS;
+      expect(maxResumeGenerations()).toBe(3);
+      process.env.HEARTBEAT_MAX_RESUME_GENERATIONS = "5";
+      expect(maxResumeGenerations()).toBe(5);
+    });
+
+    test("a negative limit still allows the initial crash-recovery resume", async () => {
+      process.env.HEARTBEAT_MAX_RESUME_GENERATIONS = "-1";
+      const task = await crashTaskWithStaleSession();
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks).toEqual([]);
+      expect(findings.autoResumedTasks.map((t) => t.taskId)).toEqual([task.id]);
+      const [resume] = await getChildTasks(task.id);
+      expect(resume?.tags).toContain(`${RESUME_GENERATION_TAG_PREFIX}1`);
+    });
+
+    test("a positive limit still bounds the resume chain", async () => {
+      process.env.HEARTBEAT_MAX_RESUME_GENERATIONS = "1";
+      const task = await crashTaskWithStaleSession([
+        "auto-resume",
+        "reason:crash_recovery",
+        `${RESUME_GENERATION_TAG_PREFIX}1`,
+      ]);
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoResumedTasks).toEqual([]);
+      expect(findings.autoFailedTasks.map((t) => t.reason)).toEqual([
+        RESUME_BUDGET_EXHAUSTED_REASON,
+      ]);
+      expect(await getChildTasks(task.id)).toEqual([]);
+    });
+  });
 });

@@ -14,7 +14,12 @@ import {
   handleDbQuery,
   resolveDbQuerySql,
 } from "../http/db-query";
-import { executeReadOnlyQueryBounded, isReportableTimeout } from "../http/db-query-bounded";
+import {
+  executeReadOnlyQueryBounded,
+  getDbQueryWorkerPidsForTests,
+  isReportableTimeout,
+  resetDbQueryWorkerPoolForTests,
+} from "../http/db-query-bounded";
 import {
   executeReadOnlyQuery,
   getDbQueryConcurrencyCap,
@@ -182,6 +187,7 @@ async function callDbQueryTool(sql: string, params: unknown[] = []): Promise<DbQ
 /** Env keys the flag/budget-override tests touch — reset after each so tests don't leak into each other. */
 const DB_QUERY_OVERRIDE_ENV_KEYS = [
   "DB_QUERY_BOUNDED_ENABLED",
+  "DB_QUERY_WORKER_POOL_ENABLED",
   "DB_QUERY_HTTP_BUDGET_MS",
   "DB_QUERY_HTTP_MAX_ROWS",
   "DB_QUERY_MCP_BUDGET_MS",
@@ -207,6 +213,7 @@ describe("db-query bounded execution (Fix 1)", () => {
   });
 
   afterAll(async () => {
+    resetDbQueryWorkerPoolForTests();
     closeDb();
     boundedTestGlobals.__testMigrationTemplate = boundedTestGlobals.__savedDbQueryBoundedTemplate;
     boundedTestGlobals.__savedDbQueryBoundedTemplate = undefined;
@@ -214,6 +221,8 @@ describe("db-query bounded execution (Fix 1)", () => {
   });
 
   afterEach(() => {
+    // Tests that mock Bun.spawn must not find a parked worker from an earlier test.
+    resetDbQueryWorkerPoolForTests();
     for (const key of DB_QUERY_OVERRIDE_ENV_KEYS) delete process.env[key];
     resetDbQueryBoundedWarningForTests();
     resetDbQuerySpawnUnavailableWarningForTests();
@@ -687,6 +696,8 @@ describe("db-query bounded execution (Fix 1)", () => {
   // Hold completion of real query children until the HTTP assertion finishes.
   // SELECT 1 can finish before the HTTP request arrives and release the slots.
   test("caps saturation via the HTTP route returns 429 with a stable code and Retry-After", async () => {
+    // The hold below delays the child's `exited`, which only gates the per-request path.
+    process.env.DB_QUERY_WORKER_POOL_ENABLED = "false";
     const release = Promise.withResolvers<void>();
     const childExits: Promise<number>[] = [];
     const originalSpawn = Bun.spawn;
@@ -818,6 +829,8 @@ describe("db-query bounded execution (Fix 1)", () => {
   // SQLite honoring `PRAGMA busy_timeout` is documented upstream behavior,
   // not something this PR needs to re-prove.
   test("R: the child's busy_timeout is bound to the query's budgetMs, not a fixed value", async () => {
+    // The mock speaks the per-request protocol (payload on stdin, JSON on stdout).
+    process.env.DB_QUERY_WORKER_POOL_ENABLED = "false";
     const originalSpawn = Bun.spawn;
     let capturedPayload: { busyTimeoutMs?: number } = {};
 
@@ -861,6 +874,79 @@ describe("db-query bounded execution (Fix 1)", () => {
     } finally {
       Bun.spawn = originalSpawn;
     }
+  });
+
+  // Worker pool (default path). The pool must keep every guarantee of the
+  // per-request spawn: kill on budget, read-only, fresh data.
+  describe("worker pool", () => {
+    afterEach(() => resetDbQueryWorkerPoolForTests());
+
+    test("reuses one worker across sequential queries", async () => {
+      await executeReadOnlyQueryBounded("SELECT 1", [], 10_000);
+      const pids = getDbQueryWorkerPidsForTests();
+      expect(pids.length).toBe(1);
+      await executeReadOnlyQueryBounded("SELECT 2", [], 10_000);
+      expect(getDbQueryWorkerPidsForTests()).toEqual(pids);
+    });
+
+    test("a timeout kills the worker and the next query gets a fresh one", async () => {
+      await executeReadOnlyQueryBounded("SELECT 1", [], 10_000);
+      const [before] = getDbQueryWorkerPidsForTests();
+      await expect(executeReadOnlyQueryBounded(SLOW_QUERY, [], 200)).rejects.toThrow(/budget/i);
+      expect(getDbQueryWorkerPidsForTests()).toEqual([]);
+      const result = await executeReadOnlyQueryBounded("SELECT 3 AS n", [], 10_000);
+      expect(result.rows).toEqual([[3]]);
+      const [after] = getDbQueryWorkerPidsForTests();
+      expect(after).not.toBe(before);
+    });
+
+    test("a reused worker still rejects writes and keeps serving", async () => {
+      getDb().run("CREATE TABLE IF NOT EXISTS pool_write_guard (id INTEGER PRIMARY KEY)");
+      await executeReadOnlyQueryBounded("SELECT 1", [], 10_000);
+      const [pid] = getDbQueryWorkerPidsForTests();
+      await expect(
+        executeReadOnlyQueryBounded("INSERT INTO pool_write_guard VALUES (1)", [], 10_000),
+      ).rejects.toThrow("Only read-only queries are allowed");
+      await expect(
+        executeReadOnlyQueryBounded(
+          "INSERT INTO pool_write_guard VALUES (1) RETURNING id",
+          [],
+          10_000,
+        ),
+      ).rejects.toThrow(/readonly/i);
+      const ok = await executeReadOnlyQueryBounded(
+        "SELECT COUNT(*) FROM pool_write_guard",
+        [],
+        10_000,
+      );
+      expect(ok.rows).toEqual([[0]]);
+      expect(getDbQueryWorkerPidsForTests()).toEqual([pid]);
+    });
+
+    test("a long-lived worker sees rows committed after it opened its connection", async () => {
+      getDb().run("CREATE TABLE IF NOT EXISTS pool_fresh (id INTEGER PRIMARY KEY)");
+      const first = await executeReadOnlyQueryBounded(
+        "SELECT COUNT(*) FROM pool_fresh",
+        [],
+        10_000,
+      );
+      const [pid] = getDbQueryWorkerPidsForTests();
+      getDb().run("INSERT INTO pool_fresh DEFAULT VALUES");
+      const second = await executeReadOnlyQueryBounded(
+        "SELECT COUNT(*) FROM pool_fresh",
+        [],
+        10_000,
+      );
+      expect(second.rows[0][0]).toBe((first.rows[0][0] as number) + 1);
+      expect(getDbQueryWorkerPidsForTests()).toEqual([pid]);
+    });
+
+    test("DB_QUERY_WORKER_POOL_ENABLED=false spawns per query and parks nothing", async () => {
+      process.env.DB_QUERY_WORKER_POOL_ENABLED = "false";
+      const result = await executeReadOnlyQueryBounded("SELECT 1 AS one", [], 10_000);
+      expect(result.rows).toEqual([[1]]);
+      expect(getDbQueryWorkerPidsForTests()).toEqual([]);
+    });
   });
 
   // Same review thread — "cover ... a post-timeout write/checkpoint" was the

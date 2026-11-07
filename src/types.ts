@@ -615,7 +615,16 @@ export const SteeringStatusSchema = z.enum([
 ]);
 export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 
-export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api", "chat"]);
+/** `app-page`: a steer sent from a json-render app page (the `SessionThread` component). */
+export const SteeringSourceSchema = z.enum([
+  "ui",
+  "mcp",
+  "script",
+  "slack",
+  "api",
+  "chat",
+  "app-page",
+]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
 export const SteeringMessageSchema = z

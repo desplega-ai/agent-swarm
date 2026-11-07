@@ -158,6 +158,8 @@ type SandboxRequest = {
   /** Binary body, base64-encoded by the sandbox. */
   bodyBase64?: string;
   retries?: number;
+  /** The sandbox retries stdlib fetches itself and sends `false`: one host attempt each. */
+  retry?: boolean;
   timeoutMs?: number;
 };
 
@@ -234,7 +236,8 @@ async function dispatchCall(
         ? await fetch(request.url, { ...requestInit(request), signal })
         : await runtimeFetch(request.url, {
             ...requestInit(request),
-            retries: request.retries,
+            // Only `false` crosses the boundary: retry options hold functions.
+            ...(request.retry === false ? { retry: false } : { retries: request.retries }),
             timeoutMs: request.timeoutMs,
             signal,
           });

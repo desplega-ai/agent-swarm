@@ -167,6 +167,7 @@ import type {
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
+  SteeringSource,
   SteerMode,
   SteerResult,
   SubmitImprovementInput,
@@ -802,6 +803,8 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+    vcsRepo?: string;
     /**
      * Create in `draft` status (#1240) — visible to the owner but not
      * dispatch-eligible. Used while attachments are still uploading; the
@@ -888,15 +891,21 @@ class ApiClient {
    */
   async steerTask(
     id: string,
-    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+    input: {
+      message: string;
+      mode: SteerMode;
+      requestedByUserId?: string;
+      source?: SteeringSource;
+    },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       // Identify the surface so the steering row is attributed to the dashboard
-      // rather than defaulting to a generic "api" caller.
-      body: JSON.stringify({ ...input, source: "ui" }),
+      // rather than defaulting to a generic "api" caller. A json-render app
+      // page passes "app-page".
+      body: JSON.stringify({ ...input, source: input.source ?? "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
@@ -4018,7 +4027,7 @@ class ApiClient {
    */
   async getSavingsJobs(
     target: SavingsTarget | { kind: "workflow" | "script" },
-    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
   ): Promise<SavingsJobsResponse> {
     const res = await fetch(
       `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
@@ -4533,12 +4542,30 @@ class ApiClient {
     name: string,
     input?: Record<string, unknown>,
     parentTaskId?: string,
+    /**
+     * Task-kind actions only. `followUp: false` skips the Lead follow-up
+     * (review) of the created task; `requestedByUserId` names the picked
+     * identity, which the server honors only for a shared operator key.
+     * `session` puts the task in a SessionThread session.
+     */
+    options: {
+      followUp?: boolean;
+      requestedByUserId?: string;
+      /** A SessionThread session: the server keys the task by app, key and requester. */
+      session?: { key: string; scope?: "user" | "shared" };
+    } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       {
         method: "POST",
-        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+        body: JSON.stringify({
+          input: input ?? {},
+          ...(parentTaskId ? { parentTaskId } : {}),
+          ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+          ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+          ...(options.session ? { session: options.session } : {}),
+        }),
       },
       `Failed to run action ${name}`,
     );
@@ -4595,10 +4622,11 @@ export const api = new ApiClient();
 
 function savingsParams(
   target: Record<string, string>,
-  opts: { days?: 7 | 30 | 90; tier?: SavingsTier },
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
 ): URLSearchParams {
   const params = new URLSearchParams(target);
   if (opts.days) params.set("days", String(opts.days));
   if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
   return params;
 }

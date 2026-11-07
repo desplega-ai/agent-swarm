@@ -1975,6 +1975,13 @@ export interface paths {
                             [key: string]: unknown;
                         };
                         parentTaskId?: string;
+                        followUp?: boolean;
+                        requestedByUserId?: string;
+                        session?: {
+                            key: string;
+                            /** @enum {string} */
+                            scope?: "user" | "shared";
+                        };
                     };
                 };
             };
@@ -14048,6 +14055,8 @@ export interface paths {
                         dependsOn?: string[];
                         offeredTo?: string;
                         dir?: string;
+                        /** @description A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400. */
+                        vcsRepo?: string;
                         parentTaskId?: string;
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
@@ -14080,7 +14089,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -14359,7 +14368,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
                     };
                 };
@@ -20114,7 +20123,7 @@ export interface paths {
         };
         /**
          * Estimated automation savings per workflow or script
-         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
          */
         get: {
             parameters: {
@@ -20123,6 +20132,7 @@ export interface paths {
                     scriptName?: string;
                     scheduleId?: string;
                     kind?: "workflow" | "script" | "schedule";
+                    components?: "true" | "false";
                     days?: "7" | "30" | "90";
                     tier?: "smol" | "regular" | "smart" | "ultra";
                 };
@@ -20245,10 +20255,64 @@ export interface paths {
                                     p90: number;
                                 };
                             } | null;
+                            components?: {
+                                /** @enum {string} */
+                                kind: "workflow" | "script" | "task";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+                                depth: number;
+                                /** @description Runs (tasks for a task component) in this tree. Fractional below the first level. */
+                                runs: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`. */
+                                inOwnRow: boolean;
+                            }[];
+                            withComponents?: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
                         };
                     };
                 };
-                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, or an unknown days or tier value */
+                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -29977,7 +30041,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";

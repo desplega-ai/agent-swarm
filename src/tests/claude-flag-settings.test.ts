@@ -5,14 +5,16 @@ import { join } from "node:path";
 import {
   ClaudeSettingsConfigError,
   claudeFlagSettings,
+  LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN,
   mergeClaudeSettingsArgs,
   userClaudeMdExclude,
   WORKSPACE_CLAUDE_MD_EXCLUDE,
 } from "../providers/claude-flag-settings";
 
 let directory: string;
-// Own CONTEXT_MODE_DISABLED: an ambient value would change every expectation.
+// Own CONTEXT_MODE_DISABLED: the deprecated flag must not change any expectation.
 let prevContextModeDisabled: string | undefined;
+const LEGACY_PLUGIN_OFF = { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false };
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "claude-flag-settings-"));
@@ -32,6 +34,7 @@ describe("mergeClaudeSettingsArgs", () => {
     expect(merged.argLists).toEqual([["--max-turns", "3"]]);
     expect(merged.settings).toEqual({
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
+      enabledPlugins: LEGACY_PLUGIN_OFF,
     });
   });
 
@@ -60,6 +63,7 @@ describe("mergeClaudeSettingsArgs", () => {
         "/b/CLAUDE.md",
         userClaudeMdExclude(),
       ],
+      enabledPlugins: LEGACY_PLUGIN_OFF,
     });
   });
 
@@ -116,21 +120,22 @@ describe("mergeClaudeSettingsArgs", () => {
       model: "b",
       env: {},
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
+      enabledPlugins: LEGACY_PLUGIN_OFF,
     });
   });
 });
 
-describe("CONTEXT_MODE_DISABLED", () => {
-  // The plugin id the worker image installs.
+describe("legacy context-mode plugin", () => {
+  // The plugin id older worker images installed (pinned literal, not the export).
   const CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
 
-  test("unset: the context-mode plugin is left to the user settings", () => {
-    expect(claudeFlagSettings().enabledPlugins).toBeUndefined();
-    expect(mergeClaudeSettingsArgs([[]], directory).settings.enabledPlugins).toBeUndefined();
-  });
-
-  test.each(["true", "1"])("=%s turns the context-mode plugin off for the session", (value) => {
-    process.env.CONTEXT_MODE_DISABLED = value;
+  test.each([
+    undefined,
+    "true",
+    "false",
+  ])("always turned off, whatever CONTEXT_MODE_DISABLED is (%s)", (value) => {
+    if (value === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = value;
     expect(claudeFlagSettings().enabledPlugins).toEqual({ [CONTEXT_MODE_CLAUDE_PLUGIN]: false });
     expect(mergeClaudeSettingsArgs([[]], directory).settings.enabledPlugins).toEqual({
       [CONTEXT_MODE_CLAUDE_PLUGIN]: false,
@@ -138,7 +143,6 @@ describe("CONTEXT_MODE_DISABLED", () => {
   });
 
   test("overrides a caller that enables the plugin and keeps the caller's other plugins", () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
     const caller = { enabledPlugins: { [CONTEXT_MODE_CLAUDE_PLUGIN]: true, "other@market": true } };
     const merged = mergeClaudeSettingsArgs([["--settings", JSON.stringify(caller)]], directory);
     expect(merged.settings.enabledPlugins).toEqual({

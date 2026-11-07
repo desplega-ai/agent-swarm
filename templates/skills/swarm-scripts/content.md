@@ -8,8 +8,8 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 |---|---|
 | 1 to 9 SDK calls, result fits in context | Direct tool calls. |
 | 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
-| Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
-| One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| Fetch, parse, and transform heavy data | Script. |
+| One large web fetch | Script with `ctx.stdlib.fetch`. Return only the part you need. |
 | A schedule, workflow, or API script that reads or writes drive files | Script with `ctx.fs` and `ctx.sh`. |
 | Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
 | Work that repeats on a clock | Schedule. See `scheduling`. |
@@ -70,6 +70,19 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
 - Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script. A `targetType: "script"` schedule gets 60 s; a manual `script-run` gets 30 s, so a candidate that finishes well under 30 s by hand has margin on the schedule. A nested `ctx.swarm.script_run` gets its own 30 s but runs inside its caller's remaining time: run slow children as sibling calls from the outer script, not deeper in the chain. The run ends when your default export resolves. A call you did not await gets about 2 s more and is then stopped (`quickjs` aborts it at once), so await every write that must land. That makes a `Promise.race` deadline bound the run; a nested `script_run` that lost the race keeps running on the server under its own 30 s.
 
+### Upserting a large source
+
+A large source pasted inline into a `script-upsert` tool call overflows the call. Write the source to a local file, then send it from bash through the same route, `POST $MCP_BASE_URL/api/scripts/upsert`. The body is JSON (`name`, `source`, optional `description`, `intent`, `scope`), so wrap the file instead of sending it raw:
+
+```bash
+jq -n --arg name my-script --rawfile source ./my-script.ts '{name: $name, source: $source}' \
+  | curl -sS -X POST "$MCP_BASE_URL/api/scripts/upsert" \
+      -H "Authorization: Bearer $API_KEY" -H "X-Agent-ID: $AGENT_ID" \
+      -H "Content-Type: application/json" --data-binary @-
+```
+
+The route runs the same typecheck and scope rules as the tool.
+
 ### What `ctx` holds
 
 - `ctx.swarm.*`: the swarm SDK. `task_get`, `task_send`, `task_storeProgress`, `task_action`, `task_list`, `slack_reply`, `memory_search`, `memory_store`, `kv_get`, `kv_getOrNull`, `kv_set`, `kv_delete`, `kv_incr`, `kv_list`, `swarm_get`, `agent_info`, `db_query`, and more. `kv_getOrNull` returns the entry, `null` on a missing key, and throws on other errors.
@@ -77,7 +90,8 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
-- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
+- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
+- Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
 
 ### Files and shell

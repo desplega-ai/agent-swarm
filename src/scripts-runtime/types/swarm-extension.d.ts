@@ -344,7 +344,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui";
+  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;

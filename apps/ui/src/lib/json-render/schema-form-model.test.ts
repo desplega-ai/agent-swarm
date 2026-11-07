@@ -295,6 +295,22 @@ describe("controls", () => {
       expect(isValidStateId(bad)).toBe(false);
     }
   });
+
+  test("the assembler's per-instance ids are valid state ids", () => {
+    expect(isValidStateId("instances/a/props")).toBe(true);
+    expect(isValidStateId("instances/outer.inner/props")).toBe(true);
+    for (const bad of [
+      "instances/",
+      "instances/props",
+      "instances//props",
+      "instances/a/",
+      "instances/a/b c",
+      "instances/__proto__/props",
+      "instances/../props",
+    ]) {
+      expect(isValidStateId(bad)).toBe(false);
+    }
+  });
 });
 
 describe("createCommitQueue", () => {
