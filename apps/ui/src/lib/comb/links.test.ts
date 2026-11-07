@@ -12,7 +12,9 @@ import {
 const LIVE = "https://live.agent-fs.dev";
 const APP = "http://localhost:5274";
 const IDS = { orgId: "org-1", driveId: "drive-1" };
-const NOT_READY = ["disabled", "loading", "needs-connect", "invalid-key", "unreachable"] as const;
+// Connected, or about to be (the browser mints its own key): links stay in-app.
+const NAVIGABLE = ["ready", "loading", "needs-connect", "invalid-key"] as const;
+const NOT_NAVIGABLE = ["disabled", "unreachable"] as const;
 
 /** A live link into org-1/drive-1, mapped to its Comb route. */
 function live(path: string): string | null {
@@ -154,22 +156,37 @@ describe("combPathForLink", () => {
 });
 
 describe("isCombNavigable", () => {
-  test("only a connected Comb is navigable", () => {
-    expect(isCombNavigable("ready")).toBe(true);
-    for (const state of NOT_READY) {
-      expect(isCombNavigable(state)).toBe(false);
+  test("connected or connecting Comb is navigable, off or unreachable is not", () => {
+    for (const state of NAVIGABLE) expect(isCombNavigable(state)).toBe(true);
+    for (const state of NOT_NAVIGABLE) expect(isCombNavigable(state)).toBe(false);
+  });
+});
+
+describe("isCombNavigable after the automatic connect settled", () => {
+  test("a settled connect without a key keeps the link's own target", () => {
+    for (const state of ["needs-connect", "invalid-key"] as const) {
+      expect(isCombNavigable(state, null)).toBe(true);
+      expect(isCombNavigable(state, { kind: "connected" })).toBe(true);
+      expect(isCombNavigable(state, { kind: "unsupported" })).toBe(false);
+      expect(isCombNavigable(state, { kind: "pending", reason: "domain rule" })).toBe(false);
+      expect(isCombNavigable(state, { kind: "failed", message: "no" })).toBe(false);
     }
+    // A saved key (pasted later) wins over an earlier failed attempt.
+    expect(isCombNavigable("ready", { kind: "unsupported" })).toBe(true);
+    expect(isCombNavigable("loading", { kind: "failed", message: "no" })).toBe(true);
+    const href = `${LIVE}/file/~/org-1/drive-1/notes.md`;
+    expect(combLinkFor("needs-connect", LIVE, APP, href, { kind: "unsupported" })).toBeNull();
   });
 });
 
 describe("combLinkFor", () => {
   const href = `${LIVE}/file/~/org-1/drive-1/notes.md`;
 
-  test("maps a link only while Comb is ready", () => {
-    expect(combLinkFor("ready", LIVE, APP, href)).toBe("/file/~/org-1/drive-1/notes.md");
-    for (const state of NOT_READY) {
-      expect(combLinkFor(state, LIVE, APP, href)).toBeNull();
+  test("maps a link while Comb is navigable, including during the first paint", () => {
+    for (const state of NAVIGABLE) {
+      expect(combLinkFor(state, LIVE, APP, href)).toBe("/file/~/org-1/drive-1/notes.md");
     }
+    for (const state of NOT_NAVIGABLE) expect(combLinkFor(state, LIVE, APP, href)).toBeNull();
   });
 
   test("returns null for a missing or foreign href", () => {

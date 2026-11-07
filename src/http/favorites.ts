@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { AssetKeyError, normalizeAssetKey } from "../assets/key";
 import { listFavorites as listFavoriteRows, setFavorite } from "../be/db";
 import { FavoriteItemTypeSchema, UserFavoriteSchema } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
@@ -50,6 +51,7 @@ const putFavorite = route({
         row: UserFavoriteSchema.nullable(),
       }),
     },
+    400: { description: "Invalid asset key for a key favorite" },
     401: { description: "No authenticated principal context" },
   },
 });
@@ -93,18 +95,28 @@ export async function handleFavorites(
       jsonError(res, "Authenticated principal required to update favorites", 401);
       return true;
     }
+    let itemId = parsed.body.itemId;
+    if (parsed.body.itemType === "key") {
+      try {
+        itemId = normalizeAssetKey(itemId);
+      } catch (error) {
+        if (!(error instanceof AssetKeyError)) throw error;
+        jsonError(res, error.message, 400);
+        return true;
+      }
+    }
     const favorite = await setFavorite({
       favoriteScope: owner.scope,
       userId: owner.userId,
       itemType: parsed.body.itemType,
-      itemId: parsed.body.itemId,
+      itemId,
       favorite: parsed.body.favorite,
       actorId: owner.actorId,
     });
     putFavorite.respond(res, 200, {
       favorite: parsed.body.favorite,
       itemType: parsed.body.itemType,
-      itemId: parsed.body.itemId,
+      itemId,
       row: favorite,
     });
     return true;

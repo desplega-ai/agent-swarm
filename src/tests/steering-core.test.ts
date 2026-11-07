@@ -697,4 +697,17 @@ describe("task steering core", () => {
       );
     }
   });
+
+  test("a task with no provider anywhere advertises the claude modes a steer actually takes", async () => {
+    const task = await createTaskExtended("no provider capability read", { source: "api" });
+    expect(task.agentId ?? null).toBeNull();
+    expect(task.provider ?? null).toBeNull();
+    // `requestSteering` delivers through the default claude harness, so the
+    // advertised modes must not claim "can't be steered" ([]).
+    expect((await getTaskSteeringFields(task)).supportedSteerModes).toEqual(
+      PROVIDER_STEER_CAPABILITIES.claude,
+    );
+    const batch = await getTaskSteeringFieldsForTasks([task]);
+    expect(batch.get(task.id)?.supportedSteerModes).toEqual(PROVIDER_STEER_CAPABILITIES.claude);
+  });
 });

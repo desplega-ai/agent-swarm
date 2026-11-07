@@ -196,6 +196,12 @@ describe("swarm-config reserved keys guard", () => {
       expect(isReservedConfigKey("Secrets_Encryption_Key")).toBe(true);
     });
 
+    test("recognizes the GitHub host keys (they redirect GitHub tokens)", () => {
+      expect(isReservedConfigKey("GITHUB_URL")).toBe(true);
+      expect(isReservedConfigKey("GITHUB_API_URL")).toBe(true);
+      expect(isReservedConfigKey("GITHUB_TOKEN")).toBe(false);
+    });
+
     test("does not match unrelated keys", () => {
       expect(isReservedConfigKey("OPENAI_API_KEY")).toBe(false);
       expect(isReservedConfigKey("API_KEYS")).toBe(false);
@@ -471,6 +477,17 @@ describe("swarm-config reserved keys guard", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe(EXPECTED_MESSAGE("API_KEY"));
+    });
+
+    test("returns 400 for reserved key GITHUB_URL", async () => {
+      const res = await fetch(`${baseUrl}/api/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "global", key: "GITHUB_URL", value: "https://evil.test" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe(EXPECTED_MESSAGE("GITHUB_URL"));
     });
 
     test("returns 400 for case variant 'Api_Key'", async () => {

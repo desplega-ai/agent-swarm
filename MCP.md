@@ -1123,7 +1123,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/schedule:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key, so the planning session, the schedule and its runs share one key. |
 | `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
 | `targetType` | `agent-task \| workflow \| script` | No | "agent-task" | Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; use 'script' + scriptName/scriptArgs when it only runs a catalog script; use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script. |
@@ -1985,7 +1985,7 @@ Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are u
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/page:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key. |
 | `title` | `string` | Yes | - | Human-readable title shown in listings. |
 | `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
 | `body` | `string` | Yes | - | Full page body (HTML document, SVG image, or JSON-render spec, per contentType). |
@@ -2154,14 +2154,15 @@ Capability: `slack` (enabled by default)
 
 **Reply to Slack thread**
 
-Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for. For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
-| `message` | `string` | Yes | - | The message to send to the Slack thread. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message to send to the Slack thread. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 
 ### slack-read
 
@@ -2182,13 +2183,14 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 
 **Post message to Slack channel**
 
-Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.
+Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user. |
-| `message` | `string` | Yes | - | The message content to post. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message content to post. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -2461,25 +2463,27 @@ Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` 
 
 **Reply in the chat thread of this task**
 
-Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | `string` | Yes | - | Markdown text to post to the thread. |
+| `text` | `string` | No | - | Markdown text to post to the thread. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-post
 
 **Post to a chat thread or channel**
 
-Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
 | `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
 | `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
-| `text` | `string` | Yes | - | Markdown text to post. |
+| `text` | `string` | No | - | Markdown text to post. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-open-dm

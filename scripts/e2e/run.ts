@@ -53,6 +53,8 @@ export type ScenarioContext = {
   recordHttpCall: typeof recordHttpCall;
   /** The environment the SUT booted with (ports for stand-ins, feature flags). Read-only. */
   sutEnv: Readonly<Record<string, string>>;
+  /** The SUT's stdout/stderr so far (current process only). Compare lengths to read what a step added. */
+  sutLog: () => Promise<string>;
   log: (message: string) => void;
   markThread: (label: string, channel: string, ts: string) => void;
   restartSut: () => Promise<void>;
@@ -236,6 +238,11 @@ async function main(): Promise<number> {
     },
     recordHttpCall,
     sutEnv: activeSut.env,
+    async sutLog() {
+      if (!activeSut) throw new Error("E2E harness is not running");
+      activeSut.flushLog();
+      return Bun.file(activeSut.logPath).text();
+    },
     async restartSut() {
       if (!activeSut || !activeSlack) throw new Error("E2E harness is not running");
       const connectionCalls = activeSlack.mock.apiCalls("apps.connections.open").length;

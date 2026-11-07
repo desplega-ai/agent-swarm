@@ -19,6 +19,7 @@ import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar
 import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { AgentSlackIconField } from "@/components/shared/agent-slack-icon-field";
+import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
 import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { MediaIconField } from "@/components/shared/media-icon-field";
@@ -403,7 +404,7 @@ export default function AgentDetailPage() {
               {agent.role}
             </span>
           )}
-          <StatusBadge status={agent.status} size="md" />
+          <AgentStatusBadge agent={agent} size="md" />
         </div>
       </div>
 

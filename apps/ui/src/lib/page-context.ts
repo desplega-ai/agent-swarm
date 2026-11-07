@@ -43,10 +43,10 @@ const ENTITY_ROUTES: ReadonlyArray<{ pattern: string; kind: string }> = [
   { pattern: "/skills/:id", kind: "skill" },
   { pattern: "/templates/:id", kind: "template" },
   { pattern: "/templates/:id/history/:version", kind: "template" },
-  { pattern: "/mcp-servers/:id", kind: "mcp-server" },
+  { pattern: "/integrations/tools/mcp-servers/:id", kind: "mcp-server" },
   { pattern: "/repos/:id", kind: "repo" },
   { pattern: "/people/:id", kind: "person" },
-  { pattern: "/connections/:id", kind: "connection" },
+  { pattern: "/integrations/tools/connections/:id", kind: "connection" },
   { pattern: "/approval-requests/:id", kind: "approval-request" },
 ];
 

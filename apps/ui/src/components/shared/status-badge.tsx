@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 
 type Status =
   | AgentStatus
+  | "on_demand"
   | AgentTaskStatus
   | ApprovalRequestStatus
   | ServiceStatus
@@ -42,6 +43,7 @@ const HEALTH: Record<string, HealthConfig> = {
   busy: { dot: "bg-status-active", text: "text-status-active-strong", spinner: true },
   offline: { dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   waiting_for_credentials: { dot: "bg-status-warning", text: "text-status-warning-strong" },
+  on_demand: { dot: "bg-status-info", text: "text-status-info-strong" },
   starting: { dot: "bg-status-pending", text: "text-status-pending-strong" },
   healthy: { dot: "bg-status-success", text: "text-status-success-strong" },
   unhealthy: { dot: "bg-status-error", text: "text-status-error-strong" },

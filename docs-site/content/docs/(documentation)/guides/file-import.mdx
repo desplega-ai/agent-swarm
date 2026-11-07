@@ -1,0 +1,126 @@
+---
+title: File import
+description: Import workflows, skills, scripts and agent instructions from a mounted package at API boot.
+---
+
+The file importer loads a versioned package of workflows, skills, scripts and agent instructions when the API starts.
+Mount the package, point the API at it, and restart to deploy a new release.
+Git, release selection and restarts stay with your deployment tooling.
+
+With no import configured, boot is unchanged.
+
+## Configure a source
+
+Set one of these on the API server. A global `swarm_config` row with the same key wins over the environment.
+
+| Variable | Value |
+|---|---|
+| `SWARM_IMPORT_SOURCES` | JSON array of sources |
+| `SWARM_IMPORT_SOURCES_FILE` | Path to a JSON or YAML file holding that array |
+
+```json
+[{ "id": "team-flows", "type": "dir", "path": "/import/team-flows", "onConflict": "noop" }]
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Lowercase slug. The source owns every resource it imports under this id. Do not rename it. |
+| `type` | `dir`. Only directory sources exist today. |
+| `path` | Absolute path of the package root. The importer only reads it, so mount it read-only. Every file it reads must resolve inside this root; a symlink that points outside rejects the package. |
+| `onConflict` | `noop` (default) or `overwrite`. See [Conflicts and edits](#conflicts-and-edits). |
+
+JSON Schema for this value: `templates/import/sources.schema.json`.
+
+## Package layout
+
+A package can declare its items in a root `swarm-import.yaml` (or `.yml`, `.json`).
+Every section is optional. A package that leaves out a kind imports none of it.
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/templates/import/manifest.schema.json
+version: 1
+workflows:
+  - id: review
+    file: workflows/review.yaml
+skills:
+  - id: review-guide
+    dir: skills/review-guide
+scripts:
+  - name: team-lint-report
+    file: scripts/lint-report.ts
+    description: Summarize lint findings for a pull request
+agents:
+  - name: Reviewer
+    instructions: agents/reviewer.md
+    skills: [review-guide]
+```
+
+- `id` values are local to the package. They are never database ids.
+- A workflow file uses the same format as an extension workflow: `name`, `description`, `definition`, `triggers`, `cooldown`, `input`, `triggerSchema`.
+- A skill directory holds `SKILL.md` and optional `files/**`. The skill name comes from the `SKILL.md` frontmatter.
+- Bundled files follow the skill file limits (`SKILL_FILES_MAX_FILE_BYTES`, `SKILL_FILES_MAX_COUNT`, `SKILL_FILES_MAX_TOTAL_BYTES`), and `files/SKILL.md` is refused. A file over a limit fails validation, so the package imports nothing.
+- Scripts are global scripts, keyed by `name`.
+- An agent entry names an agent by `name` or by `id`, never both. Use `id` when names repeat.
+
+Without a manifest, the directory convention applies:
+
+| Path | Imported as |
+|---|---|
+| `workflows/<id>.{yaml,yml,json}` | Workflow |
+| `skills/<id>/SKILL.md` | Skill |
+| `scripts/<name>.ts` | Global script, with a generic description |
+| `agents/<name>.md` | Instructions for the agent named `<name>` |
+
+The convention cannot express skill assignments. Use a manifest for those.
+
+## What an import does
+
+The importer validates the whole package before it writes anything.
+Workflows go through the same definition check as the API, scripts through the import allowlist and type check, and skills through the `SKILL.md` parser.
+If any item fails, the source imports nothing, the log lists every problem with its file and field, and the API still starts.
+
+For a valid package it then creates or updates each resource:
+
+| Kind | Result |
+|---|---|
+| Workflow | Created **disabled**. An update keeps the current on/off state and records a workflow version. |
+| Skill | Created with `global` scope, so it reaches only the agents it is installed on. |
+| Script | Global script. Embeddings are filled in by the post-boot backfill. |
+| Agent instructions | Written to the agent's `IDENTITY.md` profile field. |
+| Skill assignment | Installed on the agent and delivered by the normal worker skill refresh. An install a user deactivated stays off. |
+
+An unchanged package writes nothing and adds no workflow versions.
+Removing a file does not delete its resource.
+
+Each boot logs one line per kind and source, for example:
+
+```text
+[import:team-flows] workflow created=1 updated=0 unchanged=3 preserved=0 failed=0
+[import:team-flows] conflict workflow review: a same-named workflow exists that this source does not own
+[import:team-flows] unresolved agent name:Reviewer: not registered; applies when it registers (instructions: yes, skills: 1)
+```
+
+## Conflicts and edits
+
+A source owns only what it created or adopted.
+
+| Situation | `noop` | `overwrite` |
+|---|---|---|
+| A resource with the same name exists that the source did not create | Conflict: left as is, logged | Adopted, then updated from the file |
+| A resource owned by another source, or a built-in seeded one | Conflict | Conflict |
+| An owned resource was edited in the UI, through the API, or by an agent | Edit kept | File wins |
+
+An agent whose `IDENTITY.md` is empty or still the generated default counts as free, so instructions apply without a conflict.
+
+## Agents that register later
+
+When an agent named in the package does not exist yet, the importer stores its instructions and skill installs as pending and logs it as unresolved.
+They apply when an agent with that name or id registers.
+Every import of the source rewrites its pending entries.
+
+## Active workflow runs
+
+Each run is pinned to the workflow definition it started with.
+An import that updates a workflow reaches new runs only; runs already in flight finish on their original definition.
+Skills, scripts and agent instructions are not pinned: a run picks up the version current when each step reads it.
+To move every run to a new release at once, let active runs finish before you deploy it.

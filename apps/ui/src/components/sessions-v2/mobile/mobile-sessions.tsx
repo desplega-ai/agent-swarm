@@ -206,10 +206,12 @@ export function MobileSessions({
       }
       if (nextView) params.set("view", nextView);
       else params.delete("view");
+      // The group screen's Overview or list (`?tab=`) belongs to its group.
+      if (nextView !== view) params.delete("tab");
       const qs = params.toString();
       return `${path}${qs ? `?${qs}` : ""}`;
     },
-    [searchParams],
+    [searchParams, view],
   );
   const push = (to: string) => {
     setInstant(false);

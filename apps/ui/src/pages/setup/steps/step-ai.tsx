@@ -242,12 +242,8 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
             className="h-auto max-w-full whitespace-normal px-0 text-left has-[>svg]:px-0"
           >
             {/* A new tab keeps setup open in this one. */}
-            <Link
-              to={setupExitHref("/settings/integrations")}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              More providers (OpenAI, Bedrock, Claude Managed) in Settings
+            <Link to={setupExitHref("/integrations/ai")} target="_blank" rel="noopener noreferrer">
+              More providers (OpenAI, Bedrock, Claude Managed) in Connect
               <ArrowUpRight />
             </Link>
           </Button>

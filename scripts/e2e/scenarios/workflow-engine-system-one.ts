@@ -406,71 +406,90 @@ export const workflowEngineSystemOne: Scenario = {
       cleanups.push(
         await setGlobalConfig(ctx, "CLOUDFLARE_API_TOKEN", "e2e-cloudflare-token", true),
       );
-      // Keep this workflow so coverage can read its completed step.
+      const invalidExtractDefault = await ctx.api("PUT", "/api/config", {
+        body: { scope: "global", key: "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", value: "openai" },
+      });
+      expectStatus(
+        invalidExtractDefault,
+        [400],
+        "reject a decision host as the extraction default",
+      );
+      expect(
+        String(asRecord(invalidExtractDefault.json).error).includes(
+          "Invalid SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER value",
+        ),
+        "the validator names the extraction default",
+      );
+      cleanups.push(
+        await setGlobalConfig(ctx, "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", "cloudflare"),
+      );
+      // Keep these workflows so coverage can read their completed steps.
       ctx.llm.setSystemOneResponder(undefined);
-      const cloudflareExtractFlow = await createWorkflow(
-        ctx,
-        "wf-s1-extract-cloudflare-run",
-        {
-          nodes: [
-            extractionNode(`Order ${marker} shipped to Barcelona`, {
-              provider: "cloudflare",
-              fields: {
-                order_id: { type: "text", instructions: "Order number" },
-                parcels: { type: "number", instructions: "Parcels shipped" },
-              },
-            }),
-          ],
-        },
-        {},
-        workerId,
-      );
-      const clairicBefore = ctx.llm.requestsTo("/clairic").length;
-      const decideCallsBeforeExtract = ctx.llm.requestsTo("/systemone").length;
-      const extractionRun = await triggerWorkflow(
-        ctx,
-        cloudflareExtractFlow,
-        {},
-        { agentId: workerId },
-      );
-      const extractionDetail = await waitForRun(
-        ctx,
-        extractionRun.runId,
-        "completed",
-        20_000,
-        "Cloudflare extraction run",
-      );
-      const extracted = outputOf(extractionDetail, "extract");
-      const extractedAnswers = asRecord(extracted.answers);
-      expect(
-        asRecord(extractedAnswers.order_id).type === "text" &&
-          asRecord(extractedAnswers.order_id).value === "e2e" &&
-          asRecord(extractedAnswers.parcels).type === "number" &&
-          asRecord(extractedAnswers.parcels).value === 1 &&
-          asRecord(extractedAnswers.parcels).confidence === 0.9,
-        `the step output carries one typed answer per field: ${JSON.stringify(extractedAnswers)}`,
-      );
-      expect(
-        extracted.model === "clairic" && asRecord(extracted.usage).input_tokens === 10,
-        "the step output reports the model and usage the host returned",
-      );
-      const clairicCalls = ctx.llm.requestsTo("/clairic");
-      const clairicSeen = clairicCalls.at(-1);
-      const clairicBody = asRecord(clairicSeen?.body);
-      expect(
-        clairicCalls.length === clairicBefore + 1 &&
-          clairicSeen?.path ===
-            "/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clairic" &&
-          clairicSeen?.headers.authorization === "Bearer e2e-cloudflare-token" &&
-          String(clairicBody.state).includes(marker) &&
-          Object.keys(asRecord(clairicBody.fields)).join(",") === "order_id,parcels" &&
-          clairicBody.model === "clairic",
-        `Extraction must send the token, state, fields, and Clairic model: ${JSON.stringify(clairicSeen?.body)}`,
-      );
-      expect(
-        ctx.llm.requestsTo("/systemone").length === decideCallsBeforeExtract,
-        "extraction did not use the decision route",
-      );
+      for (const explicitProvider of [true, false]) {
+        const cloudflareExtractFlow = await createWorkflow(
+          ctx,
+          explicitProvider ? "wf-s1-extract-cloudflare-run" : "wf-s1-extract-default-run",
+          {
+            nodes: [
+              extractionNode(`Order ${marker} shipped to Barcelona`, {
+                ...(explicitProvider ? { provider: "cloudflare" } : {}),
+                fields: {
+                  order_id: { type: "text", instructions: "Order number" },
+                  parcels: { type: "number", instructions: "Parcels shipped" },
+                },
+              }),
+            ],
+          },
+          {},
+          workerId,
+        );
+        const clairicBefore = ctx.llm.requestsTo("/clairic").length;
+        const decideCallsBeforeExtract = ctx.llm.requestsTo("/systemone").length;
+        const extractionRun = await triggerWorkflow(
+          ctx,
+          cloudflareExtractFlow,
+          {},
+          { agentId: workerId },
+        );
+        const extractionDetail = await waitForRun(
+          ctx,
+          extractionRun.runId,
+          "completed",
+          20_000,
+          "Cloudflare extraction run",
+        );
+        const extracted = outputOf(extractionDetail, "extract");
+        const extractedAnswers = asRecord(extracted.answers);
+        expect(
+          asRecord(extractedAnswers.order_id).type === "text" &&
+            asRecord(extractedAnswers.order_id).value === "e2e" &&
+            asRecord(extractedAnswers.parcels).type === "number" &&
+            asRecord(extractedAnswers.parcels).value === 1 &&
+            asRecord(extractedAnswers.parcels).confidence === 0.9,
+          `the step output carries one typed answer per field: ${JSON.stringify(extractedAnswers)}`,
+        );
+        expect(
+          extracted.model === "clairic" && asRecord(extracted.usage).input_tokens === 10,
+          "the step output reports the model and usage the host returned",
+        );
+        const clairicCalls = ctx.llm.requestsTo("/clairic");
+        const clairicSeen = clairicCalls.at(-1);
+        const clairicBody = asRecord(clairicSeen?.body);
+        expect(
+          clairicCalls.length === clairicBefore + 1 &&
+            clairicSeen?.path ===
+              "/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/clairic" &&
+            clairicSeen?.headers.authorization === "Bearer e2e-cloudflare-token" &&
+            String(clairicBody.state).includes(marker) &&
+            Object.keys(asRecord(clairicBody.fields)).join(",") === "order_id,parcels" &&
+            clairicBody.model === "clairic",
+          `Extraction must send the token, state, fields, and Clairic model: ${JSON.stringify(clairicSeen?.body)}`,
+        );
+        expect(
+          ctx.llm.requestsTo("/systemone").length === decideCallsBeforeExtract,
+          "extraction did not use the decision route",
+        );
+      }
 
       // ── extraction: configured, strict token check, no outbound call ────────
       // Not tracked for cleanup: deleting a workflow deletes its runs, and the coverage

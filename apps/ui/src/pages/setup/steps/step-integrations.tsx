@@ -173,13 +173,13 @@ export function StepIntegrations({
             </Fragment>
           ))}
           <Link
-            to={setupExitHref("/settings/integrations")}
+            to={setupExitHref("/integrations/tools")}
             target="_blank"
             rel="noopener noreferrer"
             className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger transition-colors sm:mt-1 sm:h-auto sm:rounded-none sm:border-0 sm:border-t sm:border-border-subtle sm:px-3 sm:py-2.5"
           >
             <ExternalLink className="size-4 shrink-0" />
-            <span className="font-medium">More in Settings</span>
+            <span className="font-medium">More in Connect</span>
           </Link>
         </nav>
 

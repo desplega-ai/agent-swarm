@@ -70,7 +70,7 @@ Add `--contact-sheet` to the start command for a timestamped PNG summary of visu
 
 ## Step 3: share the screenshot through agent-fs
 
-Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention: that copy is the durable original. A person opens it through the live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
+Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention: that copy is the durable original. A person opens it through the file link from the Outputs section of your system prompt (the dashboard when configured). `--file` is binary-safe. `--content` is text-only and mangles PNGs.
 
 ```bash
 agent-fs write thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png \

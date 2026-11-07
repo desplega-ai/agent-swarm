@@ -149,6 +149,7 @@ import {
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { getGitHubHostForSql } from "../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import { validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
 import {
@@ -191,6 +192,7 @@ import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
   approvalRequestListClause,
+  scheduleApprovalCardUpdates,
   scrubApprovalVotesJson,
 } from "./db/approvals";
 import {
@@ -218,6 +220,7 @@ import {
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
 import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
+import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -339,6 +342,9 @@ export {
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
   installSystemDefaultSkillsForAgent: (agentId) => installSystemDefaultSkillsForAgent(agentId),
+  // Lazy: the importer imports this facade.
+  resolvePendingImportAssignments: async (agent) =>
+    (await import("./import/pending")).resolvePendingImportAssignments(agent),
 });
 
 export {
@@ -3605,17 +3611,17 @@ export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
 }
 
 /**
- * Batch size and hard cap for the paginated eligibility scans in
+ * Batch size for the paginated eligibility scans in
  * `getUnassignedTaskIdsForAgent` (and `autoAssignPoolTasks` in
  * src/heartbeat/heartbeat.ts, which mirrors this pattern). A fixed single
  * window used to mean N ineligible affinity-tagged tasks at the head of the
  * priority order could hide all eligible work behind them forever — see
  * PR #954 review. Scanning continues page-by-page until `limit` eligible
- * candidates are found or the pool is exhausted; the cap bounds worst-case
- * DB load when eligible work is buried deep or genuinely absent.
+ * candidates are found or the pool is exhausted; the scan cap
+ * (`getEligibilityScanCap`) bounds worst-case DB load when eligible work is
+ * buried deep or genuinely absent.
  */
 const ELIGIBILITY_SCAN_BATCH_SIZE = Number(process.env.ELIGIBILITY_SCAN_BATCH_SIZE) || 25;
-const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
 
 /**
  * Same ordering as `getUnassignedTaskIds`, filtered through
@@ -3640,9 +3646,10 @@ export async function getUnassignedTaskIdsForAgent(
 
   const batchSize = Math.max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE);
   const eligible: string[] = [];
+  const scanCap = getEligibilityScanCap();
   let offset = 0;
 
-  while (eligible.length < limit && offset < ELIGIBILITY_SCAN_CAP) {
+  while (eligible.length < limit && offset < scanCap) {
     const rows = await getDbClient().query<AgentTaskRow>(
       "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
       [batchSize, offset],
@@ -5581,6 +5588,7 @@ export async function getAttributionByPerson(opts: {
     }
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
+  const githubHost = getGitHubHostForSql();
 
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = await getDbClient().query<RootRow>(
@@ -5621,7 +5629,7 @@ export async function getAttributionByPerson(opts: {
            OR (
              ta.kind = 'url'
              AND (
-               ta.url LIKE '%github.com/%/pull/%'
+               ta.url LIKE '%${githubHost}/%/pull/%'
                OR ta.url LIKE '%/-/merge_requests/%'
              )
            )
@@ -5633,7 +5641,7 @@ export async function getAttributionByPerson(opts: {
         -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
         -- planner scans every task's output and probes the tree instead.
         CROSS JOIN agent_tasks described ON described.id = tree.taskId
-        WHERE described.output LIKE '%github.com/%/pull/%'
+        WHERE described.output LIKE '%${githubHost}/%/pull/%'
            OR described.output LIKE '%/-/merge_requests/%'
       )
       SELECT
@@ -10068,7 +10076,10 @@ export async function resolveApprovalRequest(
       id,
     ],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const resolved = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([resolved]);
+  return resolved;
 }
 
 // Cancels 1 pending request. The `status = 'pending'` guard lets a concurrent
@@ -10085,7 +10096,10 @@ export async function cancelApprovalRequestById(
        RETURNING *`,
     [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const cancelled = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([cancelled]);
+  return cancelled;
 }
 
 export async function cancelPendingApprovalRequestsForRun(
@@ -10100,7 +10114,9 @@ export async function cancelPendingApprovalRequestsForRun(
        RETURNING *`,
     [scrubSecrets(reason), now, now, workflowRunId],
   );
-  return rows.map(rowToApprovalRequest);
+  const cancelled = rows.map(rowToApprovalRequest);
+  scheduleApprovalCardUpdates(cancelled);
+  return cancelled;
 }
 
 export async function listCancelledApprovalRequestsForRun(
@@ -10125,13 +10141,21 @@ export async function listCancelledApprovalRequestsForStep(
   return rows.map(rowToApprovalRequest);
 }
 
+/**
+ * Lease one Slack side effect of a settled request. `cancellationNotificationClaims`
+ * holds every such claim: the cancellation thread reply (`<channel>:<ts>`) and the
+ * in-place card edit (`card:<channel>:<ts>`), so a retry never repeats a delivered one.
+ * `anyTerminal` claims on every terminal status, not only `cancelled`.
+ */
 export async function claimApprovalCancellationNotification(
   id: string,
   notificationKey: string,
+  options?: { anyTerminal?: boolean },
 ): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
+  const statusClause = options?.anyTerminal ? "status <> 'pending'" : "status = 'cancelled'";
   return getDbClient().transaction(async () => {
     const row = await getDbClient().get<ApprovalRequestRow>(
-      "SELECT * FROM approval_requests WHERE id = ? AND status = 'cancelled'",
+      `SELECT * FROM approval_requests WHERE id = ? AND ${statusClause}`,
       [id],
     );
     if (!row) return null;
@@ -10157,7 +10181,7 @@ export async function claimApprovalCancellationNotification(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND ${statusClause}`,
       [JSON.stringify(claims), now, id],
     );
     return { approval: rowToApprovalRequest(row), leaseToken };
@@ -10206,7 +10230,7 @@ async function updateApprovalCancellationNotificationClaim(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND status <> 'pending'`,
       [JSON.stringify(claims), new Date().toISOString(), id],
     );
   });
@@ -12991,10 +13015,12 @@ export async function setFavorite(opts: {
   favorite: boolean;
   actorId?: string | null;
 }): Promise<UserFavorite | null> {
+  // A `key` item id arrives normalized: `PUT /api/favorites` normalizes it and answers 400.
+  const itemId = opts.itemId;
   if (!opts.favorite) {
     await getDbClient().run(
       "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",
-      [opts.favoriteScope, opts.itemType, opts.itemId],
+      [opts.favoriteScope, opts.itemType, itemId],
     );
     return null;
   }
@@ -13010,7 +13036,7 @@ export async function setFavorite(opts: {
          lastUpdatedAt = excluded.lastUpdatedAt,
          updated_by = excluded.updated_by
        RETURNING *`,
-    [opts.favoriteScope, opts.userId ?? null, opts.itemType, opts.itemId, now, now, actor, actor],
+    [opts.favoriteScope, opts.userId ?? null, opts.itemType, itemId, now, now, actor, actor],
   );
   if (!row) throw new Error("Failed to set favorite");
   return rowToUserFavorite(row);

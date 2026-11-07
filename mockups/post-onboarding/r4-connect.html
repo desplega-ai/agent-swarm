@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect · Round 4 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<link rel="stylesheet" href="./r3-kit.css">
+<link rel="stylesheet" href="./r4-kit.css">
+<style>
+/* ---------- exhibit extras ---------- */
+.app.auto { height: auto; }
+.x-src { max-width: 110ch; margin: 0; padding: 0 0 0 18px; font-size: 13px; line-height: 1.65; color: var(--color-muted-foreground); }
+.x-src b { color: var(--color-foreground); font-weight: 500; }
+.x-src code { font-family: var(--font-mono); font-size: 11.5px; color: var(--color-foreground); }
+.dlg-demo { position: relative; max-width: 760px; height: 300px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: 12px; background: var(--shell); box-shadow: var(--frame-shadow); }
+
+/* ---------- Channels and Tools content (as round 3) ---------- */
+.more-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--color-muted-foreground); }
+.more-row .names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid .gr .ic.i-more { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.grid .mono { font-size: 12px; }
+.grid .nm { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.grid .nm b { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid .nm .tag { flex: none; }
+.grid .gr { min-height: 48px; }
+.grid .gr.hd { min-height: 36px; }
+.conn { --cols: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 96px 120px 24px; }
+.oauth { --cols: minmax(0, 1.5fr) minmax(0, 1fr) 104px 72px minmax(0, 1.3fr) minmax(0, 1fr) 24px; }
+.mcp { --cols: minmax(0, 1.2fr) minmax(0, 1fr) 104px 72px minmax(0, 1fr) minmax(0, 0.8fr) 24px; }
+.accts { display: inline-flex; align-items: center; gap: 8px; }
+.stack { display: inline-flex; }
+.stack .av { width: 22px; height: 22px; box-shadow: 0 0 0 2px var(--color-background); }
+.stack .av + .av { margin-left: -6px; }
+.av.a1 { background: color-mix(in oklch, var(--color-status-info) 35%, var(--color-muted)); }
+.av.a2 { background: color-mix(in oklch, var(--color-status-success) 35%, var(--color-muted)); }
+.foot-note { display: flex; align-items: center; gap: 8px; margin: 12px 2px 0; font-size: 12px; color: var(--color-muted-foreground); }
+.foot-note .ic { width: 14px; height: 14px; flex: none; }
+
+/* ---------- AI providers: one section per configured family ---------- */
+.fams { display: flex; flex-direction: column; gap: 12px; }
+.fam { position: relative; background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
+.fam-h { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; padding: 14px 12px 12px 16px; }
+.fam-h > .mark { align-self: start; }
+.fam-t { min-width: 0; }
+.fam-t h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.fam-t p { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--color-muted-foreground); max-width: 92ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fam-r { display: flex; align-items: center; gap: 12px; align-self: start; }
+.howbtn { height: 28px; padding: 0 8px; font-size: 12px; color: var(--color-muted-foreground); }
+.howbtn:hover, .howbtn[aria-expanded="true"] { color: var(--color-foreground); }
+.howbtn .i-chevron-down { width: 12px; height: 12px; transition: transform 150ms var(--ease-snappy); }
+.howbtn[aria-expanded="true"] .i-chevron-down { transform: rotate(180deg); }
+
+.how { display: none; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px 32px; margin: 0 12px 14px 60px; padding: 14px 16px; border-radius: var(--radius-lg); background: color-mix(in oklch, var(--color-muted) 70%, transparent); }
+.fam.how-open .how { display: grid; }
+.how ol { margin: 0; padding: 0; list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 10px; }
+.how li { counter-increment: s; display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; font-size: 13px; line-height: 20px; }
+.how li::before { content: counter(s); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; background: var(--color-background); border: 1px solid var(--color-border); }
+.how li .cmd { grid-column: 2; margin-top: 6px; max-width: 360px; }
+.how .aside { font-size: 12px; line-height: 1.55; color: var(--color-muted-foreground); }
+.how .aside p { margin: 0 0 8px; text-wrap: pretty; }
+.how .aside .cmd { margin: 4px 0 8px; }
+.how .cfg { grid-column: 1 / -1; margin: 2px 0 0; padding-top: 10px; border-top: 1px solid var(--color-border-subtle); font-size: 12px; color: var(--color-muted-foreground); }
+.how a, .ln { color: var(--color-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--color-foreground) 30%, transparent); text-underline-offset: 3px; }
+.how a .ic, .ln .ic { width: 11px; height: 11px; margin-left: 2px; vertical-align: -1px; }
+
+.kt { border-top: 1px solid var(--color-border-subtle); }
+.kt .gr { --cols: minmax(0, 1.3fr) 128px 72px 80px minmax(0, 1.5fr) 92px 28px; min-height: 52px; padding: 0 12px 0 16px; cursor: pointer; }
+.kt .gr.hd { min-height: 32px; font-size: 12px; background: none; cursor: default; }
+.kt .gr.hd + .gr { border-top-color: var(--color-border-subtle); }
+.kt .gr.sel { background: var(--color-accent); }
+.kt .gr > .rmc { overflow: visible; position: relative; justify-self: end; }
+.kt .rmc .menu { top: calc(100% + 4px); right: 0; }
+.kt .num { text-align: right; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.kt .gr.hd .num { font-family: inherit; }
+.kt .gr.hd .lh { display: flex; align-items: center; gap: 8px; }
+.kc { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kc .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-status-success-solid); }
+.kc .dot.warn { background: var(--color-status-warning); }
+.kc .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kc .sfx { margin-left: 8px; font-family: var(--font-mono); font-size: 11.5px; color: var(--color-muted-foreground); }
+.kc .k2 { display: none; }
+.kc .k2.warn { display: flex; align-items: center; gap: 4px; margin-top: 1px; font-size: 12px; font-weight: 500; color: var(--color-status-warning-strong); }
+.kc .k2.warn .ic { width: 12px; height: 12px; }
+.kc .dot.warn { align-self: flex-start; margin-top: 6px; }
+.kn { padding: 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 500; color: var(--color-foreground); }
+.kn:focus-visible, .rm:focus-visible, .howbtn:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; border-radius: 4px; }
+.kt .gr > .plan { display: flex; flex-direction: column; line-height: 1.3; }
+.plan small { font-size: 11px; color: var(--color-muted-foreground); }
+.rm { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-md); background: none; color: var(--color-muted-foreground); }
+.rm .ic { width: 16px; height: 16px; }
+.rm:hover, .rm[aria-expanded="true"] { background: color-mix(in oklch, var(--color-foreground) 8%, transparent); color: var(--color-foreground); }
+
+.fam-add { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 10px 12px 10px 16px; border-top: 1px solid var(--color-border-subtle); }
+.fam-add .field { width: 360px; }
+.fam-add .field .ic { color: var(--color-muted-foreground); }
+.field .ph { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fam-add .or { font-size: 12px; color: var(--color-muted-foreground); }
+.fam-add .fnote { margin-left: auto; padding-left: 16px; font-size: 12px; color: var(--color-muted-foreground); text-align: right; text-wrap: pretty; }
+
+/* ---------- AI providers: the others, compact ---------- */
+.sec-h { display: flex; align-items: baseline; gap: 12px; margin: 28px 2px 10px; }
+.sec-h h2 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.sec-h p { margin: 0; font-size: 12px; color: var(--color-muted-foreground); }
+.opanel { background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+.olist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.oi { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; min-height: 64px; padding: 10px 14px; border-top: 1px solid var(--color-border-subtle); }
+.olist .oi:nth-child(-n+2) { border-top: 0; }
+.olist .oi:nth-child(odd) { border-right: 1px solid var(--color-border-subtle); }
+.oi .mark { width: 28px; height: 28px; font-size: 12px; align-self: start; margin-top: 1px; }
+.oi .t { min-width: 0; }
+.oi .t1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; }
+.oi .t1 b { font-weight: 500; white-space: nowrap; }
+.oi .t1 .env { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground); }
+.oi .t1 .dchip { flex: none; }
+.oi .t2 { margin-top: 1px; font-size: 12px; line-height: 1.45; color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oi .t3 { margin-top: 2px; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--color-muted-foreground); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oi .t2 i { font-style: normal; color: var(--color-foreground); }
+.osub { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-top: 1px solid var(--color-border-subtle); border-bottom: 1px solid var(--color-border-subtle); background: color-mix(in oklch, var(--color-muted) 50%, transparent); font-size: 12px; font-weight: 500; color: var(--color-muted-foreground); }
+.osub span { font-weight: 400; }
+.osub + .olist .oi:nth-child(-n+2) { border-top: 0; }
+
+.unsup { margin-top: 12px; padding: 14px 16px 16px; border: 1px dashed color-mix(in oklch, var(--color-muted-foreground) 45%, transparent); border-radius: var(--radius-xl); }
+.unsup-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.unsup-h h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.unsup > p { margin: 4px 0 12px; font-size: 12px; line-height: 1.5; color: var(--color-muted-foreground); max-width: 100ch; }
+.ugrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px; margin: 0; padding: 0; list-style: none; }
+.ugrid li { min-width: 0; font-size: 13px; line-height: 1.35; }
+.ugrid b { font-weight: 500; }
+.ugrid span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--color-muted-foreground); }
+.ugrid code { font-family: var(--font-mono); font-size: 11px; }
+
+/* ---------- key drawer content ---------- */
+.dw-h { flex: none; padding: 16px 12px 14px 20px; border-bottom: 1px solid var(--color-border-subtle); }
+.dw-t { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dw-t h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; white-space: nowrap; }
+.dw-t .sfx { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted-foreground); }
+.dw-t .x { margin-left: auto; }
+.dw-sub { margin: 2px 0 12px 34px; font-size: 12px; color: var(--color-muted-foreground); }
+.dw-sub .mono { font-size: 11px; }
+.dw-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 34px; }
+.dw-acts .btn { height: 28px; font-size: 12px; padding: 0 10px; }
+.dw-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 12px 28px 20px; scrollbar-gutter: stable; }
+.dw-sec + .dw-sec { margin-top: 24px; }
+.dw-sec h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.dw-sec h3 .hint { font-size: 12px; font-weight: 400; color: var(--color-muted-foreground); }
+.dw-p { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--color-muted-foreground); text-wrap: pretty; }
+.callout { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; margin-bottom: 20px; padding: 10px 12px; border: 1px solid color-mix(in oklch, var(--color-status-warning) 45%, var(--color-border)); border-radius: var(--radius-lg); background: color-mix(in oklch, var(--color-status-warning) 9%, transparent); font-size: 13px; line-height: 1.5; }
+.callout .ic { margin-top: 2px; color: var(--color-status-warning-strong); }
+.callout b { font-weight: 600; }
+.callout p { margin: 0; }
+.callout p + p { margin-top: 2px; font-size: 12px; color: var(--color-muted-foreground); }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.stats div { display: flex; flex-direction: column; gap: 2px; }
+.stats span { font-size: 12px; color: var(--color-muted-foreground); }
+.stats b { font-family: var(--font-mono); font-size: 14px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.chart-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--color-muted-foreground); }
+.chart { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 5px; align-items: end; height: 88px; border-bottom: 1px solid var(--color-border); }
+.chart i { display: block; height: var(--h); min-height: 2px; border-radius: 3px 3px 0 0; background: color-mix(in oklch, var(--color-foreground) 22%, transparent); }
+.chart i.now { background: color-mix(in oklch, var(--color-foreground) 70%, transparent); }
+.chart-x { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground); }
+.kv { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; font-size: 13px; }
+.kv dt { color: var(--color-muted-foreground); }
+.kv dd { margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.kv dd small { font-size: 12px; color: var(--color-muted-foreground); }
+.wins { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.wins li { display: grid; grid-template-columns: 128px minmax(0, 1fr) 132px; column-gap: 12px; align-items: center; font-size: 12px; }
+.wins .wl { color: var(--color-foreground); white-space: nowrap; }
+.wins .wr { text-align: right; color: var(--color-muted-foreground); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wins .wr b { font-family: var(--font-mono); font-weight: 400; color: var(--color-foreground); }
+.wins .wr.hot b, .wins .wr.hot { color: var(--color-status-warning-strong); }
+.notes { display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 13px; line-height: 1.45; }
+.notes li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; }
+.notes .ic { width: 14px; height: 14px; margin-top: 2px; color: var(--color-muted-foreground); }
+.notes .warn, .notes .warn .ic { color: var(--color-status-warning-strong); }
+.nysl { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 12px; line-height: 1.5; color: var(--color-muted-foreground); }
+.nysl .nys { flex: none; }
+.agents { display: flex; flex-direction: column; margin: 0 0 10px; padding: 0; list-style: none; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }
+.agents li { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; font-size: 13px; }
+.agents li + li { border-top: 1px solid var(--color-border-subtle); }
+.agents .av { width: 22px; height: 22px; }
+.agents b { font-weight: 500; }
+.agents .h { margin-left: auto; font-size: 12px; color: var(--color-muted-foreground); }
+.dz { padding-top: 18px; border-top: 1px solid var(--color-border-subtle); }
+.btn.wide { width: 100%; height: 36px; }
+
+/* ---------- phone ---------- */
+.phone .pbody { padding: 12px 14px 24px; }
+.ptitle { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
+.phone .grid .gr { --cols: minmax(0, 1fr) auto; }
+.phone .grid .hp-hide { display: none; }
+.phone .more-row { flex-wrap: wrap; }
+.phone .fams { gap: 10px; }
+.phone .fam-h { grid-template-columns: 28px minmax(0, 1fr) auto; column-gap: 10px; padding: 12px 6px 10px 12px; }
+.phone .fam-h > .mark { width: 28px; height: 28px; font-size: 12px; }
+.phone .fam-t h2 { flex-wrap: wrap; row-gap: 4px; }
+.phone .fam-t p { display: none; }
+.phone .howbtn .bl, .phone .howbtn .i-chevron-down { display: none; }
+.phone .howbtn { width: 44px; height: 44px; padding: 0; justify-content: center; margin: -8px 0; }
+.phone .howbtn .ic { width: 18px; height: 18px; }
+.phone .how { margin: 0 12px 12px; grid-template-columns: 1fr; }
+.phone .kt .gr { --cols: minmax(0, 1fr) 44px; min-height: 60px; padding: 6px 4px 6px 12px; }
+.phone .kt .gr.hd, .phone .kt .gr > .hp-hide { display: none; }
+.phone .kc { align-items: flex-start; }
+.phone .kc .dot { margin-top: 6px; }
+.phone .kc .tx { white-space: normal; }
+.phone .kc .k2:not(.warn) { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-muted-foreground); }
+.phone .kc .k2.warn { color: var(--color-status-warning-strong); font-weight: 500; }
+.phone .rm { width: 44px; height: 44px; }
+.phone .trow .sp { display: none; }
+.field { white-space: nowrap; overflow: hidden; }
+.phone .fam-add { flex-wrap: wrap; padding: 10px 12px 12px; }
+.phone .fam-add .field { flex: 1; width: auto; height: 44px; font-size: 16px; }
+.phone .fam-add .btn { height: 44px; }
+.phone .fam-add .fnote, .phone .fam-add .or { display: none; }
+.phone .sec-h { flex-direction: column; gap: 2px; margin-top: 22px; }
+.phone .olist { grid-template-columns: 1fr; }
+.phone .olist .oi { border-right: 0; }
+.phone .olist .oi:nth-child(2) { border-top: 1px solid var(--color-border-subtle); }
+.phone .oi .btn { height: 36px; }
+.phone .oi .t1 { flex-wrap: wrap; row-gap: 0; }
+.phone .ugrid { grid-template-columns: 1fr 1fr; }
+</style>
+</head>
+<body>
+<header class="x-top">
+  <div class="x-id"><b>Post-onboarding</b><span>Round 4</span></div>
+  <nav class="x-nav" aria-label="Mockup pages"><a href="r4-connect.html" aria-current="page">Connect</a><a href="r3-connect.html">Connect (round 3)</a><a href="r3-sidebar.html">Sidebar</a><a href="r3-home.html">Home</a></nav>
+  <span class="sp"></span><a class="w-a" href="index.html">Index</a>
+  <button class="x-theme" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Connect, round 4: the breadcrumb names the page, one top row, AI providers from the code</h1>
+    <p>Desktop pages have no title. The breadcrumb in the top bar names the page. Every Connect page starts with one row: search on the left, the primary action on the right. AI providers shows only what the code supports today, with the real config keys and the real setup steps.</p>
+    <ul>
+      <li><b>Top row.</b> Channels: Search channels and Connect a channel. AI providers: Search providers and keys and Add key. Tools: the search sits in the tab row, after the tabs, then the Add action, then Advanced.</li>
+      <li><b>Phone.</b> The top bar shows a compact page title. On Tools, the tabs scroll and the search and add buttons stay pinned at the right.</li>
+      <li><b>AI providers.</b> One section per configured family: status, How to get a key, the pooled keys, and an Add row. A key row shows its plan, the cost today and over 7 days, the 5 h and 7 d windows, and when an agent last used it.</li>
+      <li><b>Key actions.</b> The row menu has Rename, Set plan, Clear rate limit and Remove. Remove asks for a confirm. Click a key to open its drawer.</li>
+      <li><b>Not yet supported.</b> A dashed tag marks each thing that the API or the dashboard cannot do yet. The list of sources is at the end of the page.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone frames follow.</p>
+
+  <section class="x-state x-desk" id="state-1">
+    <h2>(1) AI providers: overview</h2>
+    <p class="x-cap">Three configured families: Claude subscription, Codex subscription and OpenRouter. The token taras-backup hit its 5 h window, so its menu is open on Clear rate limit. How to get a token is open on the Claude section. The others are compact below, then the providers that this page cannot add yet.</p>
+    <div class="app inset auto"><nav class="side" data-variant="2" data-active="ai" aria-label="Main navigation, AI providers overview"></nav><div class="main" data-k="ai" data-how="claude" data-menu="taras-backup"></div></div>
+  </section>
+
+  <section class="x-state x-desk" id="state-2">
+    <h2>(2) AI providers: key detail drawer</h2>
+    <p class="x-cap">Click a key row (or its name) to open the drawer. It shows why the key is limited and when it comes back, usage with daily bars, plan and windows, the rate-limit record, the agents that draw from the pool, and Remove. Esc or the scrim closes it.</p>
+    <div class="app inset" style="--h: 1010px"><nav class="side" data-variant="2" data-active="ai" aria-label="Main navigation, key drawer"></nav><div class="main" data-k="ai" data-drawer="taras-backup"></div></div>
+  </section>
+
+  <section class="x-state x-desk" id="state-2b">
+    <h2>(2b) Remove, with a confirm</h2>
+    <p class="x-cap">Opened from Remove in the row menu or the drawer (AlertDialog). The text says what happens to running tasks and that the swarm cannot revoke the token at the vendor.</p>
+    <div class="dlg-demo" data-dialog="taras-backup"></div>
+  </section>
+
+  <section class="x-state x-desk" id="state-3">
+    <h2>(3) Tools › Tools: search in the tab row</h2>
+    <p class="x-cap">One row holds the tabs, the search for the open tab, the Add action and Advanced. On the Tools tab, Add opens a menu: Script connection, OAuth app, MCP server. On the other tabs it adds that tab's item.</p>
+    <div class="app inset" style="--h: 700px"><nav class="side" data-variant="2" data-active="tools" aria-label="Main navigation, Tools"></nav><div class="main" data-k="tools" data-tab="tools"></div></div>
+  </section>
+
+  <section class="x-state x-desk" id="state-3b">
+    <h2>(3b) Tools › OAuth apps</h2>
+    <p class="x-cap">Same row. The search placeholder and the Add label follow the tab.</p>
+    <div class="app inset" style="--h: 560px"><nav class="side" data-variant="2" data-active="tools" aria-label="Main navigation, OAuth apps"></nav><div class="main" data-k="tools" data-tab="oauth"></div></div>
+  </section>
+
+  <section class="x-state x-desk" id="state-4">
+    <h2>(4) Channels: the top row</h2>
+    <p class="x-cap">The round-3 cards, under the new top row. Connect a channel opens the same choice as the cards, for people who look for the button first.</p>
+    <div class="app inset" style="--h: 560px"><nav class="side" data-variant="2" data-active="channels" aria-label="Main navigation, Channels"></nav><div class="main" data-k="channels"></div></div>
+  </section>
+
+  <section class="x-state" id="state-phone">
+    <h2>Phone: (1) and (3)</h2>
+    <p class="x-cap">The top bar shows a compact title. Key rows drop to two lines with a 44px menu target. On Tools, search and add stay pinned at the right of the scrolling tabs.</p>
+    <div class="x-row">
+      <div class="x-col"><h3>(1) AI providers</h3><div class="phone" data-k="ai"></div></div>
+      <div class="x-col"><h3>(3) Tools › Tools</h3><div class="phone" data-k="tools" data-tab="tools"></div></div>
+    </div>
+  </section>
+
+  <section class="x-state" id="sources">
+    <h2>Where the AI providers data comes from</h2>
+    <p class="x-cap">Paths are relative to the repo root. Read in the worktree on 2026-11-04.</p>
+    <ul class="x-src">
+      <li><b>Families and config keys.</b> The <code>llm</code> entries in <code>apps/ui/src/lib/integrations-catalog.ts</code> (Anthropic, OpenRouter, OpenAI, Codex ChatGPT OAuth, Amazon Bedrock, Claude Managed Agents, Memory, Transcription) and the registry in <code>packages/model-catalog/src/openai-compatible-providers.ts</code> (NaN, Helmcode, Vercel AI Gateway).</li>
+      <li><b>Key row fields.</b> <code>ApiKeyStatus</code> in <code>apps/ui/src/api/types.ts</code>: name, plan, planSource, status, rateLimitedUntil, lastUsedAt, lastRateLimitAt, rateLimitCount, rateLimitWindows. Window names come from <code>WINDOW_LABELS</code> in <code>apps/ui/src/pages/api-keys/page.tsx</code>.</li>
+      <li><b>Actions.</b> Rename, Set plan and Clear rate limit: <code>use-api-keys.ts</code> (PATCH <code>/api/keys/name</code>, PATCH <code>/api/keys/plan</code>, POST <code>/api/keys/clear-rate-limit</code>). Add and Remove: <code>use-pool-keys.ts</code> (<code>/api/config/pool-keys</code>). Codex accounts: <code>codex_oauth_&lt;n&gt;</code> slots.</li>
+      <li><b>Costs.</b> All time and task count: <code>KeyCostSummary</code> from GET <code>/api/keys/costs</code>. Today and 7 days: <code>byCredential</code> from GET <code>/api/usage/summary?groupBy=both&amp;startDate=…</code>. For subscriptions this is the API value of the runs, as in <code>subscriptions-card.tsx</code>.</li>
+      <li><b>Plans and prices.</b> <code>src/utils/subscription-plans.ts</code> (Claude Pro, Max 5x, Max 20x, Team; ChatGPT Go, Plus, Pro 5x, Pro 20x, Business).</li>
+      <li><b>How-to text.</b> <code>apps/ui/src/pages/setup/steps/ai/claude-card.tsx</code> and <code>codex-card.tsx</code>, the key URLs in <code>step-memory.tsx</code>, and the docs <code>guides/provider-auth/codex-oauth.mdx</code> and <code>model-gateways.mdx</code>.</li>
+      <li><b>Not yet supported.</b> Daily bars for one key (the usage summary has no key filter). Which agent used which key (no per-key agent split). A dated list of limits (the API keeps the count and the last one). 5 h and 7 d bars for Codex (only Claude Code reports window events). The eight env-only providers: no catalog entry, so this page cannot add or pool them.</li>
+    </ul>
+  </section>
+</main>
+
+<template id="t-channels">
+  <div class="pcs">
+    <article class="pc"><div class="pc-h"><span class="mark">S</span><div><h3>Slack</h3><p>The swarm answers in channels and threads.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">Socket mode · #market-intel, #eng, #ops</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">T</span><div><h3>Telegram</h3><p>Talk to the Lead from a Telegram bot.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Bot token from BotFather</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">D</span><div><h3>Discord</h3><p>Mention the bot in a server channel.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Application ID and bot token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">T</span><div><h3>Microsoft Teams</h3><p>Chat with the swarm in Teams channels.</p></div><span class="tag">Beta</span></div><div class="pc-f"><span class="m">Azure bot registration</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">W</span><div><h3>WhatsApp</h3><p>Message the Lead through a Kapso number.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Kapso API key</span><button class="btn xs" type="button">Connect</button></div></article>
+  </div>
+</template>
+
+<template id="t-tools">
+  <div class="pcs">
+    <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitHub</h3><p>Repositories, pull requests and issues for coding agents.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">GitHub App · 2 script connections</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">L</span><div><h3>Linear</h3><p>Pick up issues and post status updates back.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">OAuth · 1 script connection</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">M</span><div><h3>Gmail</h3><p>Read and send mail from a connected account.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">Google Workspace app · 2 accounts</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">A</span><div><h3>agent-fs</h3><p>The shared drive where agents keep results and files.</p></div><span class="dchip ok">Connected</span></div><div class="pc-f"><span class="m">Drive default · 214 files</span><button class="btn xs" type="button">Manage</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">O</span><div><h3>Microsoft 365</h3><p>Outlook mail and calendar for a work account.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">OAuth app ready, sign in an account</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">J</span><div><h3>Jira</h3><p>Sync tickets with your Jira site.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">OAuth, about 2 minutes</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">G</span><div><h3>GitLab</h3><p>Merge requests and pipelines for coding agents.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Personal or group token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">S</span><div><h3>Sentry</h3><p>Let agents read issues and stack traces.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">Auth token</span><button class="btn xs" type="button">Connect</button></div></article>
+    <article class="pc"><div class="pc-h"><span class="mark">B</span><div><h3>Bitbucket</h3><p>Repositories and pull requests on Bitbucket Cloud.</p></div><span class="dchip">Not connected</span></div><div class="pc-f"><span class="m">App password</span><button class="btn xs" type="button">Connect</button></div></article>
+  </div>
+  <div class="more-row"><button class="btn xs ghost" type="button"><span class="ic i-chevron-down" aria-hidden="true"></span>Show 5 more</button><span class="names">Attio, AgentMail, Composio, Serply, Search Console</span></div>
+</template>
+
+<template id="t-scripts">
+  <div class="grid conn">
+    <div class="gr hd"><span>Name</span><span>Provider</span><span class="hp-hide">Auth</span><span class="hp-hide">Used by</span><span>Status</span><span class="hp-hide"></span></div>
+    <div class="gr"><span class="mono">github-acme</span><span class="dim">GitHub</span><span class="dim hp-hide">OAuth app, org</span><span class="dim hp-hide">6 scripts</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">github-readonly</span><span class="dim">GitHub</span><span class="dim hp-hide">Token</span><span class="dim hp-hide">2 scripts</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">gmail-taras</span><span class="dim">Gmail</span><span class="dim hp-hide">OAuth, user</span><span class="dim hp-hide">1 script</span><span><span class="dchip ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">pricing-scraper</span><span class="dim">Custom HTTP</span><span class="dim hp-hide">API key</span><span class="dim hp-hide">1 script</span><span><span class="dchip warn">Expires in 3d</span></span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+  </div>
+  <p class="foot-note"><span class="ic i-key" aria-hidden="true"></span>Scripts call through the broker and never see the secret.</p>
+</template>
+
+<template id="t-oauth">
+  <div class="grid oauth">
+    <div class="gr hd"><span>App</span><span class="hp-hide">Provider</span><span>Status</span><span class="hp-hide">Scopes</span><span class="hp-hide">Connected accounts</span><span class="hp-hide">Used by</span><span class="hp-hide"></span></div>
+    <div class="gr"><span class="nm"><span class="mark sm">G</span><b>Google Workspace</b></span><span class="dim hp-hide">Google</span><span><span class="dchip ok">Active</span></span><span class="mono hp-hide">6</span><span class="hp-hide"><span class="accts"><span class="stack"><span class="av a1">T</span><span class="av a2">O</span></span><span class="dim">taras@, ops@acme.dev</span></span></span><span class="dim hp-hide">Gmail</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="nm"><span class="mark sm">M</span><b>Microsoft Entra</b></span><span class="dim hp-hide">Microsoft</span><span><span class="dchip ok">Active</span></span><span class="mono hp-hide">4</span><span class="dim hp-hide">No accounts yet</span><span class="dim hp-hide">Microsoft 365</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="nm"><span class="mark sm">A</span><b>acme-crm</b><span class="tag">Custom</span></span><span class="dim hp-hide">OAuth 2.0, any provider</span><span><span class="dchip">Draft</span></span><span class="mono hp-hide">3</span><span class="dim hp-hide">No accounts yet</span><span class="dim hp-hide">Not used yet</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+  </div>
+  <p class="foot-note"><span class="ic i-shield" aria-hidden="true"></span>GitHub, Linear and Jira sign in through built-in apps, so they are not in this list.</p>
+</template>
+
+<template id="t-mcp">
+  <div class="grid mcp">
+    <div class="gr hd"><span>Server</span><span class="hp-hide">Transport</span><span>Status</span><span class="hp-hide">Tools</span><span class="hp-hide">Installed on</span><span class="hp-hide">Added</span><span class="hp-hide"></span></div>
+    <div class="gr"><span class="mono">playwright</span><span class="dim hp-hide">stdio</span><span><span class="dchip ok">Healthy</span></span><span class="mono hp-hide">21</span><span class="hp-hide">4 agents</span><span class="dim hp-hide">2 weeks ago</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">context7</span><span class="dim hp-hide">HTTP</span><span><span class="dchip ok">Healthy</span></span><span class="mono hp-hide">2</span><span class="hp-hide">All 6 agents</span><span class="dim hp-hide">1 month ago</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">linear</span><span class="dim hp-hide">HTTP, OAuth</span><span><span class="dchip ok">Healthy</span></span><span class="mono hp-hide">18</span><span class="hp-hide">2 agents</span><span class="dim hp-hide">3 days ago</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+    <div class="gr"><span class="mono">sentry</span><span class="dim hp-hide">SSE</span><span><span class="dchip">Disabled</span></span><span class="mono hp-hide dim">0</span><span class="hp-hide dim">Not installed</span><span class="dim hp-hide">2 months ago</span><span class="hp-hide"><span class="ic i-more" aria-hidden="true"></span></span></div>
+  </div>
+</template>
+
+<script src="./r3-kit.js"></script>
+<script src="./r4-connect.js"></script>
+</body>
+</html>

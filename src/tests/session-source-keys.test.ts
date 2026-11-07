@@ -9,7 +9,17 @@ import {
   sourceMoveError,
   sourceOfKey,
 } from "../assets/source-key";
-import { closeDb, createAgent, createTask, createTaskExtended, initDb } from "../be/db";
+import {
+  closeDb,
+  countSessions,
+  createAgent,
+  createScheduledTask,
+  createTask,
+  createTaskExtended,
+  createUser,
+  initDb,
+} from "../be/db";
+import { getSessionTree, showsScheduleRuns } from "../be/db/session-tree";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { registerSendTaskTool } from "../tools/send-task";
 
@@ -125,6 +135,37 @@ describe("session source key shapes", () => {
 describe("session source keys at insert", () => {
   beforeAll(() => initDb(":memory:"));
   afterAll(() => closeDb());
+
+  test("schedule runs in source sections keep their default visibility", async () => {
+    const user = await createUser({ name: "Source schedule viewer" });
+    const schedule = await createScheduledTask({
+      name: crypto.randomUUID(),
+      intervalMs: 60_000,
+      taskTemplate: "Source research",
+    });
+    const key = "shared/slack/schedule-test/thread:123/";
+    await createTaskExtended("Source schedule", {
+      key,
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: user.id,
+    });
+    const opts = {
+      viewer: { userId: user.id, scope: "all" as const },
+      tree: true,
+      mine: true,
+      showSource: ["comb", "ui"],
+    };
+    expect(await countSessions({ ...opts, keyPrefix: "shared/slack/schedule-test/" })).toBe(0);
+    const tree = await getSessionTree({ kind: "user", userId: user.id }, undefined, opts);
+    expect(tree.groups.some((group) => group.key === "shared/slack/schedule-test/")).toBe(false);
+    expect(tree.inbox.total).toBe(0);
+    // A source group view does not relax the filters either.
+    expect(showsScheduleRuns("shared/slack/schedule-test/")).toBe(false);
+    expect(
+      await countSessions({ ...opts, groupKey: "shared/slack/schedule-test/thread:123/" }),
+    ).toBe(0);
+  });
 
   test.each([
     "slack",

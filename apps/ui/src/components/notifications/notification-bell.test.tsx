@@ -28,6 +28,11 @@ mock.module("@/api/hooks/use-notification-events", () => ({
 }));
 mock.module("@/components/ui/badge", () => ({ Badge: Box }));
 mock.module("@/components/ui/button", () => ({ Button: Box }));
+mock.module("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: () => null,
+}));
 mock.module("@/components/ui/popover", () => ({
   Popover: ({
     onOpenChange,

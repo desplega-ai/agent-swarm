@@ -803,3 +803,83 @@ describe("parseSlackTs", () => {
     expect(parseSlackTs("not-a-ts")).toBe("not-a-ts");
   });
 });
+
+describe("extractSlackMessageText — bot text that repeats its blocks", () => {
+  test("an outcome card's answer block and footer render once", () => {
+    const text =
+      ":bee-lgtm: Yes: every follow-up carries the context. 2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>";
+    const result = extractSlackMessageText({
+      text,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Yes: every follow-up carries the context." },
+        },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: "2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>",
+            },
+          ],
+        },
+      ],
+    });
+    expect(result).toBe(text);
+  });
+
+  test("a block with a link the text lacks is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Alert fired",
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: "Alert fired" } },
+        {
+          type: "context",
+          elements: [{ type: "mrkdwn", text: "<https://trace.example.test/1|View trace>" }],
+        },
+      ],
+    });
+    expect(result).toBe("Alert fired\n<https://trace.example.test/1|View trace>");
+  });
+
+  test("a block that differs only by an underscore is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Incident in foobar",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "Incident in foo_bar" } }],
+    });
+    expect(result).toBe("Incident in foobar\nIncident in foo_bar");
+  });
+
+  test("a block found only inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "this is fine",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "hi" } }],
+    });
+    expect(result).toBe("this is fine\nhi");
+  });
+
+  test("a block ending in a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the caféteria",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the caféteria\ncafé");
+  });
+
+  test("a block starting with a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "see the résumé",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "ésumé" } }],
+    });
+    expect(result).toBe("see the résumé\nésumé");
+  });
+
+  test("a non-ASCII block on word boundaries is still dropped", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the café today",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the café today");
+  });
+});

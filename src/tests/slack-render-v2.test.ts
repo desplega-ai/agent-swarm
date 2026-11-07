@@ -1111,6 +1111,54 @@ describe("Slack renderer v2", () => {
     expect(blockedLine).toContain("⛔");
   });
 
+  test.each([
+    [undefined, 15],
+    ["", 15],
+    [" ", 15],
+    ["-1", 15],
+    ["0", 15],
+    ["NaN", 15],
+    ["invalid", 15],
+    ["Infinity", 15],
+    ["-Infinity", 15],
+    ["1e309", 15],
+    ["5", 5],
+    ["30", 30],
+    ["0.5", 0.5],
+  ] as const)("SLACK_TREE_STALL_MIN=%s uses the expected stall threshold", async (value, minutes) => {
+    const previous = process.env.SLACK_TREE_STALL_MIN;
+    try {
+      if (value === undefined) delete process.env.SLACK_TREE_STALL_MIN;
+      else process.env.SLACK_TREE_STALL_MIN = value;
+
+      const ask = await createTaskExtended("stall threshold ask", { source: "slack" });
+      const now = new Date();
+      for (const [idleMs, stalled] of [
+        [0, false],
+        [minutes * 60_000 - 1, false],
+        [minutes * 60_000, true],
+      ] as const) {
+        const text = await renderThreadTree(
+          [
+            {
+              ...ask,
+              status: "in_progress" as const,
+              lastUpdatedAt: new Date(now.getTime() - idleMs).toISOString(),
+            },
+          ],
+          new Map(),
+          now,
+        );
+        expect(text.split("\n")[0]).toStartWith(stalled ? "🧵 ⚠️ stalled" : "🧵 🔄 working");
+        const taskLine = text.split("\n").find((line) => line.includes(getTaskLink(ask.id)));
+        expect(taskLine).toContain(stalled ? "⚠️" : "🔄");
+      }
+    } finally {
+      if (previous === undefined) delete process.env.SLACK_TREE_STALL_MIN;
+      else process.env.SLACK_TREE_STALL_MIN = previous;
+    }
+  });
+
   test("header transitions from active to stalled to done", async () => {
     const lead = await createAgent({ name: "Header Lead", isLead: true, status: "idle" });
     const worker = await createAgent({ name: "Header Worker", isLead: false, status: "idle" });

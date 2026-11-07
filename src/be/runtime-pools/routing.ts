@@ -33,6 +33,12 @@ function nonnegativeEnv(key: string, fallback: number): number {
   return raw && Number.isInteger(n) && n >= 0 ? n : fallback;
 }
 
+function positiveEnv(key: string, fallback: number): number {
+  const raw = process.env[key]?.trim();
+  const n = Number(raw);
+  return raw && Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 async function eligibleRuntimeSlots(agentId?: string): Promise<Map<string, number>> {
   const runtimes = await getDbClient().query<{ agent_id: string; free_slots: number }>(
     `SELECT r.agent_id, SUM(MAX(0, r.reported_slots - MAX(
@@ -218,7 +224,8 @@ export async function routePoolTasks(
 
   const assigned: Array<{ taskId: string; agentId: string }> = [];
   const limit = nonnegativeEnv("HEARTBEAT_MAX_AUTO_ASSIGN", 5);
-  const batchSize = Number(process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE) || 50;
+  // SQLite treats a negative LIMIT as "no limit", so only positive integers are accepted.
+  const batchSize = positiveEnv("HEARTBEAT_POOL_SCAN_BATCH_SIZE", 50);
   const cap = Number(process.env.HEARTBEAT_POOL_SCAN_CAP) || 500;
   let offset = 0;
   let scanned = 0;

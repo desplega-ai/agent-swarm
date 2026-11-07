@@ -236,3 +236,49 @@ describe("parseGithubShorthand", () => {
     expect(parseSwarmLinkOrRef("hello", ORIGINS)).toBeNull();
   });
 });
+
+describe("GitHub Enterprise Server web base", () => {
+  const GHES: SwarmLinkOrigins = { ...ORIGINS, github: "https://ghe.test" };
+
+  test("a PR on the configured host is a PR chip", () => {
+    expect(parse("https://ghe.test/o/r/pull/7", GHES)).toEqual({
+      type: "github",
+      kind: "pull",
+      owner: "o",
+      repo: "r",
+      number: 7,
+      sha: null,
+      href: "https://ghe.test/o/r/pull/7",
+    });
+  });
+
+  test("shorthand links to the configured host", () => {
+    expect(parseSwarmLinkOrRef("o/r#7", GHES)).toMatchObject({
+      kind: "ref",
+      href: "https://ghe.test/o/r/issues/7",
+    });
+    expect(parseGithubShorthand("o/r@a1b2c3d", "https://ghe.test")).toMatchObject({
+      href: "https://ghe.test/o/r/commit/a1b2c3d",
+    });
+  });
+
+  test("only the configured host matches: github.com and other hosts stay plain links", () => {
+    expect(parse("https://github.com/o/r/pull/7", GHES)).toBeNull();
+    expect(parse("https://www.github.com/o/r/pull/7", GHES)).toBeNull();
+    expect(parse("https://ghe.test:8443/o/r/pull/7", GHES)).toBeNull();
+  });
+
+  test("a port in the web base is part of the host", () => {
+    const withPort = { ...ORIGINS, github: "https://ghe.test:8443" };
+    expect(parse("https://ghe.test:8443/o/r/pull/7", withPort)).toMatchObject({ kind: "pull" });
+    expect(parse("https://ghe.test/o/r/pull/7", withPort)).toBeNull();
+  });
+
+  test("in default mode ghe.test URLs are plain links", () => {
+    expect(parse("https://ghe.test/o/r/pull/7")).toBeNull();
+    expect(parse("https://ghe.test/o/r/pull/7", { ...ORIGINS, github: null })).toBeNull();
+    expect(parseSwarmLinkOrRef("o/r#7", ORIGINS)).toMatchObject({
+      href: "https://github.com/o/r/issues/7",
+    });
+  });
+});

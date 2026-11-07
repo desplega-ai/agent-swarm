@@ -284,11 +284,13 @@ export function OAuthInlineConnect({
                   <SelectValue placeholder="Select a provider preset" />
                 </SelectTrigger>
                 <SelectContent>
-                  {presets.map((preset) => (
-                    <SelectItem key={preset.id} value={preset.id}>
-                      {preset.displayName}
-                    </SelectItem>
-                  ))}
+                  {presets
+                    .filter((preset) => !preset.hiddenInCatalog || preset.id === presetId)
+                    .map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.displayName}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

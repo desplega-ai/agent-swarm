@@ -22,6 +22,8 @@ export interface SwarmLinkOrigins {
   agentFsLive: string | null;
   /** The browser-facing agent-fs API (`agent_fs.comb.api_url`), which serves share links. */
   agentFsApi: string | null;
+  /** The GitHub web base (`/status` `github.web_url`). Default `https://github.com`. */
+  github?: string | null;
 }
 
 /** Dashboard routes with an id (the first path segment), and the noun a chip shows. */
@@ -50,7 +52,7 @@ export type DashboardRoute = keyof typeof DASHBOARD_ROUTES;
 export type GithubKind = "pull" | "issue" | "commit" | "repo" | "ref";
 
 export type SwarmLink =
-  /** `number` is set for pull / issue / ref, `sha` for commit. `href` is the github.com URL. */
+  /** `number` is set for pull / issue / ref, `sha` for commit. `href` is the GitHub URL. */
   | {
       type: "github";
       kind: GithubKind;
@@ -96,7 +98,25 @@ function fileFromCombRoute(route: string, href: string): SwarmLink | null {
   return { type: "file", name, path: `/${names.join("/")}${folder ? "/" : ""}`, folder, href };
 }
 
+export const DEFAULT_GITHUB_WEB_URL = "https://github.com";
 const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
+
+/** The origin of a GitHub web base, github.com when it is unset or not a URL. */
+export function githubOrigin(webUrl: string | null | undefined): string {
+  return originOf(webUrl ?? null) ?? DEFAULT_GITHUB_WEB_URL;
+}
+
+/** The host (with port) of a GitHub web base, `github.com` by default. */
+export function githubHostOf(webUrl: string | null | undefined): string {
+  return new URL(githubOrigin(webUrl)).host;
+}
+
+/** True when `url` is on the GitHub web base: github.com (and www.) by default, else that host. */
+export function isGithubHost(url: URL, webUrl: string | null | undefined): boolean {
+  const host = githubHostOf(webUrl);
+  if (host === "github.com") return GITHUB_HOSTS.has(url.hostname.toLowerCase());
+  return url.host.toLowerCase() === host;
+}
 const GITHUB_NAME = /^[A-Za-z0-9_.-]+$/;
 /** First path segments that are GitHub pages, not an owner. */
 const GITHUB_RESERVED_OWNERS = new Set([
@@ -142,9 +162,13 @@ function githubLink(
   };
 }
 
-/** A github.com PR, issue, commit or repo URL. Any other github.com page is not a smart link. */
-function parseGithubUrl(url: URL, href: string): SwarmLink | null {
-  if (!GITHUB_HOSTS.has(url.hostname.toLowerCase())) return null;
+/** A GitHub PR, issue, commit or repo URL. Any other GitHub page is not a smart link. */
+function parseGithubUrl(
+  url: URL,
+  href: string,
+  webUrl: string | null | undefined,
+): SwarmLink | null {
+  if (!isGithubHost(url, webUrl)) return null;
   const [owner, repo, section, id] = url.pathname.split("/").filter(Boolean);
   if (!owner || !repo) return null;
   if (!section) return githubLink("repo", owner, repo, {}, href);
@@ -169,8 +193,12 @@ function parseGithubUrl(url: URL, href: string): SwarmLink | null {
  * other text, so a path like `src/foo#1` is only matched when it has the exact
  * owner/repo shape.
  */
-export function parseGithubShorthand(raw: string): SwarmLink | null {
+export function parseGithubShorthand(
+  raw: string,
+  webUrl: string | null = DEFAULT_GITHUB_WEB_URL,
+): SwarmLink | null {
   const text = raw.trim();
+  const base = githubOrigin(webUrl);
   const ref = /^([\w.-]+)\/([\w.-]+)#(\d{1,9})$/.exec(text);
   if (ref) {
     const [, owner = "", repo = "", n = ""] = ref;
@@ -179,7 +207,7 @@ export function parseGithubShorthand(raw: string): SwarmLink | null {
       owner,
       repo,
       { number: Number(n) },
-      `https://github.com/${owner}/${repo}/issues/${n}`,
+      `${base}/${owner}/${repo}/issues/${n}`,
     );
   }
   const commit = /^([\w.-]+)\/([\w.-]+)@([0-9a-f]{7,40})$/i.exec(text);
@@ -190,7 +218,7 @@ export function parseGithubShorthand(raw: string): SwarmLink | null {
       owner,
       repo,
       { sha: sha.toLowerCase() },
-      `https://github.com/${owner}/${repo}/commit/${sha.toLowerCase()}`,
+      `${base}/${owner}/${repo}/commit/${sha.toLowerCase()}`,
     );
   }
   return null;
@@ -217,7 +245,7 @@ export function githubTitle(link: Extract<SwarmLink, { type: "github" }>): strin
  * plain text.
  */
 export function parseSwarmLinkOrRef(raw: string, origins: SwarmLinkOrigins): SwarmLink | null {
-  return parseGithubShorthand(raw) ?? parseSwarmLink(raw, origins);
+  return parseGithubShorthand(raw, origins.github ?? null) ?? parseSwarmLink(raw, origins);
 }
 
 /**
@@ -248,7 +276,7 @@ export function parseSwarmLink(raw: string, origins: SwarmLinkOrigins): SwarmLin
     return { type: "dashboard", route: route as DashboardRoute, id, path, href };
   }
 
-  const github = parseGithubUrl(url, href);
+  const github = parseGithubUrl(url, href, origins.github);
   if (github) return github;
 
   const agentFs = [originOf(origins.agentFsLive), originOf(origins.agentFsApi)];

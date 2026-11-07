@@ -32,7 +32,7 @@ import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useSteerTask } from "@/api/hooks/use-tasks";
-import type { AgentTaskStatus, SteerMode, SteerResult } from "@/api/types";
+import type { AgentTaskStatus, SteeringSource, SteerMode, SteerResult } from "@/api/types";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCan } from "@/lib/use-can";
@@ -73,6 +73,11 @@ export interface SteerComposerProps {
   sendLabel?: string;
   /** The task a send goes to, in the routing label's tooltip. See `ComposerDock`. */
   routeDetail?: string;
+  /**
+   * The surface the steering row is attributed to. Omitted: the client's
+   * `"ui"`. A json-render app page sends `"app-page"`.
+   */
+  source?: SteeringSource;
   className?: string;
 }
 
@@ -112,6 +117,7 @@ export function SteerComposer({
   bar,
   sendLabel,
   routeDetail,
+  source,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -155,6 +161,7 @@ export function SteerComposer({
         message: trimmed,
         mode: effectiveMode,
         requestedByUserId: userId ?? undefined,
+        source,
       },
       {
         onSuccess: (result) => {

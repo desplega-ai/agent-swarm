@@ -44,6 +44,7 @@ describe("predefined extension catalog", () => {
         "require-ticket-ref",
         "require-verification-note",
         "slack-reply-gate",
+        "sql-admin-only",
         "task-digest",
       ]);
       for (const [name, entry] of Object.entries(catalog)) {

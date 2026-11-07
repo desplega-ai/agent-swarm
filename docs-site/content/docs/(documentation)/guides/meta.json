@@ -27,6 +27,7 @@
     "performance-resource-sizing",
     "cost-and-context-computation",
     "extensions",
+    "file-import",
     "scripts-runtime",
     "agent-capabilities",
     "scripts-only-mode",

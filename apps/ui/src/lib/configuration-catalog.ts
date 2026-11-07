@@ -1026,6 +1026,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "DB_QUERY_WORKER_POOL_ENABLED",
+        label: "Query worker pool",
+        description:
+          "Reuse long-lived child processes for bounded db-query instead of spawning one per query (saves roughly 65 ms per call). On by default; turn it off to spawn a fresh child per query. Only applies while bounded execution is on.",
+        kind: "boolean",
+        defaultValue: "true",
+      },
+      {
         key: "DB_QUERY_HTTP_BUDGET_MS",
         label: "HTTP query budget",
         description:
@@ -1450,7 +1458,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "COMB_ENABLED",
         label: "Files",
         description:
-          "Show the agent-fs review space in the dashboard. On by default, but it stays off until agent-fs is set up and browsers can reach it (AGENT_FS_PUBLIC_URL, AGENT_FS_PROXY, or a public AGENT_FS_API_URL). Saving on or off here overrides that.",
+          "Show the agent-fs review space in the dashboard. Needs agent-fs (AGENT_FS_API_URL). Unset, it is on when browsers can reach agent-fs: through AGENT_FS_PUBLIC_URL, or the API's /agentfs proxy (AGENT_FS_PROXY). Save off to turn it off.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}ui/comb`,
@@ -1459,7 +1467,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_LINK_TARGET",
         label: "File link target",
         description:
-          "Where agents and task attachments link people for files. dashboard opens Files at APP_URL and needs Files on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+          "Where agents and task attachments link people for files. Unset: the dashboard when APP_URL is set and Files is not turned off, else the agent-fs live app. dashboard opens Files at APP_URL (links also need Files on). live always opens the agent-fs live app.",
         kind: "enum",
         options: ["live", "dashboard"],
         docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
@@ -1477,9 +1485,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_PROXY",
         label: "Serve agent-fs through the API",
         description:
-          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Files then uses <public API URL>/agentfs.",
+          "Serve agent-fs through the swarm API at /agentfs. Defaults on when AGENT_FS_API_URL is set. Files then uses <public API URL>/agentfs.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/agent-fs-co-deployment`,
       },
     ],
@@ -1543,6 +1551,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "days",
         defaultValue: "30",
         placeholder: "30",
+      },
+      {
+        key: "BOOT_SCRUB_MODE",
+        label: "Secret redaction of stored rows",
+        description:
+          "When a release adds secret-redaction rules, backfill re-scrubs stored rows in the background, paced by load and resumable across restarts. forward-only applies the rules to new writes only and leaves stored rows alone; switching back to backfill sweeps what was skipped. Stopping a running backfill takes effect at once; starting one takes effect after a restart.",
+        kind: "enum",
+        options: ["backfill", "forward-only"],
+        defaultValue: "backfill",
+        restartRequired: true,
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
@@ -1637,6 +1655,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}concepts/workflows`,
       },
       {
+        key: "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER",
+        label: "Default SystemOne extraction provider",
+        description:
+          "Extraction host for a system-one-extraction node that names no provider. cloudflare serves Clairic and needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. A node that names its provider keeps it. Applies to the next extraction.",
+        kind: "enum",
+        options: ["cloudflare"],
+        defaultValue: "cloudflare",
+        docsUrl: `${DOCS}concepts/workflows`,
+      },
+      {
         key: "FOLLOW_UP_GATE_MODE",
         label: "Follow-up gate mode",
         description:
@@ -1722,6 +1750,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "SEED_SCRIPTS_ENABLED",
+        label: "Seed built-in scripts",
+        description:
+          "Create the bundled script catalog at boot and via the seed CLI. Turn off for installs whose scripts are managed entirely by an external pipeline. Existing seeded scripts are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SKILLS_ENABLED",
+        label: "Seed built-in skills",
+        description:
+          "Create the bundled skill catalog at boot and via the seed CLI. Turn off for installs whose skills are managed entirely by an external pipeline. Existing seeded skills are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_WORKFLOWS_ENABLED",
+        label: "Seed built-in workflows",
+        description:
+          "Create the bundled workflow catalog at boot and via the seed CLI. Turn off for installs whose workflows are managed entirely by an external pipeline. Existing seeded workflows are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SCHEDULES_ENABLED",
+        label: "Seed built-in schedules",
+        description:
+          "Create the bundled schedule catalog at boot and via the seed CLI. Turn off for installs whose schedules are managed entirely by an external pipeline. Existing seeded schedules are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
       },
       {
         key: "EXTENSION_HANDLER_TIMEOUT_MS",
@@ -1912,10 +1980,19 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/personalization`,
       },
       {
-        key: "DASHBOARD_URL",
+        key: "APP_URL",
         label: "Dashboard URL",
         description:
-          "Public URL of this dashboard. Used to build deep links in Slack, email, and other outbound messages.",
+          "Public URL of this dashboard, or a comma-separated list where the first entry wins. Used for deep links in Slack, email, and other outbound messages. With APP_URL set, agents link files to Files in the dashboard by default. A saved value reaches running workers at their next poll.",
+        kind: "string",
+        placeholder: "https://swarm.example.com",
+        docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
+      },
+      {
+        key: "DASHBOARD_URL",
+        label: "Dashboard URL (deprecated)",
+        description:
+          "Deprecated alias of APP_URL, read only when APP_URL is unset. Use APP_URL: a saved DASHBOARD_URL does not reach workers.",
         kind: "string",
         placeholder: "https://swarm.example.com",
       },

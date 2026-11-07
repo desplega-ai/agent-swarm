@@ -7,11 +7,15 @@ import { SESSION_TREE_KEY } from "./use-session-tree";
 /** The server moves at most 200 sessions per call. */
 const MOVE_BATCH = 200;
 
-/** A move changes keys in the tree, the lists, and each moved session's detail. */
-function invalidateAfterMove(queryClient: QueryClient) {
+/**
+ * A move changes keys in the tree, the lists, and each moved session's detail.
+ * A group rename also moves the stars on the group (`["favorites", "key"]`).
+ */
+export function invalidateAfterMove(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["session"] });
+  void queryClient.invalidateQueries({ queryKey: ["favorites", "key"] });
 }
 
 /**

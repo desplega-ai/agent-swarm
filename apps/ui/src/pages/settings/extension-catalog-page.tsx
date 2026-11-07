@@ -151,7 +151,7 @@ function CatalogCard({
   onDetails: () => void;
 }) {
   return (
-    <Card className="gap-4 py-5">
+    <Card interactive className="gap-4 py-5">
       <CardHeader className="px-5">
         <CardTitle className="flex min-w-0 items-center gap-2">
           <Blocks className="h-4 w-4 shrink-0 text-muted-foreground" />

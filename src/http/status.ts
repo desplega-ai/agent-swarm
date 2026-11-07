@@ -44,6 +44,7 @@ import { getSlackConfiguration } from "../slack/config";
 import { getSlackConnectionState } from "../slack/connection-state";
 import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
+import { resolveGitHubHost } from "../utils/github-host";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { resolveAppUrl } from "./config-values";
 import { route } from "./route-def";
@@ -141,7 +142,7 @@ export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
 export const StatusCombSchema = z.object({
   enabled: z.boolean(),
-  /** What is missing when Comb is off (for example no browser-reachable agent-fs URL). Null when on. */
+  /** Why Comb is off (no `AGENT_FS_API_URL`, `COMB_ENABLED=false`, or no browser agent-fs address). Null when on. */
   reason: z.string().nullable(),
   api_url: z.string().nullable(),
   live_url: z.string(),
@@ -221,6 +222,16 @@ export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
 export const StatusHealthSchema = z.enum(["ok", "degraded", "broken"]);
 export type StatusHealth = z.infer<typeof StatusHealthSchema>;
 
+/**
+ * The GitHub web base (`GITHUB_URL`, default https://github.com) the dashboard
+ * builds and recognizes PR, issue and repo links with. Deployment-env only.
+ */
+export const StatusGitHubSchema = z.object({
+  web_url: z.string(),
+  enterprise: z.boolean(),
+});
+export type StatusGitHub = z.infer<typeof StatusGitHubSchema>;
+
 export const StatusRuntimePoolsSchema = z.object({ enabled: z.boolean(), supervisor: z.string() });
 
 export const StatusResponseSchema = z.object({
@@ -236,6 +247,8 @@ export const StatusResponseSchema = z.object({
   telemetry: StatusTelemetrySchema.optional(),
   /** Additive: absent on servers that predate it. */
   instance: StatusInstanceSchema.optional(),
+  /** Additive: absent on servers that predate it, or when `GITHUB_URL` is invalid. */
+  github: StatusGitHubSchema.optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -780,7 +793,15 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     health: computeHealth(setup, readyLeads),
     telemetry: { enabled: isTelemetryEnabled() },
     instance,
+    ...githubStatus(),
   };
+}
+
+/** Left out on an invalid host config: the GitHub integration logs that error and stays off. */
+function githubStatus(): { github?: StatusGitHub } {
+  const host = resolveGitHubHost();
+  if (!host.ok) return {};
+  return { github: { web_url: host.config.webUrl, enterprise: host.config.enterprise } };
 }
 
 function getCombStatus(serviceUserId: string | null): StatusAgentFs["comb"] {
@@ -822,7 +843,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

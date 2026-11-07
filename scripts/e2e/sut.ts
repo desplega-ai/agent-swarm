@@ -156,6 +156,8 @@ export async function startSut(
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
   const codexDevicePort = await freePort();
   const chatSdkPort = await freePort();
+  // Chat SDK Slack posts to a mock bound here by the scenario (slack-http.ts).
+  const chatSdkSlackPort = await freePort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
@@ -188,9 +190,12 @@ export async function startSut(
     // Every tool group registers, so the MCP coverage denominator is the whole surface.
     CAPABILITIES: ALL_CAPABILITIES.join(","),
     CHAT_SDK_ENABLED: "true",
+    // Short buffer: a chat mention becomes a task in half a second, not ten.
+    CHAT_SDK_BUFFER_MS: "500",
     CHAT_SDK_ADAPTERS: "{}",
     CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
       telegram: `http://127.0.0.1:${chatSdkPort}`,
+      slack: `http://127.0.0.1:${chatSdkSlackPort}/api/`,
     }),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,

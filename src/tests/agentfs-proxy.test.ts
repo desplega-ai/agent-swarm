@@ -554,10 +554,9 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     }
   });
 
-  test("flag unset or off: the handler declines on every prefix", async () => {
-    for (const value of [undefined, "false", "0"]) {
-      if (value === undefined) delete process.env.AGENT_FS_PROXY;
-      else process.env.AGENT_FS_PROXY = value;
+  test("flag off: the handler declines on every prefix", async () => {
+    for (const value of ["false", "0"]) {
+      process.env.AGENT_FS_PROXY = value;
       const before = fake.hits;
       for (const path of ["/agentfs/health", "/share/x", "/site/x"]) {
         expect((await fetch(`${proxyUrl}${path}`)).status).toBe(404);
@@ -566,9 +565,10 @@ describe("handleAgentFsProxy against a fake agent-fs", () => {
     }
   });
 
-  test("every boolean literal the config validator accepts turns it on", async () => {
-    for (const value of ["true", " TRUE ", "1"]) {
-      process.env.AGENT_FS_PROXY = value;
+  test("unset or an enabled flag serves agent-fs", async () => {
+    for (const value of [undefined, "true", " TRUE ", "1"]) {
+      if (value === undefined) delete process.env.AGENT_FS_PROXY;
+      else process.env.AGENT_FS_PROXY = value;
       expect((await fetch(`${proxyUrl}/agentfs/health`)).status).toBe(200);
     }
   });
@@ -888,7 +888,7 @@ describe("the API in front of a fake agent-fs", () => {
     await mkdir(join(tmp, "off"), { recursive: true });
     [on, off] = await Promise.all([
       startSwarm({ AGENT_FS_API_URL: fake.url, AGENT_FS_PROXY: "true" }, join(tmp, "on")),
-      startSwarm({ AGENT_FS_API_URL: fake.url }, join(tmp, "off")),
+      startSwarm({ AGENT_FS_API_URL: fake.url, AGENT_FS_PROXY: "false" }, join(tmp, "off")),
     ]);
   }, SERVER_BOOT_HOOK_TIMEOUT_MS * 2);
 

@@ -44,7 +44,7 @@ import {
   listRuntimePools,
   resolvePoolDelivery,
 } from "./db";
-import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
+import { type AgentDemand, computeDesired, countPoolRuntimes, pendingWorkForAgent } from "./demand";
 import { resolveE2bImage, stopE2bImageBuilds } from "./e2b-images";
 import { isRuntimeWanted, rotatingRuntimes } from "./lifecycle";
 import {
@@ -821,12 +821,11 @@ async function reconcilePools(
         (currentPool?.circuitOpenUntil && Date.parse(currentPool.circuitOpenUntil) > now.getTime())
       )
         continue;
-      const poolCount = (await listRuntimeInstancesForPool(pool.id)).filter(
-        (r) =>
-          r.status === "provisioning" ||
-          (r.status === "active" &&
-            Date.parse(r.lastSeenAt) >= now.getTime() - runtimeStaleThresholdMinutes() * 60_000),
-      ).length;
+      const poolCount = countPoolRuntimes(
+        await listRuntimeInstancesForPool(pool.id),
+        now,
+        runtimeStaleThresholdMinutes(),
+      );
       const counted = demands.reduce((n, d) => n + d.current, 0);
       const desired = computeDesired(
         {

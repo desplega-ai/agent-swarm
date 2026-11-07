@@ -28,6 +28,7 @@ import "./api-keys";
 import "./events";
 import "./extensions";
 import "./favorites";
+import "./checklist";
 import "./fs";
 import "./heartbeat";
 import "./inbox-state";

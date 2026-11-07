@@ -753,7 +753,7 @@ Enable GitHub webhooks for automated task creation from PR reviews and issue ass
 
 ### Setup
 
-1. Create a GitHub App at https://github.com/settings/apps/new
+1. Create a GitHub App at https://github.com/settings/apps/new (GitHub Enterprise Server: `https://<host>/settings/apps/new`, and set `GITHUB_URL=https://<host>` on the API and every worker; see the GitHub integration docs)
 2. Set webhook URL to your server: `https://your-server.com/github/webhook`
 3. Generate a webhook secret
 4. (Optional) Generate a private key for bot reactions

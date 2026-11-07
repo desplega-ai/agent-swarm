@@ -52,6 +52,18 @@ export type ApplySiblingAwarenessResult = {
   siblings: SiblingTaskInfo[];
 };
 
+/**
+ * A Slack task opens with the thread's history, which the new task carries
+ * itself: preview the sibling's ask instead. The template closes the block at
+ * column 0, where no quoted message line can start.
+ */
+function withoutThreadContext(description: string): string {
+  if (!description.startsWith("<thread_context>")) return description;
+  const close = "\n</thread_context>";
+  const end = description.indexOf(close);
+  return end === -1 ? description : description.slice(end + close.length).trimStart();
+}
+
 async function toSiblingTaskInfo(task: AgentTask): Promise<SiblingTaskInfo> {
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
   return {
@@ -59,7 +71,7 @@ async function toSiblingTaskInfo(task: AgentTask): Promise<SiblingTaskInfo> {
     status: task.status,
     agentId: task.agentId,
     agentName: agent?.name ?? null,
-    description: stripSiblingBlock(task.task),
+    description: withoutThreadContext(stripSiblingBlock(task.task)),
     updatedAt: task.lastUpdatedAt,
     createdAt: task.createdAt,
   };

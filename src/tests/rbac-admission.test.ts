@@ -21,6 +21,7 @@ import {
   setAgentFsProvisionFetchForTests,
 } from "../be/seed/agent-fs-provision";
 import { type IdentityActor, mintToken } from "../be/users";
+import { handleChecklist } from "../http/checklist";
 import { handleCore } from "../http/core";
 import { handleDbQuery } from "../http/db-query";
 import { handleFs } from "../http/fs";
@@ -65,6 +66,7 @@ function createTestServer(): Server {
     const myAgentId = req.headers["x-agent-id"] as string | undefined;
 
     if (await handleCore(req, res, myAgentId, API_KEY)) return;
+    if (await handleChecklist(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleTasks(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleFs(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleInboxState(req, res, pathSegments, queryParams)) return;
@@ -418,6 +420,23 @@ describe("handleCore admission wiring", () => {
       reason: "admission: missing permission 'mcp-oauth.authorize.any'",
       source: "http",
     });
+  });
+
+  test("requesters can edit their checklist but cannot edit the swarm checklist", async () => {
+    process.env.RBAC_ENABLED = "true";
+    const { userId, plaintext } = await createTokenForUser("Checklist Requester");
+    await narrowUserToRequester(userId);
+    const added = await api(port, "POST", "/api/checklist/items", {
+      bearer: plaintext,
+      body: { scope: "user", kind: "custom", label: "Review plan" },
+    });
+    expect(added.status).toBe(201);
+    expect(added.body).toMatchObject({ item: { userId, kind: "custom", editable: true } });
+    const denied = await api(port, "PATCH", "/api/checklist/items/swarm:tool", {
+      bearer: plaintext,
+      body: { action: "remove" },
+    });
+    expect(denied.status).toBe(403);
   });
 
   test("flag on default-admin users bypass admission and preserve no-op behavior", async () => {

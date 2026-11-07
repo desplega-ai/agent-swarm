@@ -26,6 +26,8 @@ export const DEFAULT_E2B_FORWARD_KEYS = [
   ...openAICompatibleKeyVars(),
   ...openAICompatibleBaseUrlVars(),
   "GITHUB_TOKEN",
+  "GITHUB_URL",
+  "GITHUB_API_URL",
   "GITLAB_TOKEN",
   "AZURE_DEVOPS_TOKEN",
   "AZURE_DEVOPS_ORG_URL",

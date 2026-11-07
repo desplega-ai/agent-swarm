@@ -17,6 +17,7 @@
 import { toast } from "sonner";
 import { resolveScopedParams } from "./action-params";
 import type { ActionChain, UiToastParams } from "./catalog";
+import { isChainHalt } from "./chain-halt";
 
 export type ActionHandlerMap = Record<
   string,
@@ -68,9 +69,11 @@ export function createToastActionHandler(deps: ToastActionDeps) {
             ? {
                 label: undo?.label ?? "Undo",
                 onClick: () => {
-                  void runChainThroughHandlers(undoChain, deps).catch((error: unknown) =>
-                    deps.onError(error instanceof Error ? error.message : String(error)),
-                  );
+                  void runChainThroughHandlers(undoChain, deps).catch((error: unknown) => {
+                    // A halted step already reported itself (its toast or `onError`).
+                    if (isChainHalt(error)) return;
+                    deps.onError(error instanceof Error ? error.message : String(error));
+                  });
                 },
               }
             : undefined,

@@ -76,6 +76,7 @@ import {
 } from "../db";
 import { getScript } from "../scripts/db";
 import { resolveSeededEnabled } from "./automation-toggle";
+import { isSeedScriptsEnabled, isSeedWorkflowsEnabled } from "./seed-toggle";
 import type { Seeder, SeedItem } from "./types";
 import { canonicalJson } from "./workflows-seeder";
 
@@ -360,17 +361,34 @@ function nextRunAt(schedule: SeedSchedule): string | null {
 
 export function createSchedulesSeeder(
   sources: readonly ScheduleTemplateSource[] = BUILT_IN_SCHEDULE_SOURCES,
+  env: NodeJS.ProcessEnv = process.env,
 ): Seeder<ScheduleSeedItem> {
   const schedules = loadSeedSchedules(sources);
+  const scriptsEnabled = isSeedScriptsEnabled(env);
+  const workflowsEnabled = isSeedWorkflowsEnabled(env);
   return {
     kind: "schedule",
 
-    items(): ScheduleSeedItem[] {
-      return schedules.map((schedule) => ({
-        key: schedule.name,
-        contentHash: scheduleSeedHash(schedule),
-        schedule,
-      }));
+    async items(): Promise<ScheduleSeedItem[]> {
+      const items: ScheduleSeedItem[] = [];
+      for (const schedule of schedules) {
+        // An opted-out catalog may be supplied externally. Defer only missing
+        // targets, checking again on the next seed pass; keep unrelated schedules.
+        if (
+          schedule.targetType === "script" &&
+          !scriptsEnabled &&
+          !(await getScript({ name: schedule.scriptName, scope: "global" }))
+        )
+          continue;
+        if (
+          schedule.targetType === "workflow" &&
+          !workflowsEnabled &&
+          !(await listWorkflows()).some((workflow) => workflow.name === schedule.workflow)
+        )
+          continue;
+        items.push({ key: schedule.name, contentHash: scheduleSeedHash(schedule), schedule });
+      }
+      return items;
     },
 
     async upstreamHash(item): Promise<string | null> {

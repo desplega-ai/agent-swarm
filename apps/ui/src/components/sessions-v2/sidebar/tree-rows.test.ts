@@ -12,6 +12,7 @@ import {
   foldId,
   foldIds,
   fullListOf,
+  groupStarKey,
   isMyGroupRow,
   isNavRow,
   type ListState,
@@ -19,6 +20,7 @@ import {
   listSessionIds,
   openByDefault,
   sessionRange,
+  type TreeRow,
   wholeListTotal,
 } from "./tree-rows";
 
@@ -457,5 +459,25 @@ describe("resource sections", () => {
     const ids = foldIds(buildSessionGroupTree(t.groups, ME));
     expect(ids.has("source:workflow")).toBe(true);
     expect(ids.has("shared/workflow:w1/")).toBe(true);
+  });
+});
+
+describe("groupStarKey", () => {
+  const groupRow = (key: string, thread?: boolean) =>
+    ({
+      type: "group",
+      key: `group:${key}`,
+      level: 1,
+      node: { key, thread },
+      open: false,
+      counts: counts(1),
+      sharedWithMe: false,
+    }) as unknown as TreeRow;
+
+  test("stars real group rows only, not thread rows or other rows", () => {
+    expect(groupStarKey(groupRow("shared/a/"))).toBe("shared/a/");
+    expect(groupStarKey(groupRow("shared/slack/c1/", false))).toBe("shared/slack/c1/");
+    expect(groupStarKey(groupRow("shared/slack/c1/thread:1/", true))).toBeNull();
+    expect(groupStarKey({ type: "add", key: "add:group", level: 1 } as TreeRow)).toBeNull();
   });
 });

@@ -985,6 +985,11 @@ Configuration reload applies those thresholds immediately.
 `HEARTBEAT_INTERVAL_MS` and `HEARTBEAT_DISABLE` require a restart because startup reads them when creating the timer.
 Runtime routing, supervisor timers, and controller seeding also require a restart where marked below.
 
+The Slack v2 task tree reads `SLACK_TREE_STALL_MIN` on each render. It marks an
+`in_progress` task as stalled when its `lastUpdatedAt` is at least that many minutes old.
+Only finite positive values are accepted; unset, non-numeric, non-finite, zero, and negative
+values use 15 minutes. This display threshold does not trigger heartbeat remediation.
+
 Rollback switches accept `0`/`false` interchangeably (both parse through
 `parseEnvFlag` in `src/utils/env-flag.ts`); `HEARTBEAT_PIN_CRASH_RESUME` and
 `POOL_AFFINITY_ENFORCEMENT` previously honoured only `0`.
