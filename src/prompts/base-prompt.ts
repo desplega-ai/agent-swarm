@@ -23,6 +23,7 @@ import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName } from "../types";
 import { agentFsFileLinkQuery, getAppUrl, resolveAgentFsLinkBase } from "../utils/constants";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -291,6 +292,13 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   ) {
     const steeringResult = await resolveTemplateAsync("system.agent.steering", {});
     prompt += steeringResult.text;
+  }
+
+  // Rich cards (task uiSpec). Read the flag here, never in a module-level
+  // const: the worker layers swarm_config rows into process.env at runtime.
+  if (hasMcp && !scriptsOnlyMode && isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
+    const uiSpecResult = await resolveTemplateAsync("system.agent.ui_spec", {});
+    prompt += uiSpecResult.text;
   }
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
