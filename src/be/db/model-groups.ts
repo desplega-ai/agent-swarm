@@ -1,8 +1,8 @@
 /**
  * Model groups: a named, ordered list of model profiles that may span
  * harnesses (runbooks/model-tiers.md § Model groups). Members live in
- * `model_group_members` (migration 301), one row per position. Groups and
- * profiles share one name space (enforced by migration 301's triggers).
+ * `model_group_members` (migration 303), one row per position. Groups and
+ * profiles share one name space (enforced by migration 303's triggers).
  */
 import type { ModelGroup } from "../../types";
 import { repairWindowStart, TASK_HOLDS_PROFILE_SQL } from "./model-profiles";
@@ -219,7 +219,7 @@ export async function modelGroupReferences(name: string): Promise<{
  * Delete a group (its members cascade) unless a task still holds it or a
  * schedule names it. The check is part of the DELETE statement, so a reference
  * written after the caller's own count still makes it `in-use`; migration
- * 301's triggers refuse the opposite order.
+ * 303's triggers refuse the opposite order.
  */
 export async function deleteModelGroup(name: string): Promise<"deleted" | "missing" | "in-use"> {
   const row = await getDbClient().get<{ id: string }>(
