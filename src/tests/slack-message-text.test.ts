@@ -803,3 +803,43 @@ describe("parseSlackTs", () => {
     expect(parseSlackTs("not-a-ts")).toBe("not-a-ts");
   });
 });
+
+describe("extractSlackMessageText — bot text that repeats its blocks", () => {
+  test("an outcome card's answer block and footer render once", () => {
+    const text =
+      ":bee-lgtm: Yes: every follow-up carries the context. 2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>";
+    const result = extractSlackMessageText({
+      text,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Yes: every follow-up carries the context." },
+        },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: "2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>",
+            },
+          ],
+        },
+      ],
+    });
+    expect(result).toBe(text);
+  });
+
+  test("a block with a link the text lacks is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Alert fired",
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: "Alert fired" } },
+        {
+          type: "context",
+          elements: [{ type: "mrkdwn", text: "<https://trace.example.test/1|View trace>" }],
+        },
+      ],
+    });
+    expect(result).toBe("Alert fired\n<https://trace.example.test/1|View trace>");
+  });
+});

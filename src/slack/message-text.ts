@@ -164,6 +164,11 @@ function decodeMrkdwn(text: string): string {
     .replace(/&amp;/g, "&");
 }
 
+/** Decode Slack's HTML escapes only, keeping `<…>` tokens (links carry their URL there). */
+function decodeEntities(text: string): string {
+  return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
 /**
  * Normalize text for the text-vs-rich_text equality check only (never for
  * output): drop emoji shortcodes, quote and list markers, and mrkdwn style
@@ -256,6 +261,8 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
   // Index range of each rich_text block's parts inside blockParts, so a
   // rich_text block that merely re-renders `msg.text` can be dropped below.
   const richTextRanges: Array<[number, number]> = [];
+  // Index of each table part: `msg.text` never carries a table's cells.
+  const tableParts = new Set<number>();
   if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
     for (const rawBlock of msg.blocks) {
       if (rawBlock == null || typeof rawBlock !== "object") continue;
@@ -277,7 +284,10 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
         if (blockParts.length > start) richTextRanges.push([start, blockParts.length]);
       } else if (isTableBlock(block)) {
         const table = renderTableBlock(block);
-        if (table) blockParts.push(table);
+        if (table) {
+          tableParts.add(blockParts.length);
+          blockParts.push(table);
+        }
       } else if (block.type === "header") {
         if (block.text?.text) blockParts.push(block.text.text);
       } else if (block.type === "context" && Array.isArray(block.elements)) {
@@ -306,19 +316,30 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
   // the whole message would render twice. When the rich_text content equals
   // `text` after normalization, keep `text` (it also carries the mentions,
   // links and emoji the rich_text flattening drops) and skip the blocks.
-  let bodyBlockParts = blockParts;
+  const dropped = new Set<number>();
   if (topText && richTextRanges.length > 0) {
     const richText = richTextRanges
       .map(([start, end]) => blockParts.slice(start, end).join("\n"))
       .join("\n");
     if (normalizeForDedupe(richText) === normalizeForDedupe(decodeMrkdwn(topText))) {
-      const dropped = new Set<number>();
       for (const [start, end] of richTextRanges) {
         for (let i = start; i < end; i++) dropped.add(i);
       }
-      bodyBlockParts = blockParts.filter((_, i) => !dropped.has(i));
     }
   }
+
+  // A bot message (our own tree and outcome cards, other apps) often repeats its
+  // blocks in `text`, joined on one line or with a footer, so neither check
+  // sees the copy. Drop a block part whose content `text` already holds.
+  if (topText) {
+    const covered = normalizeForDedupe(decodeEntities(topText));
+    blockParts.forEach((part, i) => {
+      if (tableParts.has(i)) return;
+      const normalized = normalizeForDedupe(decodeEntities(part));
+      if (normalized && covered.includes(normalized)) dropped.add(i);
+    });
+  }
+  const bodyBlockParts = blockParts.filter((_, i) => !dropped.has(i));
 
   const bodyText = [...attachmentParts, ...bodyBlockParts].filter(Boolean).join("\n");
 
