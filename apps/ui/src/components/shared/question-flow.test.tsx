@@ -31,6 +31,7 @@ mock.module("@/components/ui/button", () => require("../../components/ui/button"
 mock.module("@/components/ui/tooltip", () => require("../../components/ui/tooltip"));
 mock.module("@/components/ui/dialog", () => require("../../components/ui/dialog"));
 mock.module("@/components/ui/kbd", () => require("../../components/ui/kbd"));
+mock.module("@/components/ui/tabs", () => require("../../components/ui/tabs"));
 mock.module("@/components/shared/fade-in", () => require("./fade-in"));
 mock.module("@/components/shared/questions/keyboard", () => require("./questions/keyboard"));
 // SubmitBar is the real one: these tests cover what QuestionFlow hands it.
@@ -58,6 +59,7 @@ async function mount(props: {
   initialValues?: Record<string, unknown>;
   submitLabel?: string;
   onSubmit?: () => Promise<void>;
+  embedded?: boolean;
 }) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -69,6 +71,7 @@ async function mount(props: {
           questions={props.questions}
           initialValues={props.initialValues}
           submitLabel={props.submitLabel}
+          embedded={props.embedded}
           onSubmit={props.onSubmit ?? (async () => {})}
           done={() => <p>Sent</p>}
         />
@@ -127,6 +130,33 @@ describe("QuestionFlow submit label", () => {
     await act(async () => view.submitButton()?.click());
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({ email: "demo@example.com" });
+    await view.unmount();
+  });
+});
+
+describe("QuestionFlow embedded", () => {
+  test("one tab per question, an answered mark, one panel shown", async () => {
+    const view = await mount({
+      questions: [approvalQuestion, textQuestion],
+      initialValues: { go: { approved: true } },
+      embedded: true,
+    });
+    const tabs = [...view.container.querySelectorAll('[role="tab"]')];
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "Question 1, answered",
+      "Question 2",
+    ]);
+    // The first open question is the selected tab; the other panel is hidden.
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+    const panels = [...view.container.querySelectorAll('[role="tabpanel"]')];
+    expect(panels.map((panel) => panel.getAttribute("data-state"))).toEqual(["inactive", "active"]);
+    expect(view.submitButton()).not.toBeNull();
+    await view.unmount();
+  });
+
+  test("a single question shows no tab strip", async () => {
+    const view = await mount({ questions: [textQuestion], embedded: true });
+    expect(view.container.querySelector('[role="tablist"]')).toBeNull();
     await view.unmount();
   });
 });
