@@ -223,6 +223,8 @@ function scriptUsageSnippet(
 ): string {
   const namespace = normalizeScriptSlug(slug) || "myConnection";
   if (kind === "graphql") return `await ctx.api.${namespace}.graphql("query { ... }");`;
+  // mockup(ui-audit): sql connections expose only query(); the OpenAPI fallback invented exampleOperation()
+  if ((kind as string) === "sql") return `await ctx.api.${namespace}.query("select 1", []);`;
   if (kind === "mcp") {
     const tool = detail?.tools[0]?.name || "toolName";
     return `await ctx.mcp.${namespace}.${tool}({});`;

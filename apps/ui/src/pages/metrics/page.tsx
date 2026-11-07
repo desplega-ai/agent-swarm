@@ -1,6 +1,7 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef } from "ag-grid-community";
 import {
+  ArrowLeft,
   BarChart3,
   Check,
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   LineChart as LineChartIcon,
   Maximize2,
   Minimize2,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Save,
@@ -37,6 +39,7 @@ import type {
   MetricWidget,
 } from "@/api/types";
 import { SharedBarChart, SharedLineChart } from "@/components/shared/charts/nivo-charts";
+import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,12 +60,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 const NEW_METRIC_DEFINITION: MetricDefinition = {
@@ -425,12 +435,16 @@ function WidgetViz({
   if (widget.viz.type === "stat") {
     const valueKey = widget.viz.value ?? Object.keys(rows[0] ?? {})[0] ?? "value";
     const labelKey = widget.viz.label;
+    // mockup(ui-audit): usage-metric-detail P1 - stat is the number itself, no nested bordered box.
+    // The card title already names it; a label row only shows when it differs (labelKey).
     return (
-      <div className="rounded-md border p-4">
-        <div className="text-sm text-muted-foreground">
-          {labelKey ? String(rows[0]?.[labelKey] ?? widget.title) : widget.title}
-        </div>
-        <div className="mt-2 font-mono text-4xl tabular-nums">
+      <div className="min-w-0">
+        {labelKey ? (
+          <div className="truncate text-xs text-muted-foreground">
+            {String(rows[0]?.[labelKey] ?? widget.title)}
+          </div>
+        ) : null}
+        <div className="truncate font-mono text-2xl tabular-nums sm:text-3xl">
           {formatValue(rows[0]?.[valueKey], widget.viz.format)}
         </div>
       </div>
@@ -490,7 +504,10 @@ function widgetSpanClass(widget: MetricWidget): string {
 function layoutGridClass(columns: number | undefined): string {
   const columnCount = Math.min(Math.max(columns ?? 2, 1), 4);
   return cn(
-    "grid grid-cols-1 gap-4 auto-rows-[minmax(280px,auto)]",
+    // mockup(ui-audit): usage-metric-detail P1 - rows size to content (charts/tables keep a min
+    // height on their card); phones put stat widgets 3-up, everything else spans the row.
+    "grid grid-cols-3 gap-3 sm:gap-4 auto-rows-auto",
+    columnCount === 1 && "md:grid-cols-1",
     columnCount >= 2 && "md:grid-cols-2",
     columnCount >= 3 && "xl:grid-cols-3",
     columnCount >= 4 && "2xl:grid-cols-4",
@@ -515,11 +532,33 @@ function WidgetCard({
   onExpand: () => void;
 }) {
   const Icon = widgetIcon(widget.viz.type);
+  if (widget.viz.type === "stat") {
+    // mockup(ui-audit): usage-metric-detail P1 - compact stat card: title + number, no footer or expand.
+    return (
+      <Card
+        className={cn("h-full min-w-0 gap-1 rounded-md px-3 py-3 sm:px-4", widgetSpanClass(widget))}
+        title={widget.description ?? undefined}
+      >
+        <div className="truncate text-xs text-muted-foreground">{widget.title}</div>
+        {loading && rows.length === 0 ? (
+          <Skeleton className="h-8 w-16" />
+        ) : (
+          <WidgetViz widget={widget} rows={rows} loading={loading} />
+        )}
+      </Card>
+    );
+  }
   return (
-    <Card className={cn("h-full min-w-0 rounded-md", widgetSpanClass(widget))}>
-      <CardHeader className="border-b">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+    <Card
+      className={cn(
+        "col-span-3 h-full min-h-[280px] min-w-0 rounded-md md:col-span-1",
+        widgetSpanClass(widget),
+      )}
+    >
+      {/* mockup(ui-audit): usage-metrics P1 - header grid column is width-bounded so titles truncate. */}
+      <CardHeader className="min-w-0 grid-cols-[minmax(0,1fr)] border-b">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <CardTitle className="flex min-w-0 items-center gap-2 text-base">
               <Icon className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{widget.title}</span>
@@ -556,7 +595,8 @@ function WidgetCard({
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           {typeof total === "number" && (
             <span>
-              {total} rows{typeof elapsed === "number" ? ` in ${elapsed}ms` : ""}
+              {total} {total === 1 ? "row" : "rows"}
+              {typeof elapsed === "number" ? ` in ${elapsed}ms` : ""}
             </span>
           )}
           {truncated && <span>Result truncated</span>}
@@ -753,15 +793,21 @@ function MetricsListPage() {
   const [editorOpen, setEditorOpen] = useState(false);
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+    // mockup(ui-audit): usage-metrics P1 double scroller - inner scroller only at lg+.
+    <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
       <PageHeader
         icon={BarChart3}
         title="Metrics"
         description="Available SQL-backed dashboards. Open one to inspect dashboard widgets, raw JSON, and shareable variable state."
         action={
-          <Button onClick={() => setEditorOpen(true)}>
+          // mockup(ui-audit): usage-metrics P2 - icon-only action on phones so the description gets the width.
+          <Button
+            onClick={() => setEditorOpen(true)}
+            aria-label="Add dashboard"
+            className="max-sm:size-9 max-sm:px-0"
+          >
             <Plus className="size-4" />
-            Add dashboard
+            <span className="max-sm:sr-only">Add dashboard</span>
           </Button>
         }
       />
@@ -775,11 +821,12 @@ function MetricsListPage() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {metrics.map((metric) => (
-            <Link key={metric.id} to={`/usage/metrics/${metric.id}`}>
+            <Link key={metric.id} to={`/usage/metrics/${metric.id}`} className="min-w-0">
               <Card className="h-full rounded-md transition-colors hover:border-primary/60">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                {/* mockup(ui-audit): usage-metrics P1 - bounded header column so title/description truncate and the icon stays visible. */}
+                <CardHeader className="min-w-0 grid-cols-[minmax(0,1fr)]">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
                       <CardTitle className="truncate text-base">{metric.title}</CardTitle>
                       <CardDescription className="line-clamp-2 break-words">
                         {metric.description ?? metric.slug}
@@ -827,6 +874,7 @@ function MetricsDetailPage() {
   const resolvedVariables = run.data?.metric.definition.variables ?? variables;
   const controlValues = run.data?.variables ?? variableValues;
   const [editorOpen, setEditorOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const widgetResults = run.data?.widgets ?? [];
   const widgetResultById = new Map(widgetResults.map((item) => [item.widget.id, item.result]));
@@ -882,37 +930,65 @@ function MetricsDetailPage() {
       value={tab}
       onValueChange={(next) => updateSearch({ tab: next === "dashboard" ? null : next })}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 max-sm:flex-nowrap">
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-        <div className="flex flex-wrap items-center gap-2">
-          {run.data && (
-            <span className="text-xs text-muted-foreground">
-              {run.data.result?.total ?? 0} rows in {run.data.result?.elapsed ?? 0}ms
-            </span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => run.refetch()}
-            disabled={run.isFetching}
-          >
-            <RefreshCw className={cn("size-4", run.isFetching && "animate-spin")} />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)}>
-            <Code2 className="size-4" />
-            Edit JSON
-          </Button>
-          {!fullMode && (
-            <Button variant="outline" size="sm" onClick={() => updateSearch({ mode: "full" })}>
-              <Maximize2 className="size-4" />
-              Full
+        {/* mockup(ui-audit): usage-metric-detail P1 - phones: tabs + one overflow menu on a single row, no "N rows" text. */}
+        {isMobile ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="size-8" aria-label="Metric actions">
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => run.refetch()} disabled={run.isFetching}>
+                <RefreshCw className={cn("size-4", run.isFetching && "animate-spin")} />
+                Refresh
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setEditorOpen(true)}>
+                <Code2 className="size-4" />
+                Edit JSON
+              </DropdownMenuItem>
+              {!fullMode && (
+                <DropdownMenuItem onSelect={() => updateSearch({ mode: "full" })}>
+                  <Maximize2 className="size-4" />
+                  Full screen
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {run.data && (
+              <span className="text-xs text-muted-foreground">
+                {run.data.result?.total ?? 0} {run.data.result?.total === 1 ? "row" : "rows"} in{" "}
+                {run.data.result?.elapsed ?? 0}ms
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => run.refetch()}
+              disabled={run.isFetching}
+            >
+              <RefreshCw className={cn("size-4", run.isFetching && "animate-spin")} />
+              Refresh
             </Button>
-          )}
-        </div>
+            <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)}>
+              <Code2 className="size-4" />
+              Edit JSON
+            </Button>
+            {!fullMode && (
+              <Button variant="outline" size="sm" onClick={() => updateSearch({ mode: "full" })}>
+                <Maximize2 className="size-4" />
+                Full
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <TabsContent value="dashboard" className="mt-4 space-y-4">
@@ -1020,17 +1096,37 @@ function MetricsDetailPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-      <PageHeader
-        icon={LayoutDashboard}
-        title={selected.title}
-        description={selected.description ?? selected.slug}
-        action={
-          <Button asChild variant="outline">
-            <Link to="/usage/metrics">Back to metrics</Link>
+    // mockup(ui-audit): usage-metrics P1 double scroller - inner scroller only at lg+.
+    <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+      {isMobile ? (
+        // mockup(ui-audit): usage-metric-detail P1 - phones: description clamped to 2 lines with
+        // "Show more"; Back becomes an icon (the breadcrumb already says Metrics).
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <CollapsibleDescription
+              text={selected.description ?? selected.slug}
+              textClassName="text-muted-foreground"
+              collapsedClassName="line-clamp-2"
+            />
+          </div>
+          <Button asChild variant="outline" size="icon" className="size-8 shrink-0">
+            <Link to="/usage/metrics" aria-label="Back to metrics">
+              <ArrowLeft className="size-4" />
+            </Link>
           </Button>
-        }
-      />
+        </div>
+      ) : (
+        <PageHeader
+          icon={LayoutDashboard}
+          title={selected.title}
+          description={selected.description ?? selected.slug}
+          action={
+            <Button asChild variant="outline">
+              <Link to="/usage/metrics">Back to metrics</Link>
+            </Button>
+          }
+        />
+      )}
       {content}
       {expandedDialog}
       <MetricEditorDialog metric={selected} open={editorOpen} onOpenChange={setEditorOpen} />

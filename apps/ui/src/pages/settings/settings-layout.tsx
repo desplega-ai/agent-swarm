@@ -2,6 +2,8 @@ import {
   Blocks,
   Boxes,
   Bug,
+  ChevronLeft,
+  ChevronRight,
   Contact,
   FileText,
   FlaskConical,
@@ -16,7 +18,7 @@ import {
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react";
-import { Fragment, type ReactNode, useCallback, useEffect } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
@@ -151,12 +153,10 @@ export function SettingsLayout() {
   return (
     <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
-      <SectionTabs
-        label="Settings"
-        tabs={navItems}
-        activePath={activeItem.path}
-        className="lg:hidden shrink-0 mb-4"
-      />
+      {/* mockup(ui-audit): settings tab strip hid 7 of 10 sections, add edge fade + chevrons */}
+      <OverflowCue className="lg:hidden shrink-0 mb-4">
+        <SectionTabs label="Settings" tabs={navItems} activePath={activeItem.path} />
+      </OverflowCue>
 
       {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
           § Motion collapse pattern). */}
@@ -235,6 +235,66 @@ export function SettingsLayout() {
         ) : null}
         <Outlet />
       </div>
+    </div>
+  );
+}
+
+// mockup(ui-audit): settings tab strip hid 7 of 10 sections, add edge fade + chevrons
+/**
+ * Wraps the shared `SectionTabs` strip (whose scrollbar is hidden) with an
+ * edge fade and a chevron on each side that still has hidden tabs, so a phone
+ * shows that more sections exist past the screen edge. Page-local: it finds
+ * the strip's scroller in the DOM instead of changing the shared component.
+ */
+function OverflowCue({ children, className }: { children: ReactNode; className?: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>("nav > div");
+    if (!scroller) return;
+    const update = () => {
+      const max = scroller.scrollWidth - scroller.clientWidth;
+      setEdges({ left: scroller.scrollLeft > 4, right: scroller.scrollLeft < max - 4 });
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, []);
+
+  const scrollBy = (direction: 1 | -1) => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>("nav > div");
+    scroller?.scrollBy({ left: direction * scroller.clientWidth * 0.7, behavior: "smooth" });
+  };
+
+  return (
+    <div ref={rootRef} className={cn("relative", className)}>
+      {children}
+      {edges.left ? (
+        <button
+          type="button"
+          onClick={() => scrollBy(-1)}
+          aria-label="Show earlier settings sections"
+          className="absolute top-0 bottom-[3px] left-0 flex w-10 items-center justify-start bg-gradient-to-r from-background from-40% to-transparent pl-0.5 text-foreground"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+      ) : null}
+      {edges.right ? (
+        <button
+          type="button"
+          onClick={() => scrollBy(1)}
+          aria-label="Show more settings sections"
+          className="absolute top-0 bottom-[3px] right-0 flex w-10 items-center justify-end bg-gradient-to-l from-background from-40% to-transparent pr-0.5 text-foreground"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      ) : null}
     </div>
   );
 }

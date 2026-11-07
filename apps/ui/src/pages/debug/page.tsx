@@ -19,10 +19,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { cn } from "@/lib/utils";
 import { filterTables } from "./filter-tables";
 import { formatDebugCell } from "./format-cell";
 
@@ -34,10 +37,12 @@ function TableBrowser({
   expandedTable,
   onSelectTable,
   onToggleTable,
+  className,
 }: {
   expandedTable: string;
   onSelectTable: (tableName: string) => void;
   onToggleTable: (tableName: string) => void;
+  className?: string;
 }) {
   const { data: tablesResult, isLoading } = useTableList();
 
@@ -50,7 +55,12 @@ function TableBrowser({
   const visibleTables = useMemo(() => filterTables(tables, search), [tables, search]);
 
   return (
-    <div className="w-[220px] shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
+    <div
+      className={cn(
+        "w-[220px] shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden",
+        className,
+      )}
+    >
       <div className="px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Tables
@@ -163,6 +173,12 @@ export default function DebugPage() {
   const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
   const expandedTable = readStringParam(searchParams, "table");
   const [tablesCollapsed, setTablesCollapsed] = useLocalToggle("debug:tables-collapsed", false);
+  // mockup(ui-audit): settings-debug P0 — below md the tables list is a closed drawer, not a 220px column
+  const isMobile = useIsMobile();
+  const [tablesSheetOpen, setTablesSheetOpen] = useState(false);
+  const tablesHidden = isMobile ? !tablesSheetOpen : tablesCollapsed;
+  const toggleTables = () =>
+    isMobile ? setTablesSheetOpen(!tablesSheetOpen) : setTablesCollapsed(!tablesCollapsed);
   const editorRef = useRef<{ getValue: () => string } | null>(null);
 
   const executeQuery = useCallback(() => {
@@ -176,6 +192,8 @@ export default function DebugPage() {
     const newSql = `SELECT * FROM ${tableName} LIMIT 50`;
     setParams({ table: tableName, sql: newSql }, { defaultValues: { sql: DEFAULT_SQL } });
     dbQuery.mutate({ sql: newSql });
+    // mockup(ui-audit): settings-debug P0 — picking a table on a phone closes the drawer to show results
+    setTablesSheetOpen(false);
   }
 
   function handleToggleTable(tableName: string) {
@@ -229,18 +247,41 @@ export default function DebugPage() {
       {/* Main content: sidebar + editor/results */}
       <div className="flex flex-1 min-h-0 border border-border rounded-md overflow-hidden">
         {/* Table browser sidebar */}
-        {!tablesCollapsed && (
+        {!isMobile && !tablesCollapsed && (
           <TableBrowser
             expandedTable={expandedTable}
             onSelectTable={handleSelectTable}
             onToggleTable={handleToggleTable}
           />
         )}
+        {/* mockup(ui-audit): settings-debug P0 — phone: tables in a left drawer, editor/results full width */}
+        {isMobile && (
+          <Sheet open={tablesSheetOpen} onOpenChange={setTablesSheetOpen}>
+            <SheetContent
+              side="left"
+              className="w-[85vw] gap-0 p-0 pt-10"
+              // Keep the phone keyboard closed until the user taps the search box.
+              onOpenAutoFocus={(e) => e.preventDefault()}
+            >
+              <SheetTitle className="sr-only">Tables</SheetTitle>
+              <SheetDescription className="sr-only">
+                Pick a table to query it, or expand it to see its columns.
+              </SheetDescription>
+              <TableBrowser
+                className="w-full flex-1 border-r-0"
+                expandedTable={expandedTable}
+                onSelectTable={handleSelectTable}
+                onToggleTable={handleToggleTable}
+              />
+            </SheetContent>
+          </Sheet>
+        )}
 
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Monaco editor */}
-          <div className="border-b border-border shrink-0 h-[clamp(96px,22vh,200px)]">
+          {/* mockup(ui-audit): settings-debug P0 — shorter editor on a phone, results get the room */}
+          <div className="border-b border-border shrink-0 h-[clamp(88px,16dvh,140px)] md:h-[clamp(96px,22vh,200px)]">
             <Editor
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}
@@ -251,7 +292,8 @@ export default function DebugPage() {
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 fontSize: 13,
-                lineNumbers: "on",
+                // mockup(ui-audit): settings-debug P0 — no gutter on a phone, the query gets the width
+                lineNumbers: isMobile ? "off" : "on",
                 wordWrap: "on",
                 automaticLayout: true,
                 padding: { top: 8 },
@@ -260,28 +302,43 @@ export default function DebugPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="flex shrink-0 items-center gap-3 px-3 py-2 border-b border-border bg-muted/30">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="shrink-0"
-                  aria-label={tablesCollapsed ? "Show table list" : "Hide table list"}
-                  aria-pressed={tablesCollapsed}
-                  onClick={() => setTablesCollapsed(!tablesCollapsed)}
-                >
-                  {tablesCollapsed ? (
-                    <PanelLeftOpen className="h-4 w-4" />
-                  ) : (
-                    <PanelLeftClose className="h-4 w-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {tablesCollapsed ? "Show table list" : "Hide table list"}
-              </TooltipContent>
-            </Tooltip>
+          {/* mockup(ui-audit): settings-debug P0 — toolbar wraps so Execute and the stats never clip */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-b border-border bg-muted/30">
+            {/* mockup(ui-audit): settings-debug P0 — on a phone the drawer toggle is a labelled "Tables" button */}
+            {isMobile ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                aria-expanded={tablesSheetOpen}
+                onClick={toggleTables}
+              >
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+                Tables
+              </Button>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0"
+                    aria-label={tablesHidden ? "Show table list" : "Hide table list"}
+                    aria-pressed={tablesHidden}
+                    onClick={toggleTables}
+                  >
+                    {tablesHidden ? (
+                      <PanelLeftOpen className="h-4 w-4" />
+                    ) : (
+                      <PanelLeftClose className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {tablesHidden ? "Show table list" : "Hide table list"}
+                </TooltipContent>
+              </Tooltip>
+            )}
 
             <Button
               size="sm"
@@ -297,7 +354,7 @@ export default function DebugPage() {
               Execute
             </Button>
 
-            <span className="text-xs text-muted-foreground">
+            <span className="hidden text-xs text-muted-foreground md:inline">
               {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+Enter
             </span>
 
