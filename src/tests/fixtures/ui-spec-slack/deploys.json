@@ -1,0 +1,50 @@
+{
+  "uiSpec": {
+    "spec": {
+      "root": "c",
+      "elements": {
+        "c": {
+          "type": "Card",
+          "props": {
+            "title": "Weekly deploys"
+          },
+          "children": ["f", "t", "a"]
+        },
+        "f": {
+          "type": "Fields",
+          "props": {},
+          "children": ["k"]
+        },
+        "k": {
+          "type": "Field",
+          "props": {
+            "label": "Deploys",
+            "value": "1,284"
+          },
+          "children": []
+        },
+        "t": {
+          "type": "Table",
+          "props": {
+            "headers": ["Service", "Deploys"],
+            "rows": [["api", 812], ["ui", 472]]
+          },
+          "children": []
+        },
+        "a": {
+          "type": "Actions",
+          "props": {},
+          "children": ["l"]
+        },
+        "l": {
+          "type": "LinkButton",
+          "props": {
+            "label": "Open dashboard",
+            "url": "https://example.com/deploys"
+          },
+          "children": []
+        }
+      }
+    }
+  }
+}
