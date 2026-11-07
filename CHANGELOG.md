@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-11-07
+
+### Added
+- Savings: a fleet savings page at `/usage/savings` (#2779); scripts are priced and show their saving on script pages (#2776); a schedule's saving shows in the rail, header and list (#2777); workflow savings get a daily rollup, a Saved (30d) list column (#2772) and totals with components (#2780).
+- Scripts: a stdlib `retry(fn, opts)` helper, method-aware `ctx.stdlib.fetch` retries, and `ctx.swarm` bridge retries on 429 and transient 5xx (#2790).
+- Slack: threads with several people name every participant, with a trust level; external and unknown people are untrusted (#2767).
+- Tasks: link a task to a registered repo from the Create task dialog (#2804).
+
+### Changed
+- Worker image: context-mode is removed from the image and the Claude, Codex and opencode adapters; `CONTEXT_MODE_DISABLED` and `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` are now ignored (#2812).
+- Docker: bumped codex, amp, grok, kiro, qwen, copilot and the Anthropic SDK (#2788), and amp again (#2818).
+- Docs: small-company playbooks lead with what Agent Swarm does (#2786); task lifecycle grace timer wording (#2787); seed skill patches for swarm-scripts and work-on-task (#2785).
+
+### Fixed
+- Slack: author lines cannot be forged, and every requester lookup carries `userTeam` (#2771).
+- Savings: the fleet savings summary and job lists load in a few statements (#2809).
+- opencode: installed MCP servers use the local command-array stdio shape (#2793); OpenRouter gateway model ids have a catalog entry (#2784).
+- Scrubber: a structural rule match inside a vendor secret redacts the whole secret (#2783); the gitleaks `true|false|null` allowlist is anchored as a whole (#2796).
+- Dreaming: triage docs are sent once, partial cost is labelled, and skill routes carry forward (#2792).
+- Docker: context-mode was pinned to a Node 22 compatible release before its removal (#2789, #2806).
+- Tests: config cleanup settles and the star toast is awaited (#2782).
+
 ## [2.8.2] - 2026-11-06
 
 ### Added

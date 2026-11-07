@@ -58,7 +58,6 @@ for (const transport of ["cli", "sdk"] as const) {
             CLAUDE_TRANSPORT: transport,
             CLAUDE_QUEUE_STEERING: "1",
             CLAUDECODE: "",
-            CONTEXT_MODE_DISABLED: "true",
             // Synthetic values ensure this probe cannot authenticate or incur model charges.
             CLAUDE_CODE_OAUTH_TOKEN: "example-synthetic-not-an-oauth-token",
             ANTHROPIC_API_KEY: "example-synthetic-not-an-api-key",

@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -28,8 +27,13 @@ export function userClaudeMdExclude(home: string = process.env.HOME ?? homedir()
   return join(home, ".claude", "CLAUDE.md");
 }
 
-/** Plugin id the worker image installs (`claude plugin install context-mode@context-mode`). */
-export const CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
+/**
+ * Plugin id older worker images installed (`claude plugin install
+ * context-mode@context-mode`). context-mode is removed, but a HOME carried
+ * over from such an image still has the plugin installed, and its hooks
+ * would point the session at `ctx_*` tools it no longer gets.
+ */
+export const LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
 
 export type ClaudeFlagSettings = Record<string, unknown> & {
   claudeMdExcludes: string[];
@@ -39,17 +43,15 @@ export type ClaudeFlagSettings = Record<string, unknown> & {
 /**
  * Flag-level settings (`--settings` / SDK `settings`) for every Claude session.
  *
- * `CONTEXT_MODE_DISABLED` also turns the context-mode plugin off for the
- * session. Dropping only its MCP server left the plugin hooks running: the
- * SessionStart block and tool tips pointed at `ctx_*` tools the session did
- * not have, and the PreToolUse hook denied WebFetch.
+ * Always turns the legacy context-mode plugin off. A stale install would
+ * otherwise keep its hooks running: the SessionStart block and tool tips
+ * point at `ctx_*` tools the session does not have, and the PreToolUse hook
+ * denies WebFetch. Disabling a plugin that is not installed is a no-op.
  */
 export function claudeFlagSettings(): ClaudeFlagSettings {
   return {
     claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
-    ...(isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)
-      ? { enabledPlugins: { [CONTEXT_MODE_CLAUDE_PLUGIN]: false } }
-      : {}),
+    enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
   };
 }
 

@@ -13,8 +13,8 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 |---|---|
 | 1 to 9 SDK calls, result fits in context | Direct tool calls. |
 | 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
-| Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
-| One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| Fetch, parse, and transform heavy data | Script. |
+| One large web fetch | Script with `ctx.stdlib.fetch`. Return only the part you need. |
 | A schedule, workflow, or API script that reads or writes drive files | Script with `ctx.fs` and `ctx.sh`. |
 | Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
 | Work that repeats on a clock | Schedule. See `scheduling`. |
@@ -74,6 +74,19 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - A script invoked from a workflow node may run under a workflow identity. The node may also supply arguments the script needs: when you run that script directly, pass the same arguments the node maps. A script without a strict `argsSchema` then fails deeper in, often as a not-found or resource error instead of a validation error.
 - Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
 - Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script. A `targetType: "script"` schedule gets 60 s; a manual `script-run` gets 30 s, so a candidate that finishes well under 30 s by hand has margin on the schedule. A nested `ctx.swarm.script_run` gets its own 30 s but runs inside its caller's remaining time: run slow children as sibling calls from the outer script, not deeper in the chain. The run ends when your default export resolves. A call you did not await gets about 2 s more and is then stopped (`quickjs` aborts it at once), so await every write that must land. That makes a `Promise.race` deadline bound the run; a nested `script_run` that lost the race keeps running on the server under its own 30 s.
+
+### Upserting a large source
+
+A large source pasted inline into a `script-upsert` tool call overflows the call. Write the source to a local file, then send it from bash through the same route, `POST $MCP_BASE_URL/api/scripts/upsert`. The body is JSON (`name`, `source`, optional `description`, `intent`, `scope`), so wrap the file instead of sending it raw:
+
+```bash
+jq -n --arg name my-script --rawfile source ./my-script.ts '{name: $name, source: $source}' \
+  | curl -sS -X POST "$MCP_BASE_URL/api/scripts/upsert" \
+      -H "Authorization: Bearer $API_KEY" -H "X-Agent-ID: $AGENT_ID" \
+      -H "Content-Type: application/json" --data-binary @-
+```
+
+The route runs the same typecheck and scope rules as the tool.
 
 ### What `ctx` holds
 

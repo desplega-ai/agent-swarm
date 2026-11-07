@@ -54,7 +54,6 @@ import {
 } from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
-import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
 import type {
@@ -648,24 +647,6 @@ export async function createSessionMcpConfig(
 
   if (Object.keys(mergedServers).length === 0 && !installedServers) return null;
 
-  // Inject the context-mode stdio MCP server so its `ctx_*` tools survive
-  // `--strict-mcp-config` (which restricts Claude to this file and structurally
-  // excludes plugin-provided MCP servers). The plugin's hooks still fire via the
-  // installed Claude plugin — strict-mcp-config only suppresses MCP servers, not
-  // hooks. Placed BEFORE mergeMcpConfig so an API-installed server can still
-  // override it (unlikely, but safe). Gated by CONTEXT_MODE_DISABLED so builds
-  // and deploys without context-mode don't break; the same flag turns the plugin
-  // (and so its hooks) off via `claudeFlagSettings()`.
-  //
-  // Server key uses the plugin naming convention (`plugin_context-mode_context-mode`)
-  // so that the resulting tool names (`mcp__plugin_context-mode_context-mode__ctx_*`)
-  // match the names the plugin's hooks reference in guidance text. With the bare
-  // key `context-mode`, the tools would be `mcp__context-mode__ctx_*` — callable,
-  // but invisible to the hook nudges that point agents at the plugin-prefixed name.
-  if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
-    mergedServers["plugin_context-mode_context-mode"] = { command: "context-mode" };
-  }
-
   try {
     const config = mergeMcpConfig(
       { mcpServers: mergedServers },
@@ -803,7 +784,6 @@ export function buildClaudeSessionEnvironment(
       AGENT_SWARM_TASK_ID: config.taskId,
       AGENT_SWARM_AGENT_ID: config.agentId,
       AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
-      CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
     } as Record<string, string>,
     appliedReasoningEffort:
       reasoningApplication.kind === "claude-env" ? (config.reasoningEffort ?? null) : null,
