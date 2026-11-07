@@ -1469,6 +1469,18 @@ describe("getBasePromptWithParts", () => {
     expect(promptChars(parts)).toBe(prompt.length);
   });
 
+  test("the lead channel thread note gets its own part", async () => {
+    const { prompt, parts } = await getBasePromptWithParts({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      serverCapabilities: ["chat-sdk"],
+    });
+    const thread = parts.find((part) => part.id === "system.agent.lead.channel_thread");
+    expect(thread?.chars).toBeGreaterThan(0);
+    expect(promptChars(parts)).toBe(prompt.length);
+  });
+
   describe("template overrides", () => {
     const soulOnly: BasePromptArgs = { ...minimalArgs, soulMd: "ZZ" };
     const overrides = (bodies: Record<string, string>) =>
