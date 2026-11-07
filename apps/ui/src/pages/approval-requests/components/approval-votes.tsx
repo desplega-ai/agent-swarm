@@ -1,5 +1,7 @@
-import { CircleCheck, CircleX } from "lucide-react";
+import { ChevronDown, CircleCheck, CircleX } from "lucide-react";
+import { useState } from "react";
 import type { ApprovalRequest } from "@/api/types";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { quorumLabel } from "@/lib/approval-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { ResponderChip } from "./responder-chip";
@@ -10,6 +12,9 @@ import { ResponderChip } from "./responder-chip";
  * by a single answer shows nothing here: the resolution banner names them.
  */
 export function ApprovalVotes({ request }: { request: ApprovalRequest }) {
+  const isMobile = useIsMobile();
+  // On a phone the vote list folds under the quorum line: it is context, the questions are the task.
+  const [open, setOpen] = useState(false);
   const votes = request.approvals ?? [];
   const progress = request.approvalProgress ?? null;
   const quorum = quorumLabel(progress);
@@ -18,12 +23,26 @@ export function ApprovalVotes({ request }: { request: ApprovalRequest }) {
   return (
     <section
       aria-label="Approvals"
-      className="flex flex-col gap-2 rounded-xl border border-border-subtle px-4 py-3"
+      className="flex flex-col gap-2 rounded-xl border border-border-subtle px-4 py-3 max-md:py-2"
     >
-      <div className="flex items-center justify-between gap-2 text-xs">
+      <button
+        type="button"
+        disabled={!isMobile || votes.length === 0}
+        aria-expanded={isMobile ? open : undefined}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-9 items-center justify-between gap-2 text-xs outline-none disabled:cursor-default max-md:-my-1"
+      >
         <span className="font-medium text-foreground">Approvals</span>
-        {quorum ? <span className="tabular-nums text-muted-foreground">{quorum}</span> : null}
-      </div>
+        <span className="flex items-center gap-1 tabular-nums text-muted-foreground">
+          {quorum}
+          {isMobile && votes.length > 0 ? (
+            <ChevronDown
+              aria-hidden
+              className={cn("size-4 transition-transform", open && "rotate-180")}
+            />
+          ) : null}
+        </span>
+      </button>
       {quorum && progress ? (
         <div
           className="h-1 overflow-hidden rounded-full bg-muted"
@@ -39,7 +58,7 @@ export function ApprovalVotes({ request }: { request: ApprovalRequest }) {
           />
         </div>
       ) : null}
-      {votes.length === 0 ? (
+      {isMobile && !open ? null : votes.length === 0 ? (
         <p className="text-xs text-muted-foreground">No approvals yet.</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
