@@ -5,6 +5,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  getDbClient,
   initDb,
   updateAgentProfile,
 } from "../be/db";
@@ -119,6 +120,30 @@ test("human reply preserves Lead-only capability requirements and returns a clea
   const body = await response.json();
   expect(response.status).toBe(403);
   expect(body.error).toContain("Lead-only task routing affinity does not authorize");
+});
+
+test.each([
+  ["malformed JSON", "{not json"],
+  ["schema-invalid JSON", JSON.stringify({ capabilities: "revision" })],
+])("human reply to a parent with %s routing affinity returns a clear 403", async (_, stored) => {
+  const parent = await createTaskExtended("corrupt affinity task", {
+    agentId: workerId,
+    requestedByUserId: userId,
+    contextKey: `task:${crypto.randomUUID()}`,
+    routingAffinity: { capabilities: ["revision"], leadOnly: false },
+  });
+  await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+    stored,
+    parent.id,
+  ]);
+  const response = await fetch(`${baseUrl}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task: "reply to corrupt parent", parentTaskId: parent.id }),
+  });
+  const body = await response.json();
+  expect(response.status).toBe(403);
+  expect(body.error).toContain(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
 });
 
 test("human can choose another worker without inheriting the previous worker requirements", async () => {
