@@ -191,6 +191,7 @@ import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
   approvalRequestListClause,
+  scheduleApprovalCardUpdates,
   scrubApprovalVotesJson,
 } from "./db/approvals";
 import {
@@ -10068,7 +10069,10 @@ export async function resolveApprovalRequest(
       id,
     ],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const resolved = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([resolved]);
+  return resolved;
 }
 
 // Cancels 1 pending request. The `status = 'pending'` guard lets a concurrent
@@ -10085,7 +10089,10 @@ export async function cancelApprovalRequestById(
        RETURNING *`,
     [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const cancelled = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([cancelled]);
+  return cancelled;
 }
 
 export async function cancelPendingApprovalRequestsForRun(
@@ -10100,7 +10107,9 @@ export async function cancelPendingApprovalRequestsForRun(
        RETURNING *`,
     [scrubSecrets(reason), now, now, workflowRunId],
   );
-  return rows.map(rowToApprovalRequest);
+  const cancelled = rows.map(rowToApprovalRequest);
+  scheduleApprovalCardUpdates(cancelled);
+  return cancelled;
 }
 
 export async function listCancelledApprovalRequestsForRun(
@@ -10125,13 +10134,21 @@ export async function listCancelledApprovalRequestsForStep(
   return rows.map(rowToApprovalRequest);
 }
 
+/**
+ * Lease one Slack side effect of a settled request. `cancellationNotificationClaims`
+ * holds every such claim: the cancellation thread reply (`<channel>:<ts>`) and the
+ * in-place card edit (`card:<channel>:<ts>`), so a retry never repeats a delivered one.
+ * `anyTerminal` claims on every terminal status, not only `cancelled`.
+ */
 export async function claimApprovalCancellationNotification(
   id: string,
   notificationKey: string,
+  options?: { anyTerminal?: boolean },
 ): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
+  const statusClause = options?.anyTerminal ? "status <> 'pending'" : "status = 'cancelled'";
   return getDbClient().transaction(async () => {
     const row = await getDbClient().get<ApprovalRequestRow>(
-      "SELECT * FROM approval_requests WHERE id = ? AND status = 'cancelled'",
+      `SELECT * FROM approval_requests WHERE id = ? AND ${statusClause}`,
       [id],
     );
     if (!row) return null;
@@ -10157,7 +10174,7 @@ export async function claimApprovalCancellationNotification(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND ${statusClause}`,
       [JSON.stringify(claims), now, id],
     );
     return { approval: rowToApprovalRequest(row), leaseToken };
@@ -10206,7 +10223,7 @@ async function updateApprovalCancellationNotificationClaim(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND status <> 'pending'`,
       [JSON.stringify(claims), new Date().toISOString(), id],
     );
   });

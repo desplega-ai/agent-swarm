@@ -6,6 +6,7 @@ import {
   createTaskExtended,
   getApprovalRequestById,
   getTaskById,
+  getUserById,
   releaseApprovalCancellationNotificationClaim,
   updateApprovalRequestNotifications,
 } from "../be/db";
@@ -103,9 +104,9 @@ export async function dispatchApprovalNotifications(
   if (!notifications.length) return;
 
   const approvalUrl = `${getAppUrl()}/approval-requests/${requestId}`;
-  const updatedChannels: Array<ApprovalNotificationChannel & { messageTs?: string }> = [
-    ...notifications,
-  ];
+  const updatedChannels: Array<
+    ApprovalNotificationChannel & { messageTs?: string; channelId?: string }
+  > = [...notifications];
   let updated = false;
 
   for (let i = 0; i < notifications.length; i++) {
@@ -194,7 +195,12 @@ export async function dispatchApprovalNotifications(
         });
 
         if (result.ts) {
-          updatedChannels[i] = { ...notification, messageTs: result.ts };
+          // chat.update needs the conversation id; a user-id target posts into a DM.
+          updatedChannels[i] = {
+            ...notification,
+            messageTs: result.ts,
+            ...(result.channel ? { channelId: result.channel } : {}),
+          };
           updated = true;
         }
 
@@ -214,7 +220,7 @@ export async function dispatchApprovalNotifications(
   if (updated) {
     try {
       await db.updateApprovalRequestNotifications(requestId, updatedChannels);
-      // A cancel that landed while the card was posting found no messageTs to thread under.
+      // A resolution that landed while the card was posting found no messageTs to act on.
       const latest = await db.getApprovalRequestById(requestId);
       if (latest?.status === "cancelled") {
         await postApprovalCancellationUpdates(
@@ -222,6 +228,7 @@ export async function dispatchApprovalNotifications(
           latest.resolutionReason ?? "Workflow run cancelled",
         );
       }
+      if (latest && latest.status !== "pending") await updateResolvedApprovalCards([latest]);
     } catch (err) {
       console.error(
         "[HITL] Failed to update notification channels in DB:",
@@ -291,6 +298,129 @@ export async function postApprovalCancellationUpdates(
         );
         console.error(
           `[HITL] Failed to post cancellation update for approval ${approval.id}:`,
+          scrubSecrets(error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
+}
+
+export interface ApprovalCardSlackClient {
+  chat: {
+    update(input: {
+      channel: string;
+      ts: string;
+      text: string;
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: any[];
+      unfurl_links: false;
+      unfurl_media: false;
+    }): Promise<unknown>;
+  };
+}
+
+type ApprovalSlackEntry = {
+  channel: string;
+  target: string;
+  messageTs?: string;
+  channelId?: string;
+};
+
+/** The claim key of one Slack card's in-place edit, beside the cancellation reply's key. */
+export function approvalCardUpdateKey(target: string, messageTs: string): string {
+  return `card:${approvalCancellationNotificationKey(target, messageTs)}`;
+}
+
+async function describeResolver(resolvedBy: string | null): Promise<string | null> {
+  if (!resolvedBy) return null;
+  if (resolvedBy === "operator") return "operator";
+  const user = await getUserById(resolvedBy).catch(() => null);
+  return user?.name ?? null;
+}
+
+/**
+ * Build the resolved card: the outcome replaces "Approval Required", the
+ * questions stay, the primary button becomes a neutral "View" link and the
+ * timeout caption goes. Returns null for a pending request.
+ */
+export async function buildResolvedApprovalCard(
+  approval: ApprovalRequest,
+): Promise<{ text: string; blocks: unknown[] } | null> {
+  if (approval.status === "pending") return null;
+  const by = await describeResolver(approval.resolvedBy);
+  const byText = by ? ` by ${escapeSlackMrkdwn(by)}` : "";
+  const reason = (approval.resolutionReason ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  const outcome = {
+    approved: `✅ *Approved${byText}*`,
+    rejected: `❌ *Rejected${byText}*`,
+    timeout: "⏱️ *Timed out, no response*",
+    cancelled: `🚫 *Cancelled${reason ? `: ${escapeSlackMrkdwn(reason)}` : ""}*`,
+  }[approval.status];
+  const title = escapeSlackMrkdwn(approval.title);
+  const resolvedAt = new Date(approval.resolvedAt ?? approval.updatedAt);
+  const unix = Math.floor(resolvedAt.getTime() / 1000);
+  // Slack renders the token in each viewer's timezone; the fallback is for old clients only.
+  const when = `<!date^${unix}^{date_short_pretty} {time}|${resolvedAt.toISOString()}>`;
+  const approvalUrl = `${getAppUrl()}/approval-requests/${approval.id}`;
+  const questions = approval.questions as ReadonlyArray<{ label?: string; type?: string }>;
+  return {
+    text: `${outcome.replaceAll("*", "")}: ${title}`,
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: `${outcome}\n${title}` } },
+      { type: "section", text: { type: "mrkdwn", text: buildSlackQuestionsSummary(questions) } },
+      {
+        type: "actions",
+        elements: [
+          { type: "button", text: { type: "plain_text", text: "View" }, url: approvalUrl },
+        ],
+      },
+      { type: "context", elements: [{ type: "mrkdwn", text: `Resolved ${when}` }] },
+    ],
+  };
+}
+
+/**
+ * Edit each resolved request's Slack card in place with chat.update. One
+ * claim per (channel, messageTs) makes a repeat call a no-op. A Slack error
+ * releases the claim and is logged; it never throws.
+ */
+export async function updateResolvedApprovalCards(
+  approvals: ReadonlyArray<Pick<ApprovalRequest, "id" | "notificationChannels">>,
+  client: ApprovalCardSlackClient | undefined = getSlackApp()?.client as
+    | ApprovalCardSlackClient
+    | undefined,
+): Promise<void> {
+  if (!client) return;
+  for (const approval of approvals) {
+    const cards = ((approval.notificationChannels ?? []) as ApprovalSlackEntry[]).filter(
+      (n) => n.channel === "slack" && n.messageTs,
+    );
+    for (const card of cards) {
+      const key = approvalCardUpdateKey(card.target, card.messageTs!);
+      try {
+        const claim = await claimApprovalCancellationNotification(approval.id, key, {
+          anyTerminal: true,
+        });
+        if (!claim) continue;
+        try {
+          const rendered = await buildResolvedApprovalCard(claim.approval);
+          if (!rendered) throw new Error("approval is still pending");
+          await client.chat.update({
+            channel: card.channelId ?? card.target,
+            ts: card.messageTs!,
+            text: rendered.text,
+            blocks: rendered.blocks,
+            unfurl_links: false,
+            unfurl_media: false,
+          });
+          await completeApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
+        } catch (error) {
+          await releaseApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
+          throw error;
+        }
+      } catch (error) {
+        console.error(
+          `[HITL] Failed to update the Slack card for approval ${approval.id}:`,
           scrubSecrets(error instanceof Error ? error.message : String(error)),
         );
       }
