@@ -8,7 +8,7 @@
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
 #   worker-full-base             — worker-base + dev toolchain, Playwright
 #                                  Chromium + agent-browser, postgres/redis,
-#                                  glab, az (azure-devops), context-mode plugins
+#                                  glab, az (azure-devops)
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -19,10 +19,6 @@
 
 ARG PREK_VERSION=0.4.5
 ARG SKILLS_CLI_VERSION=1.5.20
-# context-mode pins BOTH the global CLI/MCP server (worker-base) and the
-# Claude/Codex plugin marketplaces (worker-full-base). Global so the two
-# stages cannot drift; each stage re-declares it.
-ARG CONTEXT_MODE_VERSION=2.1.4
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
@@ -142,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.318
+ARG CLAUDE_CODE_VERSION=2.1.319
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -207,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.5
+ARG OPENCODE_VERSION=2.2.6
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -216,21 +212,6 @@ ENV PATH="/home/worker/.opencode/bin:$PATH"
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
-    && rm -rf /tmp/npm-cache /root/.npm
-USER worker
-
-# Install context-mode CLI globally (context-window compression tools for all
-# harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
-# stdio MCP) AND makes the package importable (for the OpenCode in-process
-# plugin). The Claude/Codex plugin installs (worker-full-base) provide the
-# hooks; this provides the CLI binary + package importability. Disable
-# per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-# Version: global ARG at the top of this file.
-ARG CONTEXT_MODE_VERSION
-USER root
-RUN test -n "${CONTEXT_MODE_VERSION}" \
-    && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
@@ -263,7 +244,7 @@ RUN mkdir -p /home/worker/.wts \
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
-  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings", "ScheduleWakeup"] }, \
+  "permissions": { "allow": ["mcp__agent-swarm__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings", "ScheduleWakeup"] }, \
   "outputStyle": "Concise", \
   "attribution": { "commit": "", "pr": "", "sessionUrl": false }, \
   "autoMemoryEnabled": false, \
@@ -273,7 +254,7 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   "disableRemoteControl": true, \
   "disableClaudeAiConnectors": true, \
   "enableAllProjectMcpServers": true, \
-  "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
+  "enabledMcpjsonServers": ["agent-swarm"], \
   "env": { "DISABLE_ERROR_REPORTING": "1" }, \
   "hooks": { \
     "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
@@ -580,9 +561,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793937652-gdc5d48
-ARG AMP_SHA512_AMD64=63b570e77b7ef5cf301a660e44f3b9b33c4693b5dac18d126fb7483d58125e60ba30e4d8d00d54bd660fa55216ee6fb0fd2997d811211ad33fd2b44c4950662d
-ARG AMP_SHA512_ARM64=f275a25adbd3d286ac40f213a5efdb327a4ce8b54f8af5a55d7338ef48fefa934f7a2468c9801dec20be7dcf74814ebb799edf18ce45c43cfeb53e5f6cfdea89
+ARG AMP_VERSION=0.0.1794009661-g88d32b
+ARG AMP_SHA512_AMD64=0f63d7178550f7a774b19cfa00e9be7605fea0cf6dd21d6b8058798571c833cb21a792d655921ac5ff9309655c36e01d379d54551fd0ca1c702f66f72514db79
+ARG AMP_SHA512_ARM64=cbd4872291b263162af1a765d82ad269c360cc3c25a19d5e201dbb8d91aeabd3932eb174b9c4090cddf7a45e3044c921b6d4a497a707e5466fa1664bedb7e4e3
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -630,7 +611,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.106
+ARG COPILOT_CLI_VERSION=1.0.107
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -640,8 +621,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.7), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.8
+# scripts are not needed for ACP (verified on 0.26.9), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.9
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -824,34 +805,6 @@ RUN ffmpeg -version \
     && head -c 8 /tmp/agent-browser-smoke.png | grep -q PNG \
     && agent-browser close \
     && rm -rf /tmp/agent-browser-smoke.png /home/worker/.agent-browser
-USER root
-
-# Install the context-mode plugins for Claude + Codex (build-time cache).
-# These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
-# skills-only installer cannot replace. Both marketplaces are PINNED to the
-# v${CONTEXT_MODE_VERSION} tag, the same version as the global CLI/MCP server
-# (npm i -g context-mode in worker-base). Never leave them unpinned: upstream
-# v2.0.0 raised engines.node to >=24.15.0, and on this image's Node 22 the
-# newer hook denies EVERY Bash call with NODE_TOO_OLD. Bump the tag only
-# together with NODE_VERSION when the target release needs a newer Node.
-# The ref persists (Claude: known_marketplaces.json + settings.json
-# extraKnownMarketplaces; Codex: config.toml `ref`), so a runtime marketplace
-# refresh stays on the tag. Plugin auto-update is also off at runtime:
-# DISABLE_AUTOUPDATER=1 (worker-base ENV) disables it in Claude Code.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build;
-# the leading `test -n` is NOT guarded, so an ARG that fails to reach this
-# stage fails the build instead of installing an unpinned or empty ref.
-# CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
-# `bun install` under the hood and previously left an 880 MB cache in a layer.
-ARG CONTEXT_MODE_VERSION
-USER worker
-RUN test -n "${CONTEXT_MODE_VERSION}" \
-    && { claude plugin marketplace add "mksglu/claude-context-mode#v${CONTEXT_MODE_VERSION}" || true; } \
-    && { claude plugin install context-mode@context-mode --scope user || true; } \
-    && { codex plugin marketplace add mksglu/context-mode --ref "v${CONTEXT_MODE_VERSION}" || true; } \
-    && { codex plugin add context-mode@context-mode || true; } \
-    && rm -rf /home/worker/.bun/install/cache
-
 USER root
 
 # ─── Stage: worker-full — default/published image (must stay LAST) ───────────

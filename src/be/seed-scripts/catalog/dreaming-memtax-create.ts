@@ -707,6 +707,45 @@ export function handoffRow(path: string, r: Route, texts: string[], scripts: Ski
     memberIds,
   };
 }
+// Synthesize turns only a few routes into actions a night (shared skill caps), so :latest carries every route it did
+// not act on. A route is consumed when an approved synthesize action cites the handoff KV and one of its members.
+export const ROUTES_KV_REF = "memtax-create:skill-routes";
+export function consumedMembers(synth: unknown): Set<string> {
+  const s: any = parse(synth);
+  const out = new Set<string>();
+  for (const x of Array.isArray(s?.actions) ? s.actions : []) {
+    const ev: string[] = Array.isArray(x?.evidence) ? x.evidence.map(String) : [];
+    if (!ev.some((e) => e.includes(ROUTES_KV_REF))) continue;
+    for (const e of ev) if (e.startsWith("memory:")) out.add(e.slice("memory:".length));
+  }
+  return out;
+}
+/** Stored routes minus consumed ones, merged by slug with tonight's (union memberIds, tonight's fields win), members
+ * whose rows are gone dropped (`live` null = unknown, keep all), largest first. */
+export function carryRoutes(tonight: any[], stored: any[], consumed: Set<string>, live: Set<string> | null) {
+  const slugOf = (r: any) => String(r?.slug || String(r?.path ?? "").split("/").pop() || "");
+  const namesOf = (r: any) => Object.fromEntries((r?.memberIds ?? []).map((id: string, i: number) => [id, String(r?.memberNames?.[i] ?? "")]));
+  const kept = stored.filter((r) => slugOf(r) && !(r.memberIds ?? []).some((id: string) => consumed.has(id)));
+  const tonightSlugs = new Set(tonight.map(slugOf));
+  const bySlug = new Map<string, any>();
+  const names: Record<string, string> = {};
+  for (const r of [...kept, ...tonight]) {
+    const slug = slugOf(r);
+    if (!slug) continue;
+    Object.assign(names, Object.fromEntries(Object.entries(namesOf(r)).filter(([, n]) => n)));
+    const prev = bySlug.get(slug);
+    bySlug.set(slug, { ...prev, ...r, slug, memberIds: [...new Set([...(prev?.memberIds ?? []), ...(r.memberIds ?? []).map(String)])] });
+  }
+  const routes: any[] = [];
+  let gone = 0;
+  for (const r of bySlug.values()) {
+    const memberIds = live ? r.memberIds.filter((id: string) => live.has(id)) : r.memberIds;
+    if (!memberIds.length) gone++;
+    else routes.push({ ...r, memberIds, memberNames: memberIds.map((id: string) => names[id] ?? "") });
+  }
+  routes.sort((x, y) => y.memberIds.length - x.memberIds.length);
+  return { routes, carried: routes.filter((r) => !tonightSlugs.has(r.slug)).length, consumed: stored.length - kept.length, gone };
+}
 export const scriptHint = (texts: string[]) => texts.some((t) => /\b(GET|POST|PUT|PATCH|DELETE) \/|\bcurl\b|\bendpoint\b|https?:\/\/[^\s]*\/(v\d|api)\b|x-api-key|Bearer\b/i.test(String(t ?? "")));
 
 const KIND_OF_ROOT = (root: string) =>
@@ -1445,10 +1484,33 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     let handoff = runDry ? "dry run, not written" : "none";
     if (!runDry) {
       try {
-        const value = { runId, at: new Date().toISOString(), routes: skillRoutes.map((r) => ({ ...r, memberNames: (r.memberIds ?? []).map((id: string) => memberNames[id] ?? "") })) };
-        await ctx.swarm.kv_set({ namespace: NS, key: `memtax-create:skill-routes:${runId}`, value: value as any });
-        await ctx.swarm.kv_set({ namespace: NS, key: "memtax-create:skill-routes:latest", value: value as any });
-        handoff = `KV memtax-create:skill-routes:latest (${skillRoutes.length} routes)`;
+        const tonight = skillRoutes.map((r) => ({ ...r, memberNames: (r.memberIds ?? []).map((id: string) => memberNames[id] ?? "") }));
+        await ctx.swarm.kv_set({ namespace: NS, key: `memtax-create:skill-routes:${runId}`, value: { runId, at: new Date().toISOString(), routes: tonight } as any });
+        // Tonight's synthesize already read the stored set: drop what it acted on, carry the rest forward.
+        const stored: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key: "memtax-create:skill-routes:latest" }))?.value;
+        const prior: any[] = Array.isArray(stored?.routes) ? stored.routes : [];
+        let consumed = new Set<string>();
+        try {
+          for (const r of await qStrict(`SELECT json_extract(output, '$.taskOutput') v FROM workflow_run_steps WHERE runId = ? AND nodeId = 'synthesize'`, [runId])) for (const id of consumedMembers(r.v)) consumed.add(id);
+        } catch (e: any) {
+          consumed = new Set();
+          errors.push(`handoff: synthesize step unreadable, nothing marked consumed: ${String(e?.message ?? e).slice(0, 200)}`);
+        }
+        const ids = [...new Set([...prior, ...tonight].flatMap((r: any) => (r?.memberIds ?? []).map(String)))];
+        let live: Set<string> | null = null;
+        try {
+          live = new Set<string>();
+          for (let i = 0; i < ids.length; i += 500) {
+            const part = ids.slice(i, i + 500);
+            for (const r of await qStrict(`SELECT DISTINCT id FROM agent_memory WHERE id IN (${part.map(() => "?").join(",")}) AND (expiresAt IS NULL OR expiresAt > ?)`, [...part, new Date().toISOString()])) live.add(String(r.id));
+          }
+        } catch (e: any) {
+          live = null;
+          errors.push(`handoff: member check failed, kept every member: ${String(e?.message ?? e).slice(0, 200)}`);
+        }
+        const carry = carryRoutes(tonight, prior, consumed, live);
+        await ctx.swarm.kv_set({ namespace: NS, key: "memtax-create:skill-routes:latest", value: { runId, at: new Date().toISOString(), routes: carry.routes } as any });
+        handoff = `KV memtax-create:skill-routes:latest (${carry.routes.length} routes: ${tonight.length} tonight, ${carry.carried} carried, ${carry.consumed} consumed, ${carry.gone} with no live members)`;
       } catch (e: any) {
         errors.push(`handoff: ${String(e?.message ?? e).slice(0, 200)}`);
         handoff = "failed";
@@ -1799,6 +1861,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     t("handoff: covered how-to -> skill-refactor skill-update, no script", h2.lane === "skill-refactor" && h2.op === "skill-update" && h2.skill === "agentmail-sending" && h2.scriptLane === null, h2);
     const h3 = handoffRow("/howto/bluesky", routeCluster("/howto/bluesky", sk), ["POST /xrpc/com.atproto.repo.createRecord with Bearer token"], scr, ["d4", "d5"]);
     t("handoff: API how-to with no script -> script candidate", h3.scriptExisting === null && h3.script === true && h3.scriptLane === "scriptify", h3);
+    const cm = consumedMembers(JSON.stringify({ actions: [{ evidence: ["memory:m1", "kv:dreaming-v2/memtax-create:skill-routes:latest"] }, { evidence: ["memory:m9"] }] }));
+    t("carry: only an action citing the handoff KV consumes its members", cm.has("m1") && !cm.has("m9"), [...cm]);
+    const cr = carryRoutes([{ slug: "b", memberIds: ["m4"], memberNames: ["n4"], route: "skill-new" }], [{ slug: "a", memberIds: ["m1"] }, { slug: "b", memberIds: ["m2", "m3"], memberNames: ["n2", "n3"], route: "skill-update" }, { slug: "c", memberIds: ["m5"] }], cm, new Set(["m1", "m2", "m4"]));
+    t("carry: consumed dropped, merged by slug (union), dead members and empty routes dropped, largest first", cr.routes.length === 1 && cr.routes[0].slug === "b" && cr.routes[0].route === "skill-new" && cr.routes[0].memberIds.join() === "m2,m4" && cr.routes[0].memberNames.join() === "n2,n4" && cr.consumed === 1 && cr.gone === 1, cr);
     // Near-duplicate guard. Vectors with a known cosine: [1, 0] vs [c, sqrt(1 - c^2)].
     const at = (c: number) => [c, Math.sqrt(1 - c * c)];
     const o = { nearDupCos: 0.8, twinCos: 0.95 };

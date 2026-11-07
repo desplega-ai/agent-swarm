@@ -802,6 +802,8 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+    vcsRepo?: string;
     /**
      * Create in `draft` status (#1240) — visible to the owner but not
      * dispatch-eligible. Used while attachments are still uploading; the
@@ -4018,7 +4020,7 @@ class ApiClient {
    */
   async getSavingsJobs(
     target: SavingsTarget | { kind: "workflow" | "script" },
-    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
   ): Promise<SavingsJobsResponse> {
     const res = await fetch(
       `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
@@ -4595,10 +4597,11 @@ export const api = new ApiClient();
 
 function savingsParams(
   target: Record<string, string>,
-  opts: { days?: 7 | 30 | 90; tier?: SavingsTier },
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
 ): URLSearchParams {
   const params = new URLSearchParams(target);
   if (opts.days) params.set("days", String(opts.days));
   if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
   return params;
 }

@@ -45,7 +45,7 @@ export function buildCtx({
   /** Aborts in-flight `ctx.sh` commands when the run ends (quickjs passes its run signal). */
   signal?: AbortSignal;
 }): RuntimeCtx {
-  const swarm = Object.assign(createSwarmSdk(swarmConfig), { config: swarmConfig });
+  const swarm = Object.assign(createSwarmSdk(swarmConfig, { signal }), { config: swarmConfig });
   const { fs, sh } = createScriptFs(agentFs, signal);
   return {
     swarm,

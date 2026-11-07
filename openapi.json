@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.8.2",
+    "version": "2.8.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -35247,6 +35247,11 @@
                   "dir": {
                     "type": "string"
                   },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400."
+                  },
                   "parentTaskId": {
                     "type": "string"
                   },
@@ -35341,7 +35346,7 @@
             }
           },
           "400": {
-            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
             "content": {
               "application/json": {
                 "schema": {
@@ -52127,7 +52132,7 @@
     "/api/savings/jobs": {
       "get": {
         "summary": "Estimated automation savings per workflow or script",
-        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
         "tags": [
           "Savings"
         ],
@@ -52175,6 +52180,19 @@
             },
             "required": false,
             "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "false"
+            },
+            "required": false,
+            "name": "components",
             "in": "query"
           },
           {
@@ -52620,6 +52638,222 @@
                         "actualHours",
                         "hoursSaved"
                       ]
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "workflow",
+                              "script",
+                              "task"
+                            ]
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "scriptName": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "linkKind": {
+                            "type": "string",
+                            "enum": [
+                              "sub-workflow",
+                              "step-workflow",
+                              "step-script",
+                              "step-task",
+                              "descendant-task"
+                            ]
+                          },
+                          "depth": {
+                            "type": "integer"
+                          },
+                          "runs": {
+                            "type": "number",
+                            "description": "Runs (tasks for a task component) in this tree. Fractional below the first level."
+                          },
+                          "actualUsd": {
+                            "type": "number"
+                          },
+                          "agentOnlyUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "savingUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "hoursSaved": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "inOwnRow": {
+                            "type": "boolean",
+                            "description": "True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name",
+                          "linkKind",
+                          "depth",
+                          "runs",
+                          "actualUsd",
+                          "agentOnlyUsd",
+                          "savingUsd",
+                          "hoursSaved",
+                          "inOwnRow"
+                        ]
+                      }
+                    },
+                    "withComponents": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
                     }
                   },
                   "required": [
@@ -52640,7 +52874,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of workflowId, scriptName, scheduleId and kind, or an unknown days or tier value",
+            "description": "Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value",
             "content": {
               "application/json": {
                 "schema": {

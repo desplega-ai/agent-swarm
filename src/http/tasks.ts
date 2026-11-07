@@ -19,6 +19,7 @@ import {
   getPendingSteeringForTask,
   getSteeringMessageById,
   getSteeringMessagesForTask,
+  getSwarmRepos,
   getTaskAttachments,
   getTaskById,
   getTaskLineage,
@@ -98,6 +99,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
 import { readsRepoSecrets } from "./config";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
@@ -343,6 +345,14 @@ const createTask = route({
       dependsOn: z.array(z.string()).optional(),
       offeredTo: z.string().optional(),
       dir: z.string().optional(),
+      vcsRepo: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400.",
+        ),
       parentTaskId: z.string().optional(),
       key: AssetKeySchema.optional(),
       source: AgentTaskSourceSchema.optional(),
@@ -386,7 +396,7 @@ const createTask = route({
     201: { description: "Task created", schema: AgentTaskSchema },
     400: {
       description:
-        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
     },
     403: {
       description:
@@ -1114,6 +1124,25 @@ export async function handleTasks(
       jsonError(res, modelError, 400);
       return true;
     }
+    // Store the registered repo's URL, not its `owner/repo` path: the path can name
+    // repos on two hosts, and a display-named repo has no name hit. The worker and
+    // the profile check match a qualified URL only by equality, so they load this repo.
+    let vcsRepo: string | undefined;
+    if (parsed.body.vcsRepo) {
+      const requested = parsed.body.vcsRepo;
+      const [repo, ...others] = (await getSwarmRepos()).filter((r) =>
+        vcsRepoUrlMatches(r.url, requested),
+      );
+      if (!repo) {
+        jsonError(res, `Unknown repo "${requested}": register it in Repos first.`, 400);
+        return true;
+      }
+      if (others.length > 0) {
+        jsonError(res, `Repo "${requested}" matches several registered repos: pass its URL.`, 400);
+        return true;
+      }
+      vcsRepo = normalizeVcsRepo(repo.url);
+    }
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
@@ -1148,13 +1177,13 @@ export async function handleTasks(
       jsonError(res, "You don't have access to the tasks in this context.", 403);
       return true;
     }
-    // The child inherits the parent's repo in createTaskExtended, and the worker
-    // loads that repo's config, so the profile check judges the same pool.
+    // The task's repo (else the parent's, inherited in createTaskExtended) is the one
+    // the worker loads config from, so the profile check judges the same pool.
     const profileError = await taskProfileError({
       profile: parsed.body.profile,
       ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
       agentId: defaultAgentId,
-      vcsRepo: parentTask?.vcsRepo,
+      vcsRepo: vcsRepo ?? parentTask?.vcsRepo,
     });
     if (profileError) {
       jsonError(res, profileError, 400);
@@ -1201,6 +1230,7 @@ export async function handleTasks(
           dependsOn: parsed.body.dependsOn || undefined,
           offeredTo: parsed.body.offeredTo || undefined,
           dir: parsed.body.dir || undefined,
+          vcsRepo,
           parentTaskId: parsed.body.parentTaskId || undefined,
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",

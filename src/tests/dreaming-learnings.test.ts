@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, test } from "bun:test";
+import { loadSeedWorkflows } from "../be/seed/workflows-seeder";
 import dreamingLearnings from "../be/seed-scripts/catalog/dreaming-learnings";
 import dreamingMemtax from "../be/seed-scripts/catalog/dreaming-memtax";
 import dreamingMemtaxCreate, {
@@ -25,6 +26,7 @@ CREATE TABLE agents (id TEXT, name TEXT, role TEXT, isLead INTEGER, harness_prov
 CREATE TABLE swarm_repos (id TEXT, name TEXT, url TEXT, defaultBranch TEXT, clonePath TEXT, autoClone INTEGER);
 CREATE TABLE skills (name TEXT, description TEXT, isEnabled INTEGER);
 CREATE TABLE scripts (name TEXT, description TEXT, scope TEXT, isScratch INTEGER);
+CREATE TABLE workflow_run_steps (runId TEXT, nodeId TEXT, output TEXT);
 `;
 
 let db: Database;
@@ -129,6 +131,17 @@ describe("controls", () => {
       expect(out.ok).toBe(true);
     });
   }
+});
+
+describe("learnings-triage prompt", () => {
+  test("sends each batch's docs once and keeps its own return contract", () => {
+    const wf = loadSeedWorkflows().find((w) => w.name === "dreaming");
+    const node: any = wf?.definition.nodes.find((n: any) => n.id === "learnings-triage");
+    const template = String(node?.config?.body?.config?.template ?? "");
+    expect(template.split("{{item.docs}}").length - 1).toBe(1);
+    expect(template).toContain('"decisions":[');
+    expect(template).not.toContain("`pre` is a cheap name-based guess"); // memtax-classify wording
+  });
 });
 
 describe("learnings-plan", () => {
@@ -355,6 +368,30 @@ describe("learnings-report", () => {
     expect(out.promotedIds).toEqual(["l1"]);
     expect(out.cursor.to).toMatchObject({ id: "l4", at: "2026-11-04T03:30:00.000Z" });
     expect(out.markdown).toContain("1 promoted, 2 kept, 1 dropped");
+  });
+
+  test("cost is 'this run' only once every triage task has a session_costs row", async () => {
+    db.run("INSERT INTO agent_tasks (id, agentId, task) VALUES ('t1', 'lead-1', ?)", [
+      "dreaming-v2 run r1: learnings triage, batch b1 (new). DECIDE ONLY.",
+    ]);
+    const agg = triage([]);
+    agg.results.push({ itemKey: "b2", status: "failed", output: { taskId: "t2" } } as any);
+    const run = async () =>
+      (
+        (await dreamingLearnings(
+          { mode: "report", runId: "r1", leadAgentId: "lead-1", plan, triage: agg },
+          ctx() as any,
+        )) as any
+      ).cost;
+    // Two sessions for t1, none yet for t2: the sum is partial, not the run's cost.
+    db.run("INSERT INTO session_costs (taskId, totalCostUsd) VALUES ('t1', 0.1), ('t1', 0.05)");
+    const partial = await run();
+    expect(partial.basis).toBe("partial: 1 of 2 tasks");
+    expect(partial.usd).toBeCloseTo(0.15);
+    db.run("INSERT INTO session_costs (taskId, totalCostUsd) VALUES ('t2', 0.25)");
+    const full = await run();
+    expect(full.basis).toBe("this run");
+    expect(full.usd).toBeCloseTo(0.4);
   });
 
   test("a batch another agent ran is untrusted: no drops, no promotions, the cursor holds", async () => {
@@ -733,6 +770,73 @@ describe("memtax-create with the learnings triage", () => {
       counts: { read: 2, promoted: 0, kept: 0, dropped: 2 },
       promotedIds: [],
     },
+  });
+
+  test("skill routes synthesize did not act on carry to the next night; consumed and dead ones drop", async () => {
+    for (const n of [1, 2, 3, 4]) learning(n, "2026-10-27T00:00:00.000Z");
+    learning(6, "2026-10-27T00:00:00.000Z", { expiresAt: "2026-10-30T00:00:00.000Z" });
+    const route = (slug: string, ids: number[]) => ({
+      path: `/howto/${slug}`,
+      slug,
+      route: "skill-new",
+      memberIds: ids.map(uuid),
+      memberNames: ids.map((n) => `learning ${n}`),
+    });
+    kv.set("memtax-create:skill-routes:latest", {
+      runId: "r0",
+      at: "2026-11-05T04:00:00.000Z",
+      // acted: consumed tonight. capped: over the cap, never acted on. merged: re-routed tonight. dead: members gone.
+      routes: [
+        route("acted", [1]),
+        route("capped", [2]),
+        route("merged", [3]),
+        route("dead", [5, 6]),
+      ],
+    });
+    db.run(
+      "INSERT INTO workflow_run_steps (runId, nodeId, output) VALUES ('r1', 'synthesize', ?)",
+      [
+        JSON.stringify({
+          taskOutput: JSON.stringify({
+            actions: [
+              {
+                id: "A1",
+                evidence: [`memory:${uuid(1)}`, "kv:dreaming-v2/memtax-create:skill-routes:latest"],
+              },
+              { id: "A2", evidence: [`memory:${uuid(2)}`] }, // not a handoff action
+            ],
+            rejected: [{ from: "kv:dreaming-v2/memtax-create:skill-routes:latest", reason: "cap" }],
+          }),
+        }),
+      ],
+    );
+    const out: any = await dreamingMemtaxCreate(
+      {
+        mode: "apply",
+        runId: "r1",
+        dryRun: false,
+        leadAgentId: lead,
+        plan: {
+          entities: [],
+          clusters: [],
+          memberNames: {},
+          skillRoutes: [{ ...route("merged", [4]), memberNames: undefined }],
+        },
+      },
+      ctx() as any,
+    );
+    const latest: any = kv.get("memtax-create:skill-routes:latest");
+    expect(latest.runId).toBe("r1");
+    expect(latest.routes.map((r: any) => [r.slug, r.memberIds, r.memberNames])).toEqual([
+      ["merged", [uuid(3), uuid(4)], ["learning 3", ""]],
+      ["capped", [uuid(2)], ["learning 2"]],
+    ]);
+    expect((kv.get("memtax-create:skill-routes:r1") as any).routes.map((r: any) => r.slug)).toEqual(
+      ["merged"],
+    );
+    expect(out.handoff).toContain(
+      "2 routes: 1 tonight, 1 carried, 1 consumed, 1 with no live members",
+    );
   });
 
   test("live with v3Writes on: drops are deleted with a pre-image and the cursor is committed", async () => {

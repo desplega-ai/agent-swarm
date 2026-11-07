@@ -47,8 +47,11 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * v11 = a pass 2 hit inside a longer gitleaks secret redacts that whole
  * secret, so a generic `sk-` match in a Heroku key's tail no longer leaves
  * the key's prefix behind.
+ * v12 = the gitleaks global allowlist `^true|false|null$` is anchored as a
+ * whole, so a secret containing "false", starting with "true" or ending with
+ * "null" is no longer allowed.
  */
-export const SCRUBBER_RULES_VERSION = 11;
+export const SCRUBBER_RULES_VERSION = 12;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
@@ -433,14 +433,20 @@ describe("savings scripts", () => {
   });
 
   describe("routes", () => {
+    afterEach(() => setSystemTime());
+
     const get = async (path: string) => {
       const res = await fetch(`http://127.0.0.1:${port}${path}`);
       return { status: res.status, body: (await res.json().catch(() => null)) as never };
     };
 
     test("scriptName, kind=script and the daily series read the script rollup", async () => {
-      // The ticks above used a fixed clock; cover the real current window.
-      await runSavingsRollupTick(inProcessSql);
+      // The window's partial first day is 2026-10-30 from 17:37. Its bucket
+      // scales to round(5 x 6.38 / 24) = 1 run; before 16:48 it rounds to 2,
+      // which hid that today's bucket was 2 runs short.
+      setSystemTime(new Date("2026-11-06T17:37:00.000Z"));
+      // Today's runs go in before the tick: a second tick within
+      // RECOMPUTE_AFTER_MS of the first skips today's bucket.
       await bulkScriptRuns(agentId, "helper", new Date().toISOString().slice(0, 10), 2);
       await runSavingsRollupTick(inProcessSql);
       const one = (await get("/api/savings/jobs?scriptName=helper&days=7")).body as {

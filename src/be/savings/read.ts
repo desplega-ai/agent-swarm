@@ -103,6 +103,8 @@ const zeroFacts = (): WorkflowFacts => ({
   agentUsd: 0,
   agentMs: 0,
   followupUsd: 0,
+  childTaskUsd: 0,
+  childTaskMs: 0,
   recordedLlmUsd: 0,
   estimatedLlmUsd: 0,
   computeSecs: 0,
@@ -154,8 +156,26 @@ const sliceCache = new Map<string, { at: number; ttl: number; result: Promise<un
 const SLICE_TTL_MS = 2 * MINUTE_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const FLEET_SLICE_TTL_MS = HOUR_MS + 2 * MINUTE_MS;
-/** First-day scans in flight per read: below the default db-query concurrency cap of 3. */
+/**
+ * First-day scans in flight, across every read (the workflow and script reads
+ * of a fleet read run together): below the default db-query concurrency cap of 3.
+ */
 const FIRST_DAY_SCAN_CONCURRENCY = 2;
+let scansInFlight = 0;
+const scanWaiters: (() => void)[] = [];
+
+async function withScanSlot<T>(scan: () => Promise<T>): Promise<T> {
+  if (scansInFlight < FIRST_DAY_SCAN_CONCURRENCY) scansInFlight++;
+  else await new Promise<void>((resolve) => scanWaiters.push(resolve));
+  try {
+    return await scan();
+  } finally {
+    // Hand the slot to the next waiter, or free it.
+    const next = scanWaiters.shift();
+    if (next) next();
+    else scansInFlight--;
+  }
+}
 
 /** One scan per key at a time, kept for `ttl`; a failed scan reads as `failed` and is not kept. */
 function cachedScan<T>(
@@ -170,7 +190,7 @@ function cachedScan<T>(
   const now = Date.now();
   // A slice start of an older minute (or hour) is never read again.
   for (const [k, v] of sliceCache) if (now - v.at > v.ttl) sliceCache.delete(k);
-  const result: Promise<T> = scan().catch((err): T => {
+  const result: Promise<T> = withScanSlot(scan).catch((err): T => {
     console.warn(
       `[savings-read] first-day scan of ${label} failed: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`,
     );
@@ -233,38 +253,96 @@ function parseDefinition(definition: unknown): unknown {
   }
 }
 
+/** Binary order, as SQLite compares text. */
+const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 const isRetired = (name: string) => /-retired-\d{4}-\d{2}-\d{2}$/.test(name);
 
-/** At most this many UTC days of buckets per synchronous query. */
-const CHUNK_DAYS = 3;
+/** At most about this many bucket rows per synchronous query (a single larger day is read whole). */
+const CHUNK_ROWS = 5_000;
 /** Jobs priced between two event-loop yields. */
 const PRICE_BATCH = 100;
 /** A cached fleet read is reused at most this long, even when nothing bumped. */
 const FLEET_CACHE_TTL_MS = 60_000;
 
-const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Yield to the event loop. Turns chain across every read in flight: the
+ * workflow and script reads of a fleet read run together, and two of their
+ * slices in one loop turn would stall it for both.
+ */
+let lastTurn: Promise<void> = Promise.resolve();
+const yieldLoop = (): Promise<void> => {
+  lastTurn = lastTurn.then(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  return lastTurn;
+};
 
 /**
- * Run a bucket query over the window in CHUNK_DAYS slices and fold each slice
- * with `onRows`, yielding to the event loop between them: a fleet window is
- * ~100k rows, and one synchronous read and fold of them stalls every other
- * request. `params` gets each slice's bounds; slices arrive oldest first.
+ * Read the buckets matching `where` over the window and fold them with
+ * `onRows`, in slices of whole days of at most about CHUNK_ROWS rows, oldest
+ * first, yielding to the event loop between them: a fleet window is ~100k
+ * rows, and one synchronous read and fold of them stalls every other request.
+ *
+ * Slices follow the row counts, not the calendar. Every query waits its turn
+ * on the shared connection, which takes up to a second on a busy API, so a
+ * read pays one wait per slice: fixed 3-day slices made a 90-day read 31
+ * waits even when most of its days are empty. The slices cover the window
+ * end to end, so a day that gains rows after the count is still read.
+ *
+ * `oneJob` names the index of a one-job filter (`jobKey` or `jobId`): its few
+ * rows are read in one query, through that index. Without ANALYZE statistics
+ * (production has none) the planner would pick the kind-and-day index and
+ * read every job's buckets of the window.
  */
-async function forEachDayChunk<T>(
-  sql: string,
-  params: (from: string, to: string) => DbParam[],
+async function forEachBucketChunk<T>(
+  columns: string,
+  where: string,
+  params: DbParam[],
   firstDay: string,
   lastDay: string,
   onRows: (rows: T[]) => void | Promise<void>,
+  oneJob?: "idx_automation_savings_daily_key" | "idx_automation_savings_daily_job",
 ): Promise<void> {
-  for (let from = firstDay; from <= lastDay; ) {
-    const toMs = Math.min(
-      Date.parse(dayStartIso(from)) + (CHUNK_DAYS - 1) * DAY_MS,
-      Date.parse(dayStartIso(lastDay)),
+  const client = getDbClient();
+  if (oneJob) {
+    await onRows(
+      await client.query<T>(
+        `SELECT ${columns} FROM automation_savings_daily INDEXED BY ${oneJob} WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
+        [...params, firstDay, lastDay],
+      ),
     );
-    if (from !== firstDay) await yieldLoop();
-    await onRows(await getDbClient().query<T>(sql, params(from, utcDay(toMs))));
-    from = utcDay(toMs + DAY_MS);
+    return;
+  }
+  const counts = await client.query<{ day: string; n: number }>(
+    `SELECT day, count(*) n FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? GROUP BY day ORDER BY day`,
+    [...params, firstDay, lastDay],
+  );
+  // Each slice ends on its last counted day; the next starts the day after.
+  const ends: string[] = [];
+  let rows = 0;
+  for (const c of counts) {
+    const n = Number(c.n) || 0;
+    if (ends.length > 0 && rows + n <= CHUNK_ROWS) {
+      ends[ends.length - 1] = c.day;
+      rows += n;
+    } else {
+      ends.push(c.day);
+      rows = n;
+    }
+  }
+  // The first slice starts on the first day and the last one ends on the last day.
+  ends[Math.max(0, ends.length - 1)] = lastDay;
+  let from = firstDay;
+  for (const to of ends) {
+    // Also before the first slice: database calls settle as microtasks, so
+    // without it a parallel read's first slice would run in this same turn.
+    await yieldLoop();
+    await onRows(
+      await client.query<T>(
+        `SELECT ${columns} FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
+        [...params, from, to],
+      ),
+    );
+    from = utcDay(Date.parse(dayStartIso(to)) + DAY_MS);
   }
 }
 
@@ -460,15 +538,14 @@ async function priceWorkflowBuckets(scope: {
       job.days.push(b);
     }
   };
-  await forEachDayChunk(
-    `SELECT day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}
-     FROM automation_savings_daily
-     WHERE jobKind='workflow' AND subKind='' AND modelVersion=? AND day>=? AND day<=? ${keyFilter}
-     ORDER BY day`,
-    (from, to) => [MODEL_VERSION, from, to, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
+  await forEachBucketChunk(
+    `day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}`,
+    `jobKind='workflow' AND subKind='' AND modelVersion=? ${keyFilter}`,
+    [MODEL_VERSION, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
     scope.firstDay,
     scope.lastDay,
     fold,
+    scope.jobKey !== undefined ? "idx_automation_savings_daily_key" : undefined,
   );
 
   // Versions of one job share the schedule cap: the live version first, then
@@ -511,7 +588,8 @@ async function priceWorkflowBuckets(scope: {
     fleetParts.push(priceWorkflow(job.facts, { ...pricing, band: "fleet" }, allocation));
     daily.add(splitByDay(job.facts, job.days, pricing, priced));
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  // Ties break on the id, so the order does not depend on which index served the read.
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.workflowId, b.workflowId));
 
   return {
     computedAt,
@@ -723,16 +801,19 @@ export async function readScriptSavings(opts: {
   const client = getDbClient();
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
   const calendarDays = daysBetween(firstDay, lastDay);
-  const marker = await client.get<{ n: number; at: string | null }>(
-    "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
-    [MODEL_VERSION, firstDay, lastDay],
-  );
-  const complete = Number(marker?.n) >= calendarDays.length;
-  const scheduled = (
-    await client.query<{ scriptName: string }>(
+  // Issued together: each query waits its turn on the shared connection, and
+  // two queued at once wait about once.
+  const [marker, scheduledRows] = await Promise.all([
+    client.get<{ n: number; at: string | null }>(
+      "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
+      [MODEL_VERSION, firstDay, lastDay],
+    ),
+    client.query<{ scriptName: string }>(
       "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL ORDER BY scriptName",
-    )
-  ).map((r) => r.scriptName);
+    ),
+  ]);
+  const complete = Number(marker?.n) >= calendarDays.length;
+  const scheduled = scheduledRows.map((r) => r.scriptName);
   const scope = {
     days: opts.days,
     tier: opts.tier,
@@ -782,12 +863,10 @@ async function priceScriptBuckets(scope: {
   const byName = scope.scriptName !== undefined;
   let computedAt = scope.markerAt;
   const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
-  await forEachDayChunk<ScriptBucketRow>(
-    `SELECT day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs
-     FROM automation_savings_daily
-     WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=? ${byName ? "AND jobId=?" : ""}
-     ORDER BY day`,
-    (from, to) => [MODEL_VERSION, from, to, ...(byName ? [scope.scriptName as string] : [])],
+  await forEachBucketChunk<ScriptBucketRow>(
+    "day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs",
+    `jobKind='script' AND modelVersion=? ${byName ? "AND jobId=?" : ""}`,
+    [MODEL_VERSION, ...(byName ? [scope.scriptName as string] : [])],
     scope.firstDay,
     scope.lastDay,
     (buckets) => {
@@ -804,6 +883,7 @@ async function priceScriptBuckets(scope: {
         job.days.set(b.day, day);
       }
     },
+    byName ? "idx_automation_savings_daily_job" : undefined,
   );
   const boundaryEstimated = await clipScriptFirstDay(jobs, scope.window, scope.firstDay, scope);
 
@@ -831,7 +911,7 @@ async function priceScriptBuckets(scope: {
       ),
     );
   }
-  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50);
+  rows.sort((a, b) => b.savingUsd.p50 - a.savingUsd.p50 || byId(a.scriptName, b.scriptName));
 
   return {
     computedAt,
@@ -841,6 +921,210 @@ async function priceScriptBuckets(scope: {
     fleetTotal: fleetParts.length > 0 ? sumTotals(fleetParts) : null,
     points: rows.length > 0 ? daily.points : [],
   };
+}
+
+/** Deepest run tree the "with components" view follows. */
+export const MAX_COMPONENT_DEPTH = 10;
+
+export type SavingsComponent = {
+  kind: "workflow" | "script" | "task";
+  /** Set for workflow components. */
+  workflowId?: string;
+  /** Set for script components. */
+  scriptName?: string;
+  name: string;
+  /** How the nearest occurrence below the root is linked. */
+  linkKind: SavingsLinkKind;
+  /** 1 for a direct child of the root. */
+  depth: number;
+  /** Runs (tasks for a task component) in this tree. Fractional below the first level. */
+  runs: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  hoursSaved: SavingsBand;
+  /**
+   * Tasks the root caused without owning them: their spend is already in the
+   * root's own row, on both sides, so they add nothing here.
+   */
+  inOwnRow: boolean;
+};
+
+type SavingsLinkKind =
+  | "sub-workflow"
+  | "step-workflow"
+  | "step-script"
+  | "step-task"
+  | "descendant-task";
+
+export type WorkflowComponentsRead = {
+  components: SavingsComponent[];
+  /** Own runs plus every component's share; null when the root has no row. */
+  withComponents: SavingsTotals | null;
+};
+
+const scaleBand = (b: SavingsBand, f: number): SavingsBand => ({
+  p10: b.p10 * f,
+  p50: b.p50 * f,
+  p90: b.p90 * f,
+});
+
+/** A share `f` of a priced row: its per-run figures times the linked runs. */
+function scaleRow(row: PricedWorkflow, f: number): PricedWorkflow {
+  return {
+    ...row,
+    runs: row.runs * f,
+    substitutedRuns: row.substitutedRuns * f,
+    enabledOnlyRuns: row.enabledOnlyRuns * f,
+    effectRuns: row.effectRuns * f,
+    measuredUsd: row.measuredUsd * f,
+    estimatedLlmUsd: row.estimatedLlmUsd * f,
+    actualUsd: row.actualUsd * f,
+    agentOnlyUsd: scaleBand(row.agentOnlyUsd, f),
+    savingUsd: scaleBand(row.savingUsd, f),
+    actualHours: row.actualHours * f,
+    agentOnlyHours: scaleBand(row.agentOnlyHours, f),
+    hoursSaved: scaleBand(row.hoursSaved, f),
+  };
+}
+
+const zeroBand = (): SavingsBand => ({ p10: 0, p50: 0, p90: 0 });
+const addBand = (a: SavingsBand, b: SavingsBand): SavingsBand => ({
+  p10: a.p10 + b.p10,
+  p50: a.p50 + b.p50,
+  p90: a.p90 + b.p90,
+});
+
+/**
+ * The workflow's run tree for the window: every workflow run, nested script
+ * run and unowned task its runs caused, recursively (depth at most
+ * MAX_COMPONENT_DEPTH, never re-entering a workflow already on the path).
+ * Each component is priced as on its own row: that row's figures per run
+ * times the runs linked into this tree. A child workflow's own links count in
+ * the share of its runs this tree started. The sum is a read-time view: no
+ * list or fleet total adds it, since every component is on its own row.
+ */
+export async function readWorkflowComponents(opts: {
+  days: number;
+  tier: SavingsTier;
+  now: number;
+  workflowId: string;
+  /** The root's own row, as the single-workflow read priced it. */
+  own: WorkflowSavingsRow;
+  /** The curve the own row was priced with, so every component is priced alike. */
+  curve?: CurveSet;
+}): Promise<WorkflowComponentsRead> {
+  const { firstDay, lastDay, start } = savingsWindow(opts.days, opts.now);
+  // The window starts mid-way through its first UTC day; links are stored per
+  // day, so that day counts by the share of it inside the window.
+  // shortcut: a day-share estimate, not a live scan; scan the first day's links
+  // like the rows do if component figures near the boundary need to be exact.
+  const firstDayShare =
+    (Date.parse(dayStartIso(utcDay(Date.parse(start) + DAY_MS))) - Date.parse(start)) / DAY_MS;
+  const [workflows, scripts, links] = await Promise.all([
+    readWorkflowSavings({ days: opts.days, tier: opts.tier, now: opts.now, curve: opts.curve }),
+    readScriptSavings({ days: opts.days, tier: opts.tier, now: opts.now, curve: opts.curve }),
+    getDbClient().query<{
+      parentJobId: string;
+      childKind: "workflow" | "script" | "task";
+      childJobId: string;
+      linkKind: SavingsLinkKind;
+      n: number;
+      usd: number;
+    }>(
+      `SELECT parentJobId, childKind, childJobId, linkKind,
+         sum(CASE WHEN day=? THEN n*? ELSE n END) n,
+         sum(CASE WHEN day=? THEN actualUsd*? ELSE actualUsd END) usd
+       FROM automation_savings_links WHERE modelVersion=? AND day>=? AND day<=?
+       GROUP BY 1,2,3,4 ORDER BY 1,2,3,4`,
+      [firstDay, firstDayShare, firstDay, firstDayShare, MODEL_VERSION, firstDay, lastDay],
+    ),
+  ]);
+  const workflowRows = new Map(workflows.rows.map((r) => [r.workflowId, r]));
+  workflowRows.set(opts.workflowId, opts.own);
+  const scriptRows = new Map(scripts.rows.map((r) => [r.scriptName, r]));
+  const children = new Map<string, typeof links>();
+  for (const l of links) children.set(l.parentJobId, [...(children.get(l.parentJobId) ?? []), l]);
+
+  const components = new Map<string, SavingsComponent>();
+  const parts: PricedWorkflow[] = [];
+  const addComponent = (
+    c: Omit<SavingsComponent, "actualUsd" | "agentOnlyUsd" | "savingUsd" | "hoursSaved">,
+    priced: PricedWorkflow | null,
+    taskUsd = 0,
+  ) => {
+    const key = `${c.kind}\u0000${c.workflowId ?? c.scriptName ?? c.linkKind}`;
+    const prev = components.get(key);
+    components.set(key, {
+      ...c,
+      linkKind: prev && prev.depth <= c.depth ? prev.linkKind : c.linkKind,
+      depth: Math.min(prev?.depth ?? c.depth, c.depth),
+      runs: (prev?.runs ?? 0) + c.runs,
+      actualUsd: (prev?.actualUsd ?? 0) + (priced?.actualUsd ?? taskUsd),
+      agentOnlyUsd: addBand(prev?.agentOnlyUsd ?? zeroBand(), priced?.agentOnlyUsd ?? zeroBand()),
+      savingUsd: addBand(prev?.savingUsd ?? zeroBand(), priced?.savingUsd ?? zeroBand()),
+      hoursSaved: addBand(prev?.hoursSaved ?? zeroBand(), priced?.hoursSaved ?? zeroBand()),
+    });
+    if (priced) parts.push(priced);
+  };
+
+  const walk = (parent: string, share: number, depth: number, path: Set<string>) => {
+    for (const l of children.get(parent) ?? []) {
+      const linked = Number(l.n) * share;
+      if (l.childKind === "task") {
+        // Only the root's: a child workflow's unowned tasks are in its row already.
+        if (depth === 1 && linked > 0) {
+          addComponent(
+            {
+              kind: "task",
+              name:
+                l.linkKind === "step-task"
+                  ? "Tasks its script steps created"
+                  : "Tasks below its agent tasks",
+              linkKind: l.linkKind,
+              depth,
+              runs: linked,
+              inOwnRow: true,
+            },
+            null,
+            Number(l.usd) * share,
+          );
+        }
+        continue;
+      }
+      // A cycle back to a workflow on the path is that workflow's own row: skip it.
+      if (linked <= 0 || (l.childKind === "workflow" && path.has(l.childJobId))) continue;
+      const row =
+        l.childKind === "workflow" ? workflowRows.get(l.childJobId) : scriptRows.get(l.childJobId);
+      const f = row && row.runs > 0 ? linked / row.runs : 0;
+      addComponent(
+        {
+          kind: l.childKind,
+          ...(l.childKind === "workflow"
+            ? { workflowId: l.childJobId }
+            : { scriptName: l.childJobId }),
+          name: row?.name ?? l.childJobId,
+          linkKind: l.linkKind,
+          depth,
+          runs: linked,
+          inOwnRow: false,
+        },
+        row ? scaleRow(row, f) : null,
+      );
+      if (l.childKind === "workflow" && f > 0 && depth < MAX_COMPONENT_DEPTH) {
+        walk(l.childJobId, Math.min(1, f), depth + 1, new Set([...path, l.childJobId]));
+      }
+    }
+  };
+  walk(opts.workflowId, 1, 1, new Set([opts.workflowId]));
+
+  const list = [...components.values()].sort(
+    (a, b) =>
+      Number(a.inOwnRow) - Number(b.inOwnRow) ||
+      a.depth - b.depth ||
+      b.savingUsd.p50 - a.savingUsd.p50,
+  );
+  return { components: list, withComponents: sumTotals([opts.own, ...parts]) };
 }
 
 export type FleetKindTotals = {
@@ -902,8 +1186,11 @@ export async function readFleetSavings(opts: {
   /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
   curve?: CurveSet;
 }): Promise<FleetSavingsRead> {
-  const wf = await readWorkflowSavings({ ...opts, band: "fleet" });
-  const sc = await readScriptSavings({ ...opts, band: "fleet" });
+  // Independent reads: run together, so their database waits overlap.
+  const [wf, sc] = await Promise.all([
+    readWorkflowSavings({ ...opts, band: "fleet" }),
+    readScriptSavings({ ...opts, band: "fleet" }),
+  ]);
   const { firstDay, lastDay } = savingsWindow(opts.days, opts.now);
   const all: PricedWorkflow[] = [...wf.rows, ...sc.rows];
   const total =
