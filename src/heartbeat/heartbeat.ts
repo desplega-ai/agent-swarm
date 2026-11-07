@@ -138,9 +138,14 @@ function defaultIntervalMs(): number {
   return parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS);
 }
 
-/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
+/**
+ * Stall threshold: tasks with fresh worker heartbeat but no task update for
+ * this many minutes. A positive integer, or 30: `Number(value) || 30` kept a
+ * negative threshold, which flagged every recently updated task (#2835).
+ */
 function stallThresholdMinutes(): number {
-  return Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+  const value = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN);
+  return Number.isInteger(value) && value > 0 ? value : 30;
 }
 
 /** Stall threshold: tasks with no active session (worker clearly dead) */
