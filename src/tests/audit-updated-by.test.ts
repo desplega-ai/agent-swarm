@@ -3,8 +3,10 @@
  *
  * Verifies:
  * - `updated_by` is stamped when a source task with a human requester is present.
- * - A pure-automation update (no source task / no human requester) does NOT clobber
- *   an existing `updated_by` value or cause a crash.
+ * - A tool or route update with no trusted human (no requester, or a foreign
+ *   source task) records the agent and clears `updated_by`: the pair always
+ *   describes the latest user-intent write.
+ * - A direct system update that passes no audit fields leaves both untouched.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -159,7 +161,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("does not crash or clear updated_by when source task has no human requester", async () => {
+  test("an update with no human requester records the agent and clears the person", async () => {
     const server = new McpServer({ name: "audit-test-2", version: "1.0.0" });
     registerUpdateScheduleTool(server);
 
@@ -186,7 +188,8 @@ describe("update-schedule MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     const after = await getScheduledTaskById(schedule.id);
-    expect(after?.updatedBy).toBe(humanUserId); // must not be cleared
+    expect(after?.updatedBy).toBeUndefined();
+    expect(after?.updatedByAgentId).toBe(agentId);
   });
 });
 
@@ -247,7 +250,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("does not clobber updated_by when source task has no human requester", async () => {
+  test("an update with no human requester records the agent and clears the person", async () => {
     const server = new McpServer({ name: "audit-wf-test-2", version: "1.0.0" });
     registerUpdateWorkflowTool(server);
 
@@ -269,7 +272,8 @@ describe("update-workflow MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     const after = await getWorkflow(wf.id);
-    expect(after?.updatedBy).toBe(humanUserId);
+    expect(after?.updatedBy).toBeUndefined();
+    expect(after?.updatedByAgentId).toBe(agentId);
   });
 });
 
@@ -299,7 +303,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("does not clobber updated_by on automation patch", async () => {
+  test("an automation patch records the agent and clears the person", async () => {
     const server = new McpServer({ name: "audit-patch-test-2", version: "1.0.0" });
     registerPatchWorkflowTool(server);
 
@@ -324,7 +328,8 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     const after = await getWorkflow(wf.id);
-    expect(after?.updatedBy).toBe(humanUserId);
+    expect(after?.updatedBy).toBeUndefined();
+    expect(after?.updatedByAgentId).toBe(agentId);
   });
 });
 
@@ -578,7 +583,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("does not clobber updated_by on automation patch", async () => {
+  test("an automation patch records the agent and clears the person", async () => {
     const server = new McpServer({ name: "audit-patchnode-test-2", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
@@ -600,7 +605,8 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     const after = await getWorkflow(wf.id);
-    expect(after?.updatedBy).toBe(humanUserId);
+    expect(after?.updatedBy).toBeUndefined();
+    expect(after?.updatedByAgentId).toBe(agentId);
   });
 
   test("does not trust a foreign source task", async () => {
@@ -632,8 +638,9 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    // updated_by must be unchanged — the foreign task's requester is not trusted.
+    // The foreign task's requester is not trusted: this write has no known person.
     const after = await getWorkflow(wf.id);
-    expect(after?.updatedBy).toBe(humanUserId);
+    expect(after?.updatedBy).toBeUndefined();
+    expect(after?.updatedByAgentId).toBe(agentId);
   });
 });

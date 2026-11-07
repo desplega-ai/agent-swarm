@@ -373,7 +373,15 @@ export function createWorkflowsSeeder(
       // them still resolve.
       const input =
         workflow.input || existing.input ? { ...workflow.input, ...existing.input } : undefined;
-      await updateWorkflow(existing.id, { ...executable, input });
+      // Seed writes carry no agent and no person on purpose: the audit columns
+      // stay NULL (an update resets them) so a seeded row is never attributed
+      // to whoever booted the API.
+      await updateWorkflow(existing.id, {
+        ...executable,
+        input,
+        updatedBy: null,
+        updatedByAgentId: null,
+      });
     },
   };
 }

@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getSkillById, listSkills, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -46,6 +47,12 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
 
         let updated = 0;
         const errors: string[] = [];
+        // A content change is attributed to the caller; a lastFetchedAt-only
+        // touch is a fetch, not an edit, and leaves the audit pair alone.
+        const updatedBy = await resolveTaskAuditUserId(
+          requestInfo.auditSourceTaskId,
+          requestInfo.agentId,
+        );
 
         for (const skill of skills) {
           if (skill.isComplex) continue; // Skip complex skills (handled by npx)
@@ -80,6 +87,8 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
                 userInvocable: parsed.userInvocable,
                 sourceHash: newHash,
                 lastFetchedAt: now,
+                updatedByAgentId: requestInfo.agentId ?? null,
+                updatedBy,
               });
               updated++;
             } else {

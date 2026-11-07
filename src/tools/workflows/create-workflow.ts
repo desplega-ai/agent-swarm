@@ -141,9 +141,14 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         }
 
         const createdBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
-        const assetKey = key ? await authorizeAssetKeyWrite(key, createdBy) : undefined;
+        const assetKey = key
+          ? await authorizeAssetKeyWrite(
+              key,
+              await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+            )
+          : undefined;
 
         const workflow = await createWorkflow(
           {

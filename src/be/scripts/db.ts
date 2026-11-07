@@ -15,9 +15,11 @@ import { computeContentHash, getDbClient } from "../db";
 import { registerStoredSecret, scriptApiSecretName } from "../secret-registry";
 import { embedScript } from "./embeddings";
 
-type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
+type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked" | "createdBy" | "updatedBy"> & {
   isScratch: number;
   typeChecked: number;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 type ScriptVersionRow = ScriptVersionRecord;
@@ -38,9 +40,11 @@ type ScriptWriteArgs = ScriptIdentity & {
   typeChecked?: boolean;
   fsMode?: ScriptFsMode;
   executor?: ScriptExecutorName | null;
+  /** The writing agent: `createdByAgentId` on insert, `updatedByAgentId` on every update. */
   agentId?: string | null;
   changeReason?: string | null;
   embeddingMode?: "sync" | "skip";
+  /** The person behind the write: `created_by` on insert, `updated_by` on every update. */
   createdBy?: string | null;
 };
 
@@ -66,6 +70,9 @@ function rowToScript(row: ScriptRow): ScriptRecord {
     typeChecked: row.typeChecked === 1,
     executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
+    updatedByAgentId: row.updatedByAgentId ?? null,
+    createdBy: row.created_by ?? null,
+    updatedBy: row.updated_by ?? null,
   };
 }
 
@@ -125,9 +132,9 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
       `INSERT INTO scripts (
           id, "key", name, scope, scopeId, source, description, intent, signatureJson,
           argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, executor, createdByAgentId, createdAt, updatedAt,
-          created_by, updated_by
+          created_by, updated_by, updatedByAgentId
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *`,
       [
         id,
@@ -150,6 +157,7 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
         now,
         args.createdBy ?? null,
         args.createdBy ?? null,
+        args.agentId ?? null,
       ],
     );
 
@@ -221,7 +229,8 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       const row = await getDbClient().get<ScriptRow>(
         `UPDATE scripts
         SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?
+          isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?,
+          updatedByAgentId = ?
         WHERE id = ?
         RETURNING *`,
         [
@@ -235,6 +244,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
           executor ?? null,
           new Date().toISOString(),
           args.createdBy ?? null,
+          args.agentId ?? null,
           existing.id,
         ],
       );
@@ -271,7 +281,8 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
     const row = await tx.get<ScriptRow>(
       `UPDATE scripts
         SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?
+          contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?,
+          updatedByAgentId = ?
         WHERE id = ?
         RETURNING *`,
       [
@@ -288,6 +299,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
         executor ?? null,
         now,
         args.createdBy ?? null,
+        args.agentId ?? null,
         existing.id,
       ],
     );

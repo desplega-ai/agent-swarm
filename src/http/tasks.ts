@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
@@ -974,7 +974,7 @@ export async function resolveTaskRequester(
   trustedUserId?: string | null,
 ): Promise<string | undefined> {
   const trusted =
-    trustedUserId === undefined ? await resolveHttpAuditUserId(req, myAgentId) : trustedUserId;
+    trustedUserId === undefined ? await resolveHttpRequesterUserId(req, myAgentId) : trustedUserId;
   if (trusted) return trusted;
   if (process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "false" || !bodyUserId) return undefined;
   // A worker on the shared key is not the operator: its X-Agent-ID names it, so the body
@@ -1094,7 +1094,7 @@ export async function handleTasks(
     if (!parsed) return true;
 
     // Trusted identity first, then the body hint; see resolveTaskRequester.
-    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
     const requestedByUserId = await resolveTaskRequester(
       req,
       myAgentId,
@@ -1466,7 +1466,7 @@ export async function handleTasks(
       return true;
     }
 
-    const trustedUserId = await await resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await await resolveHttpRequesterUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     if (
       process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&

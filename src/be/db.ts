@@ -328,6 +328,7 @@ export {
   assertAssetKeyMovesAllowed,
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
+export { setSkillUpdatedBy } from "./db/skill-audit";
 export {
   getRunWorkflow,
   PINNED_WORKFLOW_KEYS,
@@ -1783,6 +1784,8 @@ export async function moveAssetKey(input: {
   id: string;
   key: string;
   changedBy?: string;
+  /** Agent making the move; recorded as `updatedByAgentId` on workflows, schedules and scripts. */
+  changedByAgentId?: string;
   /** Task moves only: descendant task ids the caller already authorized to move with the task. */
   descendantTaskIds?: readonly string[];
 }): Promise<false | { movedTaskIds?: string[] }> {
@@ -1815,14 +1818,14 @@ export async function moveAssetKey(input: {
       }
       case "workflow":
         await tx.run(
-          'UPDATE workflows SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
+          'UPDATE workflows SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
+          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
         );
         break;
       case "schedule":
         await tx.run(
-          'UPDATE scheduled_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
+          'UPDATE scheduled_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
+          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
         );
         break;
       case "page":
@@ -1841,12 +1844,10 @@ export async function moveAssetKey(input: {
         ]);
         break;
       case "script":
-        await tx.run('UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
-          key,
-          now,
-          input.changedBy ?? null,
-          input.id,
-        ]);
+        await tx.run(
+          'UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
+          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
+        );
         break;
       case "file":
         await tx.run(
@@ -6037,6 +6038,7 @@ type ScheduledTaskRow = {
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdByAgentId: string | null;
+  updatedByAgentId: string | null;
   parentTaskId: string | null;
   requestedDelayMs: number | null;
   requestedRunAt: string | null;
@@ -6090,6 +6092,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     lastRunAt: normalizeDate(row.lastRunAt) ?? undefined,
     nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    updatedByAgentId: row.updatedByAgentId ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
     requestedDelayMs: row.requestedDelayMs ?? undefined,
     requestedRunAt: normalizeDate(row.requestedRunAt) ?? undefined,
@@ -6285,8 +6288,8 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         timezone, model, modelTier, profile, scheduleType,
         targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
-        created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        created_by, updated_by, updatedByAgentId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -6321,6 +6324,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       now,
       data.createdBy ?? null,
       data.createdBy ?? null,
+      data.createdByAgentId ?? null,
     ],
   );
 
@@ -6358,7 +6362,12 @@ export interface UpdateScheduledTaskData {
   requiredParams?: string[];
   requires?: AutomationIntegrationId[];
   lastUpdatedAt?: string;
-  updatedBy?: string;
+  /**
+   * Audit pair for a user-intent write: pass both (null = unknown) so they
+   * describe the same write. Omitted (scheduler and system writes) leaves them untouched.
+   */
+  updatedBy?: string | null;
+  updatedByAgentId?: string | null;
 }
 
 export async function updateScheduledTask(
@@ -6484,6 +6493,10 @@ export async function updateScheduledTask(
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");
     params.push(data.updatedBy);
+  }
+  if (data.updatedByAgentId !== undefined) {
+    updates.push("updatedByAgentId = ?");
+    params.push(data.updatedByAgentId);
   }
 
   if (updates.length === 0) {
@@ -7654,6 +7667,7 @@ type WorkflowRow = {
   dir: string | null;
   vcs_repo: string | null;
   createdByAgentId: string | null;
+  updatedByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   created_by: string | null;
@@ -7680,6 +7694,7 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    updatedByAgentId: row.updatedByAgentId ?? undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     createdBy: row.created_by ?? undefined,
@@ -7711,8 +7726,8 @@ export async function createWorkflow(
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
   const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, updatedByAgentId, created_by, updated_by, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
@@ -7728,6 +7743,7 @@ export async function createWorkflow(
       JSON.stringify(data.requires ?? []),
       data.dir ?? null,
       data.vcsRepo ?? null,
+      data.createdByAgentId ?? null,
       data.createdByAgentId ?? null,
       data.createdBy ?? null,
       data.createdBy ?? null,
@@ -7780,8 +7796,11 @@ function rowToWorkflowSummary(row: WorkflowRow): WorkflowSummary {
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    updatedByAgentId: row.updatedByAgentId ?? undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
     nodeCount,
   };
 }
@@ -7872,7 +7891,12 @@ export async function updateWorkflow(
     requires?: AutomationIntegrationId[];
     dir?: string | null;
     vcsRepo?: string | null;
-    updatedBy?: string;
+    /**
+     * Audit pair for a user-intent write: pass both (null = unknown) so they
+     * describe the same write. Omitted (system writes) leaves them untouched.
+     */
+    updatedBy?: string | null;
+    updatedByAgentId?: string | null;
   },
 ): Promise<Workflow | null> {
   const updates: string[] = [];
@@ -7936,6 +7960,10 @@ export async function updateWorkflow(
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");
     params.push(data.updatedBy);
+  }
+  if (data.updatedByAgentId !== undefined) {
+    updates.push("updatedByAgentId = ?");
+    params.push(data.updatedByAgentId);
   }
   if (updates.length === 0) return await getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
@@ -10594,6 +10622,10 @@ type SkillRow = {
   systemDefault: number;
   invocationCount: number;
   lastInvokedAt: string | null;
+  createdByAgentId: string | null;
+  updatedByAgentId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -10626,6 +10658,10 @@ function rowToSkill(row: SkillRow): Skill {
     systemDefault: row.systemDefault === 1,
     invocationCount: row.invocationCount,
     lastInvokedAt: row.lastInvokedAt,
+    createdByAgentId: row.createdByAgentId ?? null,
+    updatedByAgentId: row.updatedByAgentId ?? null,
+    createdBy: row.created_by ?? null,
+    updatedBy: row.updated_by ?? null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     lastFetchedAt: row.lastFetchedAt,
@@ -10805,6 +10841,9 @@ export interface SkillInsert {
   systemDefault?: boolean;
   /** Defaults to true. Extensions create their skills disabled. */
   isEnabled?: boolean;
+  /** Audit: the creating agent and person. Seeds leave both NULL. */
+  createdByAgentId?: string | null;
+  createdBy?: string | null;
 }
 
 /**
@@ -10821,8 +10860,9 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
         id, name, description, content, type, scope, ownerAgentId,
         sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
         allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
-        version, isEnabled, systemDefault, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?) RETURNING *`,
+        version, isEnabled, systemDefault, createdAt, lastUpdatedAt,
+        createdByAgentId, updatedByAgentId, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       data.name,
@@ -10848,6 +10888,10 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
       data.systemDefault ? 1 : 0,
       now,
       now,
+      data.createdByAgentId ?? null,
+      data.createdByAgentId ?? null,
+      data.createdBy ?? null,
+      data.createdBy ?? null,
     ],
   );
 
@@ -10869,9 +10913,18 @@ type NullableSkillField =
 
 export async function updateSkill(
   id: string,
-  updates: Partial<Omit<SkillInsert, NullableSkillField>> & {
+  updates: Partial<Omit<SkillInsert, NullableSkillField | "createdByAgentId" | "createdBy">> & {
     [K in NullableSkillField]?: string | null;
-  } & { isEnabled?: boolean; lastFetchedAt?: string },
+  } & {
+    isEnabled?: boolean;
+    lastFetchedAt?: string;
+    /**
+     * Audit pair for a user-intent write: pass both (null = unknown) so they
+     * describe the same write. Omitted (seed and system writes) leaves them untouched.
+     */
+    updatedBy?: string | null;
+    updatedByAgentId?: string | null;
+  },
 ): Promise<Skill | null> {
   const existing = await getSkillById(id);
   if (!existing) return null;
@@ -10959,6 +11012,14 @@ export async function updateSkill(
   if (updates.lastFetchedAt !== undefined) {
     sets.push("lastFetchedAt = ?");
     params.push(updates.lastFetchedAt);
+  }
+  if (updates.updatedBy !== undefined) {
+    sets.push("updated_by = ?");
+    params.push(updates.updatedBy);
+  }
+  if (updates.updatedByAgentId !== undefined) {
+    sets.push("updatedByAgentId = ?");
+    params.push(updates.updatedByAgentId);
   }
 
   // Bump version when content changes
@@ -11137,7 +11198,7 @@ export interface SkillFilters {
  * which is replaced with an empty string so the row still satisfies `Skill`.
  */
 const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdByAgentId, updatedByAgentId, created_by, updated_by, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
 export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";

@@ -59,6 +59,8 @@ export async function invokeToolInProcess(args: {
   args?: unknown;
   agentId?: string;
   sourceTaskId?: string;
+  /** Audit-only task; see `RequestInfo.auditSourceTaskId`. */
+  auditSourceTaskId?: string;
   runtimeInstanceId?: string;
   callOrigin: Extract<RequestInfo["callOrigin"], "script-sdk" | "extension">;
 }): Promise<unknown> {
@@ -89,6 +91,7 @@ export async function invokeToolInProcess(args: {
       headers: {
         "x-agent-id": args.agentId ?? "",
         ...(args.sourceTaskId ? { "x-source-task-id": args.sourceTaskId } : {}),
+        ...(args.auditSourceTaskId ? { "x-audit-source-task-id": args.auditSourceTaskId } : {}),
         ...(args.runtimeInstanceId ? { "x-runtime-instance-id": args.runtimeInstanceId } : {}),
       },
     },
@@ -170,6 +173,7 @@ export async function handleMcpBridge(
       args,
       agentId: myAgentId,
       sourceTaskId,
+      auditSourceTaskId: headerValue(req, "x-audit-source-task-id"),
       runtimeInstanceId,
       // The agent header is caller-controlled; the extension origin also needs the
       // per-process token that only the in-process extension SDK holds.

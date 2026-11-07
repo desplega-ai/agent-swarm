@@ -2203,6 +2203,9 @@
     },
     "profile": {
       "exempt": "enum or fixed-format value"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "script_apis": {
@@ -2577,6 +2580,9 @@
     },
     "key": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "seed_state": {
@@ -2942,6 +2948,12 @@
     },
     "lastInvokedAt": {
       "exempt": "timestamp"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "slack_inbound_receipts": {
@@ -3804,6 +3816,9 @@
     },
     "requires": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "runtime_controllers": {

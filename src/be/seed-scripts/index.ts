@@ -449,6 +449,8 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
 
     // upsertScriptByName handles both create and update (and bumps the
     // script_versions history), so a single path serves either action.
+    // Seed writes carry no agent and no person on purpose: the audit columns
+    // stay NULL so a seeded row is never attributed to whoever booted the API.
     const argsJsonSchema = await extractArgsJsonSchema(script.source);
     await upsertScriptByName({
       name: script.name,

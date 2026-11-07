@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createSkill, getAgentById } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
@@ -112,6 +113,11 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           agent: parsedMeta.agent,
           disableModelInvocation: parsedMeta.disableModelInvocation,
           userInvocable: parsedMeta.userInvocable,
+          createdByAgentId: requestInfo.agentId,
+          createdBy: await resolveTaskAuditUserId(
+            requestInfo.auditSourceTaskId,
+            requestInfo.agentId,
+          ),
         });
 
         return toolOk(`Installed remote skill "${skill.name}".`, {
