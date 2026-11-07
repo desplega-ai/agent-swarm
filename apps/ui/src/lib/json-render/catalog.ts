@@ -36,6 +36,7 @@ import { z } from "zod";
 // Relative (not `@/`) so `scripts/generate-catalog-schema.ts` can run under plain
 // `bun run` — bun does not resolve the vite alias from tsconfig.app.json.
 import { SWARM_SDK_METHODS, type SwarmSdkMethod } from "../swarm-sdk";
+import { CURRENCY_CODE } from "./format-number";
 import { ICON_NAMES } from "./icon-names";
 
 // ─── Action schemas (also exported for the discovery endpoint mirror) ───────
@@ -220,6 +221,8 @@ const splitProps = z.object({
 
 const dividerProps = z.object({
   label: z.string().optional(),
+  /** `vertical` is a rule between the items of a row Stack, as tall as the row. */
+  orientation: z.enum(["horizontal", "vertical"]).optional(),
 });
 
 const tabsTabSchema = z.object({
@@ -237,6 +240,24 @@ const tabsProps = z.object({
   defaultTab: z.string().optional(),
   /** `line` (default) is the tab strip; `segmented` is a compact segmented control. */
   variant: z.enum(["line", "segmented"]).optional(),
+});
+
+const accordionItemSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  /** A muted line under the title. */
+  description: z.string().optional(),
+  icon: iconName.optional(),
+});
+
+const accordionProps = z.object({
+  /** State id: the open item keys are mirrored to `/ui/<id>/open` (an array). */
+  id: z.string(),
+  /** `single` (default) keeps at most one item open; `multiple` lets several open. */
+  type: z.enum(["single", "multiple"]).optional(),
+  items: z.array(accordionItemSchema).min(1),
+  /** Item keys open on first render. `single` uses the first one only. */
+  defaultOpen: z.array(z.string()).optional(),
 });
 
 const searchInputProps = z.object({
@@ -317,6 +338,33 @@ const treeProps = z.object({
     .describe("CSS max-height for the scrollable row list, e.g. '480px' (default '480px')"),
   /** Grow to fill a `fill`-aware parent instead of the fixed `maxHeight` box —
    * the row list scrolls inside whatever height the parent gives it. */
+  fill: z.boolean().optional(),
+});
+
+const filesProps = z.object({
+  /** Absolute agent-fs folder in the swarm drive, e.g. "/apps/launch-tracker/docs". */
+  path: z.string(),
+  /** `list` shows one folder; `browser` lets the viewer open subfolders, with crumbs. */
+  mode: z.enum(["list", "browser"]).optional(),
+  /** The file path to highlight, usually `{ "$state": "/route/params/<param>" }`. */
+  selectedPath: z.string().optional(),
+  emptyMessage: z.string().optional(),
+  maxHeight: z
+    .string()
+    .optional()
+    .describe("CSS max-height for the scrollable list, e.g. '480px' (default '480px')"),
+  fill: z.boolean().optional(),
+  /** Chain run when a row is clicked; `$row` = `{ path, name, type, size, modifiedAt }`. */
+  onSelect: actionChainSchema.optional(),
+  /** Adds an Upload button and a drop zone that upload into the open folder, then refetch. */
+  upload: z.boolean().optional(),
+});
+
+const fileProps = z.object({
+  /** Absolute agent-fs file path in the swarm drive. Empty renders a "No file selected" state. */
+  path: z.string(),
+  /** CSS height of the scrolling view, e.g. '480px'. Without it the view sizes to content. */
+  height: z.string().optional(),
   fill: z.boolean().optional(),
 });
 
@@ -470,6 +518,38 @@ export const BADGE_TONES = [
 
 export type BadgeTone = (typeof BADGE_TONES)[number];
 
+const dateRangePresetSchema = z.enum(["7d", "30d", "90d", "mtd", "custom"]);
+
+const dateRangeProps = z.object({
+  /** State id: the range lands at `/ui/<id>/from` and `/ui/<id>/to` as `YYYY-MM-DD`. */
+  id: z.string(),
+  /** Buttons shown, in order. Defaults to all five. */
+  presets: z.array(dateRangePresetSchema).min(1).optional(),
+  /** Selected on first load. Defaults to the first preset. */
+  defaultPreset: dateRangePresetSchema.optional(),
+  label: z.string().optional(),
+});
+
+const timelineProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` — one event per row. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Row field with the event time (ISO date or epoch ms). Rows without one are left out. */
+  timeField: z.string(),
+  titleField: z.string(),
+  descriptionField: z.string().optional(),
+  /** Row field shown as a status pill (lifecycle values get the dashboard status chip). */
+  statusField: z.string().optional(),
+  /** For `statusField` — value → pill tone and dot color. Falls back to `neutral`. */
+  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** Icon on every event marker, instead of a dot. */
+  icon: iconName.optional(),
+  emptyMessage: z.string().optional(),
+  /** Chain run when an event is clicked; `$row` = the row, `$rowIndex` its index in `data`. */
+  onSelect: actionChainSchema.optional(),
+});
+
 const badgeProps = z.object({
   text: z.union([z.string(), z.number()]),
   tone: z.enum(BADGE_TONES).optional(),
@@ -485,6 +565,9 @@ const badgeProps = z.object({
   /** Tooltip shown on hover. */
   hint: z.string().optional(),
 });
+
+/** ISO 4217 currency code (`USD`, `EUR`). */
+const currencyCode = z.string().regex(CURRENCY_CODE);
 
 const metricProps = z.object({
   label: z.string(),
@@ -509,6 +592,10 @@ const metricProps = z.object({
     .optional(),
   /** Numeric row field the sparkline reads when `sparkline` holds rows. */
   sparklineKey: z.string().optional(),
+  /** Formats a numeric `value`; `percent` reads ratios (0.42 = 42%). Strings show as is. */
+  format: z.enum(["number", "currency", "percent"]).optional(),
+  /** ISO 4217 code for `format: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
 });
 
 /** Series colors: the dashboard chart palette plus the semantic status tokens. */
@@ -536,7 +623,7 @@ const chartSeriesSchema = z.object({
 });
 
 const chartProps = z.object({
-  kind: z.enum(["line", "area", "bar"]),
+  kind: z.enum(["line", "area", "bar", "pie", "donut"]),
   /** Usually `{ "$state": "/queries/<name>/data" }`. */
   data: z.array(z.record(z.string(), z.unknown())).optional(),
   /** Usually `{ "$state": "/queries/<name>/loading" }`. */
@@ -553,10 +640,7 @@ const chartProps = z.object({
   /** Axis and tooltip value format. `percent` reads values as ratios (0.42 = 42%). */
   format: z.enum(["number", "currency", "percent"]).optional(),
   /** ISO 4217 code for `format: "currency"`. Defaults to USD. */
-  currency: z
-    .string()
-    .regex(/^[A-Z]{3}$/)
-    .optional(),
+  currency: currencyCode.optional(),
   /** Plot height in px. Defaults to 240. */
   height: z.number().int().min(120).max(640).optional(),
   /** Defaults to on with two or more series. */
@@ -669,10 +753,14 @@ const detailListFieldSchema = z.object({
       "copy",
       "link",
       "json",
+      "currency",
+      "percent",
     ])
     .optional(),
   /** For `kind: "badge"` / `"status"` — value → badge tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** ISO 4217 code for `kind: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
   ...linkOptions,
 });
 
@@ -719,10 +807,14 @@ const tableColumnSchema = z.object({
       "checkbox",
       "link",
       "json",
+      "currency",
+      "percent",
     ])
     .optional(),
   /** For `kind: "badge"` / `"status"` — cell value → tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+  /** ISO 4217 code for `kind: "currency"`. Defaults to USD. */
+  currency: currencyCode.optional(),
   width: z.number().optional(),
   /** Pin the column to an edge so it survives horizontal scroll (id, actions). */
   pinned: z.enum(["left", "right"]).optional(),
@@ -942,12 +1034,20 @@ const formFieldSchema = z.object({
    * render as (and be clobbered by) the failure state. */
   name: z.string().regex(/^[^$]/, "field names must not start with '$' (reserved)"),
   label: z.string().optional(),
-  /** `text` is a multi-line variant of `string` (textarea). */
-  kind: z.enum(["string", "text", "number", "boolean", "date", "enum"]).optional(),
+  /** `text` is a multi-line variant of `string` (textarea). `file` attaches agent-fs files. */
+  kind: z.enum(["string", "text", "number", "boolean", "date", "enum", "file"]).optional(),
   /** Required for `kind: "enum"`. */
   options: z.array(z.string()).optional(),
   placeholder: z.string().optional(),
   required: z.boolean().optional(),
+  /** `kind: "file"` — absolute agent-fs folder uploads land in. Required unless `source: "pick"`. */
+  dir: z.string().optional(),
+  /** `kind: "file"` — file-input accept list, e.g. `[".pdf", "image/*"]`. */
+  accept: z.array(z.string()).optional(),
+  /** `kind: "file"` — several files; `$form.<name>` is then an array of paths. */
+  multiple: z.boolean().optional(),
+  /** `kind: "file"` — `upload` (default) a new file, `pick` an existing one, or `both`. */
+  source: z.enum(["upload", "pick", "both"]).optional(),
 });
 
 const formProps = z.object({
@@ -973,11 +1073,30 @@ const drawerProps = z.object({
   side: z.enum(["right", "left"]).optional(),
   size: z.enum(["sm", "md", "lg", "xl"]).optional(),
   /**
+   * `sheet` (default) slides over the page. `split` renders an inline right
+   * pane beside the page canvas, with a draggable edge whose width is kept
+   * per viewer; below md it is the sheet. At most one per page.
+   */
+  presentation: z.enum(["sheet", "split"]).optional(),
+  /**
    * Buttons in a sticky footer. Same shape and confirm rules as Table
    * `rowActions` (destructive variants confirm; an `app.mutate` delete always
    * confirms), minus `placement`. Chains have no `$row`; read the open record
    * with `$state` (e.g. `/route/params/<param>`).
    */
+  actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
+});
+
+const dialogProps = z.object({
+  /**
+   * Route param driving the open state, the same contract as `Drawer.param`:
+   * open exactly while `/route/params/<param>` is set; closing removes it.
+   */
+  param: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  size: z.enum(["sm", "md", "lg"]).optional(),
+  /** Footer buttons, the same shape and confirm rules as Drawer `actions`. */
   actions: z.array(tableRowActionSchema.omit({ placement: true })).optional(),
 });
 
@@ -1101,6 +1220,17 @@ const cardGridProps = z.object({
   emptyMessage: z.string().optional(),
 });
 
+const approvalProps = z.object({
+  /** The approval request id, usually `{ "$state": "/actions/<name>/result/requestId" }`. Empty renders nothing. */
+  requestId: z.string(),
+  /** After resolution, show the answers (default true). False shows only the outcome line. */
+  showResolved: z.boolean().optional(),
+  /** Questions only, without the card chrome. */
+  compact: z.boolean().optional(),
+  /** Chain run once when this page sees the request leave `pending`. Params may use `$chain`: `status`, `responses`, `resolvedBy`. */
+  onResolved: actionChainSchema.optional(),
+});
+
 const elementRefProps = z.object({
   app: z.string().optional(),
   element: z.string(),
@@ -1119,6 +1249,7 @@ export type ActionChain = z.infer<typeof actionChainSchema>;
 export type TableFilters = z.infer<typeof tableProps>["filters"];
 export type GridColumns = z.infer<typeof gridProps>["columns"];
 export type TabsTab = z.infer<typeof tabsTabSchema>;
+export type AccordionItem = z.infer<typeof accordionItemSchema>;
 export type SelectOption = z.infer<typeof selectOptionSchema>;
 export type DetailListField = z.infer<typeof detailListFieldSchema>;
 export type CardGridField = z.infer<typeof cardGridFieldSchema>;
@@ -1128,6 +1259,8 @@ export type ChipOption = z.infer<typeof chipOptionSchema>;
 export type DrawerAction = NonNullable<z.infer<typeof drawerProps>["actions"]>[number];
 export type MetricTrend = z.infer<typeof metricTrendSchema>;
 export type ChartProps = z.infer<typeof chartProps>;
+export type DateRangeProps = z.infer<typeof dateRangeProps>;
+export type TimelineProps = z.infer<typeof timelineProps>;
 export type ChartColor = (typeof CHART_COLORS)[number];
 export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
@@ -1164,7 +1297,13 @@ export const swarmCatalogSpec = {
     Divider: {
       props: dividerProps,
       description:
-        'Horizontal rule between sections, optionally with a centered `label` (e.g. `"Filters"`).',
+        'Rule between sections, optionally with a centered `label` (e.g. `"Filters"`). `orientation: "vertical"` draws it between the items of a row `Stack`, as tall as the row.',
+    },
+    Accordion: {
+      props: accordionProps,
+      slots: ["default"],
+      description:
+        'Grouped collapsible sections. POSITIONAL children like Tabs: children[i] is the body of items[i], so declare exactly as many children as items, in the same order. `items: [{ key, title, description?, icon? }]`. `type: "single"` (default) keeps at most one item open (opening one closes the others, and the open one can be closed); `"multiple"` lets several open. The open keys are client state at `{ "$state": "/ui/<id>/open" }` (an array); `defaultOpen` lists the keys open on first render. Bodies mount only while open. For one collapsible block use `Section collapsible`.',
     },
     Tabs: {
       props: tabsProps,
@@ -1219,12 +1358,12 @@ export const swarmCatalogSpec = {
     Metric: {
       props: metricProps,
       description:
-        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ "$state": "/queries/<name>/data" }`) read through `sparklineKey`. Fewer than two points draws nothing.',
+        'Stat tile (the dashboard `StatPanel`): label, value, optional `detail` line and `trend: { direction: "up"|"down"|"flat", label }` (arrow plus success/error/muted text). `icon` adds a tile tinted by `tone` (neutral|success|active|error|info|pending|warning|paused); `info` is a one-sentence explanation in a tooltip next to the label. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads; an empty value renders an em dash. `sparkline` draws a small trend line under the value, in the `tone` color: an array of numbers (`null` is a gap), or rows (bind `{ "$state": "/queries/<name>/data" }`) read through `sparklineKey`. Fewer than two points draws nothing. `format` number | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) formats a numeric `value`, the same contract as Chart; a string value shows as is.',
     },
     Chart: {
       props: chartProps,
       description:
-        'Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: "category"` (default) keeps row order, `"time"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `height` px (120-640, default 240). No rows renders `emptyMessage` (default "No data yet"). Wrap it in a `Card` for a title.',
+        'Line, area or bar chart over rows. Bind `data`/`loading`/`error` to a named query like Table. `x` is the row field on the x axis: `xType: "category"` (default) keeps row order, `"time"` parses ISO dates or epoch ms, sorts the rows and labels ticks as dates (rows whose `x` does not parse are dropped). `series: [{ key, label?, color? }]` (1-8) plots numeric row fields; `color` is chart-1..chart-5, primary, success, warning, error, info or muted (default palette, in order: primary, chart-2..chart-5). `stacked` stacks area and bar series (lines never stack). `format` number (default) | currency (`currency`, ISO code, default USD) | percent (values are ratios, 0.42 = 42%) shapes axis ticks and the tooltip. Hover shows a tooltip with every series; the legend shows with two or more series (`legend` forces it on or off). `kind: "pie"` or `"donut"` takes exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip shows the value in `format` plus the share, and the legend defaults on (`xType` and `stacked` do not apply). `height` px (120-640, default 240). No rows renders `emptyMessage` (default "No data yet"). Wrap it in a `Card` for a title.',
     },
     Alert: {
       props: alertProps,
@@ -1290,23 +1429,29 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`); also bind `refreshing` to `/queries/<name>/fetching` so a poll or `app.refresh` over loaded rows shows a slim progress bar (`loading` alone is the first-load skeleton). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`); also bind `refreshing` to `/queries/<name>/fetching` so a poll or `app.refresh` over loaded rows shows a slim progress bar (`loading` alone is the first-load skeleton). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one; an array means "one of", which is what a multiple `Chips` writes, and an empty array disables it) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`). Columns take `pinned: "left"|"right"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: "compact"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` / `checkbox` (run the column\'s `onChange` chain with `$row` set to the new value; read-only without it), `link` (a smart link: a GitHub PR, issue, commit or repo URL or `owner/repo#N`, a dashboard task / agent / session / app URL or an agent-fs file renders as a chip with an icon and a short label; any other http(s) URL opens in a new tab as plain text), `json` (compact single-line `JSON.stringify` preview, truncated), `currency` (a number as money, ISO 4217 `currency`, default USD: `$1,234.50`) and `percent` (a ratio as a percent, 0.42 = 42%). Columns also take `align`, `truncate: "middle"` (ids, paths), a header `icon`, a header `hint` (a tooltip on the header; a label cut by the column width also shows in full on hover) and `tooltip` (a row field shown in a tooltip on the cell), and `format` — a `{{field}}` template (e.g. `"{{name}} · v{{version}}"`) that combines several row fields into one cell and overrides `key`/`kind` rendering on desktop and in the phone list (placeholder names match `[w.]+`, no hyphens or spaces; sorting uses the composed text; `search` and `filters` still read the column\'s `key`). `href` (a row field holding a URL) makes the cell a link to that URL while it shows its own text or `format` (`{ key: "number", format: "{{repo}}#{{number}}", href: "url" }`), and `linkLabel` (a `{{field}}` template) replaces the derived label of a link. `popover: { title?, fields, trigger? }` opens a popover from the cell on hover or focus (`trigger: "click"` for a click) that lists several fields of the row with the DetailList field shape (up to 12); on a cell with its own controls (link, copy, switch) a click popover opens from a separate Details button beside the content. In the phone list a link column renders as a chip under the row and a popover column gets a Details button (tap to open, whatever its `trigger`). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: "list"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: "scroll"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: "menu"` (collected into a More menu). `selectable: true` + `id` adds a leading checkbox column (select-all header over the rows left after `search`/`filters`, shift-click for a range); the selection is client state at `{ "$state": "/ui/<id>/selected" }` (an array of row ids by `rowId`), never a model write. `bulkActions` (same shape as `rowActions`, no `placement`, implies `selectable`) show a bar with the count, the buttons and Clear while rows are selected; chains have no `$row`, read the ids from that `$state` path, and the selection clears after the chain succeeds.',
     },
     Form: {
       props: formProps,
       description:
-        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.',
+        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs. `kind: "file"` attaches agent-fs files with the VIEWER\'s own agent-fs key (swarm default drive): `source: "upload"` (default) picks local files and uploads them on submit, before the chain, to `<dir>/<timestamp>-<id>-<n>-<name>` (unique per file, across fields and submits); `"pick"` opens a browser of `dir` (or `/`) to attach a file that already exists; `"both"` offers both. `$form.<name>` is the path, or an array of paths with `multiple: true`. `accept` filters the file picker. An upload failure stops the chain and keeps the values. Without an agent-fs connection the field shows a "Connect agent-fs" card, and a required file field disables submit.',
+    },
+    Dialog: {
+      props: dialogProps,
+      slots: ["default"],
+      description:
+        'Route-driven modal, centered over the page, for short forms ("New item"). The same contract as Drawer: open exactly while the page route param named by `param` is set (open it with `app.navigate`, e.g. from a `headerActions` Button), a deep link opens it, and closing (the X, Escape, a click outside) clears the param. `size` sm|md (default)|lg. `actions` render in its footer with the Drawer confirm rules; read the record id with `{ "$state": "/route/params/<param>" }`. Children mount only while open. A Form inside closes nothing by itself: add an `app.navigate` step without the param after the write.',
     },
     Drawer: {
       props: drawerProps,
       slots: ["default"],
       description:
-        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set \u2014 open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed \u2014 unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ "$state": "/route/params/<param>" }`.',
+        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set \u2014 open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed \u2014 unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl: about 480/660/900/1010px at a 1440px viewport (md default), growing with the viewport up to 640/960/1280/1600px; full width on phones. `actions: [{ label, icon?, variant?, confirm?, actions }]` render in a sticky footer with the Table rowActions confirm rules (destructive variants confirm, an `app.mutate` delete always confirms); chains have no `$row`, so read the open record id with `{ "$state": "/route/params/<param>" }`. `presentation: "split"` renders it inline as a right pane beside the page instead of a sheet: the page canvas shrinks, the pane has a draggable edge (arrow keys too, double-click resets) and its width is kept per viewer; below 768px it is the sheet. At most one split Drawer per page; `side` does not apply to it.',
     },
     DetailList: {
       props: detailListProps,
       description:
-        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block) and `json` (collapsible JSON tree). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row \u2014 usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `status` (lifecycle chip), `user` (avatar + name), `relative` (smart time, exact on hover), `copy` (value + copy button), `link` (a smart link from the value, or from the row field named by `href`; `linkLabel` is a `{{field}}` template for its text), `code` (monospace block), `json` (collapsible JSON tree), and `currency` / `percent` (as Table columns, with `currency` the ISO 4217 code). Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
     CardGrid: {
       props: cardGridProps,
@@ -1317,6 +1462,11 @@ export const swarmCatalogSpec = {
       props: kanbanProps,
       description:
         'Kanban board: one card per row, grouped into `columns` by the row\'s `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with the DetailList field kinds (badge tones, status, user, relative, copy, ...). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ "action": "app.mutate", "params": { "model": "<m>", "op": "update", "rowId": { "$row": "id" }, "values": { "<columnField>": { "$row": "<columnField>" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).',
+    },
+    Approval: {
+      props: approvalProps,
+      description:
+        'One approval request (human-in-the-loop), answered in place as the viewer. Bind `requestId` to the id an `app.action` script returned (`{ "$state": "/actions/<name>/result/requestId" }`); an empty id renders nothing. It polls every 5s while the request is pending and stops once it resolves. A viewer whose role cannot answer, or whose answer the server refuses, gets a read-only card with an "Open in dashboard" link. `showResolved` (default true) shows the answers after resolution; `compact` drops the card chrome. `onResolved` runs once when the page sees the request leave `pending`, with `$chain` = `{ status, responses, resolvedBy }`; a request that was already resolved when the page loaded does not run it.',
     },
     Calendar: {
       props: calendarProps,
@@ -1332,6 +1482,26 @@ export const swarmCatalogSpec = {
       props: treeProps,
       description:
         'Collapsible tree view of a json-render flat element map. Bind `nodes` to a doc-shaped value (`{ root: string | string[], elements: Record<key,{type,children?}> }`) — usually `{ "$state": "/queries/<name>/data/0/<jsonColumn>" }`. Each row shows `key — type`; clicking one writes the node key to `/ui/<id>/value`, and the row bound to that path renders selected. A malformed or absent `nodes` value renders an empty state. Rows scroll inside a fixed-height viewport — `maxHeight` overrides the default `480px` — or set `fill: true` to grow inside a `fill`-aware parent and scroll within whatever height that gives it instead (ignores `maxHeight`). Outlines are cut at 2,000 rows with a notice; branches deeper than 32 levels keep a disabled chevron.',
+    },
+    Files: {
+      props: filesProps,
+      description:
+        'agent-fs folder listing, read as the VIEWER with their own agent-fs key (Comb\'s connection), from the swarm\'s default drive. `path` is an absolute folder. `mode: "list"` (default) shows that folder; `"browser"` also opens subfolders, with crumbs that never go above `path`. Folders sort first. Clicking a file (or, in list mode, a folder) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }` (`type` is `file` or `directory`), usually an `app.navigate` that puts `$row.path` in a route param a `File` reads. `selectedPath` highlights that row. `upload: true` adds an Upload button and a drop zone that upload into the open folder with the viewer\'s key and refresh the list; a taken name asks Keep both or Skip. A viewer who has not connected agent-fs sees a "Connect agent-fs" card instead; access is whatever their drive membership allows. Rows scroll inside `maxHeight` (default 480px), or set `fill: true` to grow inside a `fill`-aware parent.',
+    },
+    File: {
+      props: fileProps,
+      description:
+        'One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm\'s default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser\'s viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and "Open in agent-fs". An empty `path` shows a "No file selected" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a "Connect agent-fs" card.',
+    },
+    DateRange: {
+      props: dateRangeProps,
+      description:
+        'Date range filter: preset buttons (`7d`, `30d`, `90d`, `mtd` month to date, `custom`) that write `/ui/<id>/from` and `/ui/<id>/to` as inclusive `YYYY-MM-DD` dates ending today. Bind query params to them with `{ "$state": "/ui/<id>/from" }`, so the query refetches when the range changes. `presets` picks and orders the buttons (default all five); `defaultPreset` is written on first load (default the first preset). `custom` opens two date inputs in a popover and applies when from is not after to.',
+    },
+    Timeline: {
+      props: timelineProps,
+      description:
+        "Vertical event list over rows, newest first, grouped under day headings (Today, Yesterday, then dates). Bind `data`/`loading` to a named query like Table. `timeField` (ISO date or epoch ms; rows that do not parse are left out), `titleField`, optional `descriptionField`, and `statusField` with `tones` (value → pill tone, lifecycle values get the status chip) shape each event; `icon` replaces the marker dot. `onSelect` runs with `$row` and `$rowIndex` when an event is clicked. No rows renders `emptyMessage`.",
     },
     SchemaForm: {
       props: schemaFormProps,

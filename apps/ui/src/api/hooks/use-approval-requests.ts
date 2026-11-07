@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { approvalPollInterval } from "../../lib/approval-format";
 import { api } from "../client";
 
 export interface ApprovalRequestFilters {
@@ -33,6 +34,20 @@ export function useApprovalRequest(id: string) {
     select: (data) => data.approvalRequest,
     enabled: !!id,
     refetchInterval: 5000,
+  });
+}
+
+/**
+ * One request for an embedded card (the apps `Approval` component). Same cache
+ * entry as `useApprovalRequest`, but polling stops once the request resolves.
+ */
+export function useLiveApprovalRequest(id: string) {
+  return useQuery({
+    queryKey: ["approval-request", id],
+    queryFn: () => api.fetchApprovalRequest(id),
+    select: (data) => data.approvalRequest,
+    enabled: !!id,
+    refetchInterval: (query) => approvalPollInterval(query.state.data?.approvalRequest.status),
   });
 }
 

@@ -57,7 +57,6 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
 import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
@@ -127,6 +126,13 @@ import {
   Card as UiCard,
 } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -168,8 +174,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
+import { AccordionComponent, type AccordionProps } from "./accordion";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
+import { ApprovalComponent } from "./approval";
 import {
   CARD_GRID_PAGE_SIZE,
   cardGridCapText,
@@ -199,8 +207,14 @@ import type {
   TableRowAction,
   TableRowActionConfirm,
   TabsTab,
+  TimelineProps,
 } from "./catalog";
 import { ChartComponent, Sparkline } from "./chart";
+import { DateRangeComponent, TimelineView } from "./data-views";
+import { type FilesProps, FilesView, FileView } from "./files";
+import { FormFileField, useFormFileUploader } from "./form-file";
+import { filePaths, isFileField, type PendingFiles, resolveFileFields } from "./form-file-model";
+import { numberFormatter } from "./format-number";
 import { formatValue, progressPercent } from "./format-value";
 import { CatalogIcon, catalogIcon } from "./icons";
 import {
@@ -214,6 +228,7 @@ import { parseNumberInputValue } from "./number-input-value";
 import { SchemaFormComponent } from "./schema-form";
 import { SessionThreadComponent } from "./session-thread";
 import { SmartLink } from "./smart-link";
+import { SplitDrawerPane, useRouteParamPanel, useSplitDetailRegion } from "./split-pane";
 import {
   activeFilterCount,
   type ColumnFilterMode,
@@ -772,7 +787,26 @@ function SplitComponent({ props, children }: { props: SplitProps; children: Reac
   );
 }
 
-function DividerComponent({ props }: { props: { label?: string } }) {
+function DividerComponent({
+  props,
+}: {
+  props: { label?: string; orientation?: "horizontal" | "vertical" };
+}) {
+  // Vertical: a rule between the items of a row Stack, as tall as the row.
+  if (props.orientation === "vertical") {
+    if (!props.label) {
+      return <Separator orientation="vertical" className="mx-1 h-auto self-stretch" />;
+    }
+    return (
+      <div className="flex flex-col items-center gap-1 self-stretch px-1">
+        <Separator orientation="vertical" className="h-auto flex-1" />
+        <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {props.label}
+        </span>
+        <Separator orientation="vertical" className="h-auto flex-1" />
+      </div>
+    );
+  }
   if (!props.label) return <Separator className="my-1" />;
   return (
     <div className="flex items-center gap-3 py-1">
@@ -1303,7 +1337,10 @@ function minWidthForKind(kind: TableColumn["kind"]): number {
       return 85;
     case "number":
     case "duration":
+    case "percent":
       return 95;
+    case "currency":
+      return 110;
     case "badge":
     case "enum":
       return 105;
@@ -1327,7 +1364,13 @@ function flexForKind(kind: TableColumn["kind"]): number {
 }
 
 /** Columns whose values read best right-aligned with tabular digits. */
-const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>(["number", "duration", "progress"]);
+const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>([
+  "number",
+  "duration",
+  "progress",
+  "currency",
+  "percent",
+]);
 
 /** Roughly `sm` button metrics: 24px of label padding + ~7px per character (+18px for an icon). */
 function rowActionButtonWidth(rowAction: TableRowAction): number {
@@ -2023,7 +2066,7 @@ function TableComponent({ props }: { props: TableProps }) {
       // inference and let the value formatter own the rendering.
       cellDataType: false,
       valueFormatter: (params) =>
-        template ? String(params.value ?? "") : formatValue(kind, params.value),
+        template ? String(params.value ?? "") : formatValue(kind, params.value, column.currency),
       cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
         const value = params.value;
         const row = (params.data ?? {}) as Record<string, unknown>;
@@ -2095,7 +2138,9 @@ function TableComponent({ props }: { props: TableProps }) {
               // never applies to one, so long titles hard-clip mid-word. Wrapping
               // the value in a real element gives the ellipsis something to bite on
               // (and a tooltip carrying the full text while it is cut).
-              const text = params.valueFormatted ?? (template ? raw : formatValue(kind, value));
+              const text =
+                params.valueFormatted ??
+                (template ? raw : formatValue(kind, value, column.currency));
               if (!text) return null;
               // A column tooltip or popover already speaks for the cell.
               const hasOwnTip = Boolean(column.tooltip || column.popover);
@@ -2271,7 +2316,9 @@ function TableComponent({ props }: { props: TableProps }) {
   const mobileCellText = (key: string, row: Record<string, unknown>): string => {
     const column = columnByKey.get(key);
     if (column && isMutedValue(column, row[key])) return "";
-    return column?.format ? applyTemplate(column.format, row) : formatValue(column?.kind, row[key]);
+    return column?.format
+      ? applyTemplate(column.format, row)
+      : formatValue(column?.kind, row[key], column?.currency);
   };
   const rowLabel = (row: Record<string, unknown>): string => {
     const text = titleKey ? mobileCellText(titleKey, row) : "";
@@ -2729,6 +2776,8 @@ function MetricComponent({ props }: { props: MetricComponentProps }) {
           <Skeleton inline className="h-7 w-16 align-middle" />
         ) : empty ? (
           "—"
+        ) : typeof value === "number" && props.format ? (
+          numberFormatter(props.format, props.currency)(value)
         ) : (
           String(value)
         )
@@ -2765,8 +2814,13 @@ function FormComponent({ props }: { props: FormProps }) {
   const themeAttr = useJsonRenderThemeAttr();
   const [submitting, setSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Local files chosen for `kind: "file"` fields; they upload on submit.
+  const [pendingFiles, setPendingFiles] = useState<PendingFiles>({});
+  const upload = useFormFileUploader();
 
   const fields = (props.fields ?? []) as FormField[];
+  // A required file field cannot be filled without agent-fs.
+  const blockedByConnection = upload === null && fields.some((f) => isFileField(f) && f.required);
   const basePath = `/forms/${props.id}`;
   // Read through the reactive `state` snapshot (not `get()`) so a cleared form
   // — `app.mutate` sets `/forms/<id>` to `{}` after a create — re-renders.
@@ -2781,6 +2835,7 @@ function FormComponent({ props }: { props: FormProps }) {
   const submit = async () => {
     const values: Record<string, unknown> = {};
     for (const field of fields) {
+      if (isFileField(field)) continue;
       const value = coerceFieldValue(field, get(`${basePath}/${field.name}`));
       if (field.required && (value === undefined || value === "")) {
         setValidationError(`${field.label ?? field.name} is required`);
@@ -2792,6 +2847,31 @@ function FormComponent({ props }: { props: FormProps }) {
     set(`${basePath}/$error`, null);
     setSubmitting(true);
     try {
+      // Upload pending files before the chain: `$form.<name>` carries their paths.
+      if (fields.some(isFileField)) {
+        const resolved = await resolveFileFields({
+          fields,
+          read: (name) => get(`${basePath}/${name}`),
+          pending: pendingFiles,
+          upload,
+        });
+        for (const [name, value] of Object.entries(resolved.writes)) {
+          set(`${basePath}/${name}`, value);
+        }
+        if (Object.keys(resolved.writes).length > 0) {
+          setPendingFiles((prev) => {
+            const next = { ...prev };
+            for (const name of Object.keys(resolved.writes)) delete next[name];
+            return next;
+          });
+        }
+        if (!resolved.ok) {
+          setValidationError(resolved.error);
+          toast.error(resolved.error);
+          return;
+        }
+        Object.assign(values, resolved.values);
+      }
       const scope = { form: values, state: getSnapshot() };
       let mutated = false;
       for (const binding of props.onSubmit as ActionChain) {
@@ -2847,7 +2927,21 @@ function FormComponent({ props }: { props: FormProps }) {
             htmlFor={inputId}
             required={field.required}
           >
-            {kind === "text" ? (
+            {kind === "file" ? (
+              <FormFileField
+                field={field}
+                inputId={inputId}
+                paths={filePaths(value)}
+                files={pendingFiles[field.name] ?? []}
+                onChange={(next) => {
+                  set(
+                    `${basePath}/${field.name}`,
+                    field.multiple === true ? next.paths : (next.paths[0] ?? null),
+                  );
+                  setPendingFiles((prev) => ({ ...prev, [field.name]: next.files }));
+                }}
+              />
+            ) : kind === "text" ? (
               <Textarea
                 id={inputId}
                 value={value === undefined || value === null ? "" : String(value)}
@@ -2894,7 +2988,7 @@ function FormComponent({ props }: { props: FormProps }) {
         </AlertCallout>
       ) : null}
       <div>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting || blockedByConnection}>
           {submitting ? <Spinner className="size-3.5" /> : null}
           {props.submitLabel ?? "Submit"}
         </Button>
@@ -2943,26 +3037,40 @@ function DrawerComponent({
   props: DrawerComponentProps;
   children: ReactNode;
 }) {
-  const { state } = useStateStore();
-  const [, setSearchParams] = useSearchParams();
   const themeAttr = useJsonRenderThemeAttr();
+  const { open, close } = useRouteParamPanel(props.param);
+  const region = useSplitDetailRegion();
+  const isMobile = useIsMobile();
+  const footer =
+    props.actions && props.actions.length > 0 ? (
+      <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
+    ) : null;
 
-  const value = getByPath(state, `/route/params/${props.param}`);
-  const open = value !== undefined && value !== null && value !== "";
+  // Split: an inline pane in the surface's detail region. Below md, or on a
+  // surface without one, it is the sheet below.
+  const regionSlot = region?.slot;
+  if (props.presentation === "split" && region && regionSlot && isMobile === false) {
+    if (!open) return null;
+    return (
+      <SplitDrawerPane
+        region={{ ...region, slot: regionSlot }}
+        param={props.param}
+        size={props.size ?? "md"}
+        title={props.title}
+        description={props.description}
+        onClose={close}
+        footer={footer}
+      >
+        {children}
+      </SplitDrawerPane>
+    );
+  }
 
   return (
     <Sheet
       open={open}
       onOpenChange={(next) => {
-        if (next) return;
-        setSearchParams(
-          (prev) => {
-            const params = new URLSearchParams(prev);
-            params.delete(props.param);
-            return params;
-          },
-          { replace: true },
-        );
+        if (!next) close();
       }}
     >
       <SheetContent
@@ -2992,11 +3100,63 @@ function DrawerComponent({
           )}
         </SheetHeader>
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+        {footer}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+type DialogComponentProps = InferComponentProps<typeof swarmCatalog, "Dialog">;
+
+const dialogSizeClass: Record<"sm" | "md" | "lg", string> = {
+  sm: "sm:max-w-sm",
+  md: "sm:max-w-lg",
+  lg: "sm:max-w-2xl",
+};
+
+/**
+ * Route-driven modal: the Drawer's open/close contract (`useRouteParamPanel`)
+ * on a centered dialog. Escape, the X and a click outside all clear the param.
+ */
+function DialogComponent({
+  props,
+  children,
+}: {
+  props: DialogComponentProps;
+  children: ReactNode;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const { open, close } = useRouteParamPanel(props.param);
+  const title = props.title ?? "Details";
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close();
+      }}
+    >
+      <DialogContent
+        className={cn(
+          "flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0",
+          dialogSizeClass[props.size ?? "md"],
+        )}
+        data-testid="json-render-dialog"
+        {...themeAttr}
+      >
+        <DialogHeader className="shrink-0 border-b border-border py-3 pl-4 pr-12 text-left">
+          <DialogTitle className="truncate text-sm font-medium">{title}</DialogTitle>
+          {props.description ? (
+            <DialogDescription className="text-xs">{props.description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{`${title} dialog`}</DialogDescription>
+          )}
+        </DialogHeader>
+        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
         {props.actions && props.actions.length > 0 ? (
           <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
         ) : null}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -3129,7 +3289,7 @@ function DetailFieldValue({
       </pre>
     );
   }
-  const text = formatValue(field.kind, value);
+  const text = formatValue(field.kind, value, field.currency);
   if (!text) return <span className="text-muted-foreground">—</span>;
   return <span className="break-words">{text}</span>;
 }
@@ -3233,6 +3393,33 @@ function useRowActionRunner() {
       await executeRef.current({ ...binding, params: resolveScopedParams(binding.params, scope) });
     }
   }, []);
+}
+
+/** `Files` with its `onSelect` chain run with `$row` = the clicked entry. */
+function FilesComponent({ props }: { props: FilesProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <FilesView
+      props={props}
+      onSelect={(row) => void runChain(props.onSelect as ActionChain | undefined, { ...row })}
+    />
+  );
+}
+
+/** `Timeline` with its `onSelect` chain run with `$row` / `$rowIndex`. */
+function TimelineComponent({ props }: { props: TimelineProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <TimelineView
+      props={props}
+      onSelect={(row, index) =>
+        void runChain(props.onSelect as ActionChain | undefined, row, index)
+      }
+      renderStatus={(value, tones) => (
+        <StatusCell value={value} tones={tones as Record<string, BadgeTone> | undefined} />
+      )}
+    />
+  );
 }
 
 function BlockSkeleton({ testId }: { testId: string }) {
@@ -4030,6 +4217,7 @@ const iconToneClass: Record<
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
   Drawer: ({ props, children }) => <DrawerComponent props={props}>{children}</DrawerComponent>,
+  Dialog: ({ props, children }) => <DialogComponent props={props}>{children}</DialogComponent>,
   DetailList: ({ props }) => <DetailListComponent props={props} />,
   CardGrid: ({ props }) => <CardGridComponent props={props} />,
   Stack: ({ props, children }) => <StackComponent props={props}>{children}</StackComponent>,
@@ -4037,6 +4225,9 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Split: ({ props, children }) => <SplitComponent props={props}>{children}</SplitComponent>,
   Divider: ({ props }) => <DividerComponent props={props} />,
   Tabs: ({ props, children }) => <TabsComponent props={props}>{children}</TabsComponent>,
+  Accordion: ({ props, children }) => (
+    <AccordionComponent props={props as AccordionProps}>{children}</AccordionComponent>
+  ),
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,
@@ -4158,9 +4349,14 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
   Kanban: ({ props }) => <KanbanComponent props={props} />,
+  Approval: ({ props }) => <ApprovalComponent props={props} />,
   Calendar: ({ props }) => <CalendarComponent props={props} />,
   ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
   Tree: ({ props }) => <TreeComponent props={props} />,
+  Files: ({ props }) => <FilesComponent props={props} />,
+  File: ({ props }) => <FileView props={props} />,
+  DateRange: ({ props }) => <DateRangeComponent props={props} />,
+  Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
 };

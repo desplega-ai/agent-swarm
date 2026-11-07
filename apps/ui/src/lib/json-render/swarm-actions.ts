@@ -12,6 +12,7 @@ import type { z } from "zod";
 import { getConfig } from "@/lib/config";
 import { makeSwarmSDK, type SwarmSdkMethod } from "@/lib/swarm-sdk";
 import type { swarmCallActionSchema, swarmSdkActionSchema } from "./catalog";
+import { haltChain } from "./chain-halt";
 
 export type SwarmSdkActionParams = z.infer<typeof swarmSdkActionSchema>;
 export type SwarmCallActionParams = z.infer<typeof swarmCallActionSchema>;
@@ -33,14 +34,22 @@ export interface SwarmActionCallbacks {
   /** Test-injection: override `fetch` so dispatch is mockable. */
   fetchImpl?: typeof fetch;
   onResponse: (result: unknown) => void;
+  /** Clears (null) or sets the surface's error banner. */
   onError: (message: string | null) => void;
+  /**
+   * Reports a failed call before the chain halts. Defaults to `onError`; the
+   * app runtime passes an error toast instead.
+   */
+  onFailure?: (message: string) => void;
 }
 
 export function createSwarmActionHandlers({
   fetchImpl,
   onResponse,
   onError,
+  onFailure,
 }: SwarmActionCallbacks) {
+  const fail = (message: string): never => haltChain(message, onFailure ?? onError);
   return {
     "swarm.sdk": async (params: SwarmSdkActionParams | undefined) => {
       onError(null);
@@ -50,39 +59,40 @@ export function createSwarmActionHandlers({
         getHeaders: getBearerHeaders,
         fetch: fetchImpl,
       });
+      let result: unknown;
       try {
-        const result = await sdk.invoke(params.sdk as SwarmSdkMethod, params.args ?? {});
-        onResponse(result);
+        result = await sdk.invoke(params.sdk as SwarmSdkMethod, params.args ?? {});
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
+        fail(e instanceof Error ? e.message : String(e));
       }
+      onResponse(result);
     },
     "swarm.call": async (params: SwarmCallActionParams | undefined) => {
       onError(null);
       if (!params) return;
+      let res: Response;
+      let text: string;
       try {
         const f = fetchImpl ?? fetch.bind(globalThis);
-        const res = await f(`${getAbsoluteApiUrl()}${params.endpoint}`, {
+        res = await f(`${getAbsoluteApiUrl()}${params.endpoint}`, {
           method: params.method,
           headers: getBearerHeaders(),
           body: params.body ? JSON.stringify(params.body) : undefined,
         });
-        const text = await res.text();
-        let parsedBody: unknown = text;
-        if (text) {
-          try {
-            parsedBody = JSON.parse(text);
-          } catch {
-            /* keep as text */
-          }
-        }
-        onResponse({ status: res.status, body: parsedBody });
-        if (!res.ok) {
-          onError(`swarm.call ${params.method} ${params.endpoint}: ${res.status}`);
-        }
+        text = await res.text();
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
+        return fail(e instanceof Error ? e.message : String(e));
       }
+      let parsedBody: unknown = text;
+      if (text) {
+        try {
+          parsedBody = JSON.parse(text);
+        } catch {
+          /* keep as text */
+        }
+      }
+      onResponse({ status: res.status, body: parsedBody });
+      if (!res.ok) fail(`swarm.call ${params.method} ${params.endpoint}: ${res.status}`);
     },
   };
 }

@@ -86,6 +86,8 @@ export const UI_STATE_COMPONENTS: ReadonlySet<string> = new Set([
   "SchemaForm",
   "SessionThread",
   "Table",
+  "Accordion",
+  "DateRange",
 ]);
 
 /** Components whose `props.id` roots `/forms/<id>/…` interaction state. */

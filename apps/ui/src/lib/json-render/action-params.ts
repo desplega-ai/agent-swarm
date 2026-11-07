@@ -30,7 +30,8 @@
  *     previous value.
  *   - `{ $state: "/path" }`                 — json-render state read
  *   - `{ $chain: "key" }` / `{ $chain: "" }`— chain-derived value (e.g. `leafTaskId` /
- *     `newTaskId` set by a component that runs a task chain) / whole chain object.
+ *     `newTaskId` set by a component that runs a task chain, or Approval's `status` /
+ *     `responses` / `resolvedBy`) / whole chain object.
  *     Explicit absence: a chain-running component publishes every key it knows,
  *     `null` when there is no value yet. A key that is present and `null` (or
  *     `undefined`) resolves to `undefined`, and an object entry holding it is
@@ -53,13 +54,14 @@ export interface ParamScope {
   /** Live json-render state snapshot, for `$state` reads. */
   state?: Record<string, unknown>;
   /**
-   * Chain-derived values (current leaf / newly created task id) published by a
-   * component that runs a task chain — target of `$chain`. Table/Form dispatch
-   * scopes leave it unset, and a `$chain` they cannot resolve stays a sentinel.
-   * A key that is present with `null` means "no value yet" and resolves to
-   * `undefined` (see `resolveScopedValue`).
+   * Chain-derived values published by the component that runs the chain:
+   * a task chain's current leaf / newly created task id, or Approval's
+   * `{ status, responses, resolvedBy }` — target of `$chain`. Table/Form
+   * dispatch scopes leave it unset, and a `$chain` they cannot resolve stays a
+   * sentinel. A key that is present with `null` means "no value yet" and
+   * resolves to `undefined` (see `resolveScopedValue`).
    */
-  chain?: { leafTaskId?: string | null; newTaskId?: string | null };
+  chain?: Record<string, unknown>;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -102,8 +104,13 @@ export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
     if (scope.chain === undefined) return value;
     if (value.$chain === "") return scope.chain;
     const chain: Record<string, unknown> = scope.chain;
-    if (!Object.hasOwn(chain, value.$chain)) return value;
-    return chain[value.$chain] ?? undefined;
+    if (Object.hasOwn(chain, value.$chain)) return chain[value.$chain] ?? undefined;
+    // A nested path under a published key (Approval's `responses/<questionId>`)
+    // reads into it; a missing leaf keeps the sentinel like a missing key.
+    const head = value.$chain.replace(/^\//, "").split("/")[0] ?? "";
+    if (!value.$chain.includes("/") || !Object.hasOwn(chain, head)) return value;
+    const nested = getByPath(chain, value.$chain);
+    return nested === undefined ? value : nested;
   }
 
   const out: Record<string, unknown> = {};
