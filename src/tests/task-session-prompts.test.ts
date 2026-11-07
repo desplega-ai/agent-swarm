@@ -130,3 +130,40 @@ describe("buildTaskSessionPrompts", () => {
     expect(prompt).toBe("/work-on-task ccc");
   });
 });
+
+describe("buildTaskSessionPrompts composition parts", () => {
+  const promptParts = (kind: string) => kind === "task_prompt" || kind === "memories";
+  const systemParts = (kind: string) => !promptParts(kind) && kind !== "skills_listing";
+
+  test("parts cover the system prompt and the task prompt exactly", async () => {
+    const memories = "\n\n### Relevant Past Knowledge\n\n- a memory";
+    const result = await buildTaskSessionPrompts({
+      basePromptArgs: agentArgs("claude"),
+      additionalSystemPrompt: "Operator note: be careful.",
+      taskPrompt: `/work-on-task aaa${memories}`,
+      memoryChars: memories.length,
+      context: sessionA,
+    });
+    const sum = (filter: (kind: string) => boolean) =>
+      result.parts.filter((part) => filter(part.kind)).reduce((n, part) => n + part.chars, 0);
+
+    expect(sum(systemParts)).toBe(result.systemPrompt.length);
+    expect(sum(promptParts)).toBe(result.prompt.length);
+    expect(result.parts.find((part) => part.kind === "operator_prompt")?.chars).toBe(
+      "\n\nOperator note: be careful.".length,
+    );
+    expect(result.parts.find((part) => part.kind === "memories")?.chars).toBe(memories.length);
+  });
+
+  test("no operator or memories part when there are none", async () => {
+    const result = await buildTaskSessionPrompts({
+      basePromptArgs: agentArgs("codex"),
+      taskPrompt: "task",
+      context: sessionC,
+    });
+    const kinds = result.parts.map((part) => part.kind);
+    expect(kinds).not.toContain("operator_prompt");
+    expect(kinds).not.toContain("memories");
+    expect(result.parts.at(-1)).toMatchObject({ kind: "task_prompt", chars: "task".length });
+  });
+});

@@ -21,7 +21,7 @@
 
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
-import type { ProviderName } from "../types";
+import type { ProviderName, RequestCompositionPartInput } from "../types";
 import { resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
@@ -188,7 +188,21 @@ function promptFlags(args: Pick<BasePromptArgs, "traits" | "provider" | "scripts
   };
 }
 
-export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
+/** Collapse block seams to one blank line, as the final prompt does. */
+const collapseSeams = (text: string): string => text.replace(/\n{3,}/g, "\n\n");
+
+export const getBasePrompt = async (args: BasePromptArgs): Promise<string> =>
+  (await getBasePromptWithParts(args)).prompt;
+
+/**
+ * The base prompt plus the size of each piece in it, for the request
+ * composition manifest. Each part's chars are the growth of the collapsed
+ * prompt, so the parts sum to `prompt.length` exactly. The prompt text is the
+ * same one `getBasePrompt` returns.
+ */
+export const getBasePromptWithParts = async (
+  args: BasePromptArgs,
+): Promise<{ prompt: string; parts: RequestCompositionPartInput[] }> => {
   const { role, agentId, traits } = args;
   const { hasMcp, hasToolSearch, hasLocalEnv, nativeSkillDiscovery, provider, scriptsOnlyMode } =
     promptFlags(args);
@@ -234,11 +248,32 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
+  const parts: RequestCompositionPartInput[] = [];
+  let measured = 0;
+  // Size of everything appended since the last call, after seam collapsing.
+  const grown = (): number => {
+    const length = collapseSeams(prompt).length;
+    const delta = length - measured;
+    measured = length;
+    return delta;
+  };
+  const section = (id: string, chars: number): void => {
+    parts.push({ kind: "system_section", id, label: id, chars });
+  };
+  // The persona counts only as much as it adds to the rendered composite: an
+  // override that drops {{persona}} renders none of it, one that moves it
+  // elsewhere still counts it. The sections come from the render without it.
+  const sectionsResult = persona
+    ? await resolveTemplateAsync(compositeEventType, { ...vars, persona: "" })
+    : compositeResult;
+  parts.push(...compositeParts(compositeEventType, sectionsResult, grown()));
+
   // Experimental scripts-only MCP surface (code-mode): named swarm tools are
   // not registered, so tell the agent everything goes through script-run.
   if (scriptsOnlyMode) {
     const scriptsOnlyResult = await resolveTemplateAsync("system.agent.scripts_only_mode", {});
     prompt += `\n${scriptsOnlyResult.text}`;
+    section("system.agent.scripts_only_mode", grown());
   }
 
   // Server-side capability flags gate which MCP tool groups the API server
@@ -251,12 +286,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   // agent-fs CLI needs a local environment with AGENT_FS_API_URL set.
   if (hasMcp && serverHasCapability("pages", true)) {
     const agentFsConfigured = hasLocalEnv && Boolean(process.env.AGENT_FS_API_URL);
+    const outputsEvent = agentFsConfigured
+      ? "system.agent.outputs"
+      : "system.agent.outputs.no_agent_fs";
     const outputsResult = await resolveTemplateAsync(
-      agentFsConfigured ? "system.agent.outputs" : "system.agent.outputs.no_agent_fs",
+      outputsEvent,
       // Unset AGENT_FS_LINK_TARGET keeps the literal the agent expands in its shell.
       { fileLinkBase: resolveAgentFsLinkBase("prompt") ?? `\${AGENT_FS_LIVE_URL}` },
     );
     prompt += outputsResult.text;
+    section(outputsEvent, grown());
   }
 
   // H. Slack. One block for both roles; the scripts-only variant covers Slack
@@ -265,6 +304,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
+    section("system.agent.slack", grown());
   }
 
   if (
@@ -278,6 +318,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   ) {
     const steeringResult = await resolveTemplateAsync("system.agent.steering", {});
     prompt += steeringResult.text;
+    section("system.agent.steering", grown());
   }
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
@@ -297,6 +338,13 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       }),
     );
     prompt += toolsResult.text;
+    // The discovery line rides inside tools_skills as a variable.
+    const toolsChars = grown();
+    const discoveryChars = toolsResult.text.includes(discoveryResult.text)
+      ? Math.min(discoveryResult.text.length, toolsChars)
+      : 0;
+    if (discoveryChars > 0) section(discoveryEvent, discoveryChars);
+    section("system.agent.tools_skills", toolsChars - discoveryChars);
 
     // Lead docs pointer: only when the lead has the `swarm-docs` skill. The
     // skill list is unknown on claude-managed (the cloud sandbox owns skill
@@ -304,6 +352,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     if (role === "lead" && hasSwarmDocsSkill(args.skillsSummary)) {
       const docsResult = await resolveTemplateAsync("system.agent.lead.docs", {});
       prompt += docsResult.text;
+      section("system.agent.lead.docs", grown());
     }
   }
 
@@ -326,11 +375,86 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       claudeMdSourcePath(provider),
       budget,
     );
+    const claudeMdChars = grown();
+    if (claudeMdChars > 0) {
+      parts.push({
+        kind: "claude_md",
+        id: "claude_md",
+        label: "CLAUDE.md (agent notes)",
+        chars: claudeMdChars,
+      });
+    }
+  }
+
+  // Claude and pi list installed skills from their local skills tree, outside
+  // our prompt. Codex and opencode get the list inside tools_skills, already
+  // counted above; a session with no local tree reaches skills through MCP.
+  if (hasMcp && hasLocalEnv && nativeSkillDiscovery && args.skillsSummary?.length) {
+    parts.push({
+      kind: "skills_listing",
+      id: "skills_listing",
+      label: "skills listing (harness-injected)",
+      chars: args.skillsSummary.reduce(
+        (sum, skill) => sum + `- ${skill.name}: ${skill.description}\n`.length,
+        0,
+      ),
+      fidelity: "estimate",
+    });
   }
 
   // Blocks start and end with a newline; collapse the seams to one blank line.
-  return prompt.replace(/\n{3,}/g, "\n\n");
+  return { prompt: collapseSeams(prompt), parts: parts.filter((part) => part.chars > 0) };
 };
+
+/**
+ * Split the composite into the persona and its referenced templates.
+ * `sections` is the composite rendered with an empty persona, so the persona
+ * is the difference in collapsed length and no section is charged for it. The
+ * composite's own glue entry absorbs the newlines seam collapsing removed, so
+ * the parts sum to `total`, the composite's collapsed length.
+ */
+function compositeParts(
+  compositeEventType: string,
+  sections: { text: string; segments?: { templateId: string; chars: number }[] },
+  total: number,
+): RequestCompositionPartInput[] {
+  const personaChars = Math.max(0, total - collapseSeams(sections.text).length);
+  const sectionsTotal = total - personaChars;
+  const entries = (
+    sections.segments ?? [{ templateId: compositeEventType, chars: sectionsTotal }]
+  ).map((segment) => ({ ...segment }));
+  // Glue first (the seam newlines live there), then the largest sections.
+  const glue = entries.filter((entry) => entry.templateId === compositeEventType);
+  const rest = entries
+    .filter((entry) => entry.templateId !== compositeEventType)
+    .sort((a, b) => b.chars - a.chars);
+  let excess = entries.reduce((sum, entry) => sum + entry.chars, 0) - sectionsTotal;
+  for (const entry of [...glue, ...rest]) {
+    if (excess === 0) break;
+    const take = excess > 0 ? Math.min(excess, entry.chars) : excess;
+    entry.chars -= take;
+    excess -= take;
+  }
+
+  const parts: RequestCompositionPartInput[] = [];
+  if (personaChars > 0) {
+    parts.push({
+      kind: "persona",
+      id: "persona",
+      label: "persona (description, SOUL.md, IDENTITY.md)",
+      chars: personaChars,
+    });
+  }
+  for (const entry of entries) {
+    parts.push({
+      kind: "system_section",
+      id: entry.templateId,
+      label: entry.templateId,
+      chars: entry.chars,
+    });
+  }
+  return parts;
+}
 
 /**
  * Per-task context that used to close the system prompt: the repository block

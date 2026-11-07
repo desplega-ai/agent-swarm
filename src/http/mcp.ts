@@ -214,50 +214,9 @@ export async function handleMcp(
         }
       };
 
-      const configs = await getResolvedConfig(agentId);
-      const configValue = configs.find((config) => config.key === "SCRIPTS_ONLY_MCP")?.value;
-      const preloadEnabled = parseEnvFlag(
-        configs.find((config) => config.key === "TASK_TOOL_PRELOAD_ENABLED")?.value ??
-          process.env.TASK_TOOL_PRELOAD_ENABLED,
-        true,
-      );
-      let preloadedTools: string[] = [];
       const sourceTaskId = headerValue(req.headers["x-source-task-id"]);
       const sourceTask = sourceTaskId ? await getTaskById(sourceTaskId) : undefined;
-      // A session bound to a non-chat task never sees chat-reply. Without the
-      // header the tool stays, and resolves the agent's current task itself.
-      const excludedTools =
-        sourceTask && !isChatSdkTask(sourceTask) ? [...CHAT_TASK_ONLY_TOOLS] : [];
-      if (preloadEnabled) {
-        // Never select a manifest using another agent's task. Session-token
-        // identity is also checked above, before any MCP session is created.
-        if (sourceTask?.agentId === agentId) {
-          const manifestValue =
-            configs.find((config) => config.key === "TASK_TOOL_MANIFESTS")?.value ??
-            process.env.TASK_TOOL_MANIFESTS ??
-            "{}";
-          try {
-            preloadedTools = selectTaskTools(parseTaskToolManifest(manifestValue), sourceTask);
-          } catch {
-            // An invalid deployment value must not prevent tool discovery.
-            // Avoid logging its contents, which may contain misfiled secrets.
-            console.warn("[MCP] Invalid TASK_TOOL_MANIFESTS; using ordinary tool discovery");
-          }
-        }
-      }
-      const server = await createServer({
-        preloadedTools,
-        excludedTools,
-        // Agent row, then global row, then deployment env. A blank agent row
-        // resolves to "unset" for that agent.
-        enabledTools:
-          configs.find((config) => config.key === "SWARM_ENABLED_TOOLS")?.value ??
-          process.env.SWARM_ENABLED_TOOLS,
-        scriptsOnly: resolveScriptsOnlyMode({
-          env: process.env.SCRIPTS_ONLY_MCP,
-          configValue,
-        }),
-      });
+      const server = await createServer(await resolveMcpSessionOptions(agentId, sourceTask));
       await server.connect(transport);
     } else {
       return respondNoMcpSession(res, sessionId);
@@ -280,4 +239,61 @@ export async function handleMcp(
   res.writeHead(405);
   res.end("Method not allowed");
   return true;
+}
+
+export type McpSessionOptions = {
+  preloadedTools: string[];
+  excludedTools: string[];
+  enabledTools: string | undefined;
+  scriptsOnly: boolean;
+};
+
+/**
+ * The `createServer` inputs for one agent's MCP session, all resolved
+ * server-side: config rows, the API's env, and the session's source task.
+ * The request-composition tool estimate reuses this to measure the same
+ * surface the agent's harness sees.
+ */
+export async function resolveMcpSessionOptions(
+  agentId: string,
+  sourceTask: Awaited<ReturnType<typeof getTaskById>> | undefined,
+): Promise<McpSessionOptions> {
+  const configs = await getResolvedConfig(agentId);
+  const configValue = configs.find((config) => config.key === "SCRIPTS_ONLY_MCP")?.value;
+  const preloadEnabled = parseEnvFlag(
+    configs.find((config) => config.key === "TASK_TOOL_PRELOAD_ENABLED")?.value ??
+      process.env.TASK_TOOL_PRELOAD_ENABLED,
+    true,
+  );
+  let preloadedTools: string[] = [];
+  // A session bound to a non-chat task never sees chat-reply. Without the
+  // header the tool stays, and resolves the agent's current task itself.
+  const excludedTools = sourceTask && !isChatSdkTask(sourceTask) ? [...CHAT_TASK_ONLY_TOOLS] : [];
+  if (preloadEnabled) {
+    // Never select a manifest using another agent's task. Session-token
+    // identity is also checked by handleMcp, before any MCP session is created.
+    if (sourceTask?.agentId === agentId) {
+      const manifestValue =
+        configs.find((config) => config.key === "TASK_TOOL_MANIFESTS")?.value ??
+        process.env.TASK_TOOL_MANIFESTS ??
+        "{}";
+      try {
+        preloadedTools = selectTaskTools(parseTaskToolManifest(manifestValue), sourceTask);
+      } catch {
+        // An invalid deployment value must not prevent tool discovery.
+        // Avoid logging its contents, which may contain misfiled secrets.
+        console.warn("[MCP] Invalid TASK_TOOL_MANIFESTS; using ordinary tool discovery");
+      }
+    }
+  }
+  return {
+    preloadedTools,
+    excludedTools,
+    // Agent row, then global row, then deployment env. A blank agent row
+    // resolves to "unset" for that agent.
+    enabledTools:
+      configs.find((config) => config.key === "SWARM_ENABLED_TOOLS")?.value ??
+      process.env.SWARM_ENABLED_TOOLS,
+    scriptsOnly: resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP, configValue }),
+  };
 }
