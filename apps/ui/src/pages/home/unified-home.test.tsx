@@ -60,7 +60,7 @@ test("nudges and metrics on top; main column: Needs you, activity; side: Favorit
     "favorites",
     "checklist",
   ]);
-  expect(html).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
+  expect(html).toContain("@5xl/home:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
 });
 
 test("an older API gets the notice in the timeline slot, the widgets stay", () => {

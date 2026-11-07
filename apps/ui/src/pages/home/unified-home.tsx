@@ -3,12 +3,14 @@
  * home surface; there is no `/old-home` or `/old-dashboard`. To change what
  * `/` shows, change this file.
  *
- * The admin nudge banner and the metrics strip on top, then two columns from
- * `xl`. The main column: Needs you (up to half the height, scrolling inside;
- * one quiet line when nothing waits) over the swarm activity, which takes the
- * rest. The side column: Favorites, then "Getting started" (Set up, then Get
- * the swarm working). From `xl` the strip stays put and the columns scroll on
- * their own; below it the page scrolls as one column.
+ * The admin nudge banner and the metrics strip on top, then two columns. The
+ * main column: Needs you (up to half the height, scrolling inside; one quiet
+ * line when nothing waits) over the swarm activity, which takes the rest. The
+ * side column: Favorites, then "Getting started" (Set up, then Get the swarm
+ * working). Breakpoints follow the page's own width (container `home`), so a
+ * wide side panel narrows Home like a narrow window: from `@5xl` the strip
+ * stays put and the columns scroll on their own; below it the page scrolls as
+ * one column.
  *
  * The page owns its scroll: from `lg` the layout's `main` does not scroll.
  *
@@ -35,11 +37,11 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfig } from "@/hooks/use-config";
 
-/** The side column from `xl`: it scrolls on its own under the fixed strip. */
+/** The side column from `@5xl` (container `home`): it scrolls on its own under the fixed strip. */
 const SIDE_COLUMN =
-  "flex min-w-0 flex-col gap-4 xl:min-h-0 xl:overflow-y-auto xl:pb-6 xl:[scrollbar-gutter:stable] [&>*]:shrink-0";
-/** The main column from `xl`: Needs you and the activity share its height. */
-const MAIN_COLUMN = "flex min-w-0 flex-col gap-4 xl:min-h-0 xl:pb-6";
+  "flex min-w-0 flex-col gap-4 @5xl/home:min-h-0 @5xl/home:overflow-y-auto @5xl/home:pb-6 @5xl/home:[scrollbar-gutter:stable] [&>*]:shrink-0";
+/** The main column from `@5xl` (container `home`): Needs you and the activity share its height. */
+const MAIN_COLUMN = "flex min-w-0 flex-col gap-4 @5xl/home:min-h-0 @5xl/home:pb-6";
 
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
@@ -53,14 +55,14 @@ export function UnifiedHome() {
   const versionResolved = currentVersion !== null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto xl:overflow-hidden">
-      <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 xl:min-h-0 xl:flex-1 xl:pb-0">
+    <div className="@container/home flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:pb-0">
         <DashboardNudges />
         <HomeMetrics className="shrink-0" />
-        <div className="grid grid-cols-1 gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:grid-rows-[minmax(0,1fr)]">
+        <div className="grid grid-cols-1 gap-4 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] @5xl/home:grid-rows-[minmax(0,1fr)]">
           <div className={MAIN_COLUMN}>
-            <NeedsYou className="shrink-0 xl:max-h-[50%] xl:min-h-0" />
-            <div className="flex min-h-0 flex-col xl:flex-1">
+            <NeedsYou className="shrink-0 @5xl/home:max-h-[50%] @5xl/home:min-h-0" />
+            <div className="flex min-h-0 flex-col @5xl/home:flex-1">
               <TimelineRegion
                 versionResolved={versionResolved}
                 supported={supported}
@@ -118,9 +120,9 @@ function HomeActivity() {
     />
   );
   return view === "density" ? (
-    <ActivityDensity viewToggle={toggle} className="xl:min-h-0 xl:flex-1" />
+    <ActivityDensity viewToggle={toggle} className="@5xl/home:min-h-0 @5xl/home:flex-1" />
   ) : (
-    <div className="h-80 shrink-0 md:h-[28rem] xl:h-auto xl:min-h-[20rem] xl:flex-1">
+    <div className="h-80 shrink-0 md:h-[28rem] @5xl/home:h-auto @5xl/home:min-h-[20rem] @5xl/home:flex-1">
       <AgentActivityTimeline viewToggle={toggle} />
     </div>
   );

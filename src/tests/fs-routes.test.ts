@@ -676,13 +676,29 @@ describe("personal agent-fs identity and keys", () => {
     // Without AGENT_FS_PUBLIC_URL the fragment carries the dashboard's URL: the API proxy, else agent-fs itself.
     delete process.env.AGENT_FS_PUBLIC_URL;
     process.env.AGENT_FS_PROXY = "false";
-    const live = await continueTo("https://files.acme.test/file/x.md");
+    const live = await continueTo("https://files.acme.test/files");
     expect(live.status).toBe(200);
     expect(await live.json()).toEqual({
-      redirectUrl: `https://files.acme.test/file/x.md#key=${mintedKey}&apiUrl=${encodeURIComponent(process.env.AGENT_FS_API_URL!)}`,
+      redirectUrl: `https://files.acme.test/files#key=${mintedKey}&apiUrl=${encodeURIComponent(process.env.AGENT_FS_API_URL!)}`,
     });
     // AGENT_FS_APP_URL is the dashboard agent-fs opens, never a key target.
     expect((await continueTo("http://localhost:7433/file/x.md")).status).toBe(400);
+  });
+
+  test("continue sends a key only to the live app's own routes", async () => {
+    // The live origin also serves user content; its scripts could read the fragment.
+    for (const path of [
+      "/site/abc/",
+      "/share/tok",
+      "/orgs/x/drives/y/files/raw/a.html",
+      "/api/anything",
+      "/file/x.md",
+    ]) {
+      const response = await continueTo(`https://live.agent-fs.dev${path}`);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_return_to" });
+    }
+    expect(requests).toHaveLength(0);
   });
 
   test("continue refuses a link for another agent-fs org before it mints", async () => {
@@ -713,7 +729,7 @@ describe("personal agent-fs identity and keys", () => {
   });
 
   test("continue needs a user, fs.join.own, a ready account, and a new agent-fs", async () => {
-    const target = "https://live.agent-fs.dev/file/x.md";
+    const target = "https://live.agent-fs.dev/files";
     expect(
       (
         await operatorFetch("/api/fs/continue", {
@@ -741,7 +757,7 @@ describe("personal agent-fs identity and keys", () => {
   });
 
   test("the eleventh continue per minute is limited per user", async () => {
-    const target = "https://live.agent-fs.dev/file/x.md";
+    const target = "https://live.agent-fs.dev/files";
     for (let i = 0; i < 10; i++) expect((await continueTo(target)).status).toBe(200);
     expect((await continueTo(target)).status).toBe(429);
     expect((await createKey()).status).toBe(201);
@@ -897,7 +913,7 @@ describe("personal agent-fs identity and keys", () => {
     expect((await operatorFetch("/api/fs/me", { headers: picked })).status).toBe(403);
     const mint = { method: "POST", headers: picked, body: JSON.stringify({ label: "picked" }) };
     expect((await operatorFetch("/api/fs/keys", mint)).status).toBe(403);
-    const resume = JSON.stringify({ returnTo: "https://live.agent-fs.dev/file/x.md" });
+    const resume = JSON.stringify({ returnTo: "https://live.agent-fs.dev/files" });
     expect(
       (await operatorFetch("/api/fs/continue", { method: "POST", headers: picked, body: resume }))
         .status,

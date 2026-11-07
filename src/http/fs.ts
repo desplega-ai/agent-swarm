@@ -175,6 +175,21 @@ function allowedReturnOrigin(): string | null {
  * the org in `/<view>/~/<orgId>/...` (`/file`, `/detail`, `/page`, `/sql`,
  * `/members`) and in `/orgs/<orgId>/...`.
  */
+/**
+ * The live app's own routes, the only paths a minted key may be sent to. The
+ * live origin also serves user content (`/site/...`, `/share/...`, raw files),
+ * whose scripts could read the fragment, so anything else is refused. Mirrors
+ * `isAppReturnPath` in agent-fs `live/src/lib/key-handoff.ts`, plus the root
+ * and the account pages the sign-in screen returns to.
+ */
+const LIVE_APP_PATH =
+  /^\/(?:|credentials|keys|files|(?:file|detail|page)\/~\/[^/]+\/[^/]+(?:\/.*)?|(?:sql|members|shares|webhooks)\/~\/[^/]+\/[^/]+\/?|orgs\/[^/]+\/files(?:\/.*)?)$/;
+
+/** True when `target` is one of the live app's own routes (see `LIVE_APP_PATH`). */
+export function isLiveAppReturnPath(target: URL): boolean {
+  return LIVE_APP_PATH.test(target.pathname);
+}
+
 export function liveAppOrgId(target: URL): string | null {
   const segments = target.pathname.split("/").slice(1);
   const raw = segments[1] === "~" ? segments[2] : segments[0] === "orgs" ? segments[1] : undefined;
@@ -581,7 +596,7 @@ export async function handleFs(
       return true;
     }
     const target = new URL(parsed.body.returnTo);
-    if (target.origin !== allowedReturnOrigin()) {
+    if (target.origin !== allowedReturnOrigin() || !isLiveAppReturnPath(target)) {
       jsonError(res, "invalid_return_to", 400);
       return true;
     }

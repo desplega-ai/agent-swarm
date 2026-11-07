@@ -9,7 +9,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import { Clock, File, FolderOpen, Globe, Plus, Search, Star, Workflow } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFavorites } from "@/api/hooks/use-favorites";
 import { usePage } from "@/api/hooks/use-pages";
@@ -51,6 +51,10 @@ const FAVORITES_SHOWN = 3;
 /** Past this many, the open list gets a search field. */
 const SEARCH_FROM = 6;
 
+/** Each row reports the name it shows, so the search matches what the user reads. */
+const ReportLabel = createContext<((key: string, label: string) => void) | null>(null);
+const RowKey = createContext("");
+
 /** The seeded prompt of "New use case": the Lead plans it with you. */
 export const NEW_USE_CASE_HREF = `/sessions?seed=${encodeURIComponent(
   "Help me set up a new use case: what it should do, how often it runs, and where its outputs go.",
@@ -70,13 +74,21 @@ export function FavoritesView({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The names the rows resolved (page titles, workflow and schedule names, group labels).
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const reportLabel = useCallback(
+    (key: string, label: string) =>
+      setLabels((prev) => (prev[key] === label ? prev : { ...prev, [key]: label })),
+    [],
+  );
   const q = query.trim().toLowerCase();
   const matching = q
-    ? favorites.filter((favorite) =>
-        `${favorite.itemId} ${favoriteKind(favorite.itemType, favorite.itemId)}`
+    ? favorites.filter((favorite) => {
+        const key = `${favorite.itemType}:${favorite.itemId}`;
+        return `${labels[key] ?? ""} ${favorite.itemId} ${favoriteKind(favorite.itemType, favorite.itemId)}`
           .toLowerCase()
-          .includes(q),
-      )
+          .includes(q);
+      })
     : favorites;
   const shown = open ? matching : favorites.slice(0, initialLimit);
   const hidden = favorites.length - initialLimit;
@@ -138,11 +150,15 @@ export function FavoritesView({
             {open && shown.length === 0 ? (
               <li className="px-4 py-3 text-sm text-muted-foreground">No favorite matches.</li>
             ) : null}
-            {shown.map((favorite) => (
-              <li key={`${favorite.itemType}:${favorite.itemId}`}>
-                <FavoriteRow favorite={favorite} />
-              </li>
-            ))}
+            <ReportLabel.Provider value={reportLabel}>
+              {shown.map((favorite) => (
+                <li key={`${favorite.itemType}:${favorite.itemId}`}>
+                  <RowKey.Provider value={`${favorite.itemType}:${favorite.itemId}`}>
+                    <FavoriteRow favorite={favorite} />
+                  </RowKey.Provider>
+                </li>
+              ))}
+            </ReportLabel.Provider>
           </ul>
         )}
       </SectionBody>
@@ -275,6 +291,11 @@ function Row({
   mono?: boolean;
   muted?: boolean;
 }) {
+  const report = useContext(ReportLabel);
+  const rowKey = useContext(RowKey);
+  useEffect(() => {
+    if (report && rowKey) report(rowKey, title);
+  }, [report, rowKey, title]);
   const body = (
     <>
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
