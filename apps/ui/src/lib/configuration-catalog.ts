@@ -1146,6 +1146,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "UI_SPEC_ENABLED",
+        label: "Rich result cards",
+        description:
+          "Let agents attach a json-render card (uiSpec) to a task result, rendered on the Slack outcome card and in the session view. Agents get the rich-card prompt section. Off: store-progress ignores uiSpec, Slack and text-only surfaces skip the card, and the section is dropped.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_ACTIONS_ENABLED",
+        label: "Rich card action buttons",
+        description:
+          "Allow Button elements in result cards, each naming a follow-up action the card declares. Requires UI_SPEC_ENABLED. Off refuses a card with a Button; LinkButton always works.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "SLACK_TASK_WATCHER_INTERVAL_MS",
         label: "Task watcher interval",
         description:
