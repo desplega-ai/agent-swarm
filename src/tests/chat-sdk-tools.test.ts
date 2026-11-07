@@ -228,6 +228,30 @@ describe("chat-reply", () => {
       allow_sending_without_reply: true,
     });
   });
+  test("a card-only reply posts the card to the task's thread", async () => {
+    const task = await createTaskExtended("a chat task with a card", {
+      agentId: worker.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:991003"),
+    });
+    const card = {
+      root: "card",
+      elements: { card: { type: "Card", props: { title: "Weekly deploys" }, children: [] } },
+    };
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { card },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    const sends = harness.mock.calls.filter(
+      (call) =>
+        /^send(Rich)?Message$/.test(call.method) &&
+        String((call.body as { chat_id?: unknown }).chat_id) === "991003",
+    );
+    expect(sends).toHaveLength(1);
+    expect(JSON.stringify(sends[0]?.body)).toContain("Weekly deploys");
+  });
 });
 
 describe("register-chat-channel", () => {
@@ -316,6 +340,60 @@ describe("chat tool permissions", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.threadId).toBe("telegram:991010");
     expect(sendsTo("991010")).toHaveLength(1);
+  });
+
+  const card = {
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Deploy report" }, children: ["fields"] },
+      fields: { type: "Fields", props: {}, children: ["status"] },
+      status: { type: "Field", props: { label: "Status", value: "green" }, children: [] },
+    },
+  };
+
+  test("chat-post sends a card after the text, as its own message", async () => {
+    const result = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991011", text: "Deploy done.", card },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    const sends = sendsTo("991011");
+    expect(sends).toHaveLength(2);
+    expect(JSON.stringify(sends[0]?.body)).toContain("Deploy done.");
+    expect(JSON.stringify(sends[1]?.body)).toContain("Deploy report");
+    expect(JSON.stringify(sends[1]?.body)).toContain("green");
+  });
+
+  test("chat-post sends a card alone, and refuses an invalid one before sending", async () => {
+    const alone = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991012", card },
+    );
+    expect(alone.structuredContent.success).toBe(true);
+    expect(sendsTo("991012")).toHaveLength(1);
+
+    const invalid = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      {
+        adapter: "telegram",
+        threadId: "telegram:991013",
+        text: "never sent",
+        card: { root: "card", elements: { card: { type: "Chart", props: {}, children: [] } } },
+      },
+    );
+    expect(invalid.structuredContent.success).toBe(false);
+    expect(invalid.structuredContent.message).toContain("Invalid card spec.");
+    expect(sendsTo("991013")).toHaveLength(0);
+
+    const empty = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991013" },
+    );
+    expect(empty.structuredContent.message).toBe("Provide text or a card.");
   });
 
   test("chat-open-dm is refused for a worker and allowed for the lead", async () => {

@@ -6,6 +6,12 @@ import {
   getTaskById,
   recordSlackMessage,
 } from "@/be/db";
+import {
+  cardIssuesMessage,
+  cardSpecInputSchema,
+  cardToSlack,
+  renderCard,
+} from "@/integrations/cards";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { buildMrkdwnSectionBlocks, getTaskLink } from "@/slack/blocks";
@@ -21,7 +27,7 @@ export const registerSlackPostTool = (server: McpServer) => {
     {
       title: "Post message to Slack channel",
       description:
-        "Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.",
+        "Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`. Requires lead privileges.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
@@ -31,12 +37,22 @@ export const registerSlackPostTool = (server: McpServer) => {
           .describe(
             "The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user.",
           ),
-        message: z.string().min(1).max(4000).describe("The message content to post."),
+        message: z
+          .string()
+          .min(1)
+          .max(4000)
+          .optional()
+          .describe(
+            "The message content to post. Required unless card is given; with a card it renders above it.",
+          ),
         blocks: z
           .array(z.record(z.string(), z.unknown()))
           .max(50)
           .optional()
-          .describe("Optional Block Kit blocks. When omitted, a mrkdwn section is generated."),
+          .describe(
+            "Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card.",
+          ),
+        card: cardSpecInputSchema.optional(),
         threadTs: z
           .string()
           .optional()
@@ -48,7 +64,11 @@ export const registerSlackPostTool = (server: McpServer) => {
         messageTs: z.string().optional(),
       }),
     },
-    async ({ channelId: requestedChannelId, message, threadTs, blocks }, requestInfo, _meta) => {
+    async (
+      { channelId: requestedChannelId, message, threadTs, blocks, card },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -67,6 +87,16 @@ export const registerSlackPostTool = (server: McpServer) => {
       });
       if (!decision.allow) {
         return toolErr("Posting to Slack channels requires lead privileges.");
+      }
+      if (blocks && card) return toolErr("Provide either blocks or card, not both.");
+      if (!message && !card) return toolErr("Provide a message or a card.");
+      let cardSlack: Awaited<ReturnType<typeof cardToSlack>> | undefined;
+      if (card) {
+        const rendered = renderCard(card);
+        if ("issues" in rendered) {
+          return toolErr(cardIssuesMessage(rendered.issues), { data: { issues: rendered.issues } });
+        }
+        cardSlack = await cardToSlack(rendered.card);
       }
 
       const app = getSlackApp();
@@ -88,7 +118,7 @@ export const registerSlackPostTool = (server: McpServer) => {
       }
 
       try {
-        const slackMessage = markdownToSlack(message);
+        const slackMessage = message ? markdownToSlack(message) : "";
 
         const sourceTask = requestInfo.sourceTaskId
           ? await getTaskById(requestInfo.sourceTaskId)
@@ -96,7 +126,8 @@ export const registerSlackPostTool = (server: McpServer) => {
         const contextKey = sourceTask?.contextKey;
         const tree = threadTs ? await getSlackTreeMessageByThread(channelId, threadTs) : null;
         const messageBlocks: Record<string, unknown>[] = [
-          ...(blocks ?? buildMrkdwnSectionBlocks(slackMessage)),
+          ...(cardSlack && slackMessage ? buildMrkdwnSectionBlocks(slackMessage) : []),
+          ...(cardSlack?.blocks ?? blocks ?? buildMrkdwnSectionBlocks(slackMessage)),
         ];
         if (sourceTask && tree) {
           if (messageBlocks.length >= 50) {
@@ -116,7 +147,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const result = await withAutoJoin(app.client, channelId, () =>
           app.client.chat.postMessage({
             channel: channelId,
-            text: slackMessage, // Fallback for notifications
+            text: cardSlack?.text ?? slackMessage, // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
             username: getAgentDisplayName(agent),

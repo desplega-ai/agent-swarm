@@ -467,13 +467,19 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
 
     // --- write: slack ---
-    slack_post(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
+    slack_post(args: {
+      channelId: string;
+      message?: string;
+      blocks?: unknown;
+      card?: unknown;
+    }): Promise<unknown>;
     slack_reply(args: {
       channelId?: string;
       threadTs?: string;
-      message: string;
+      message?: string;
       taskId?: string;
       blocks?: unknown;
+      card?: unknown;
     }): Promise<unknown>;
     slack_startThread(args: {
       channelId: string;
@@ -494,12 +500,13 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
 
     // --- write: chat sdk ---
-    chat_reply(args: { text: string }): Promise<unknown>;
+    chat_reply(args: { text?: string; card?: unknown }): Promise<unknown>;
     chat_post(args: {
       adapter: "telegram" | "slack" | "discord" | "teams";
       threadId?: string;
       channelId?: string;
-      text: string;
+      text?: string;
+      card?: unknown;
     }): Promise<unknown>;
     chat_openDm(args: {
       adapter: "telegram" | "slack" | "discord" | "teams";

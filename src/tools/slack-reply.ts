@@ -10,6 +10,12 @@ import {
   recordSlackMessage,
 } from "@/be/db";
 import { getTaskCitations } from "@/be/task-citations";
+import {
+  cardIssuesMessage,
+  cardSpecInputSchema,
+  cardToSlack,
+  renderCard,
+} from "@/integrations/cards";
 import { getSlackApp } from "@/slack/app";
 import {
   buildCaptionBlock,
@@ -33,7 +39,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
     {
       title: "Reply to Slack thread",
       description:
-        "Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.",
+        "Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for. For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
@@ -45,18 +51,28 @@ export const registerSlackReplyTool = (server: McpServer) => {
           .uuid()
           .optional()
           .describe("The task ID with Slack context (for task-related threads)."),
-        message: z.string().min(1).max(4000).describe("The message to send to the Slack thread."),
+        message: z
+          .string()
+          .min(1)
+          .max(4000)
+          .optional()
+          .describe(
+            "The message to send to the Slack thread. Required unless card is given; with a card it renders above it.",
+          ),
         blocks: z
           .array(z.record(z.string(), z.unknown()))
           .max(50)
           .optional()
-          .describe("Optional Block Kit blocks. When omitted, a mrkdwn section is generated."),
+          .describe(
+            "Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card.",
+          ),
+        card: cardSpecInputSchema.optional(),
       }),
       outputSchema: swarmToolOutputSchema({
         messageTs: z.string().optional(),
       }),
     },
-    async ({ inboxMessageId, taskId, message, blocks }, requestInfo, _meta) => {
+    async ({ inboxMessageId, taskId, message, blocks, card }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -75,6 +91,18 @@ export const registerSlackReplyTool = (server: McpServer) => {
       if (inboxMessageId && taskId) {
         return toolErr("Provide either inboxMessageId or taskId, not both.");
       }
+      if (blocks && card) return toolErr("Provide either blocks or card, not both.");
+      if (!message && !card) return toolErr("Provide a message or a card.");
+
+      // Validate the card before any side effect, so a bad spec changes nothing.
+      let cardSlack: Awaited<ReturnType<typeof cardToSlack>> | undefined;
+      if (card) {
+        const rendered = renderCard(card);
+        if ("issues" in rendered) {
+          return toolErr(cardIssuesMessage(rendered.issues), { data: { issues: rendered.issues } });
+        }
+        cardSlack = await cardToSlack(rendered.card);
+      }
 
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
@@ -89,7 +117,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
         slackThreadTs = inboxMsg.slackThreadTs;
 
         // Mark as responded
-        await markInboxMessageResponded(inboxMessageId, message);
+        await markInboxMessageResponded(inboxMessageId, message ?? cardSlack?.text ?? "");
       } else if (taskId) {
         const task = await getTaskById(taskId);
         if (!task) {
@@ -125,13 +153,11 @@ export const registerSlackReplyTool = (server: McpServer) => {
         const citations = taskId ? await getTaskCitations(taskId) : [];
         // Sources go in a caption under the reply, never in the body or the
         // notification text.
-        const slackMessage = renderTaskCitations(
-          markdownToSlack(message),
-          citations,
-          "slack",
-          false,
-        );
-        const renderedBlocks = blocks?.map((block) =>
+        const slackMessage = message
+          ? renderTaskCitations(markdownToSlack(message), citations, "slack", false)
+          : "";
+        const customBlocks = cardSlack?.blocks ?? blocks;
+        const renderedBlocks = customBlocks?.map((block) =>
           JSON.parse(
             JSON.stringify(block, (key, value) =>
               key === "text" && typeof value === "string"
@@ -145,10 +171,15 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
         const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
+          ...(cardSlack && slackMessage ? buildMrkdwnSectionBlocks(slackMessage) : []),
           ...(renderedBlocks ?? buildMrkdwnSectionBlocks(slackMessage)),
         ];
         for (const group of taskCitationSourceGroups(
-          blocks ? JSON.stringify(blocks) : message,
+          cardSlack
+            ? `${message ?? ""}\n${JSON.stringify(cardSlack.blocks)}`
+            : blocks
+              ? JSON.stringify(blocks)
+              : (message ?? ""),
           citations,
         )) {
           const caption = buildCaptionBlock(group.items, {
@@ -178,7 +209,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
           app.client.chat.postMessage({
             channel: slackChannelId,
             thread_ts: slackThreadTs,
-            text: slackMessage, // Fallback for notifications
+            text: cardSlack?.text ?? slackMessage, // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
             username: getAgentDisplayName(agent),
