@@ -1,6 +1,7 @@
 import { formatConfigResult } from "../be/approval-config-question";
 import {
   type ApprovalRequest,
+  type ApprovalVote,
   claimApprovalCancellationNotification,
   completeApprovalCancellationNotificationClaim,
   createTaskExtended,
@@ -370,9 +371,9 @@ export async function buildResolvedApprovalCard(
   if (approval.status === "pending") return null;
   let by = await describeResolver(approval.resolvedBy);
   if (approval.resolvedBy === "operator") {
-    const claim = approval.approvals?.findLast(
-      (vote) => vote.responder === "operator",
-    )?.claimedRespondedBy;
+    const claim = [...(approval.approvals ?? [])]
+      .reverse()
+      .find((vote: ApprovalVote) => vote.responder === "operator")?.claimedRespondedBy;
     if (claim) {
       const users = await getAllUsers();
       const user =
