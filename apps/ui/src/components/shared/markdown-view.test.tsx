@@ -20,6 +20,9 @@ mock.module("@monaco-editor/react", () => ({
 let currentTheme: "light" | "dark" = "light";
 mock.module("@/hooks/use-theme", () => ({ useTheme: () => ({ theme: currentTheme }) }));
 mock.module("@/hooks/use-comb-links", () => ({ useCombLinks: () => () => null }));
+// The editor's phone branch (CodeViewer) never renders at desktop width.
+mock.module("@/hooks/use-mobile", () => ({ useIsPhone: () => false, useIsMobile: () => false }));
+mock.module("@/components/shared/code-viewer", () => ({ CodeViewer: () => null }));
 mock.module(Bun.resolveSync("./markdown-link-chip", import.meta.dir), () => ({
   SwarmLinkChip: () => null,
   useSwarmLinkPlugins: () => Object.values(defaultRehypePlugins),
