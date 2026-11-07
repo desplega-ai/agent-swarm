@@ -673,6 +673,45 @@ describe("Pool Affinity", () => {
 
       expect(ids).toContain(eligibleTask.id);
     });
+
+    describe("ELIGIBILITY_SCAN_CAP", () => {
+      const originalCap = process.env.ELIGIBILITY_SCAN_CAP;
+
+      afterAll(() => {
+        if (originalCap === undefined) delete process.env.ELIGIBILITY_SCAN_CAP;
+        else process.env.ELIGIBILITY_SCAN_CAP = originalCap;
+      });
+
+      for (const invalid of ["-1", "0", "NaN", "Infinity", "-Infinity"]) {
+        test(`falls back to the default cap when set to ${invalid}`, async () => {
+          process.env.ELIGIBILITY_SCAN_CAP = invalid;
+          const coder = await createAgent({
+            name: "coder-scan-cap",
+            isLead: false,
+            status: "idle",
+          });
+          const task = await createTaskExtended("Eligible untagged task");
+
+          expect(await getUnassignedTaskIdsForAgent(coder.id, 10)).toEqual([task.id]);
+        });
+      }
+
+      test("keeps a positive configured cap", async () => {
+        process.env.ELIGIBILITY_SCAN_CAP = "30";
+        const coder = await createAgent({ name: "coder-scan-cap", isLead: false, status: "idle" });
+        await updateAgentProfile(coder.id, { role: "coder" });
+        for (let i = 0; i < 55; i++) {
+          await createTaskExtended(`Ineligible research task ${i}`, {
+            routingAffinity: affinity({ role: "researcher" }),
+            priority: 100,
+          });
+        }
+        await createTaskExtended("Eligible task past the configured cap", { priority: 1 });
+
+        // limit=1 scans 25-row pages: rows 0-49 cover the cap of 30, so row 55 stays unseen.
+        expect(await getUnassignedTaskIdsForAgent(coder.id, 1)).toEqual([]);
+      });
+    });
   });
 
   // ==========================================================================
