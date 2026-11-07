@@ -33,24 +33,29 @@ export async function isAgentReachable(agent: Agent): Promise<boolean> {
 }
 
 /**
- * True when an offline pool agent will get a runtime if a task is sent to it.
- * Stricter than `isAgentReachable`, which also drives heartbeat and chat
- * routing: this one also requires the supervisor to be running
- * (MULTI_RUNTIME_ENABLED), a free slot under the pool's `maxRuntimes`, and an
- * agent `maxTasks` large enough for one runtime. Mirrors the supervisor's
- * `computeDesired` math.
+ * True when a task sent now to an offline pool agent gets served by a runtime
+ * for it. Stricter than `isAgentReachable`, which also drives heartbeat and
+ * chat routing: this one also requires the supervisor to be running
+ * (MULTI_RUNTIME_ENABLED). Mirrors the supervisor's `computeDesired` math:
+ * 1. A `provisioning`, non-draining runtime for the agent: true. It is booting
+ *    and will claim the task (same rule as `isAgentReachable`), even when that
+ *    runtime fills a capped pool.
+ * 2. Else the agent's own live runtimes at or above
+ *    `agentRuntimeLimit(maxTasks, slotsPerRuntime)`: false, it gets no new one.
+ * 3. Else a free slot under the pool's `maxRuntimes`.
  */
 export async function isAgentOnDemand(agent: Agent, now = new Date()): Promise<boolean> {
   if (agent.status !== "offline" || !agent.runtimePoolId) return false;
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled()) return false;
   const pool = await getRuntimePool(agent.runtimePoolId);
-  if (!pool || !isRuntimePoolWakeable(pool, now)) return false;
-  if (agentRuntimeLimit(agent.maxTasks ?? 1, pool.slotsPerRuntime) < 1) return false;
+  if (!pool?.enabled) return false;
+  const runtimes = await listRuntimeInstancesForPool(pool.id);
+  const own = runtimes.filter((r) => r.agentId === agent.id);
+  if (own.some((r) => r.status === "provisioning" && !r.draining)) return true;
+  if (!isRuntimePoolWakeable(pool, now)) return false;
+  const staleMinutes = runtimeStaleThresholdMinutes();
+  const limit = agentRuntimeLimit(agent.maxTasks ?? 1, pool.slotsPerRuntime);
+  if (countPoolRuntimes(own, now, staleMinutes) >= limit) return false;
   if (pool.maxRuntimes === null) return true;
-  const live = countPoolRuntimes(
-    await listRuntimeInstancesForPool(pool.id),
-    now,
-    runtimeStaleThresholdMinutes(),
-  );
-  return live < pool.maxRuntimes;
+  return countPoolRuntimes(runtimes, now, staleMinutes) < pool.maxRuntimes;
 }

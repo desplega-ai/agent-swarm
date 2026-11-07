@@ -399,6 +399,36 @@ describe("pool agent reachability", () => {
     );
     expect(await isAgentOnDemand(worker)).toBe(true);
   });
+  async function addRuntime(agentId: string, status: "provisioning" | "active", draining = 0) {
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots, draining) VALUES (?, ?, ?, ?, 1, ?)",
+      [crypto.randomUUID(), agentId, pool.id, status, draining],
+    );
+  }
+  test.each([
+    ["an uncapped pool", null],
+    ["a pool its runtime fills", 1],
+  ] as const)("a booting runtime keeps the agent on demand in %s", async (_label, maxRuntimes) => {
+    await updateRuntimePool(pool.id, { maxRuntimes, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "booting-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "provisioning");
+    expect(await isAgentOnDemand(worker)).toBe(true);
+  });
+  test.each([
+    ["an uncapped pool", null],
+    ["a capped pool", 5],
+  ] as const)("an agent at its own runtime limit is not on demand in %s", async (_label, maxRuntimes) => {
+    await updateRuntimePool(pool.id, { maxRuntimes, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "capped-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "active");
+    expect(await isAgentOnDemand(worker)).toBe(false);
+  });
+  test("a draining provisioning runtime does not count as booting", async () => {
+    await updateRuntimePool(pool.id, { maxRuntimes: null, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "draining-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "provisioning", 1);
+    expect(await isAgentOnDemand(worker)).toBe(false);
+  });
   test("GET /api/agents and /api/agents/{id} flag on-demand pool agents", async () => {
     const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
     const gone = await createAgent({ name: "gone", isLead: false, status: "offline" });
