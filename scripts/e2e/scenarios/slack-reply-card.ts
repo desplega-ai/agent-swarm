@@ -159,6 +159,10 @@ export const slackReplyCard: Scenario = {
         posted.text?.includes("Weekly deploy report") && posted.text.includes("Deploys: 1284"),
         `The fallback text does not carry the card: ${posted.text}`,
       );
+      expect(
+        posted.text?.startsWith("Here is this week's report."),
+        `The fallback text does not lead with the message: ${posted.text}`,
+      );
     } finally {
       await mcp.close();
     }
