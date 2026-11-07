@@ -1200,8 +1200,9 @@ export async function handleTasks(
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",
           // Un mensaje humano abre trabajo nuevo; el padre conserva contexto, no requisitos del worker.
+          // Solo en respuestas a un hilo: sin padre no hay requisitos que heredar.
           routingAffinity:
-            principal.kind === "user" || principal.kind === "operator"
+            parsed.body.parentTaskId && (principal.kind === "user" || principal.kind === "operator")
               ? { capabilities: [] }
               : undefined,
           source: parsed.body.source || "api",
