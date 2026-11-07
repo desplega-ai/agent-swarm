@@ -1,4 +1,4 @@
-// mockup(ui-audit): secrets filter bar took 3 rows and the compact grid showed only a 200px-wide Key column
+// Secrets filter bar took 3 rows and the compact grid showed only a 200px-wide Key column
 // Phone layout (below md) for Settings > Secrets: a full-width search, one row of
 // [scope][Add], then MobileList rows with the whole key, a scope chip and the agent.
 // It reuses `useSwarmConfigTable` and the section's dialogs, so a phone finds the

@@ -435,7 +435,7 @@ function WidgetViz({
   if (widget.viz.type === "stat") {
     const valueKey = widget.viz.value ?? Object.keys(rows[0] ?? {})[0] ?? "value";
     const labelKey = widget.viz.label;
-    // mockup(ui-audit): usage-metric-detail P1 - stat is the number itself, no nested bordered box.
+    // Stat is the number itself, no nested bordered box.
     // The card title already names it; a label row only shows when it differs (labelKey).
     return (
       <div className="min-w-0">
@@ -504,7 +504,7 @@ function widgetSpanClass(widget: MetricWidget): string {
 function layoutGridClass(columns: number | undefined): string {
   const columnCount = Math.min(Math.max(columns ?? 2, 1), 4);
   return cn(
-    // mockup(ui-audit): usage-metric-detail P1 - rows size to content (charts/tables keep a min
+    // Rows size to content (charts/tables keep a min
     // height on their card); phones put stat widgets 3-up, everything else spans the row.
     "grid grid-cols-3 gap-3 sm:gap-4 auto-rows-auto",
     columnCount === 1 && "md:grid-cols-1",
@@ -533,7 +533,7 @@ function WidgetCard({
 }) {
   const Icon = widgetIcon(widget.viz.type);
   if (widget.viz.type === "stat") {
-    // mockup(ui-audit): usage-metric-detail P1 - compact stat card: title + number, no footer or expand.
+    // Compact stat card: title + number, no footer or expand.
     return (
       <Card
         className={cn("h-full min-w-0 gap-1 rounded-md px-3 py-3 sm:px-4", widgetSpanClass(widget))}
@@ -555,7 +555,7 @@ function WidgetCard({
         widgetSpanClass(widget),
       )}
     >
-      {/* mockup(ui-audit): usage-metrics P1 - header grid column is width-bounded so titles truncate. */}
+      {/* Header grid column is width-bounded so titles truncate. */}
       <CardHeader className="min-w-0 grid-cols-[minmax(0,1fr)] border-b">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -793,14 +793,14 @@ function MetricsListPage() {
   const [editorOpen, setEditorOpen] = useState(false);
 
   return (
-    // mockup(ui-audit): usage-metrics P1 double scroller - inner scroller only at lg+.
+    // Inner scroller only at lg+.
     <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
       <PageHeader
         icon={BarChart3}
         title="Metrics"
         description="Available SQL-backed dashboards. Open one to inspect dashboard widgets, raw JSON, and shareable variable state."
         action={
-          // mockup(ui-audit): usage-metrics P2 - icon-only action on phones so the description gets the width.
+          // Icon-only action on phones so the description gets the width.
           <Button
             onClick={() => setEditorOpen(true)}
             aria-label="Add dashboard"
@@ -823,7 +823,7 @@ function MetricsListPage() {
           {metrics.map((metric) => (
             <Link key={metric.id} to={`/usage/metrics/${metric.id}`} className="min-w-0">
               <Card className="h-full rounded-md transition-colors hover:border-primary/60">
-                {/* mockup(ui-audit): usage-metrics P1 - bounded header column so title/description truncate and the icon stays visible. */}
+                {/* Bounded header column so title/description truncate and the icon stays visible. */}
                 <CardHeader className="min-w-0 grid-cols-[minmax(0,1fr)]">
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -935,7 +935,7 @@ function MetricsDetailPage() {
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-        {/* mockup(ui-audit): usage-metric-detail P1 - phones: tabs + one overflow menu on a single row, no "N rows" text. */}
+        {/* Phones: tabs + one overflow menu on a single row, no "N rows" text. */}
         {isMobile ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1096,10 +1096,10 @@ function MetricsDetailPage() {
   }
 
   return (
-    // mockup(ui-audit): usage-metrics P1 double scroller - inner scroller only at lg+.
+    // Inner scroller only at lg+.
     <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
       {isMobile ? (
-        // mockup(ui-audit): usage-metric-detail P1 - phones: description clamped to 2 lines with
+        // Phones: description clamped to 2 lines with
         // "Show more"; Back becomes an icon (the breadcrumb already says Metrics).
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">

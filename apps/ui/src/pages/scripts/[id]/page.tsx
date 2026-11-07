@@ -109,7 +109,7 @@ export default function ScriptDetailPage() {
   }
 
   return (
-    // Mockup (UI audit 2026-11-06): compact DetailHeader + sticky tabs. On a
+    // Compact DetailHeader + sticky tabs. On a
     // phone the page scrolls as one column: header, sticky tabs, full-height
     // source. On desktop the source still fills the remaining height.
     <div className="flex flex-col flex-1 min-h-0 gap-3">

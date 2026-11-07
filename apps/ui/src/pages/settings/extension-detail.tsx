@@ -279,7 +279,7 @@ function BundleFiles({
   if (!current) return <p className="text-sm text-muted-foreground">No files in this bundle.</p>;
 
   const source = files[current] ?? "";
-  // mockup(ui-audit): settings-extension-detail P1 — size the viewer to its content (18px lines + padding),
+  // Size the viewer to its content (18px lines + padding),
   // capped at 70dvh, instead of a fixed 360px box nested inside the sheet's scroller.
   const contentHeight = source.split("\n").length * 18 + 16;
   const viewerHeight = `min(70dvh, ${contentHeight}px)`;
@@ -421,7 +421,7 @@ export function ExtensionDetail({
   actionsSlot,
 }: {
   extensionId: string;
-  /** mockup(ui-audit): sheet-header node the Delete/Enable buttons portal into; inline when absent. */
+  /** Sheet-header node the Delete/Enable buttons portal into; inline when absent. */
   actionsSlot?: HTMLElement | null;
   /** False while the sheet closes: render cached data, fetch nothing. */
   active: boolean;
@@ -548,7 +548,7 @@ export function ExtensionDetail({
     activate.isPending ||
     remove.isPending;
 
-  // mockup(ui-audit): settings-extension-detail P1 — Delete/Enable move into the sheet header (no row of their own)
+  // Delete/Enable move into the sheet header (no row of their own)
   const actions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button
@@ -611,7 +611,7 @@ export function ExtensionDetail({
         </Alert>
       )}
 
-      {/* mockup(ui-audit): settings-extension-detail P1 — tighter Bundle card on a phone (less chrome above the source) */}
+      {/* Tighter Bundle card on a phone (less chrome above the source) */}
       <Card className="max-sm:gap-4 max-sm:py-4">
         <CardHeader className="max-sm:px-4">
           <CardTitle>Bundle</CardTitle>
@@ -629,7 +629,7 @@ export function ExtensionDetail({
             </InfoRow>
             <InfoRow label="Author">{manifest.author || "—"}</InfoRow>
           </div>
-          {/* mockup(ui-audit): settings-extension-detail P1 — description clamped to 2 lines with "Show more" */}
+          {/* Description clamped to 2 lines with "Show more" */}
           <InfoRow label="Description">
             {manifest.description ? (
               <CollapsibleDescription
@@ -844,7 +844,7 @@ export function ExtensionDetailSheet({
   // The header's disabled observer keeps a failing fetch retrying after the
   // body stops, so closing (or switching extensions) cancels that id's requests.
   const cancelRequests = useCancelExtensionRequests();
-  // mockup(ui-audit): settings-extension-detail P1 — header slot for the body's Delete/Enable buttons
+  // Header slot for the body's Delete/Enable buttons
   const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open || !shownId) return;
@@ -863,7 +863,7 @@ export function ExtensionDetailSheet({
               </Badge>
             )}
           </SheetTitle>
-          {/* mockup(ui-audit): settings-extension-detail P1 — actions share the description row, so the name keeps the full title line */}
+          {/* Actions share the description row, so the name keeps the full title line */}
           <div className="flex min-w-0 items-center gap-2">
             <SheetDescription className="min-w-0 flex-1">
               {extension

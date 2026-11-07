@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-// mockup(ui-audit): code viewers sized to content (capped) instead of fixed 360px boxes
+// Code viewers sized to content (capped) instead of fixed 360px boxes
 // Estimates the rendered height of a read-only, word-wrapped Monaco viewer
 // (fontSize 12) from the source and the measured container width, so short
 // blocks (3-line GraphQL / SQL types) do not sit in a 360px empty panel.

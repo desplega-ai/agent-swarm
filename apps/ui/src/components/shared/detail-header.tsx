@@ -1,5 +1,5 @@
 /**
- * The compact header for a detail page (mockup, UI audit 2026-11-06).
+ * The compact header for a detail page.
  *
  * One line holds what a reader needs first: status, the key badges and the
  * primary action. Everything else waits one tap away:

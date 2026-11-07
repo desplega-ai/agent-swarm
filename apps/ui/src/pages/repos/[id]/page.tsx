@@ -285,7 +285,7 @@ export default function RepoDetailPage() {
       <PageHeader
         className="shrink-0"
         title={
-          // mockup(ui-audit): repo-detail P1 — name as a wrapping h1, badges on their own wrapping row
+          // Name as a wrapping h1, badges on their own wrapping row
           <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
             <h1 className="break-all text-base font-semibold leading-snug max-sm:line-clamp-2">
               {repo.name}
@@ -323,7 +323,7 @@ export default function RepoDetailPage() {
         }
         action={
           <>
-            {/* mockup(ui-audit): repo-detail P1 — icon-only actions below sm so they never cover the badges */}
+            {/* Icon-only actions below sm so they never cover the badges */}
             <Button
               size="sm"
               variant="outline"
@@ -381,7 +381,7 @@ export default function RepoDetailPage() {
         rail={
           <DetailPageRail>
             <QuickStats>
-              {/* mockup(ui-audit): repo-detail-long P1 — label column hugs, the long value takes the rest and ellipsizes */}
+              {/* Label column hugs, the long value takes the rest and ellipsizes */}
               <QuickStat
                 label="URL"
                 className="grid-cols-[auto_minmax(0,1fr)]"

@@ -44,11 +44,11 @@ import {
   UsagePreview,
 } from "@/pages/connections/page";
 
-// mockup(ui-audit): tighter card padding below md so the content (not the card chrome) leads
+// Tighter card padding below md so the content (not the card chrome) leads
 const COMPACT_CARD =
   "max-md:gap-3 max-md:py-4 max-md:[&>[data-slot=card-header]]:px-4 max-md:[&>[data-slot=card-content]]:px-4";
 
-// mockup(ui-audit): compact Overview — label and value side by side at every width, empty rows hidden
+// Compact Overview — label and value side by side at every width, empty rows hidden
 type OverviewRow = { label: string; value: ReactNode };
 
 function InfoRow({ label, value }: OverviewRow) {
@@ -60,7 +60,7 @@ function InfoRow({ label, value }: OverviewRow) {
   );
 }
 
-// mockup(ui-audit): on lg the Overview rows move into the right rail so the operations table starts under the header
+// On lg the Overview rows move into the right rail so the operations table starts under the header
 function RailInfoRow({ label, value }: OverviewRow) {
   return (
     <div className="flex flex-col gap-0.5 py-1 text-xs">
@@ -70,7 +70,7 @@ function RailInfoRow({ label, value }: OverviewRow) {
   );
 }
 
-// mockup(ui-audit): header actions go icon-only below sm so the name and badges keep their row
+// Header actions go icon-only below sm so the name and badges keep their row
 function HeaderActionButton({
   label,
   icon,
@@ -97,7 +97,7 @@ function HeaderActionButton({
   );
 }
 
-// mockup(ui-audit): code viewers sized to content (cap 360px) instead of fixed 360px boxes
+// Code viewers sized to content (cap 360px) instead of fixed 360px boxes
 function FitTypesViewer({ source }: { source: string }) {
   const { ref, height } = useFitCodeHeight(source);
   return (
@@ -166,7 +166,7 @@ export default function ConnectionDetailPage() {
     connection.kind === "mcp" ||
     (connection.kind === "openapi" && connection.openapiSpecSourceKind === "url");
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
-  // mockup(ui-audit): mcp target shows the server name (linked), not the raw server UUID
+  // Mcp target shows the server name (linked), not the raw server UUID
   const mcpServer = connection.mcpServerId
     ? mcpServersData?.servers.find((server) => server.id === connection.mcpServerId)
     : undefined;
@@ -188,7 +188,7 @@ export default function ConnectionDetailPage() {
       )?.id ?? null)
     : null;
 
-  // mockup(ui-audit): compact Overview — only rows with a value render
+  // Compact Overview — only rows with a value render
   const overviewRows: OverviewRow[] = [];
   if (target !== "-") {
     overviewRows.push({
@@ -268,7 +268,7 @@ export default function ConnectionDetailPage() {
       ),
     });
   }
-  // mockup(ui-audit): graphql / sql have no operations — drop the one-sentence card, the rail names the helper
+  // Graphql / sql have no operations — drop the one-sentence card, the rail names the helper
   const helperName =
     connection.kind === "graphql"
       ? "graphql()"
@@ -281,10 +281,10 @@ export default function ConnectionDetailPage() {
   return (
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
       <PageHeader
-        // mockup(ui-audit): actions top-align with the slug row when badges wrap
+        // Actions top-align with the slug row when badges wrap
         className="[&>div:first-child]:items-start"
         title={
-          // mockup(ui-audit): back + slug + copy stay one nowrap group; badges wrap after it
+          // Back + slug + copy stay one nowrap group; badges wrap after it
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="flex min-w-0 items-center gap-1">
               <BackButton fallback="/integrations/tools?tab=connections" iconOnly />

@@ -153,7 +153,7 @@ export function SettingsLayout() {
   return (
     <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
-      {/* mockup(ui-audit): settings tab strip hid 7 of 10 sections, add edge fade + chevrons */}
+      {/* Settings tab strip hid 7 of 10 sections, add edge fade + chevrons */}
       <OverflowCue className="lg:hidden shrink-0 mb-4">
         <SectionTabs label="Settings" tabs={navItems} activePath={activeItem.path} />
       </OverflowCue>
@@ -239,7 +239,7 @@ export function SettingsLayout() {
   );
 }
 
-// mockup(ui-audit): settings tab strip hid 7 of 10 sections, add edge fade + chevrons
+// Settings tab strip hid 7 of 10 sections, add edge fade + chevrons
 /**
  * Wraps the shared `SectionTabs` strip (whose scrollbar is hidden) with an
  * edge fade and a chevron on each side that still has hidden tabs, so a phone

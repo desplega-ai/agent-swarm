@@ -73,7 +73,7 @@ export function UsageLayout() {
     ) ?? USAGE_NAV[0];
 
   return (
-    // mockup(ui-audit): usage double scroller - the shell fills the height only at lg+; below lg it flows inside `main`.
+    // Usage double scroller - the shell fills the height only at lg+; below lg it flows inside `main`.
     <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
       <SectionTabs

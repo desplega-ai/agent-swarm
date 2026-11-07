@@ -192,7 +192,7 @@ function RuntimePoolsList() {
           action={newPool}
         />
       ) : isMobile ? (
-        // mockup(ui-audit): settings-runtime-pools P1 — `flex-none` so the card hugs its rows instead of filling the screen
+        // `flex-none` so the card hugs its rows instead of filling the screen
         <MobileList label="Runtime pools" emptyMessage="No runtime pools" className="flex-none">
           {rows.map((row) => (
             <MobileListRow

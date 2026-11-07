@@ -200,7 +200,7 @@ export default function ScriptsPage() {
         {/* Shared toolbar (People pattern): the active tab's filters on the
             left, tabs pinned to the right. Filters hide over the first-run
             empty state (showEmptyState is false whenever a filter is active). */}
-        {/* Mockup (UI audit 2026-11-06): on a phone the tabs lead (sticky)
+        {/* On a phone the tabs lead (sticky)
             and the filters share one row: search, scope, scratch. The
             Columns menu has no grid to act on there, so it hides. */}
         {isPhone ? (

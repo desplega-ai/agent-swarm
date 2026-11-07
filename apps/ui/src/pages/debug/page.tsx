@@ -173,7 +173,7 @@ export default function DebugPage() {
   const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
   const expandedTable = readStringParam(searchParams, "table");
   const [tablesCollapsed, setTablesCollapsed] = useLocalToggle("debug:tables-collapsed", false);
-  // mockup(ui-audit): settings-debug P0 — below md the tables list is a closed drawer, not a 220px column
+  // Below md the tables list is a closed drawer, not a 220px column
   const isMobile = useIsMobile();
   const [tablesSheetOpen, setTablesSheetOpen] = useState(false);
   const tablesHidden = isMobile ? !tablesSheetOpen : tablesCollapsed;
@@ -192,7 +192,7 @@ export default function DebugPage() {
     const newSql = `SELECT * FROM ${tableName} LIMIT 50`;
     setParams({ table: tableName, sql: newSql }, { defaultValues: { sql: DEFAULT_SQL } });
     dbQuery.mutate({ sql: newSql });
-    // mockup(ui-audit): settings-debug P0 — picking a table on a phone closes the drawer to show results
+    // Picking a table on a phone closes the drawer to show results
     setTablesSheetOpen(false);
   }
 
@@ -254,7 +254,7 @@ export default function DebugPage() {
             onToggleTable={handleToggleTable}
           />
         )}
-        {/* mockup(ui-audit): settings-debug P0 — phone: tables in a left drawer, editor/results full width */}
+        {/* Phone: tables in a left drawer, editor/results full width */}
         {isMobile && (
           <Sheet open={tablesSheetOpen} onOpenChange={setTablesSheetOpen}>
             <SheetContent
@@ -280,7 +280,7 @@ export default function DebugPage() {
         {/* Right panel: editor + results */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0">
           {/* Monaco editor */}
-          {/* mockup(ui-audit): settings-debug P0 — shorter editor on a phone, results get the room */}
+          {/* Shorter editor on a phone, results get the room */}
           <div className="border-b border-border shrink-0 h-[clamp(88px,16dvh,140px)] md:h-[clamp(96px,22vh,200px)]">
             <Editor
               language="sql"
@@ -292,7 +292,7 @@ export default function DebugPage() {
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 fontSize: 13,
-                // mockup(ui-audit): settings-debug P0 — no gutter on a phone, the query gets the width
+                // No gutter on a phone, the query gets the width
                 lineNumbers: isMobile ? "off" : "on",
                 wordWrap: "on",
                 automaticLayout: true,
@@ -302,9 +302,9 @@ export default function DebugPage() {
           </div>
 
           {/* Toolbar */}
-          {/* mockup(ui-audit): settings-debug P0 — toolbar wraps so Execute and the stats never clip */}
+          {/* Toolbar wraps so Execute and the stats never clip */}
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-b border-border bg-muted/30">
-            {/* mockup(ui-audit): settings-debug P0 — on a phone the drawer toggle is a labelled "Tables" button */}
+            {/* On a phone the drawer toggle is a labelled "Tables" button */}
             {isMobile ? (
               <Button
                 variant="outline"

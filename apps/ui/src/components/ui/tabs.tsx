@@ -43,7 +43,7 @@ function TabsList({
 }: React.ComponentProps<typeof TabsPrimitive.List> &
   VariantProps<typeof tabsListVariants> & {
     /**
-     * Mockup (UI audit 2026-11-06): pin the tabs to the top of the page's
+     * Pin the tabs to the top of the page's
      * scroll area and let a long tab row scroll sideways instead of wrapping
      * or clipping, so every tab stays one tap away at any scroll depth.
      */

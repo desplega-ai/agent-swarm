@@ -53,7 +53,7 @@ export default function ConfigurationPage() {
   const reloadConfig = useReloadConfig();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
-  // mockup(ui-audit): configuration is 70 phone screens, groups collapse (first open by default)
+  // Configuration is 70 phone screens, groups collapse (first open by default)
   const [openIds, setOpenIds] = useState<Set<string> | null>(null);
   const searching = search.trim().length > 0;
 
@@ -74,7 +74,7 @@ export default function ConfigurationPage() {
     return result;
   }, [search, groups]);
 
-  // mockup(ui-audit): null = untouched, so only the first group starts open
+  // Null = untouched, so only the first group starts open
   const firstId = visibleGroups[0]?.group.id;
   const isOpen = (id: string) => (openIds ? openIds.has(id) : id === firstId);
   const allOpen = visibleGroups.every(({ group }) => isOpen(group.id));
@@ -121,7 +121,7 @@ export default function ConfigurationPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
-      {/* mockup(ui-audit): description wrapped to 5 lines beside Reload on mobile, header is desktop-only */}
+      {/* Description wrapped to 5 lines beside Reload on mobile, header is desktop-only */}
       <PageHeader
         className="hidden sm:flex"
         title="Configuration"
@@ -148,7 +148,7 @@ export default function ConfigurationPage() {
         </Alert>
       )}
 
-      {/* mockup(ui-audit): on mobile, Reload sits beside the search as an icon button */}
+      {/* On mobile, Reload sits beside the search as an icon button */}
       <div className="flex items-center gap-2">
         <div className="relative max-w-sm w-full">
           <Search
@@ -200,7 +200,7 @@ export default function ConfigurationPage() {
         <div className="flex flex-col gap-3 sm:gap-4">
           {visibleGroups.map(({ group, entries }) =>
             searching || isOpen(group.id) ? (
-              // mockup(ui-audit): expanded group keeps the shared card, with a collapse button over its header
+              // Expanded group keeps the shared card, with a collapse button over its header
               <div
                 key={group.id}
                 className="relative max-sm:[&_[data-slot=card-description]]:line-clamp-2"
@@ -244,7 +244,7 @@ export default function ConfigurationPage() {
   );
 }
 
-// mockup(ui-audit): configuration is 70 phone screens, a collapsed group is one compact row
+// Configuration is 70 phone screens, a collapsed group is one compact row
 function CollapsedGroup({
   group,
   count,

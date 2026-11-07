@@ -206,7 +206,7 @@ function PoolEditor({
     <PageHeader
       title={
         pool ? (
-          // mockup(ui-audit): settings-runtime-pool-detail P1 — name on its own line on a phone, badges wrap under it
+          // Name on its own line on a phone, badges wrap under it
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="basis-full break-all font-medium sm:basis-auto">{pool.name}</span>
             <Badge variant="outline" size="tag">
@@ -230,7 +230,7 @@ function PoolEditor({
       }
       action={
         <div className="flex items-center gap-2">
-          {/* mockup(ui-audit): settings-runtime-pool-detail P1 — icon-only actions below sm, labels from sm up */}
+          {/* Icon-only actions below sm, labels from sm up */}
           <Button type="button" size="sm" variant="ghost" asChild>
             <Link to={RUNTIME_POOLS_PATH} aria-label="Back to runtime pools">
               <ArrowLeft className="h-4 w-4" />

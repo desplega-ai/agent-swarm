@@ -61,7 +61,7 @@ export function SourceView({
 }: SourceViewProps) {
   const { theme } = useTheme();
   const { copied, copy } = useCopyToClipboard();
-  // Mockup (UI audit 2026-11-06): on a phone the viewer grows to the full
+  // On a phone the viewer grows to the full
   // source height and the PAGE scrolls (no scroll box inside the page
   // scroll), and long lines wrap by default so nothing is clipped.
   const isPhone = useIsPhone();

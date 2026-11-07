@@ -231,7 +231,7 @@ export function ScriptRunsGrid({
         />
       )}
       {isPhone ? (
-        // Mockup (UI audit 2026-11-06): phone rows instead of a clipped grid.
+        // Phone rows instead of a clipped grid.
         // Title = script name (or run id), status on the title line, the
         // facts that the grid spreads over 7 columns on one meta line.
         <MobileList

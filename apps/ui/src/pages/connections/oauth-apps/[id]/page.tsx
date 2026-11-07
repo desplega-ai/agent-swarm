@@ -69,7 +69,7 @@ function CopyableValue({ value, label }: { value: string; label: string }) {
   );
 }
 
-// mockup(ui-audit): short values (inline) sit beside their label on mobile instead of stacking
+// Short values (inline) sit beside their label on mobile instead of stacking
 function InfoRow({
   label,
   value,
@@ -231,7 +231,7 @@ export default function OAuthAppDetailPage() {
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
       <PageHeader
         title={
-          // mockup(ui-audit): back + provider stay one nowrap group so the name is never clipped to a glyph
+          // Back + provider stay one nowrap group so the name is never clipped to a glyph
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="flex min-w-0 items-center gap-1">
               <BackButton fallback="/integrations/tools?tab=oauth-apps" iconOnly />
@@ -241,9 +241,9 @@ export default function OAuthAppDetailPage() {
             <LegacyCallbackWarning app={app} staticCallback={staticCallback} />
           </span>
         }
-        // mockup(ui-audit): description dropped — the unbreakable client ID overflowed mobile by 86px and repeats the OAuth App card
+        // Description dropped — the unbreakable client ID overflowed mobile by 86px and repeats the OAuth App card
         action={
-          // mockup(ui-audit): Edit / Delete go icon-only below sm; Authorize keeps a short label
+          // Edit / Delete go icon-only below sm; Authorize keeps a short label
           <div className="flex items-center gap-1.5 sm:gap-2">
             <Button size="sm" onClick={() => setAuthorizeOpen(true)} disabled={authorize.isPending}>
               <Plus className="size-4" />
@@ -316,7 +316,7 @@ export default function OAuthAppDetailPage() {
                 </div>
               </AlertCallout>
             ) : null}
-            {/* mockup(ui-audit): tighter card padding below md */}
+            {/* Tighter card padding below md */}
             <Card className="max-md:gap-3 max-md:py-4 max-md:[&>[data-slot=card-content]]:px-4 max-md:[&>[data-slot=card-header]]:px-4">
               <CardHeader>
                 <CardTitle className="text-base">Authorizations</CardTitle>
@@ -440,13 +440,13 @@ export default function OAuthAppDetailPage() {
               </CardContent>
             </Card>
 
-            {/* mockup(ui-audit): tighter card padding below md */}
+            {/* Tighter card padding below md */}
             <Card className="max-md:gap-3 max-md:py-4 max-md:[&>[data-slot=card-content]]:px-4 max-md:[&>[data-slot=card-header]]:px-4">
               <CardHeader>
                 <CardTitle className="text-base">OAuth App</CardTitle>
               </CardHeader>
               <CardContent className="divide-y divide-border-subtle">
-                {/* mockup(ui-audit): Source row dropped — the header badge and rail already show it */}
+                {/* Source row dropped — the header badge and rail already show it */}
                 <InfoRow
                   label="Client ID"
                   value={<CopyableValue value={app.clientId} label="Copy client ID" />}

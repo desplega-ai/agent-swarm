@@ -83,7 +83,7 @@ export function ScriptSourceEditor({
     if (monacoRef.current && typeDefs) registerScriptTypeDefs(monacoRef.current, typeDefs);
   }, [typeDefs]);
 
-  // Mockup (UI audit 2026-11-06): Monaco on a phone is a fixed-height scroll
+  // Monaco on a phone is a fixed-height scroll
   // box inside the page scroll, and touch-scrolling it fights the page. A
   // read-only phone view renders the plain highlighted source at full height.
   if (isPhone && readOnly) {

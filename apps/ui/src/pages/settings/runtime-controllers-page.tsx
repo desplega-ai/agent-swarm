@@ -539,10 +539,10 @@ function RuntimeControllersList() {
           action={newController}
         />
       ) : isMobile ? (
-        // mockup(ui-audit): settings-runtime-controllers P1 — `flex-none` so the card hugs its rows instead of filling the screen
+        // `flex-none` so the card hugs its rows instead of filling the screen
         <MobileList label="Runtime controllers" emptyMessage="No controllers" className="flex-none">
           {rows.map((controller) => (
-            // mockup(ui-audit): settings-runtime-controllers P2 — shared row (chevron) plus the last error under the meta line
+            // Shared row (chevron) plus the last error under the meta line
             <MobileListRow
               key={controller.id}
               onClick={() => setEditing(controller)}

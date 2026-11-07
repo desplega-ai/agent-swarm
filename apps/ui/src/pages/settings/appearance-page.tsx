@@ -25,7 +25,7 @@ export default function AppearancePage() {
         description="Stored in this browser only. Every operator picks their own."
       />
 
-      {/* mockup(ui-audit): Card py-6 gap-6 cost ~30% of the first phone screen, tighter below sm */}
+      {/* Card py-6 gap-6 cost ~30% of the first phone screen, tighter below sm */}
       <Card className="max-sm:gap-3 max-sm:py-4">
         <CardHeader>
           <CardTitle>Mode</CardTitle>
@@ -76,7 +76,7 @@ export default function AppearancePage() {
         <CardHeader>
           <CardTitle>Theme</CardTitle>
         </CardHeader>
-        {/* mockup(ui-audit): 17 presets one per row on a phone (~1,700px); 2 columns, description hidden below sm.
+        {/* 17 presets one per row on a phone (~1,700px); 2 columns, description hidden below sm.
             Page-local override of the shared picker's grid; the real fix is a `cols` prop on ThemePresetPicker. */}
         <CardContent className="max-sm:[&>div]:grid-cols-2 max-sm:[&>div]:gap-2 max-sm:[&>div>button]:p-2 max-sm:[&>div>button>span:last-child]:hidden">
           <ThemePresetPicker />

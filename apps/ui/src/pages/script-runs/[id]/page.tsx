@@ -162,7 +162,7 @@ export default function ScriptRunDetailPage() {
       : "0 steps";
 
   return (
-    // Mockup (UI audit 2026-11-06): compact DetailHeader. Desktop: one header
+    // Compact DetailHeader. Desktop: one header
     // line + one facts row, the Detail panels fill the rest of the viewport
     // (no page scroll around a 72vh box). Phone: one status line, one summary
     // line, sticky tabs, full-height source.

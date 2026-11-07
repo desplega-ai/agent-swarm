@@ -411,7 +411,7 @@ export default function BudgetsPage() {
     label: string;
   } | null>(null);
   const [pricingDeleteTarget, setPricingDeleteTarget] = useState<PricingRow | null>(null);
-  // mockup(ui-audit): usage-budgets P1 - pricing is reference data; collapsed by default on phones.
+  // Pricing is reference data; collapsed by default on phones.
   const isMobile = useIsMobile();
   const [pricingOpenChoice, setPricingOpenChoice] = useState<boolean | null>(null);
   const pricingOpen = pricingOpenChoice ?? !isMobile;
@@ -484,7 +484,7 @@ export default function BudgetsPage() {
 
   const agentColumnDefs = useMemo<ColDef<(typeof agentRows)[number]>[]>(
     () => [
-      // mockup(ui-audit): usage-budgets P1 - smaller min widths + Updated hides when compact + Actions
+      // Smaller min widths + Updated hides when compact + Actions
       // pinned right, so the edit pencil stays on a phone screen.
       {
         headerName: "Agent",
@@ -709,7 +709,7 @@ export default function BudgetsPage() {
       {
         field: "provider",
         headerName: "Provider",
-        // mockup(ui-audit): usage-budgets P1 - Provider / Effective from hide when compact; Model
+        // Provider / Effective from hide when compact; Model
         // middle-truncates so the unique suffix shows; delete pinned right.
         context: HIDE_WHEN_COMPACT,
         width: 100,
@@ -805,7 +805,7 @@ export default function BudgetsPage() {
   // ─── render ─────────────────────────────────────────────────────────────────
 
   return (
-    // mockup(ui-audit): usage-budgets P1 double scroller - inner scroller only at lg+.
+    // Inner scroller only at lg+.
     <div className="space-y-6 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
       <PageHeader title="Budgets & spend" />
 
@@ -875,7 +875,7 @@ export default function BudgetsPage() {
           <CardTitle className="text-sm font-semibold">Recent budget refusals</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* mockup(ui-audit): usage-budgets P2 - zero refusals is one muted line, not an empty grid + pager. */}
+          {/* Zero refusals is one muted line, not an empty grid + pager. */}
           {!loadingRefusals && (refusals?.length ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">No budget refusals recorded.</p>
           ) : (
@@ -924,7 +924,7 @@ export default function BudgetsPage() {
         {pricingOpen ? (
           <CardContent className="px-4 sm:px-6">
             {isMobile ? (
-              // mockup(ui-audit): usage-budgets P1 - phones list pricing rows: full model id (wraps),
+              // Phones list pricing rows: full model id (wraps),
               // token class + price on the meta line, delete in its own tap target. 20 at a time.
               <MobileList
                 label="Pricing rows"

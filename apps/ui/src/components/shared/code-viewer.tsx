@@ -1,5 +1,5 @@
 /**
- * Read-only code viewer (mockup, UI audit 2026-11-06).
+ * Read-only code viewer.
  *
  * Two sizing modes, picked by the viewport:
  * - desktop (`md` up): fills its flex parent and scrolls inside, so a page

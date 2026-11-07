@@ -341,7 +341,7 @@ export function UsageContent() {
             </CardHeader>
             <CardContent className="px-5">
               {isMobile ? (
-                // mockup(ui-audit): usage P1 - phones stack each person: name, then the four
+                // Phones stack each person: name, then the four
                 // numbers in a 2x2 grid, so all four stay side by side instead of clipping.
                 <MobileList
                   label="Attribution by person"

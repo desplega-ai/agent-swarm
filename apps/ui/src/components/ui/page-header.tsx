@@ -4,7 +4,7 @@ import { ShowMore } from "@/components/shared/show-more";
 import { cn } from "@/lib/utils";
 
 /**
- * Mockup (UI audit 2026-11-06): every page description clamps to 2 lines on
+ * Every page description clamps to 2 lines on
  * a phone and 3 from `md` up, with "Show more". A long description no longer
  * pushes a page's tabs or content to mid-screen.
  */

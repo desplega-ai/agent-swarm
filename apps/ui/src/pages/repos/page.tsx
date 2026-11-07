@@ -47,13 +47,13 @@ interface RepoFormData {
 
 const clonePathForName = (name: string) => (name ? `/workspace/personal/repos/${name}` : "");
 
-// mockup(ui-audit): settings-repos P1 — "owner/repo" for the phone row's meta line
+// "owner/repo" for the phone row's meta line
 function repoSlug(url: string): string {
   const match = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/);
   return match?.[1] ?? url;
 }
 
-// mockup(ui-audit): settings-repos P1 — the phone list filters the same fields the grid's quick filter sees
+// The phone list filters the same fields the grid's quick filter sees
 function matchesRepoSearch(repo: SwarmRepo, search: string): boolean {
   const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return true;
@@ -404,7 +404,7 @@ export default function ReposPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* mockup(ui-audit): settings-repos P2 — on a phone "Add Repo" moves into the search row as an icon */}
+      {/* On a phone "Add Repo" moves into the search row as an icon */}
       {isMobile ? null : (
         <PageHeader
           title="Repos"
@@ -433,7 +433,7 @@ export default function ReposPage() {
         ) : null}
       </div>
 
-      {/* mockup(ui-audit): settings-repos P1 — phone list instead of the 7-column grid; Edit/Delete live on the detail page */}
+      {/* Phone list instead of the 7-column grid; Edit/Delete live on the detail page */}
       {isMobile ? (
         <MobileList
           label="Repos"
