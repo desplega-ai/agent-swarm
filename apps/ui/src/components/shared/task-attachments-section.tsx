@@ -801,12 +801,15 @@ function AttachmentRow({
 
 /**
  * A file the person sent with their message: a dashboard composer upload, or
- * a file shared with the bot in Slack or a chat channel. Every other row is
- * the agent's: `store-progress` output, a Slack file an agent fetched
- * (`intent: "slack-file"`), and rows with no intent.
+ * a file shared with the bot in Slack or a chat channel. A legacy row with
+ * neither `intent` nor `agentId` was written by no agent, so it is the
+ * person's too. Every other row is the agent's: `store-progress` output, a
+ * Slack file an agent fetched (`intent: "slack-file"`), and agent rows with
+ * no intent.
  */
 export function isPersonUpload(attachment: TaskAttachment): boolean {
-  return attachment.intent === "user-upload";
+  if (attachment.intent) return attachment.intent === "user-upload";
+  return !attachment.agentId;
 }
 
 export function TaskPromptAttachments({

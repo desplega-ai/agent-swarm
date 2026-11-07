@@ -240,16 +240,22 @@ describe("whose attachment a session shows where", () => {
     ({ ...ID_LESS, id: name, name, ...extra }) as TaskAttachment;
   // Shapes of real rows: a composer upload has no agent; a Slack file shared
   // with the bot carries the lead's id; a Slack file an agent fetched, its
-  // store-progress output and a legacy row with no intent are the agent's.
+  // and its store-progress output are the agent's. A legacy row with no intent
+  // is the agent's when it has an agent id, else the person's.
   const composer = row("composer.png", { intent: "user-upload", agentId: null });
   const slackShared = row("shared.png", { intent: "user-upload", agentId: "lead-1" });
   const slackFetched = row("asset-list.md", { intent: "slack-file", agentId: "lead-1" });
   const output = row("report.md", { intent: "task-deliverable", agentId: "worker-1" });
-  const legacy = row("legacy.md", { agentId: null });
-  const all = [composer, slackShared, slackFetched, output, legacy];
+  const legacyAgent = row("legacy.md", { agentId: "worker-1" });
+  const legacyNoAgent = row("legacy-upload.png", { agentId: null });
+  const all = [composer, slackShared, slackFetched, output, legacyAgent, legacyNoAgent];
 
-  test("only user-upload rows are the person's", () => {
-    expect(all.filter(isPersonUpload).map((a) => a.name)).toEqual(["composer.png", "shared.png"]);
+  test("user-upload rows and legacy rows with no agent are the person's", () => {
+    expect(all.filter(isPersonUpload).map((a) => a.name)).toEqual([
+      "composer.png",
+      "shared.png",
+      "legacy-upload.png",
+    ]);
   });
 
   test("the bubble shows the person's files, right-aligned", () => {
@@ -260,6 +266,7 @@ describe("whose attachment a session shows where", () => {
     expect(html).toContain("justify-end");
     expect(html).toContain("composer.png");
     expect(html).toContain("shared.png");
+    expect(html).toContain("legacy-upload.png");
     for (const name of ["asset-list.md", "report.md", "legacy.md"]) {
       expect(html).not.toContain(name);
     }
@@ -277,6 +284,7 @@ describe("whose attachment a session shows where", () => {
     }
     expect(html).not.toContain("composer.png");
     expect(html).not.toContain("shared.png");
+    expect(html).not.toContain("legacy-upload.png");
   });
 
   test("no rows for a side renders nothing", () => {
