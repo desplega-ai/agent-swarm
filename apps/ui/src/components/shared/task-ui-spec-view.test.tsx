@@ -1,0 +1,162 @@
+import { describe, expect, mock, test } from "bun:test";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { type TaskUiSpec, UI_SPEC_COMPONENTS } from "../../../../../src/utils/task-ui-spec";
+
+// The root-level test run cannot resolve ui's `@/` alias. Plain lib modules
+// map to their real files; the UI primitives are thin stubs that keep markup.
+mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/lib/json-render/card-grid-model", () =>
+  require("../../lib/json-render/card-grid-model"),
+);
+mock.module("@/lib/json-render/chart-model", () => require("../../lib/json-render/chart-model"));
+mock.module("@/lib/recharts-tooltip-style", () => require("../../lib/recharts-tooltip-style"));
+const stub =
+  (tag: string) =>
+  ({ children }: { children?: ReactNode }) => {
+    const Tag = tag as "div";
+    return <Tag>{children}</Tag>;
+  };
+mock.module("@/components/ui/button", () => ({
+  Button: ({ children, disabled }: { children?: ReactNode; disabled?: boolean }) => (
+    <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>
+  ),
+}));
+mock.module("@/components/ui/card", () => ({
+  Card: stub("section"),
+  CardHeader: stub("header"),
+  CardTitle: stub("h3"),
+  CardDescription: stub("p"),
+  CardContent: stub("div"),
+}));
+mock.module("@/components/ui/separator", () => ({ Separator: () => <hr /> }));
+mock.module("@/components/ui/table", () => ({
+  Table: stub("table"),
+  TableHeader: stub("thead"),
+  TableBody: stub("tbody"),
+  TableCaption: stub("caption"),
+  TableRow: stub("tr"),
+  TableHead: stub("th"),
+  TableCell: stub("td"),
+}));
+
+const { TaskUiSpecView } = await import("./task-ui-spec-view");
+
+const FALLBACK = "FALLBACK TEXT";
+
+/** Minimal valid props for each catalog component. */
+const SAMPLE_PROPS: Record<(typeof UI_SPEC_COMPONENTS)[number], Record<string, unknown>> = {
+  Card: { title: "Card title" },
+  Section: {},
+  Text: { content: "Some text" },
+  Fields: {},
+  Field: { label: "Deploys", value: "1,284" },
+  Table: { headers: ["Service", "Deploys"], rows: [["api", 812]] },
+  Chart: {
+    title: "Trend",
+    chart: { type: "bar", categories: ["a"], series: [{ name: "s", values: [1] }] },
+  },
+  Divider: {},
+  Image: { url: "https://example.com/x.png", alt: "x" },
+  Actions: {},
+  Button: { id: "rerun", label: "Re-run" },
+  LinkButton: { label: "Open", url: "https://example.com" },
+};
+
+function specWith(type: string, props: Record<string, unknown>): TaskUiSpec {
+  const elements: Record<string, unknown> =
+    type === "Card"
+      ? { c: { type, props, children: [] } }
+      : {
+          c: { type: "Card", props: {}, children: ["x"] },
+          x: { type, props, children: [] },
+        };
+  return {
+    spec: { root: "c", elements },
+    actions: { rerun: { kind: "follow_up", prompt: "Run it again" } },
+    fallbackText: FALLBACK,
+  };
+}
+
+const render = (uiSpec: TaskUiSpec | null) =>
+  renderToStaticMarkup(<TaskUiSpecView task={{ uiSpec }} />);
+
+describe("TaskUiSpecView", () => {
+  test.each([...UI_SPEC_COMPONENTS])("the switch renders %s without the fallback", (type) => {
+    const html = render(specWith(type, SAMPLE_PROPS[type]));
+    expect(html).toContain('data-slot="task-ui-spec"');
+    expect(html).not.toContain(FALLBACK);
+  });
+
+  test("an unknown type shows the fallback text", () => {
+    const html = render(specWith("Marquee", {}));
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain('data-slot="task-ui-spec"');
+  });
+
+  test("a root that is not a Card shows the fallback text", () => {
+    const html = render({
+      spec: { root: "t", elements: { t: { type: "Text", props: { content: "x" }, children: [] } } },
+      fallbackText: FALLBACK,
+    });
+    expect(html).toContain(FALLBACK);
+  });
+
+  test("an unsafe LinkButton URL renders no link", () => {
+    const html = render(specWith("LinkButton", { label: "Bad", url: "javascript:alert(1)" }));
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("Bad");
+  });
+
+  test("a Button renders disabled only when its action is declared", () => {
+    expect(render(specWith("Button", { id: "rerun", label: "Re-run" }))).toContain(
+      'data-button="disabled"',
+    );
+    expect(render(specWith("Button", { id: "other", label: "Nope" }))).not.toContain("Nope");
+  });
+
+  test("the plan example renders its field, table rows and link", () => {
+    const html = render({
+      spec: {
+        root: "c",
+        elements: {
+          c: { type: "Card", props: { title: "Weekly deploys" }, children: ["f", "t", "a"] },
+          f: { type: "Fields", props: {}, children: ["k"] },
+          k: { type: "Field", props: { label: "Deploys", value: "1,284" }, children: [] },
+          t: {
+            type: "Table",
+            props: {
+              headers: ["Service", "Deploys"],
+              rows: [
+                ["api", 812],
+                ["ui", 472],
+              ],
+            },
+            children: [],
+          },
+          a: { type: "Actions", props: {}, children: ["l"] },
+          l: {
+            type: "LinkButton",
+            props: { label: "Open dashboard", url: "https://example.com/deploys" },
+            children: [],
+          },
+        },
+      },
+      fallbackText: FALLBACK,
+    });
+    for (const s of [
+      "Weekly deploys",
+      "1,284",
+      "api",
+      "812",
+      "472",
+      'href="https://example.com/deploys"',
+    ]) {
+      expect(html).toContain(s);
+    }
+  });
+
+  test("no uiSpec renders nothing", () => {
+    expect(render(null)).toBe("");
+  });
+});

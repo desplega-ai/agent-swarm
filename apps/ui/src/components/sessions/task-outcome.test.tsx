@@ -20,6 +20,7 @@ mock.module("@/components/shared/show-more", () => ({
   ShowMore: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
 }));
 mock.module("@/components/shared/json-tree", () => ({ JsonTree: () => null }));
+mock.module("@/components/shared/task-ui-spec-view", () => ({ TaskUiSpecView: () => null }));
 mock.module("@/components/ui/button", () => ({
   Button: ({ children }: { children?: ReactNode }) => <button type="button">{children}</button>,
 }));
