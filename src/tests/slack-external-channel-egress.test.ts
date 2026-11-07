@@ -89,7 +89,7 @@ const writes: Array<[string, (c: InstanceType<typeof webApi.WebClient>) => Promi
         thread_ts: "1.0",
         text: "progress",
         username: "Agent",
-        icon_emoji: ":robot_face:",
+        icon: { icon_emoji: ":robot_face:" },
       }),
   ],
   [

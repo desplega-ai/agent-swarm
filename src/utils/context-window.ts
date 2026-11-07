@@ -20,7 +20,7 @@
  *     deprecated; new code should use `computeContextUsedUnified`.
  */
 
-import { buildClaudeShortnameMap } from "@desplega/model-catalog";
+import { buildClaudeShortnameMap, chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import { runtimeCatalogModel, runtimeCatalogSection } from "./runtime-model-catalog";
 
 /**
@@ -64,15 +64,23 @@ function catalogContext(provider: string, model: string): number | undefined {
  * (`src/utils/runtime-model-catalog.ts`: live `model_catalog` + overlay,
  * vendored models.dev snapshot offline). Accepts Anthropic ids (dated or
  * not), Claude CLI shortnames, OpenAI/Codex ids and `provider/model` ids.
+ * A positive finite `reportedWindow` from the running harness takes precedence.
  * Unknown models get a conservative 200k so percent math stays finite.
  */
-export function getContextWindowSize(model: string): number {
+export function getContextWindowSize(model: string, reportedWindow?: number | null): number {
+  // Harness limits can be smaller than the model's API/catalog maximum.
+  if (reportedWindow != null && Number.isFinite(reportedWindow) && reportedWindow > 0) {
+    return reportedWindow;
+  }
   return getKnownContextWindowSize(model) ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 /** {@link getContextWindowSize} without the fallback: undefined when the catalog has no window. */
 export function getKnownContextWindowSize(model: string | undefined): number | undefined {
   if (!model) return undefined;
+  // `openai-codex/<id>` (pi on the ChatGPT subscription) is the OpenAI `<id>`.
+  const subscriptionId = chatgptSubscriptionModelId(model);
+  if (subscriptionId) return catalogContext("openai", subscriptionId);
   const slash = model.indexOf("/");
   if (slash > 0) {
     const scoped = catalogContext(model.slice(0, slash), model.slice(slash + 1));

@@ -13,11 +13,29 @@
  * (`boot-scrub-v<N>:<table>:cursor`), saved in the same transaction as the
  * batch's writes, so a restart resumes after the last committed batch.
  *
+ * Cheap: `createSweepScrubber` clears a row with a one-pass literal search
+ * when no redaction rule can touch it, and runs the full `scrubSecrets` on the
+ * rest. A cleared row is one `scrubSecrets` leaves as is, so the sweep redacts
+ * exactly what a full sweep would. The rules decide, so a rule change needs no
+ * change here; there is no per-rule or per-version delta to keep in step.
+ *
  * Non-blocking: the regexes run OUTSIDE the write lock. Each batch is read,
  * scrubbed in JS, and only the changed rows plus the cursor go into one short
  * transaction. Every UPDATE is compare-and-set on the value that was read, so
- * a row a concurrent writer moved in between is skipped, never clobbered. The
- * loop yields between batches so /health and probes stay responsive.
+ * a row a concurrent writer moved in between is skipped, never clobbered.
+ *
+ * Paced: the work runs in time slices of `SLICE_MS`, so a request waits for at
+ * most one slice. After each slice the sweep rests, and the rest tracks load:
+ * it measures how late its own rest timer fires (event-loop lag, which is what
+ * a busy API adds), backs off while the lag is high and speeds up while the
+ * loop is idle. A backfill thus spreads over time, and over restarts through
+ * the cursor.
+ *
+ * Forward-only: with `BOOT_SCRUB_MODE=forward-only` a rules bump applies to new
+ * writes only. No historical row is read; the skipped version is recorded in
+ * `seed_state` (`boot-scrub-skipped-v<N>`, with a fingerprint of the rule
+ * tables), and switching back to `backfill` sweeps it, because the sweep's rule
+ * set is always the current one.
  *
  * Replay state: `workflow_run_steps.output` and `workflow_runs.context` are
  * also replayed by resume and recovery. A row written before the sealed
@@ -28,18 +46,63 @@
  */
 
 import { contentSha256 } from "@/commands/profile-sync";
-import { SCRUBBER_RULES_VERSION, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  createSweepScrubber,
+  SCRUBBER_RULES_VERSION,
+  scrubberRulesFingerprint,
+} from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 import type { DbExecutor, DbParam } from "./db-client";
 import { getMemoryStore } from "./memory";
 import type { MemoryScrubFields } from "./memory/types";
-import { breaksJsonValidity } from "./scrub-json";
+import { breaksJsonValidity, foldHexCopies } from "./scrub-json";
 import { sealJson } from "./sealed-json";
 
-const DEFAULT_BATCH_SIZE = 200;
+const DEFAULT_BATCH_SIZE = 100;
 
-/** Yield to the event loop so probes can respond. */
-const yieldTick = () => new Promise<void>((r) => setTimeout(r, 5));
+/** Longest the sweep holds the event loop before it rests. */
+const SLICE_MS = 5;
+/** Rest after a slice, as a multiple of the slice's work: fastest when idle, slowest when busy. */
+const MIN_REST_RATIO = 0.25;
+const MAX_REST_RATIO = 16;
+/** Rest-timer lateness (smoothed) above which the API counts as busy, and below which as idle. */
+const BUSY_LAG_MS = 8;
+const IDLE_LAG_MS = 3;
+/** Weight of the latest lag sample in the smoothed lag. */
+const LAG_SMOOTHING = 0.3;
+
+/** How the rest ratio follows load: doubles while busy, decays while idle, holds in between. */
+export function nextRestRatio(ratio: number, smoothedLagMs: number): number {
+  if (smoothedLagMs > BUSY_LAG_MS) return Math.min(MAX_REST_RATIO, ratio * 2);
+  if (smoothedLagMs < IDLE_LAG_MS) return Math.max(MIN_REST_RATIO, ratio * 0.7);
+  return ratio;
+}
+
+/**
+ * Time slices for a sweep. `yieldIfDue` rests once the slice has run for
+ * `SLICE_MS` and returns true, so the caller can drop state that the rest could
+ * have outdated (a secret registered meanwhile). The rest is `ratio` times the
+ * slice, and the ratio follows how late the rest timer fires.
+ */
+function createPacer() {
+  let sliceStart = performance.now();
+  let ratio = 1;
+  let lag = 0;
+  return {
+    async yieldIfDue(): Promise<boolean> {
+      const worked = performance.now() - sliceStart;
+      if (worked < SLICE_MS) return false;
+      const rest = Math.max(1, worked * ratio);
+      const restStart = performance.now();
+      await new Promise<void>((r) => setTimeout(r, rest));
+      const late = Math.max(0, performance.now() - restStart - rest);
+      lag = lag * (1 - LAG_SMOOTHING) + late * LAG_SMOOTHING;
+      ratio = nextRestRatio(ratio, lag);
+      sliceStart = performance.now();
+      return true;
+    },
+  };
+}
 
 type SweepTarget = {
   table: string;
@@ -53,9 +116,18 @@ type SweepTarget = {
    * replay column is NULL, it seals the original there first.
    */
   replay?: Record<string, string>;
+  /** Unique TEXT row key within `where`. Default `id`. */
+  idColumn?: string;
+  /** Static SQL filter limiting the sweep to some rows of the table. */
+  where?: string;
+  /**
+   * Undo an encoding the scrubber cannot see through, before scrubbing. The
+   * decoded form is written only when the scrub then redacts something.
+   */
+  decode?: (value: string) => string;
 };
 
-/** Swept in this order. Every table has a TEXT `id` primary key. */
+/** Swept in this order. Each row has a unique TEXT key (`idColumn`, default `id`). */
 export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
   { table: "session_logs", columns: ["content"] },
   { table: "agent_tasks", columns: ["task", "output", "failureReason", "progress"] },
@@ -76,6 +148,16 @@ export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
     columns: ["triggerData", "context", "error"],
     replay: { context: "context_replay" },
   },
+  // Every dreaming-v2 row copies swarm text (memory and profile pre-images, trim and heartbeat
+  // state, drafts, results), so the whole namespace follows the source rows' redaction. Legacy rows
+  // also kept a hex copy (`contentHex`), which is folded back into its plain field before scrubbing.
+  {
+    table: "kv_entries",
+    columns: ["value"],
+    idColumn: "key",
+    where: "namespace = 'dreaming-v2'",
+    decode: foldHexCopies,
+  },
 ];
 
 export type BootScrubTableStats = {
@@ -89,7 +171,11 @@ export type BootScrubSweepOptions = {
   /** Rules version to key on. Defaults to `SCRUBBER_RULES_VERSION` (tests inject). */
   version?: number;
   batchSize?: number;
-  /** Scrub function. Defaults to `scrubSecrets` (tests inject to force edge cases). */
+  /**
+   * Scrub function, called on every text. Defaults to the selective
+   * `createSweepScrubber` (tests inject to force edge cases or to run the full
+   * `scrubSecrets` for comparison).
+   */
   scrub?: (text: string) => string;
   /**
    * Test hook, called after each batch commits with the ids it scanned. A
@@ -102,6 +188,24 @@ export type BootScrubSweepOptions = {
 
 export function bootScrubDoneKey(version: number): string {
   return `boot-scrub-v${version}`;
+}
+
+/** Key of the record a forward-only install leaves for a rules version it did not backfill. */
+export function bootScrubSkippedKey(version: number): string {
+  return `boot-scrub-skipped-v${version}`;
+}
+
+export type BootScrubMode = "backfill" | "forward-only";
+
+/**
+ * `BOOT_SCRUB_MODE`: `backfill` (default) sweeps stored rows when the rules
+ * version is new; `forward-only` leaves them and applies the rules to new writes only.
+ * Read on every call, so the Configuration page's live reload reaches a running sweep.
+ */
+export function bootScrubMode(): BootScrubMode {
+  return process.env.BOOT_SCRUB_MODE?.trim().toLowerCase() === "forward-only"
+    ? "forward-only"
+    : "backfill";
 }
 
 export function bootScrubCursorKey(version: number, table: string): string {
@@ -124,15 +228,32 @@ export async function runBootScrubSweep(
   if (done) return null;
 
   const tag = `boot-scrub-v${version}`;
+  if (bootScrubMode() === "forward-only") {
+    await recordSkippedVersion(version);
+    console.log(`[${tag}] forward-only: no historical rows swept`);
+    return null;
+  }
   console.log(`[${tag}] starting`);
 
   const stats: BootScrubTableStats[] = [];
+  let halted = false;
   for (const target of BOOT_SCRUB_TARGETS) {
-    const tableStats = await sweepTarget(target, version, opts);
-    stats.push(tableStats);
+    const swept = await sweepTarget(target, version, opts);
+    stats.push(swept.stats);
     console.log(
-      `${tag}: ${target.table} scanned=${tableStats.scanned} changed=${tableStats.changed} skipped_invalid_json=${tableStats.skippedInvalidJson}`,
+      `${tag}: ${target.table} scanned=${swept.stats.scanned} changed=${swept.stats.changed} skipped_invalid_json=${swept.stats.skippedInvalidJson}`,
     );
+    if (swept.halted) {
+      halted = true;
+      break;
+    }
+  }
+
+  if (halted) {
+    // Switched to forward-only mid-sweep: the cursors stay, so `backfill` resumes here.
+    await recordSkippedVersion(version);
+    console.log(`[${tag}] halted: forward-only`);
+    return stats;
   }
 
   await getDbClient().transaction(async (tx) => {
@@ -145,6 +266,12 @@ export async function runBootScrubSweep(
     await tx.run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key LIKE ? ESCAPE '!'", [
       `${doneKey.replace(/[!%_]/g, "!$&")}:%:cursor`,
     ]);
+    // This sweep ran every current rule over every row, so it covers each version a
+    // forward-only install skipped up to here.
+    await tx.run(
+      "DELETE FROM seed_state WHERE kind = 'maintenance' AND key GLOB 'boot-scrub-skipped-v*' AND CAST(substr(key, 21) AS INTEGER) <= ?",
+      [version],
+    );
   });
   console.log(`[${tag}] complete`);
 
@@ -158,13 +285,26 @@ export async function runBootScrubSweep(
   return stats;
 }
 
+/** Remember a rules version the sweep did not run for, with the rule set it skipped. */
+async function recordSkippedVersion(version: number): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
+     VALUES ('maintenance', ?, ?, datetime('now'))
+     ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
+    [bootScrubSkippedKey(version), scrubberRulesFingerprint()],
+  );
+}
+
 async function sweepTarget(
   target: SweepTarget,
   version: number,
   opts: BootScrubSweepOptions,
-): Promise<BootScrubTableStats> {
+): Promise<{ stats: BootScrubTableStats; halted: boolean }> {
   const client = getDbClient();
-  const scrub = opts.scrub ?? scrubSecrets;
+  const pacer = createPacer();
+  // A scrubber is valid until the event loop turns: a secret registered meanwhile needs a new one.
+  const freshScrub = () => opts.scrub ?? createSweepScrubber();
+  let scrub = freshScrub();
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
   const cursorKey = bootScrubCursorKey(version, target.table);
   const stats: BootScrubTableStats = {
@@ -182,20 +322,29 @@ async function sweepTarget(
       )
     )?.seededHash ?? "";
 
+  const idCol = target.idColumn ?? "id";
+  const filter = target.where ? `${target.where} AND ` : "";
   const selectCols = [
-    "id",
+    idCol === "id" ? "id" : `${idCol} AS id`,
     ...target.columns,
     ...(target.hash && !target.columns.includes(target.hash.column) ? [target.hash.column] : []),
     ...Object.values(target.replay ?? {}),
   ];
 
+  let halted = false;
   for (;;) {
+    if (bootScrubMode() === "forward-only") {
+      halted = true;
+      break;
+    }
     const rows = await client.query<Record<string, string | null>>(
       `SELECT ${selectCols.join(", ")} FROM ${target.table}
-       WHERE id > ? ORDER BY id ASC LIMIT ?`,
+       WHERE ${filter}${idCol} > ? ORDER BY ${idCol} ASC LIMIT ?`,
       [cursor, batchSize],
     );
     if (rows.length === 0) break;
+    await pacer.yieldIfDue();
+    scrub = freshScrub();
 
     // Scrub outside the transaction: regexes never run under the write lock.
     const pending: {
@@ -204,6 +353,7 @@ async function sweepTarget(
       after: Record<string, string | null>;
     }[] = [];
     for (const row of rows) {
+      if (await pacer.yieldIfDue()) scrub = freshScrub();
       const after: Record<string, string | null> = {};
       let differs = false;
       let breaksJson = false;
@@ -213,11 +363,12 @@ async function sweepTarget(
           after[col] = value ?? null;
           continue;
         }
-        const cleaned = scrub(value);
-        after[col] = cleaned;
-        if (cleaned !== value) {
+        const decoded = target.decode ? target.decode(value) : value;
+        const cleaned = scrub(decoded);
+        after[col] = cleaned === decoded ? value : cleaned;
+        if (cleaned !== decoded) {
           differs = true;
-          if (breaksJsonValidity(value, cleaned)) breaksJson = true;
+          if (breaksJsonValidity(decoded, cleaned)) breaksJson = true;
         }
       }
       if (!differs) continue;
@@ -256,10 +407,10 @@ async function sweepTarget(
     stats.scanned += rows.length;
     cursor = batchLastId;
     await opts.afterBatch?.({ table: target.table, ids: rows.map((r) => r.id as string) });
-    await yieldTick();
+    await pacer.yieldIfDue();
   }
 
-  return stats;
+  return { stats, halted };
 }
 
 async function rewriteRow(
@@ -281,8 +432,9 @@ async function rewriteRow(
   // Compare-and-set on every changed column.
   const guards = [...changedCols.map((c) => `${c} IS ?`), ...sealedCols.map((c) => `${c} IS NULL`)];
   params.push(id, ...changedCols.map((c) => before[c] ?? null));
+  const filter = target.where ? `${target.where} AND ` : "";
   const result = await tx.run(
-    `UPDATE ${target.table} SET ${sets.join(", ")} WHERE id = ? AND ${guards.join(" AND ")}`,
+    `UPDATE ${target.table} SET ${sets.join(", ")} WHERE ${filter}${target.idColumn ?? "id"} = ? AND ${guards.join(" AND ")}`,
     params,
   );
   return result.changes > 0;

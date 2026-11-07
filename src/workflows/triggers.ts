@@ -325,6 +325,7 @@ export async function handleScheduleTrigger(
     };
     const runId = await startWorkflowExecution(workflow, triggerData, registry, {
       triggerType: "schedule",
+      triggeredByAgentId: schedule.createdByAgentId,
       requestedByUserId: schedule.createdBy,
     });
     runIds.push(runId);

@@ -1,6 +1,15 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { createServer, type Server } from "node:http";
-import { keyPrefixRange, sessionGroupKey } from "../assets/key";
+import { keyPrefixRange, sessionGroupKey, sessionResourceGroupOf } from "../assets/key";
 import {
   isSourceThreadKey,
   NESTED_THREAD_MIN_ROOTS,
@@ -10,10 +19,13 @@ import {
   closeDb,
   countSessions,
   createAgent,
+  createPage,
+  createScheduledTask,
   createSessionCost,
   createSteeringMessage,
   createTaskExtended,
   createUser,
+  createWorkflow,
   getDbClient,
   initDb,
   listRecentSessions,
@@ -43,6 +55,9 @@ const filters = (extra: SessionFilters & { limit?: number } = {}) => ({
 });
 
 beforeAll(async () => {
+  // The routes read the clock: pin it to NOW so their read state and
+  // auto-Done match the fixed-clock queries.
+  setSystemTime(new Date(NOW));
   initDb(":memory:");
   owner = await createUser({ name: "Owner" });
   other = await createUser({ name: "Other" });
@@ -75,6 +90,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM kv_entries WHERE namespace = 'session-labels'");
 });
 afterAll(async () => {
+  setSystemTime();
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
@@ -134,7 +150,7 @@ async function ids(extra: SessionFilters) {
 describe("session groups and prefix bounds", () => {
   test("leaf helpers preserve group names and namespace roots", () => {
     expect(keyPrefixRange("shared/a/")).toEqual({ lo: "shared/a/", hi: "shared/a0" });
-    for (const kind of ["task", "thread", "schedule", "workflow"]) {
+    for (const kind of ["task", "thread", "schedule", "workflow", "page", "app", "script", "fs"]) {
       expect(sessionGroupKey(`shared/a/${kind}:abc/`)).toBe("shared/a/");
     }
     for (const key of [
@@ -198,6 +214,134 @@ describe("session groups and prefix bounds", () => {
     await task(`personal/${other.id}/`);
     await task("shared/release:v2/");
     expect(await ids({ noGroup: true })).toEqual([a.id, b.id].sort());
+  });
+});
+
+describe("resource groups", () => {
+  test("a resource leaf at a namespace root is its own group; task stays No group", () => {
+    const me = `personal/${owner.id}/`;
+    const cases: Array<[string, string]> = [
+      ["shared/task:t1/", "shared/"],
+      [`${me}task:t1/`, me],
+      ["shared/thread:t1/", "shared/"],
+      ["shared/page:p1/", "shared/page:p1/"],
+      ["shared/workflow:w1/", "shared/workflow:w1/"],
+      [`${me}schedule:s1/`, `${me}schedule:s1/`],
+      ["shared/script:x1/", "shared/script:x1/"],
+      ["shared/fs:agent-fs:f1/", "shared/fs:agent-fs:f1/"],
+      ["shared/app:a1/action:send/", "shared/app:a1/action:send/"],
+      ["shared/workflow:w1/task:t1/", "shared/workflow:w1/"],
+      ["shared/northwind/page:p1/", "shared/northwind/"],
+    ];
+    for (const [key, group] of cases) expect([key, sessionGroupKey(key)]).toEqual([key, group]);
+    expect(sessionResourceGroupOf("shared/app:a1/action:send/")).toEqual({
+      kind: "app",
+      id: "a1",
+      base: "shared/",
+      resourceKey: "shared/app:a1/",
+      action: "send",
+    });
+    expect(sessionResourceGroupOf("shared/page:p1/action:x/")).toBeNull();
+    expect(sessionResourceGroupOf("shared/northwind/page:p1/")).toBeNull();
+    expect(sessionResourceGroupOf("shared/")).toBeNull();
+  });
+
+  test("tree, lists and the Inbox agree; No group keeps only task leaves", async () => {
+    const loose = await task("shared/task:loose/");
+    const page = await task("shared/page:p1/");
+    const workflow = await task("shared/workflow:w1/");
+    const workflowChild = await task("shared/workflow:w1/task:c1/");
+    const schedule = await task(`personal/${owner.id}/schedule:s1/`);
+    const action = await task("shared/app:a1/action:send/");
+    const filed = await task("shared/northwind/workflow:w2/");
+    expect(await ids({ noGroup: true })).toEqual([loose.id]);
+    expect(await ids({ groupKey: "shared/page:p1/" })).toEqual([page.id]);
+    expect(await ids({ groupKey: "shared/workflow:w1/" })).toEqual(
+      [workflow.id, workflowChild.id].sort(),
+    );
+    expect(await ids({ groupKey: `personal/${owner.id}/schedule:s1/` })).toEqual([schedule.id]);
+    expect(await ids({ groupKey: "shared/app:a1/" })).toEqual([]);
+    expect(await ids({ groupKey: "shared/app:a1/action:send/" })).toEqual([action.id]);
+    expect(await ids({ groupKey: "shared/northwind/" })).toEqual([filed.id]);
+    // Resource sections file on their own, like sources: their sessions stay in the Inbox.
+    const inbox = [loose, page, workflow, workflowChild, schedule, action].map((r) => r.id).sort();
+    expect(await ids({ triage: "inbox" })).toEqual(inbox);
+
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.noGroup.total).toBe(1);
+    expect(tree.inbox.total).toBe(6);
+    const totals = Object.fromEntries(tree.groups.map((g) => [g.key, g.total]));
+    expect(totals).toEqual({
+      "shared/app:a1/action:send/": 1,
+      "shared/northwind/": 1,
+      "shared/page:p1/": 1,
+      "shared/workflow:w1/": 2,
+      [`personal/${owner.id}/schedule:s1/`]: 1,
+    });
+    expect(tree.resourceGroups).toEqual(
+      [
+        "shared/app:a1/",
+        "shared/app:a1/action:send/",
+        "shared/page:p1/",
+        "shared/workflow:w1/",
+        `personal/${owner.id}/schedule:s1/`,
+      ].sort(),
+    );
+  });
+
+  test("the route labels resource groups by name, and a deleted resource gets none", async () => {
+    const agent = await createAgent({ name: "page-agent", isLead: false, status: "idle" });
+    const page = await createPage({
+      agentId: agent.id,
+      slug: `pricing-${crypto.randomUUID()}`,
+      title: "Pricing review",
+      contentType: "text/html",
+      body: "<h1>Pricing</h1>",
+    });
+    const workflow = await createWorkflow({
+      name: "Nightly digest",
+      definition: { nodes: [] },
+    });
+    const schedule = await createScheduledTask({
+      name: "Morning sweep",
+      cronExpression: "0 9 * * *",
+      taskTemplate: "Sweep",
+    });
+    // Each resource's own default key is its session group.
+    for (const resource of [page, workflow, schedule]) await task(resource.key);
+    await task("shared/workflow:deleted1/");
+    await task("shared/app:gone/action:send/");
+    const res = await fetch(`${baseUrl}/api/session-tree?show=all`, {
+      headers: { "x-swarm-user-id": owner.id },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Record<string, string>; resourceGroups?: unknown };
+    expect(body.resourceGroups).toBeUndefined();
+    expect(body.labels).toEqual({
+      [`shared/page:${page.id}/`]: "Pricing review",
+      [`shared/workflow:${workflow.id}/`]: "Nightly digest",
+      [`shared/schedule:${schedule.id}/`]: "Morning sweep",
+      "shared/app:gone/action:send/": "send",
+    });
+  });
+
+  test("resource groups are read-only: no prefix rename or delete", async () => {
+    await task("shared/workflow:w1/");
+    const move = (body: { from: string; to: string | null }) =>
+      fetch(`${baseUrl}/api/session-moves/prefix`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-swarm-user-id": owner.id },
+        body: JSON.stringify(body),
+      });
+    for (const body of [
+      { from: "shared/workflow:w1/", to: "shared/renamed/" },
+      { from: "shared/workflow:w1/", to: null },
+      { from: "shared/a/", to: "shared/page:p1/" },
+    ]) {
+      const res = await move(body);
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain("Resource groups are read-only.");
+    }
   });
 });
 
@@ -412,14 +556,22 @@ describe("nested source thread groups", () => {
       }
       const [sql, params] = call;
       const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
-      expect(plan.some((p) => p.detail.startsWith("SEARCH r USING INDEX"))).toBe(true);
       expect(
         plan.some((p) =>
-          p.detail.includes("SEARCH session_thread_root USING INDEX idx_agent_tasks_asset_key"),
+          /^SEARCH session_summaries USING INDEX idx_session_summaries_(key|thread) \(key>\? AND key<\?\)/.test(
+            p.detail,
+          ),
         ),
       ).toBe(true);
       expect(
-        plan.some((p) => p.detail === "SCAN r" || p.detail === "SCAN session_thread_root"),
+        plan.some((p) =>
+          p.detail.includes("SEARCH session_thread_root USING INDEX idx_session_summaries_key"),
+        ),
+      ).toBe(true);
+      expect(
+        plan.some((p) =>
+          /^SCAN (session_summaries|session_thread_root|agent_tasks)\b/.test(p.detail),
+        ),
       ).toBe(false);
       expect(sql).not.toContain('"key" LIKE');
       expect(sql).not.toContain("INDEXED BY");
@@ -468,7 +620,9 @@ describe("chain-wide read state", () => {
     ).toBe("unread");
     const tree = await getSessionTree(actor(), NOW);
     const rows = await listRecentSessions(filters({ limit: 100 }));
-    expect(tree.inbox.unread).toBe(rows.filter((s) => s.readState === "unread").length);
+    // Every fixture is filed into shared/a/, so the group holds the open ones.
+    const group = tree.groups.find((g) => g.key === "shared/a/")!;
+    expect(group.unread).toBe(rows.filter((s) => s.readState === "unread").length);
     expect(tree.later.total).toBe(rows.filter((s) => s.readState === "later").length);
     expect(tree.done.total).toBe(rows.filter((s) => s.readState === "done").length);
   });
@@ -497,6 +651,86 @@ describe("chain-wide read state", () => {
     const tree = await getSessionTree(actor(), NOW);
     expect(tree.noGroup.total).toBe(1);
     expect(tree.inbox.total).toBe(1);
+  });
+});
+
+describe("the Inbox holds ungrouped sessions and auto-Done", () => {
+  const TWO_DAYS_AGO = "2026-10-19T12:00:00.000Z";
+  const HALF_DAY_AGO = "2026-10-21T00:00:00.000Z";
+  const readState = async (id: string) =>
+    (await listRecentSessions(filters({ limit: 100 }))).find((s) => s.root.id === id)?.readState;
+
+  test("a session filed into a group shows under it only, not in the Inbox", async () => {
+    const loose = await task("shared/");
+    const personal = await task(`personal/${owner.id}/`);
+    const slack = await task("shared/slack/c1/thread:1/", { source: "slack" });
+    const filed = await task("shared/a/");
+    const sharedWithMe = await task(`personal/${other.id}/notes/`, { requestedByUserId: other.id });
+    await share(sharedWithMe);
+    const inbox = [loose.id, personal.id, slack.id].sort();
+    expect(await ids({ triage: "inbox" })).toEqual(inbox);
+    expect(await countSessions(filters({ triage: "inbox" }))).toBe(3);
+    expect(await ids({ groupKey: "shared/a/" })).toEqual([filed.id]);
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.inbox.total).toBe(3);
+    expect(tree.noGroup.total).toBe(2);
+    // A source section files on its own: its sessions stay in the Inbox too.
+    expect(tree.groups.find((g) => g.key === "shared/slack/c1/")?.total).toBe(1);
+    expect(tree.groups.find((g) => g.key === "shared/a/")?.total).toBe(1);
+  });
+
+  test("a finished, read Inbox session quiet for 24 hours reads as Done", async () => {
+    const quiet = await task("shared/", {}, OLD);
+    const running = await task("shared/", {}, OLD);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      (await task("shared/", { parentTaskId: running.id }, OLD)).id,
+    ]);
+    const approval = await task("shared/", {}, OLD);
+    await pending(approval.id);
+    const readQuiet = await task("shared/", {}, TWO_DAYS_AGO);
+    await state(readQuiet.id, "open", TWO_DAYS_AGO, { lastReadAt: TWO_DAYS_AGO });
+    const readToday = await task("shared/", {}, HALF_DAY_AGO);
+    await state(readToday.id, "open", HALF_DAY_AGO, { lastReadAt: HALF_DAY_AGO });
+    // Moved back to the Inbox by hand within 24 hours: it stays.
+    const backToInbox = await task("shared/", {}, OLD);
+    await state(backToInbox.id, "open", HALF_DAY_AGO);
+    const unread = await task("shared/", {}, TWO_DAYS_AGO);
+    await state(unread.id, "open", TWO_DAYS_AGO, { lastReadAt: "1970-01-01T00:00:00.000Z" });
+    // Unread without a row: activity in the last 7 days.
+    const fresh = await task("shared/", {}, TWO_DAYS_AGO);
+    // A group or Later is never overridden.
+    const filed = await task("shared/a/", {}, OLD);
+    const later = await task("shared/", {}, OLD);
+    await state(later.id, "snoozed", TWO_DAYS_AGO, { snoozeUntil: "2999-01-01T00:00:00.000Z" });
+
+    const expected = {
+      [quiet.id]: "done",
+      [running.id]: "read",
+      [approval.id]: "read",
+      [readQuiet.id]: "done",
+      [readToday.id]: "read",
+      [backToInbox.id]: "read",
+      [unread.id]: "unread",
+      [fresh.id]: "unread",
+      [filed.id]: "read",
+      [later.id]: "later",
+    };
+    for (const [id, state] of Object.entries(expected)) {
+      expect({ id, state: await readState(id) }).toEqual({ id, state });
+    }
+    const done = [quiet.id, readQuiet.id].sort();
+    expect(await ids({ triage: "done" })).toEqual(done);
+    expect(await countSessions(filters({ triage: "done" }))).toBe(2);
+    expect(await ids({ triage: "inbox" })).not.toContain(quiet.id);
+    expect(await ids({ noGroup: true })).not.toContain(quiet.id);
+    const tree = await getSessionTree(actor(), NOW);
+    expect(tree.done.total).toBe(2);
+    expect(tree.inbox.total).toBe(6);
+
+    // New activity brings it back to the Inbox, as unread.
+    await task("shared/", { parentTaskId: quiet.id }, HALF_DAY_AGO);
+    expect(await readState(quiet.id)).toBe("unread");
+    expect(await ids({ triage: "inbox" })).toContain(quiet.id);
   });
 });
 
@@ -658,7 +892,8 @@ test("needs attention uses the latest failed status and pending approvals anywhe
   expect(((await response.json()) as { approvals: unknown[] }).approvals).toEqual([
     { id: approvalId, status: "pending", sourceTaskId: approvalChild.id, title: "Approve deploy" },
   ]);
-  expect((await getSessionTree(actor(), NOW)).inbox.needsYou).toBe(2);
+  const tree = await getSessionTree(actor(), NOW);
+  expect(tree.groups.find((g) => g.key === "shared/a/")?.needsYou).toBe(2);
 });
 
 test("running and person filters examine descendants after aggregation", async () => {
@@ -748,7 +983,11 @@ test("tree visibility includes mine and shares, excludes ownerless, and preserve
     ["shared/a/", `personal/${other.id}/notes/`, "shared/finished/"].sort(),
   );
   expect(tree.groups.find((g) => g.key === "shared/finished/")?.total).toBe(0);
-  expect(tree.inbox.total).toBe(2);
+  const groupTotal = (t: Awaited<ReturnType<typeof getSessionTree>>) =>
+    t.groups.reduce((sum, g) => sum + g.total, 0);
+  expect(groupTotal(tree)).toBe(2);
+  // Every session is filed into a group, so none shows in the Inbox.
+  expect(tree.inbox.total).toBe(0);
   for (const group of tree.groups) {
     expect(group.total).toBe(
       await countSessions(
@@ -756,7 +995,7 @@ test("tree visibility includes mine and shares, excludes ownerless, and preserve
       ),
     );
   }
-  expect((await getSessionTree({ kind: "bypass" }, NOW)).inbox.total).toBe(5);
+  expect(groupTotal(await getSessionTree({ kind: "bypass" }, NOW))).toBe(5);
   const bypassRows = await listRecentSessions();
   expect(bypassRows).toHaveLength(5);
   expect(bypassRows.every((r) => r.readState === undefined)).toBe(true);
@@ -764,8 +1003,9 @@ test("tree visibility includes mine and shares, excludes ownerless, and preserve
     headers: { "x-swarm-user-id": owner.id },
   });
   expect(route.status).toBe(200);
-  expect(((await route.json()) as Awaited<ReturnType<typeof getSessionTree>>).inbox.total).toBe(2);
-  expect(await ids({ triage: "inbox" })).toEqual([mine.id]);
+  expect(groupTotal((await route.json()) as Awaited<ReturnType<typeof getSessionTree>>)).toBe(2);
+  expect(await ids({ triage: "inbox" })).toEqual([]);
+  expect(await ids({ groupKey: "shared/a/" })).toEqual([mine.id]);
 });
 
 test("tree scope list totals match sections while default scope includes ownerless roots", async () => {
@@ -783,7 +1023,7 @@ test("tree scope list totals match sections while default scope includes ownerle
   const response = await fetch(`${baseUrl}/api/session-tree`, { headers });
   const tree = (await response.json()) as Awaited<ReturnType<typeof getSessionTree>>;
   const comparisons = [
-    ["triage=inbox", tree.inbox.total, 2],
+    ["triage=inbox", tree.inbox.total, 1],
     ["noGroup=true", tree.noGroup.total, 1],
     ["groupKey=shared/a/", tree.groups.find((g) => g.key === "shared/a/")!.total, 1],
     ["triage=later", tree.later.total, 1],
@@ -908,6 +1148,104 @@ test("limit clamps to 200 and count without chain filters does not recurse", asy
 });
 
 describe("Mine view hides machine-started roots", () => {
+  test("grouped schedule runs appear in Mine and source-filtered groups only", async () => {
+    const schedule = await createScheduledTask({
+      name: crypto.randomUUID(),
+      intervalMs: 60_000,
+      taskTemplate: "Research",
+    });
+    const key = "shared/competitor-research/";
+    const run = await task(key, {
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: other.id,
+    });
+    const ownerless = await task(`${key}task:ownerless/`, {
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: undefined,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [run.id]);
+    await task(key, { source: "ui", requestedByUserId: other.id });
+    // Even shared schedule runs outside user groups retain the default source filter.
+    for (const inboxKey of [
+      "shared/",
+      `shared/schedule:${schedule.id}/`,
+      "shared/slack/channel/",
+    ]) {
+      const ungrouped = await task(inboxKey, { source: "schedule", scheduleId: schedule.id });
+      await share(ungrouped);
+    }
+    const headers = { "x-swarm-user-id": owner.id };
+    for (const shown of ["", "&showSource=comb,ui", "&showSource="]) {
+      const response = await fetch(
+        `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(key)}${shown}`,
+        { headers },
+      );
+      expect(response.status).toBe(200);
+      const list = (await response.json()) as {
+        total: number;
+        sessions: { root: { id: string } }[];
+      };
+      expect(list.total).toBe(2);
+      expect(list.sessions.map((row) => row.root.id).sort()).toEqual([run.id, ownerless.id].sort());
+      const treeResponse = await fetch(`${baseUrl}/api/session-tree?${shown.slice(1)}`, {
+        headers,
+      });
+      expect(treeResponse.status).toBe(200);
+      const tree = (await treeResponse.json()) as Awaited<ReturnType<typeof getSessionTree>>;
+      expect(tree.groups.find((group) => group.key === key)).toMatchObject({
+        total: 2,
+        running: 1,
+      });
+      if (shown) expect(tree.inbox.total).toBe(0);
+      const inboxResponse = await fetch(`${baseUrl}/api/sessions?scope=tree&triage=inbox${shown}`, {
+        headers,
+      });
+      const inbox = (await inboxResponse.json()) as { sessions: { root: { id: string } }[] };
+      expect(
+        inbox.sessions.some((row) => row.root.id === run.id || row.root.id === ownerless.id),
+      ).toBe(false);
+    }
+    const defaultList = await fetch(`${baseUrl}/api/sessions?scope=tree&showSource=comb,ui`, {
+      headers,
+    });
+    expect(((await defaultList.json()) as { total: number }).total).toBe(0);
+    // A resource group view keeps the default filters: only user groups relax them.
+    const resourceList = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&showSource=comb,ui&groupKey=${encodeURIComponent(
+        `shared/schedule:${schedule.id}/`,
+      )}`,
+      { headers },
+    );
+    expect(((await resourceList.json()) as { total: number }).total).toBe(0);
+    const hidden = await getSessionTree(actor(), NOW, { mine: true, hideSource: ["schedule"] });
+    expect(hidden.groups.find((group) => group.key === key)).toBeUndefined();
+    // "Select all N" in the group writes the schedule runs the group list shows.
+    const bulk = await fetch(`${baseUrl}/api/session-triage`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ action: "read", groupKey: key }),
+    });
+    expect(bulk.status).toBe(200);
+    expect(await bulk.json()).toEqual({ updated: 2 });
+    await state(run.id, "done");
+    const triaged = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(key)}`,
+      { headers },
+    );
+    expect(((await triaged.json()) as { total: number }).total).toBe(1);
+    // The Done count matches the Done list, which keeps the Mine rule for schedule runs.
+    const doneList = (await (
+      await fetch(`${baseUrl}/api/sessions?scope=tree&triage=done`, { headers })
+    ).json()) as { total: number; sessions: { root: { id: string } }[] };
+    expect(doneList.sessions.some((row) => row.root.id === run.id)).toBe(false);
+    const doneTree = (await (
+      await fetch(`${baseUrl}/api/session-tree`, { headers })
+    ).json()) as Awaited<ReturnType<typeof getSessionTree>>;
+    expect(doneTree.done.total).toBe(doneList.total);
+  });
+
   test("a workflow root attributed to the viewer is hidden by default and shown under All", async () => {
     // Positive control: pr-review-demo fan-out carries the trigger user as requester.
     const demo = await task("shared/", { source: "workflow", tags: ["pr-review-demo"] });
@@ -917,6 +1255,8 @@ describe("Mine view hides machine-started roots", () => {
     const slack = await task("shared/", { source: "slack" });
     const ui = await task("shared/", { source: "ui" });
     const whatsapp = await task("shared/", { source: "system", taskType: "kapso-inbound" });
+    // Comments the viewer sent from the Files page.
+    const comb = await task("shared/", { source: "comb", taskType: "comb-review" });
     // A workflow root someone else shared with the viewer stays too.
     const sharedRun = await task("shared/", { source: "workflow", requestedByUserId: other.id });
     await share(sharedRun);
@@ -935,13 +1275,15 @@ describe("Mine view hides machine-started roots", () => {
       return ((await res.json()) as Awaited<ReturnType<typeof getSessionTree>>).noGroup.total;
     };
 
-    const mine = [slack.id, ui.id, whatsapp.id, sharedRun.id].sort();
+    const mine = [slack.id, ui.id, whatsapp.id, comb.id, sharedRun.id].sort();
     const all = [...mine, demo.id, scheduled.id, heartbeat.id].sort();
     expect(await list("")).toEqual(mine);
     expect(await list("show=mine")).toEqual(mine);
     expect(await list("show=all")).toEqual(all);
     expect(await tree("")).toBe(mine.length);
     expect(await tree("show=all")).toBe(all.length);
+    // The sessions v2 default source filter (`comb,ui`) keeps the Files session.
+    expect(await list("showSource=comb,ui")).toEqual([comb.id, ui.id].sort());
 
     // No picked user: the bypass actor still sees every root, ownerless included.
     const bypass = await fetch(`${baseUrl}/api/sessions?scope=tree&limit=50`);
@@ -985,8 +1327,8 @@ describe("source filter and list triage", () => {
     });
     const discord = await task("shared/discord/c1/task:root/", { source: "chat" });
     const ui = await task("shared/", { source: "ui" });
-    const mcp = await task("shared/research/", { source: "mcp" });
-    const chat = await task("shared/research/", { source: "chat" });
+    const mcp = await task("shared/", { source: "mcp" });
+    const chat = await task("shared/", { source: "chat" });
     const facets = (await treeOf("show=all")).sources;
     expect(facets).toEqual([
       { source: "slack", total: 2 },
@@ -1044,7 +1386,8 @@ describe("source filter and list triage", () => {
     const chat = await task("shared/", { source: "chat" });
 
     const full = await treeOf();
-    expect(full.inbox.total).toBe(4);
+    // slackB is filed into shared/a/, so it shows under the group only.
+    expect(full.inbox.total).toBe(3);
     expect(full.sources).toEqual([
       { source: "slack", total: 2 },
       { source: "chat", total: 1 },
@@ -1062,9 +1405,10 @@ describe("source filter and list triage", () => {
     expect(inbox.total).toBe(1);
     expect(inbox.sessions.map((s) => s.root.id)).toEqual([ui.id]);
     const all = await listOf("triage=inbox");
-    expect(all.sessions.map((s) => s.root.id).sort()).toEqual(
-      [slackA.id, slackB.id, ui.id, chat.id].sort(),
-    );
+    expect(all.sessions.map((s) => s.root.id).sort()).toEqual([slackA.id, ui.id, chat.id].sort());
+    expect((await listOf("groupKey=shared/a/")).sessions.map((s) => s.root.id)).toEqual([
+      slackB.id,
+    ]);
   });
 
   test("showSource keeps only the listed sources, and an empty list keeps none", async () => {
@@ -1074,10 +1418,10 @@ describe("source filter and list triage", () => {
 
     const full = await treeOf();
     const shown = await treeOf("showSource=ui");
-    expect(shown.inbox.total).toBe(1);
-    expect(shown.groups.map((g) => g.key)).toEqual(["shared/a/"]);
+    expect(shown.inbox.total).toBe(0);
+    expect(shown.groups.map((g) => [g.key, g.total])).toEqual([["shared/a/", 1]]);
     expect(shown.sources).toEqual(full.sources);
-    const inbox = await listOf("triage=inbox&showSource=ui");
+    const inbox = await listOf("groupKey=shared/a/&showSource=ui");
     expect(inbox.total).toBe(1);
     expect(inbox.sessions.map((s) => s.root.id)).toEqual([ui.id]);
 
@@ -1086,9 +1430,9 @@ describe("source filter and list triage", () => {
     expect(none.sources).toEqual(full.sources);
     expect((await listOf("triage=inbox&showSource=")).total).toBe(0);
 
-    expect((await triage({ action: "done", triage: "inbox", showSource: ["ui"] })).status).toBe(
-      200,
-    );
+    expect(
+      (await triage({ action: "done", groupKey: "shared/a/", showSource: ["ui"] })).status,
+    ).toBe(200);
     expect((await listOf("triage=done")).sessions.map((s) => s.root.id)).toEqual([ui.id]);
   });
 
@@ -1101,17 +1445,17 @@ describe("source filter and list triage", () => {
     const later = await task("shared/", { source: "ui" });
     await state(later.id, "snoozed", NOW, { snoozeUntil: "2999-01-01T00:00:00.000Z" });
 
-    // No group, Slack hidden, Mine view: a and b only.
+    // No group, Slack hidden, Mine view: a only. b, finished and quiet since
+    // OLD, is already auto-Done.
     let res = await triage({ action: "done", noGroup: true, hideSource: ["slack"] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ updated: 2 });
+    expect(await res.json()).toEqual({ updated: 1 });
     let done = await listOf("triage=done");
     expect(done.sessions.map((s) => s.root.id).sort()).toEqual([a.id, b.id].sort());
     // The rest keep their state; the workflow root (All only) was not touched.
+    // The grouped session shows under its group, not in the Inbox.
     const inbox = await listOf("triage=inbox&show=all");
-    expect(inbox.sessions.map((s) => s.root.id).sort()).toEqual(
-      [slack.id, grouped.id, workflow.id].sort(),
-    );
+    expect(inbox.sessions.map((s) => s.root.id).sort()).toEqual([slack.id, workflow.id].sort());
     expect((await listOf("triage=later")).sessions.map((s) => s.root.id)).toEqual([later.id]);
 
     // Back to the Inbox from the Done list, then read and unread across the Inbox.
@@ -1119,13 +1463,13 @@ describe("source filter and list triage", () => {
     expect(await res.json()).toEqual({ updated: 2 });
     expect((await listOf("triage=done")).total).toBe(0);
     res = await triage({ action: "unread", triage: "inbox" });
-    expect(await res.json()).toEqual({ updated: 4 });
-    expect((await treeOf()).inbox.unread).toBe(4);
+    expect(await res.json()).toEqual({ updated: 3 });
+    expect((await treeOf()).inbox.unread).toBe(3);
     res = await triage({ action: "read", triage: "inbox" });
-    expect(await res.json()).toEqual({ updated: 4 });
+    expect(await res.json()).toEqual({ updated: 3 });
     const tree = await treeOf();
     expect(tree.inbox.unread).toBe(0);
-    expect(tree.inbox.total).toBe(4);
+    expect(tree.inbox.total).toBe(3);
 
     // One group only.
     res = await triage({ action: "done", groupKey: "shared/a/" });

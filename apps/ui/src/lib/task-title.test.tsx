@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { taskListTitle } from "./task-title";
+import { taskListTitle, taskPromptPreview } from "./task-title";
 
 describe("taskListTitle", () => {
   test("prefers the explicit title", () => {
@@ -68,5 +68,79 @@ Reply in the thread.`;
     );
     expect(taskListTitle({ task: "taskListTitle drops tags" })).toBe("taskListTitle drops tags");
     expect(taskListTitle({ task: "src/lib is untested" })).toBe("src/lib is untested");
+  });
+});
+
+describe("taskListTitle markdown marks", () => {
+  test("takes off a heading mark and keeps an identifier's case", () => {
+    expect(taskListTitle({ task: "## pr-ci-loop: fix CI on a/b#2591\nmore" })).toBe(
+      "pr-ci-loop: fix CI on a/b#2591",
+    );
+  });
+
+  test("takes off bold that wraps the whole line only", () => {
+    expect(taskListTitle({ task: "**F5Bot daily alert snapshot**\nbody" })).toBe(
+      "F5Bot daily alert snapshot",
+    );
+    expect(taskListTitle({ task: "**Fix** the login page" })).toBe("**Fix** the login page");
+  });
+
+  test("keeps an explicit title as written", () => {
+    expect(taskListTitle({ title: "## Raw", task: "x" })).toBe("## Raw");
+  });
+});
+
+describe("taskPromptPreview", () => {
+  test("drops a heading title line", () => {
+    expect(
+      taskPromptPreview({ task: "## pr-fix-loop: re-review\nUse the code-quality skill." }),
+    ).toBe("Use the code-quality skill.");
+  });
+
+  test("drops the line the title shows", () => {
+    expect(taskPromptPreview({ task: "Fix the login page\nIt fails on Safari." })).toBe(
+      "It fails on Safari.",
+    );
+  });
+
+  test("drops a Repo: preamble with the title line", () => {
+    expect(
+      taskPromptPreview({ task: "Repo: https://github.com/a/b\n\nShip the fix\nThen tag it." }),
+    ).toBe("Then tag it.");
+    expect(taskPromptPreview({ task: "Repo: https://github.com/a/b. Ship it\nNow." })).toBe("Now.");
+  });
+
+  test("keeps the whole ask under an explicit title", () => {
+    expect(taskPromptPreview({ title: "Login bug", task: "Fix the login page\nOn Safari." })).toBe(
+      "Fix the login page\nOn Safari.",
+    );
+  });
+
+  test("is empty when the title is the whole prompt", () => {
+    expect(taskPromptPreview({ task: "Summarize the week" })).toBe("");
+  });
+
+  test("reads Slack tokens as names and leaves out the thread context", () => {
+    const task =
+      "<thread_context>\n<@U1|Ana>: it broke\n</thread_context>\n\n<@U1|Ana>: can <@U2|Bo> fix it?\nSee <https://x.dev/run/1|the run> in <#C1|ops>.";
+    expect(taskPromptPreview({ task })).toBe("See the run in #ops.");
+  });
+
+  test("a list preview cut inside the thread context previews the thread", () => {
+    // 300 characters and "…", as the list endpoint cuts a prompt.
+    const head =
+      "<thread_context>\n<@U08NR6QD6CS|Taras>: On the integration launch, here is <https://cal.example/x|our calendar>\n\nMight spin up your self-host this weekend ";
+    const task = `${head.padEnd(300, "y")}…`;
+    const preview = taskPromptPreview({ task });
+    expect(taskListTitle({ task })).toBe("@Taras: On the integration launch, here is our calendar");
+    expect(preview.startsWith("Might spin up your self-host this weekend")).toBe(true);
+    expect(preview).not.toContain("<");
+    expect(preview).not.toContain("thread_context");
+  });
+
+  test("later thread messages keep their speaker", () => {
+    const head = "<thread_context>\n<@U1|Ana>: first message\n<@U2|Bo>: second message ";
+    const task = `${head.padEnd(300, "z")}…`;
+    expect(taskPromptPreview({ task }).startsWith("Bo: second message")).toBe(true);
   });
 });

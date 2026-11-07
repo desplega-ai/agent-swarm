@@ -54,6 +54,16 @@ export const PERMISSIONS = {
       "Approve or reject a pending approval request as a person. Agents never hold it; the request's approvers list still applies.",
     namespace: "approval",
   },
+  "improvement.submit": {
+    description:
+      "Draft a product improvement for desplega. An agent's draft stays pending until a person approves it.",
+    namespace: "improvement",
+  },
+  "improvement.approve": {
+    description:
+      "Approve and send a drafted product improvement to desplega as a person. Agents never hold it.",
+    namespace: "improvement",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",
@@ -105,6 +115,19 @@ export const PERMISSIONS = {
   "session.presence": {
     description: "Join the presence room of a session the principal can view.",
     namespace: "task",
+  },
+  "session.read.all": {
+    description:
+      "Opt in to read every user's tasks and sessions (the dashboard's All users scope). Read-only: writes and steering still need the principal's own access.",
+    namespace: "task",
+  },
+  "checklist.write.own": {
+    description: "Edit checklist items the caller owns.",
+    namespace: "checklist",
+  },
+  "checklist.write.agent": {
+    description: "Change a user's checklist items as an agent. Only the Lead.",
+    namespace: "checklist",
   },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
@@ -307,7 +330,8 @@ export const PERMISSIONS = {
     namespace: "mcp-oauth",
   },
   "kv.write.any": {
-    description: "Write another agent's task:agent: KV namespace.",
+    description:
+      "Write another agent's task:agent: KV namespace, or a lead-only family (usecase:*).",
     namespace: "kv",
   },
   "comb.presence": {

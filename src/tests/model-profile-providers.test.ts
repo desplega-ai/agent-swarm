@@ -188,10 +188,11 @@ describe("a profile accepts every provider pi and opencode run", () => {
 
   test("an effort the model does not list is 400", async () => {
     const refused = await post({
-      name: "pi-nan-xhigh",
+      name: "pi-nan-off",
       harness: "pi",
       model: "nan/glm5.3",
-      effort: "xhigh",
+      // glm5.3 lists minimal through max, but no none or toggle, so off is unsupported.
+      effort: "off",
     });
     expect(refused.status).toBe(400);
     expect(await errorOf(refused)).toContain("not supported");

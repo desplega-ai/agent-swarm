@@ -29,7 +29,7 @@ The header counts only at the start of the description or right after the closin
 1. A follow-up with downloaded files (status `draft`) passes without a decision call.
 2. **@mention pass-through.** A new message that @mentions Lead passes without a decision call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
 3. Otherwise one decision call (one `choice` question, see [Provider](#provider)) with the new message(s), the sender kind, and the last `contextMessages` thread messages. Labels: `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, `other`.
-4. The answer is no only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels is at least `minConfidence`. A split between two skip labels is still a skip. An unsure verdict replies.
+4. The answer is no only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels is at least `minConfidence`. A split between two skip labels is still a skip. A skip label below the threshold replies. With no probabilities, the top label's confidence stands in for the sum. With neither probabilities nor a confidence, the threshold is not applied and a skip label skips (in `enforce`, the message is dropped).
 
 Several buffered messages are judged together. One mention in any of them passes the batch.
 

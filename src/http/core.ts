@@ -41,10 +41,12 @@ import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime"
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
-import { startSlackApp, stopSlackApp } from "../slack";
+import { startSlackApp, stopSlackAppUnderLifecycleLock } from "../slack";
+import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
+  authUserId,
   beginRequestAuthScope,
   runWithoutRequestAuth,
   setRequestAuth,
@@ -179,7 +181,11 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   // request's frame they capture that request's auth slot for their whole
   // lifetime, and their later DB writes get attributed to whichever user
   // happened to save config.
-  return runWithoutRequestAuth(() => reloadGlobalConfigsAndIntegrationsInner());
+  // The shared Slack lifecycle lock keeps the socket watchdog from restarting
+  // the Slack app while a reload tears it down and rebuilds it.
+  return runWithoutRequestAuth(() =>
+    runSlackLifecycleExclusive(() => reloadGlobalConfigsAndIntegrationsInner()),
+  );
 }
 
 async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigResult> {
@@ -200,7 +206,8 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
 
   // Retire the old transport before any other integration can fail during
   // reload. HTTP/invalid selection must never leave the previous socket live.
-  await stopSlackApp();
+  // The reload already holds the Slack lifecycle lock (see the caller).
+  await stopSlackAppUnderLifecycleLock();
 
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late
@@ -222,20 +229,18 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
     integrations.push("embeddings");
   }
 
-  // Off-to-on transition: existing rows written while no key resolved (or
-  // with a stale dimension) never got embedded. Kick off the same backfill
-  // boot runs, fire-and-forget — it batches, swallows per-batch errors, and
-  // is idempotent, so it's safe to not await here.
-  if (!wasEmbeddingsConfigured && isEmbeddingsConfigured) {
-    import("../be/memory/boot-reembed")
-      .then(({ runBootReembed }) => runBootReembed())
+  // Every reload compares the embedding space with the stored one and
+  // re-embeds on a change (cheap when nothing changed). The off-to-on
+  // transition also backfills rows written while no key resolved (or with a
+  // stale dimension). Fire-and-forget: it batches, resumes and logs its own
+  // errors, so it's safe to not await here.
+  if (isEmbeddingsConfigured) {
+    import("../be/memory/embedding-space")
+      .then(({ runEmbeddingMaintenance }) =>
+        runEmbeddingMaintenance({ backfill: !wasEmbeddingsConfigured }),
+      )
       .catch((err) => {
-        console.error("[config-reload] memory backfill failed (non-fatal):", err);
-      });
-    import("../be/scripts/boot-reembed")
-      .then(({ runBootReembedScripts }) => runBootReembedScripts())
-      .catch((err) => {
-        console.error("[config-reload] script backfill failed (non-fatal):", err);
+        console.error("[config-reload] embedding maintenance failed (non-fatal):", err);
       });
   }
 
@@ -599,8 +604,9 @@ export async function handleCore(
     }
   }
 
-  if (auth?.kind === "user" && isRbacEnabled()) {
-    const grant = await getUserGrant(auth.userId);
+  const userId = authUserId(auth);
+  if (userId && isRbacEnabled()) {
+    const grant = await getUserGrant(userId);
     if (!grant.grantsAll) {
       const def = routeDef;
       const decision = decideAdmission({
@@ -610,7 +616,7 @@ export async function handleCore(
         grant,
       });
       enqueueAdmissionRow({
-        userId: auth.userId,
+        userId,
         decision,
         method: req.method,
         route: def?.path ?? pathSegments.join("/"),

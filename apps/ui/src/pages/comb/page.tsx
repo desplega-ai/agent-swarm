@@ -31,7 +31,7 @@ export default function CombPage() {
   const { search } = useLocation();
 
   const redirect = fileRedirectPath(routeOrgId, agentFs);
-  // Keep the query: `/join` sends teammates to `/file?connect=auto`.
+  // Keep the query of a deep link.
   if (redirect) return <Navigate to={`${redirect}${search}`} replace />;
 
   switch (agentFs.state) {
@@ -42,7 +42,7 @@ export default function CombPage() {
         <EmptyState
           icon={FolderOpen}
           title="Files is off"
-          description="Files shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Files needs agent-fs."
+          description="Files shows the swarm's agent-fs drive here. It turns on by itself once agent-fs is set up (AGENT_FS_API_URL). COMB_ENABLED=false in Settings, Configuration turns it off."
           action={
             <>
               <Button asChild size="sm">

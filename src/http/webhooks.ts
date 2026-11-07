@@ -96,6 +96,7 @@ import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { resolveGitHubHost } from "../utils/github-host";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
 import { getExecutorRegistry } from "../workflows";
@@ -139,6 +140,45 @@ async function runBlockableHandler(
       `[${source}] Task creation blocked by extension ${err.extension.name}: ${err.reason}`,
     );
     return { created: false, skipped: true, reason: err.reason, extension: err.extension };
+  }
+}
+
+/**
+ * GitHub events with a real handler (or a signature-checked control event).
+ * Every other event is a no-op today, so it is acknowledged before its body is
+ * read: the request span then excludes the payload upload, which dominated
+ * latency for large CI payloads (check_run, workflow_run, ...).
+ */
+const GITHUB_VERIFIED_EVENTS = new Set([
+  "ping",
+  "pull_request",
+  "issues",
+  "issue_comment",
+  "pull_request_review_comment",
+  "pull_request_review",
+]);
+
+const GITHUB_IGNORED_SUMMARY_MS = 60_000;
+const githubIgnoredCounts = new Map<string, number>();
+let githubIgnoredTimer: ReturnType<typeof setInterval> | null = null;
+
+function flushGithubIgnoredCounts(): void {
+  if (githubIgnoredCounts.size === 0) return;
+  const parts = [...githubIgnoredCounts.entries()].map(([name, n]) => `${name}=${n}`);
+  githubIgnoredCounts.clear();
+  console.log(
+    `[GitHub] ignored events last ${GITHUB_IGNORED_SUMMARY_MS / 1000}s: ${parts.join(" ")}`,
+  );
+}
+
+function countGithubIgnoredEvent(eventType: string): void {
+  // Bound the key space: the header is unauthenticated input.
+  const key =
+    githubIgnoredCounts.has(eventType) || githubIgnoredCounts.size < 50 ? eventType : "other";
+  githubIgnoredCounts.set(key, (githubIgnoredCounts.get(key) ?? 0) + 1);
+  if (!githubIgnoredTimer) {
+    githubIgnoredTimer = setInterval(flushGithubIgnoredCounts, GITHUB_IGNORED_SUMMARY_MS);
+    githubIgnoredTimer.unref();
   }
 }
 
@@ -398,6 +438,15 @@ export async function handleWebhooks(
     const eventType = req.headers["x-github-event"] as string | undefined;
     const signature = req.headers["x-hub-signature-256"] as string | undefined;
 
+    // Early ack: events nothing handles (check_run, workflow_run, push, ...) change
+    // no state, so skip the body read, HMAC and parse, and drain the body in the background.
+    if (typeof eventType === "string" && eventType && !GITHUB_VERIFIED_EVENTS.has(eventType)) {
+      countGithubIgnoredEvent(eventType);
+      githubWebhook.respond(res, 200, { created: false });
+      req.resume();
+      return true;
+    }
+
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -410,6 +459,20 @@ export async function handleWebhooks(
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid signature" }));
       return true;
+    }
+
+    // GHES names its host on every delivery. A mismatch is a misconfiguration, not an
+    // attack (the HMAC check above is the trust boundary), so warn and carry on.
+    const enterpriseHost = req.headers["x-github-enterprise-host"] as string | undefined;
+    const configuredHost = resolveGitHubHost();
+    if (
+      enterpriseHost &&
+      configuredHost.ok &&
+      enterpriseHost.toLowerCase() !== configuredHost.config.host
+    ) {
+      console.warn(
+        `[GitHub] Webhook from GHES host ${enterpriseHost}, but GITHUB_URL resolves to ${configuredHost.config.host}`,
+      );
     }
 
     if (eventType === "ping") {

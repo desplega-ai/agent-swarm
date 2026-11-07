@@ -28,6 +28,7 @@ const agentOutputShape = z.looseObject({
   credentialMissing: z.array(z.string()).nullable().optional(),
   credStatus: z.looseObject({}).nullable().optional(),
   avatar: z.looseObject({}).nullable().optional(),
+  slackIcon: z.looseObject({}).nullable().optional(),
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
 });

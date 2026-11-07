@@ -58,6 +58,8 @@ const ADAPTERS: Record<string, Adapter> = {
   cursor: normalizeCursor,
   // Grok runs on the ACP client, so its session logs are ACP updates.
   grok: normalizeAcp,
+  // fx runs on the ACP client (`fx acp`), so its session logs are ACP updates.
+  fx: normalizeAcp,
 };
 
 export function normalizeSessionLogs(logs: SessionLogRecord[]): TranscriptParseResult {

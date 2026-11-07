@@ -51,7 +51,7 @@ export interface SystemOneBuiltEndpoint {
   /** What the value is, for messages: "the account id of a Cloudflare account". */
   readonly describe: string;
   /** Request URL, or null when the value is not usable. `model` is already allowlisted. */
-  readonly build: (value: string, model: string) => string | null;
+  readonly build: (value: string, model: string, env: NodeJS.ProcessEnv) => string | null;
 }
 
 export type SystemOneEndpoint = string | SystemOneConfiguredEndpoint | SystemOneBuiltEndpoint;
@@ -155,11 +155,30 @@ async function readFirstGlobalConfig(
 const CLOUDFLARE_ENDPOINT: SystemOneBuiltEndpoint = {
   configKey: CLOUDFLARE_ACCOUNT_KEY,
   describe: "the 32-character id of a Cloudflare account",
-  build: (accountId, model) => {
+  build: (accountId, model, env) => {
     const id = accountId.trim();
-    return CLOUDFLARE_ACCOUNT_RE.test(id)
-      ? `https://api.cloudflare.com/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`
-      : null;
+    if (!CLOUDFLARE_ACCOUNT_RE.test(id)) return null;
+    const path = `/client/v4/accounts/${id}/ai/run/@cf/cloudflare/${model}`;
+    // Test traffic can reach a local mock. Config rows cannot set this reserved key.
+    if (env.NODE_ENV === "test" && env.CLOUDFLARE_API_BASE_URL) {
+      try {
+        const url = new URL(env.CLOUDFLARE_API_BASE_URL);
+        if (
+          url.protocol === "http:" &&
+          LOOPBACK_HOSTS.has(url.hostname) &&
+          url.pathname === "/" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        ) {
+          return `${url.origin}${path}`;
+        }
+      } catch {
+        // Ignore an invalid override and use the production endpoint.
+      }
+    }
+    return `https://api.cloudflare.com${path}`;
   },
 };
 
@@ -295,6 +314,9 @@ export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER: SystemOneExtractProviderId = "
 /** Global config key naming the decision provider a node or call without `provider` uses. */
 export const SYSTEM_ONE_DEFAULT_PROVIDER_CONFIG_KEY = "SYSTEM_ONE_DEFAULT_PROVIDER";
 
+/** Global config key naming the extraction provider a node without `provider` uses. */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY = "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER";
+
 export function isSystemOneProviderId(value: unknown): value is SystemOneProviderId {
   return (
     typeof value === "string" && (SYSTEM_ONE_PROVIDER_IDS as readonly string[]).includes(value)
@@ -330,6 +352,23 @@ export function isSystemOneExtractProviderId(value: unknown): value is SystemOne
   );
 }
 
+/** Resolve the extraction host from global config, then the environment, then the fallback. */
+export async function resolveSystemOneExtractDefaultProvider(
+  ctx: SystemOneProviderContext,
+): Promise<SystemOneExtractProviderId> {
+  let stored: string | undefined;
+  try {
+    stored = await readGlobalConfig(ctx.db, SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY);
+  } catch {
+    // An unreadable row uses the same fallback as an unset row.
+  }
+  for (const raw of [stored, ctx.env[SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY]]) {
+    const id = raw?.trim().toLowerCase();
+    if (isSystemOneExtractProviderId(id)) return id;
+  }
+  return SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+}
+
 /**
  * Provider a raw node config selects, `defaultId` when it names none. Undefined
  * when the field is present but not a known id.
@@ -345,8 +384,9 @@ export function systemOneProviderOf(
 /** Extraction provider a raw node config selects. Undefined when present but not a known id. */
 export function systemOneExtractProviderOf(
   config: Record<string, unknown>,
+  defaultId: SystemOneExtractProviderId = SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER,
 ): SystemOneExtractProviderId | undefined {
-  if (config.provider === undefined) return SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+  if (config.provider === undefined) return defaultId;
   return isSystemOneExtractProviderId(config.provider) ? config.provider : undefined;
 }
 
@@ -576,7 +616,7 @@ export async function resolveSystemOneTarget(
         errors.push(systemOneUrlMissingMessage(id, capability));
       } else {
         const resolved = isBuiltEndpoint(service.endpoint)
-          ? service.endpoint.build(base, overrides.model ?? service.defaultModel ?? "")
+          ? service.endpoint.build(base, overrides.model ?? service.defaultModel ?? "", ctx.env)
           : systemOneEndpointFromBase(base, service.endpoint.path);
         if (resolved) endpoint = resolved;
         else errors.push(systemOneUrlInvalidMessage(id, capability));

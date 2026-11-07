@@ -217,6 +217,18 @@ describe("oauth presets — HTTP", () => {
     expect(res.text).not.toContain("clientSecret");
   });
 
+  test("Linear and Jira are hidden from the add pickers but still listed and resolvable", async () => {
+    const res = await dispatch("/api/oauth-presets");
+    const body = (await res.json()) as {
+      presets: Array<{ id: string; hiddenInCatalog?: boolean }>;
+    };
+    const hidden = body.presets.filter((p) => p.hiddenInCatalog).map((p) => p.id);
+    expect(hidden.sort()).toEqual(["jira", "linear"]);
+    expect(getOAuthPreset("linear")?.hiddenInCatalog).toBe(true);
+    expect(getOAuthPreset("jira")?.hiddenInCatalog).toBe(true);
+    expect(getOAuthPreset("google")?.hiddenInCatalog).toBeUndefined();
+  });
+
   test("POST /api/oauth-apps with presetId 'google' hydrates endpoints + source", async () => {
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",

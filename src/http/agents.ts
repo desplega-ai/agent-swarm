@@ -35,6 +35,7 @@ import {
 } from "../be/db/model-profiles";
 import { createEvent } from "../be/events";
 import { setAgentHarnessCliVersion } from "../be/harness-model-support";
+import { checkProfileForAgent, formatProfileCheckFailures } from "../be/model-profile-check";
 import {
   sanitizeModelTierOverrides,
   setAgentModelTierOverrides,
@@ -50,6 +51,7 @@ import {
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
+import { isAgentOnDemand } from "../be/runtime-pools/reachability";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -61,9 +63,12 @@ import {
   AgentCredStatusSchema,
   AgentLatestModelSchema,
   AgentSchema,
+  AgentSlackIconSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
   DeliveryModeSchema,
+  type ProfileCheckResult,
+  ProfileCheckResultSchema,
   type ProfileSyncConflict,
   type ProviderName,
   ProviderNameSchema,
@@ -222,6 +227,7 @@ const LocalHarnessProviderSchema = z.enum([
   "amp",
   "cursor",
   "grok",
+  "fx",
 ]);
 const AcpRuntimeConfigSchema = z
   .object({
@@ -284,7 +290,7 @@ const updateAgentRuntimeRoute = route({
   pattern: ["api", "agents", null, "runtime"],
   summary: "Update an agent's runtime harness and default model",
   description:
-    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
+    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist, run on `harness_provider` and pass the profile check (`GET /api/agents/{id}/profile-check`) against it, and it cannot be sent with `model`. A failing check is a 400 `{ error, check }`; a passing one returns the result as `profileCheck`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   query: z.object({ repoId: z.string().optional() }),
@@ -298,8 +304,12 @@ const updateAgentRuntimeRoute = route({
     claude: ClaudeRuntimeConfigSchema.optional(),
   }),
   responses: {
-    200: { description: "Updated agent row", schema: AgentWithCapacitySchema },
-    400: { description: "Validation error" },
+    200: {
+      description:
+        "Updated agent row. `profileCheck` is set when the body set `profile`, so warnings show.",
+      schema: AgentWithCapacitySchema.extend({ profileCheck: ProfileCheckResultSchema.optional() }),
+    },
+    400: { description: "Validation error, or `{ error, check }` when the profile check fails" },
     404: { description: "Agent not found" },
   },
 });
@@ -373,7 +383,41 @@ async function resolveListClaudeTransports(
 /** List/detail rows carry the effective Claude transport so the dashboard can flag SDK agents. */
 const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
   claudeTransport: ClaudeTransportSchema.optional(),
+  /** Offline, but its runtime pool starts a runtime when a task is sent (`isAgentOnDemand`). */
+  onDemand: z.boolean().optional(),
 });
+
+/** The list/detail extras: effective Claude transport and the on-demand flag, when set. */
+async function withListExtras<T extends Agent>(
+  agent: T,
+  claudeTransport: ClaudeTransport | undefined,
+): Promise<T & { claudeTransport?: ClaudeTransport; onDemand?: true }> {
+  return {
+    ...agent,
+    ...(claudeTransport ? { claudeTransport } : {}),
+    ...((await isAgentOnDemand(agent)) ? { onDemand: true as const } : {}),
+  };
+}
+
+/**
+ * The agents whose name, role or id contains `q` (case-insensitive), at most
+ * `limit` of them. A swarm has tens of agents, so filtering loaded rows is cheap.
+ */
+export function searchAgents<T extends { id: string; name: string; role?: string | null }>(
+  agents: T[],
+  q: string | undefined,
+  limit: number | undefined,
+): T[] {
+  const needle = q?.toLowerCase();
+  const matching = needle
+    ? agents.filter((agent) =>
+        [agent.name, agent.role ?? "", agent.id].some((field) =>
+          field.toLowerCase().includes(needle),
+        ),
+      )
+    : agents;
+  return limit === undefined ? matching : matching.slice(0, limit);
+}
 
 const listAgents = route({
   method: "get",
@@ -385,6 +429,9 @@ const listAgents = route({
   tags: ["Agents"],
   query: z.object({
     include: z.enum(["tasks"]).optional(),
+    /** Matches the name, role or id anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `full` restores the legacy shape (includes identity markdown); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -507,6 +554,11 @@ const updateAgentProfileRoute = route({
     heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
+    // z.lazy keeps `| null` in the OpenAPI body: a named schema's $ref drops it.
+    slackIcon: z
+      .lazy(() => AgentSlackIconSchema)
+      .nullable()
+      .optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -526,7 +578,7 @@ const updateAgentProfileRoute = route({
         profileSyncRejection: ProfileSyncRejectionSchema.optional(),
       }),
     },
-    404: { description: "Agent not found" },
+    404: { description: "Agent not found, or changedByAgentId names no agent" },
   },
 });
 
@@ -609,6 +661,22 @@ const getAgentCredentialStatusRoute = route({
   responses: {
     200: { description: "Credential status payload", schema: AgentCredentialStatusEntrySchema },
     404: { description: "Agent not found" },
+  },
+});
+
+const getAgentProfileCheckRoute = route({
+  method: "get",
+  path: "/api/agents/{id}/profile-check",
+  pattern: ["api", "agents", null, "profile-check"],
+  summary: "Check whether an agent can run a model profile",
+  description:
+    "Read-only. Judges the profile's harness, model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; `ok` is false only when a row fails. Never returns a secret value.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  query: z.object({ profile: z.string().trim().min(1) }),
+  responses: {
+    200: { description: "The check result", schema: ProfileCheckResultSchema },
+    404: { description: "Agent or profile not found" },
   },
 });
 
@@ -853,21 +921,22 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks
+    const allAgents = includeTasks
       ? await getAllAgentsWithTasks({
           slim,
           readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
         })
       : await getAllAgents({ slim });
+    // Filtered before the per-agent capacity lookups.
+    const agents = searchAgents(allAgents, parsed.query.q, parsed.query.limit);
     const [agentsWithCapacity, transports] = await Promise.all([
       Promise.all(agents.map(agentWithCapacity)),
       resolveListClaudeTransports(agents),
     ]);
     listAgents.respond(res, 200, {
-      agents: agentsWithCapacity.map((agent) => {
-        const claudeTransport = transports.get(agent.id);
-        return claudeTransport ? { ...agent, claudeTransport } : agent;
-      }),
+      agents: await Promise.all(
+        agentsWithCapacity.map((agent) => withListExtras(agent, transports.get(agent.id))),
+      ),
     });
     return true;
   }
@@ -951,13 +1020,20 @@ export async function handleAgentsRest(
       body.setupScript === undefined &&
       body.toolsMd === undefined &&
       body.heartbeatMd === undefined &&
-      body.avatar === undefined
+      body.avatar === undefined &&
+      body.slackIcon === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, avatar, or slackIcon) must be provided",
         400,
       );
+      return true;
+    }
+
+    // context_versions.changed_by_agent_id is a foreign key: answer 404 instead of a bare 500.
+    if (body.changedByAgentId && !(await getAgentById(body.changedByAgentId))) {
+      jsonError(res, "changed_by_agent_not_found", 404);
       return true;
     }
 
@@ -992,6 +1068,7 @@ export async function handleAgentsRest(
           // Only include the key when the client sent it, so `null` (reset)
           // is distinguishable from "not provided" (leave untouched).
           ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+          ...(body.slackIcon !== undefined ? { slackIcon: body.slackIcon } : {}),
         },
         versionMeta,
         {
@@ -1142,6 +1219,7 @@ export async function handleAgentsRest(
     const { harness_provider, model, allow_custom_model, reasoning_effort, profile, acp, claude } =
       parsed.body;
 
+    let profileCheck: ProfileCheckResult | null = null;
     if (typeof profile === "string") {
       if (model !== undefined) {
         jsonError(res, "Send `profile` or `model`, not both", 400);
@@ -1158,6 +1236,15 @@ export async function handleAgentsRest(
           `Model profile "${profile}" runs on the ${picked.harness} harness, not ${harness_provider}`,
           400,
         );
+        return true;
+      }
+      // Judged against the body's harness: a PATCH that also switches it is
+      // checked against the new one.
+      profileCheck = await checkProfileForAgent(parsed.params.id, profile, {
+        harness: harness_provider,
+      });
+      if (profileCheck && !profileCheck.ok) {
+        json(res, { error: formatProfileCheckFailures(profileCheck), check: profileCheck }, 400);
         return true;
       }
     }
@@ -1399,7 +1486,10 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    updateAgentRuntimeRoute.respond(res, 200, await agentWithCapacity(agent));
+    updateAgentRuntimeRoute.respond(res, 200, {
+      ...(await agentWithCapacity(agent)),
+      ...(profileCheck ? { profileCheck } : {}),
+    });
     return true;
   }
 
@@ -1537,6 +1627,22 @@ export async function handleAgentsRest(
     return true;
   }
 
+  if (getAgentProfileCheckRoute.match(req.method, pathSegments)) {
+    const parsed = await getAgentProfileCheckRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await getAgentById(parsed.params.id))) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    const result = await checkProfileForAgent(parsed.params.id, parsed.query.profile);
+    if (!result) {
+      jsonError(res, `Model profile "${parsed.query.profile}" not found`, 404);
+      return true;
+    }
+    getAgentProfileCheckRoute.respond(res, 200, result);
+    return true;
+  }
+
   if (getAgent.match(req.method, pathSegments)) {
     const parsed = await getAgent.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -1557,12 +1663,7 @@ export async function handleAgentsRest(
       agentWithCapacity(agent),
       resolveListClaudeTransports([agent]),
     ]);
-    const claudeTransport = transports.get(agent.id);
-    getAgent.respond(
-      res,
-      200,
-      claudeTransport ? { ...agentWithCap, claudeTransport } : agentWithCap,
-    );
+    getAgent.respond(res, 200, await withListExtras(agentWithCap, transports.get(agent.id)));
     return true;
   }
 

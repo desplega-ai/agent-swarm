@@ -63,13 +63,17 @@ export async function createProviderAdapter(provider: string): Promise<ProviderA
       const { GrokAdapter } = await import("./grok-adapter");
       return new GrokAdapter();
     }
+    case "fx": {
+      const { FxAdapter } = await import("./fx-adapter");
+      return new FxAdapter();
+    }
     case "acp": {
       const { ACPAdapter } = await import("./acp-adapter");
       return new ACPAdapter();
     }
     default:
       throw new Error(
-        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, acp, dsh, cursor, amp, grok`,
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, acp, dsh, cursor, amp, grok, fx`,
       );
   }
 }

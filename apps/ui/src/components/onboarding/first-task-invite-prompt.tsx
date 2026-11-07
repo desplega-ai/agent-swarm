@@ -65,6 +65,9 @@ export function resetFirstTaskInviteWatchForTests() {
 /** How often a tab that waits for the first task reads the onboarding state. */
 const FIRST_TASK_POLL_MS = 5_000;
 
+/** How long the prompt waits after the first task is done, so the final answer renders first. */
+const OPEN_DELAY_MS = 2_000;
+
 function rememberOffer(key: string) {
   try {
     localStorage.setItem(key, "1");
@@ -76,7 +79,8 @@ function rememberOffer(key: string) {
 /**
  * Offers the invite dialog (the one of the People page) once, when this tab
  * sees the onboarding first task complete: a payload fetched in this tab
- * shows `first_task` not done, and a later one shows it done. Mounted on
+ * shows `first_task` not done, and a later one shows it done. It opens 2 s
+ * later, so the final answer of the task renders first. Mounted on
  * `/setup` and in the app shell, because sending the first task opens its
  * session: the shell's prompt knows what the setup's prompt saw. While it
  * waits for the task, it reads the onboarding state every 5 s. Only for
@@ -127,10 +131,15 @@ export function FirstTaskInvitePrompt() {
     if (!due || open || userId === null) return;
     const key = firstTaskInviteKey(config.apiUrl, userId);
     if (wasOffered(key)) return;
-    rememberOffer(key);
-    setOpen(true);
-    // The feedback pop-up waits for another page load.
-    markPromptShownThisLoad(config.apiUrl);
+    // Cleared on unmount, and when a condition of `due` stops holding.
+    const timer = setTimeout(() => {
+      if (wasOffered(key)) return;
+      rememberOffer(key);
+      setOpen(true);
+      // The feedback pop-up waits for another page load.
+      markPromptShownThisLoad(config.apiUrl);
+    }, OPEN_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [due, open, userId, config.apiUrl]);
 
   return <InviteDialog open={open} onOpenChange={setOpen} intro={INTROS[teamSize ?? "2-10"]} />;

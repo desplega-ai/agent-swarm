@@ -8,6 +8,7 @@ import {
   Archive,
   Hash,
   Inbox,
+  LayoutGrid,
   type LucideIcon,
   SquareDashed,
   SquarePen,
@@ -18,12 +19,13 @@ import { useUsers } from "@/api/hooks/use-users";
 import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { groupCrumb, groupLabel, sourceOfGroupKey } from "@/lib/session-groups";
+import { groupCrumb, groupLabel, resourceOfGroupKey, sourceOfGroupKey } from "@/lib/session-groups";
 import {
   GROUP_TAB,
   isSessionTab,
   itemFromDetail,
   NEW_SESSION_TAB,
+  OVERVIEW_TAB,
   type SessionSection,
   userName,
 } from "@/lib/sessions-v2";
@@ -67,10 +69,10 @@ const ACTIVITY_WORDS: Record<Exclude<Activity, null>, string> = {
   failed: "Failed",
 };
 
-/** The accessible name of a tab: its read state, its activity, then its title. */
-export function tabLabel(info: TabInfo): string {
+/** The accessible name of a tab: its read state, its activity, its title, then "Pinned" when pinned. */
+export function tabLabel(info: TabInfo, pinned = false): string {
   const words = [info.unread && "Unread", info.activity && ACTIVITY_WORDS[info.activity]];
-  return [...words.filter(Boolean), info.title].join(". ");
+  return [...words.filter(Boolean), info.title, pinned && "Pinned"].filter(Boolean).join(". ");
 }
 
 /**
@@ -96,6 +98,16 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
       activity: null,
     };
   }
+  if (tab === OVERVIEW_TAB) {
+    const crumb = groupCrumb(view ?? undefined, me, nameOf, labels);
+    return {
+      title: "Overview",
+      tip: `Overview of ${crumb}`,
+      icon: LayoutGrid,
+      unread: false,
+      activity: null,
+    };
+  }
   if (tab === GROUP_TAB) {
     const section = sectionTab(view);
     const crumb = section?.title ?? groupCrumb(view ?? undefined, me, nameOf, labels);
@@ -104,7 +116,9 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
       title,
       tip: `All sessions in ${crumb}`,
       icon: section?.icon ?? Hash,
-      source: (!section && view && sourceOfGroupKey(view)) || undefined,
+      source:
+        (!section && view && (sourceOfGroupKey(view) ?? resourceOfGroupKey(view)?.kind)) ||
+        undefined,
       unread: false,
       activity: null,
     };

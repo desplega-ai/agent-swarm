@@ -7,7 +7,7 @@
  *    pages) is fetched by the caller and handed in as `app`.
  * 2. Every named query runs via `GET /api/apps/:id/queries/<name>` on the
  *    standard 5s react-query poll, and is mirrored into json-render state at
- *    `/queries/<name>` as `{ data, loading, error }` — which is what the
+ *    `/queries/<name>` as `{ data, loading, fetching, error }` — which is what the
  *    catalog's `Table` binds to. A query with `{ "$param": … }` filters is run
  *    with the current route params (and parked, with an explicit error in its
  *    slot, while any of them is missing from the URL).
@@ -51,6 +51,11 @@
  *   - default      → normal SPA chrome (PageHeader + action cluster).
  *   - ?mode=full   → full-viewport overlay with a slim header.
  *   - ?mode=chromeless → the rendered page only (embed surface, no header).
+ *
+ * `layout: "sidebar"` wraps the page in `<AppShell>` (page sidebar + sticky
+ * page header) in every mode: inside the bordered canvas (default), under the
+ * slim bar (full), and as the whole viewport (chromeless), where the sidebar
+ * also names the app. Below `md` the sidebar folds into a header menu.
  */
 
 import type { StateStore } from "@json-render/core";
@@ -69,6 +74,8 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
+  RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -78,6 +85,7 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AppQueryPlan } from "@/api/hooks/use-apps";
 import {
@@ -87,14 +95,33 @@ import {
   useAppRefresh,
   useAppUserConfig,
 } from "@/api/hooks/use-apps";
-import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
+import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import { AppShell, shellNavItems } from "@/components/apps/app-shell";
+import {
+  buildQuerySlot,
+  errorMessage,
+  type QuerySlot,
+  sameQuerySlot,
+} from "@/components/apps/query-slot";
 import { RefreshCWIcon } from "@/components/icons/refresh-cw";
 import { SettingsIcon } from "@/components/icons/settings";
+import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
+import { PageActions } from "@/components/shared/page-actions";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useVersionedAppReferences } from "@/hooks/use-versioned-app-references";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
+import { getConfig } from "@/lib/config";
 import {
   type ActionHandlerMap,
   createSwarmActionHandlers,
@@ -102,17 +129,25 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import { AppScopeProvider } from "@/lib/json-render/app-scope";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
   DEFINING_APP_PARAM,
+  OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
+import {
+  haltChain,
+  installChainHaltGuard,
+  isChainHalt,
+  withChainOnError,
+  withChainOnErrorHandlers,
+} from "@/lib/json-render/chain-halt";
+import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
-
-const EMPTY_ROWS: AppRow[] = [];
 
 /** Task-backed actions are watched on the same 5s cadence as the app queries. */
 const TASK_POLL_MS = 5000;
@@ -122,6 +157,7 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<AgentTaskStatus> = new Set<AgentTaskSt
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 
 // Dev-only read-out of the whole global apps store, for console QA:
@@ -141,12 +177,6 @@ export function viewModeFromParam(mode: string | null): ViewMode {
   if (mode === "full") return "full";
   if (mode === "chromeless") return "chromeless";
   return "default";
-}
-
-interface QuerySlot {
-  data: AppRow[];
-  loading: boolean;
-  error: string | null;
 }
 
 /**
@@ -179,6 +209,15 @@ interface RuntimeCtx {
   navigate: NavigateFunction;
   /** Raw `?mode=` value — the only search param `app.navigate` carries over. */
   modeParam: string | null;
+  /** The dashboard's picked identity: the requester of a task an action creates. */
+  userId: string | null;
+}
+
+/** `params.session` of an `app.action` step (`SessionThread` sets it). */
+function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
+  if (typeof value !== "object" || value === null) return false;
+  const { key, scope } = value as { key?: unknown; scope?: unknown };
+  return typeof key === "string" && (scope === undefined || scope === "user" || scope === "shared");
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -343,10 +382,7 @@ function definingAppOf(params: { [key: string]: unknown } | undefined, ownAppId:
   return typeof tagged === "string" && tagged ? tagged : ownAppId;
 }
 
-export function errorMessage(error: unknown): string | null {
-  if (!error) return null;
-  return error instanceof Error ? error.message : String(error);
-}
+export { errorMessage };
 
 /** Resolves `true` after `ms`, or `false` if the runtime unmounted first. */
 function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
@@ -372,6 +408,11 @@ function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
  * still `running`, mirrored into `/actions/<name>`) instead of escaping as an
  * unhandled rejection that would leave the app stuck on "running".
  *
+ * `outcomePath` is the invoking bulk chain's private outcome slot
+ * (`OUTCOME_PARAM`). A newer invocation of the same action takes over
+ * `<path>`, but not the outcome slot, so the watcher keeps going until it can
+ * report this task's terminal status there.
+ *
  * The `PollRegistry` is captured ONCE, at start: it identifies the mount that
  * owns this watcher. Reading it live off `ctxRef` would let a watcher from a
  * disposed mount be revived by the next mount's registry (React StrictMode's
@@ -383,8 +424,11 @@ async function pollActionTask(
   path: string,
   taskId: string,
   onError: (message: string) => void,
+  outcomePath: string | null = null,
 ): Promise<void> {
   const poll = ctxRef.current.poll;
+  const owns = (ctx: RuntimeCtx, slotPath: string | null): boolean =>
+    slotPath !== null && (ctx.store.get(slotPath) as ActionSlot | undefined)?.taskId === taskId;
   try {
     for (;;) {
       if (!(await waitUnlessDisposed(poll, TASK_POLL_MS))) return;
@@ -399,22 +443,32 @@ async function pollActionTask(
       }
       if (poll.disposed) return;
 
-      // A newer invocation of the same action supersedes this watcher.
-      const current = ctx.store.get(path) as ActionSlot | undefined;
-      if (current?.taskId !== taskId) return;
+      // A newer invocation of the same action supersedes this watcher on the
+      // shared slot. It stops only once no slot it reports to names its task.
+      const ownsSlot = owns(ctx, path);
+      const ownsOutcome = owns(ctx, outcomePath);
+      if (!ownsSlot && !ownsOutcome) return;
 
       if (!TERMINAL_TASK_STATUSES.has(status)) {
-        ctx.store.set(path, { status: "running", taskId, taskStatus: status } satisfies ActionSlot);
+        if (ownsSlot) {
+          ctx.store.set(path, {
+            status: "running",
+            taskId,
+            taskStatus: status,
+          } satisfies ActionSlot);
+        }
         continue;
       }
 
       const ok = status === "completed";
-      ctx.store.set(path, {
+      const terminal = {
         status: ok ? "ok" : "error",
         taskId,
         taskStatus: status,
         ...(ok ? {} : { error: `task ${status}` }),
-      } satisfies ActionSlot);
+      } satisfies ActionSlot;
+      if (ownsSlot) ctx.store.set(path, terminal);
+      if (ownsOutcome && outcomePath !== null) ctx.store.set(outcomePath, terminal);
       if (ok) {
         await ctx.refetchAll();
       } else {
@@ -428,16 +482,19 @@ async function pollActionTask(
     const ctx = ctxRef.current;
     if (poll.disposed) return;
     const message = e instanceof Error ? e.message : String(e);
-    // Only claim the slot while it is still this watcher's running slot — a
+    // Only claim a slot while it is still this watcher's running slot — a
     // terminal state already written above (or a newer invocation) wins.
-    const current = ctx.store.get(path) as ActionSlot | undefined;
-    if (current?.taskId === taskId && current.status === "running") {
-      ctx.store.set(path, {
-        status: "error",
-        taskId,
-        ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
-        error: message,
-      } satisfies ActionSlot);
+    for (const slotPath of [path, outcomePath]) {
+      if (slotPath === null) continue;
+      const current = ctx.store.get(slotPath) as ActionSlot | undefined;
+      if (current?.taskId === taskId && current.status === "running") {
+        ctx.store.set(slotPath, {
+          status: "error",
+          taskId,
+          ...(current.taskStatus ? { taskStatus: current.taskStatus } : {}),
+          error: message,
+        } satisfies ActionSlot);
+      }
     }
     onError(message);
   }
@@ -468,11 +525,20 @@ export interface AppSurfaceProps {
  * in place, so in-flight task watchers are disposed with the old app.
  */
 export function AppSurface({
-  app,
+  app: latestApp,
   mode = "default",
   pageName,
   navigate: navigateProp,
 }: AppSurfaceProps) {
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const appRevision = useMemo(
+    () => JSON.stringify([latestApp.name, latestApp.description, latestApp.definition]),
+    [latestApp],
+  );
+  const appVersion = useVersionedValue(latestApp.id, latestApp, appRevision, autoReload, {
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
+  const app = appVersion.value ?? latestApp;
   const definition = app.definition;
   const routerNavigate = useNavigate();
   const navigate = navigateProp ?? routerNavigate;
@@ -530,7 +596,29 @@ export function AppSurface({
     }
     resolvedAppsRef.current = { signature: definitionSignature, map };
   }
-  const resolvedApps = resolvedAppsRef.current.map;
+  const referenceVersions = useVersionedAppReferences(
+    resolvedAppsRef.current.map,
+    targetAppIds,
+    autoReload && appVersion.canAutoReload,
+  );
+  const resolvedApps = referenceVersions.value;
+  const latestReferences = resolvedAppsRef.current.map;
+  const referencesRevision = useMemo(
+    () => JSON.stringify([...latestReferences].map(([id, ref]) => [id, ref.definition])),
+    [latestReferences],
+  );
+  useVersionUpdateToast({
+    entityKey: `app:${latestApp.id}`,
+    latestRevision: `${appRevision}|${referencesRevision}`,
+    pending: appVersion.pending || referenceVersions.pending,
+    editing: appVersion.editing,
+    autoReload,
+    canAutoReload: appVersion.canAutoReload,
+    onLoad: () => {
+      appVersion.apply();
+      referenceVersions.apply();
+    },
+  });
   // A target whose definition request is still in flight gets a neutral
   // "Loading…" card from the assembler instead of an "app unavailable" error.
   // `useQueries` keeps result order, so the index lines up with the id list.
@@ -551,14 +639,24 @@ export function AppSurface({
   // namespaced ids, `/refs/<definingAppId>` data refs) so `<Renderer>` and the
   // component catalog stay stock. Memoized so the `Renderer` keeps hitting its
   // own spec-identity memo across the 5s poll re-renders.
-  const assembled = useMemo(
-    () =>
-      assemblePageSpec(app, activePageName, resolvedApps, {
-        pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
-      }),
-    [app, activePageName, resolvedApps, pendingAppIds],
-  );
+  const assembled = useMemo(() => {
+    const result = assemblePageSpec(app, activePageName, resolvedApps, {
+      pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
+    });
+    // Each binding's `onError` moves into its params, so a failed step still
+    // halts its chain (see `withChainOnError`).
+    return result.spec ? { ...result, spec: withChainOnError(result.spec) } : result;
+  }, [app, activePageName, resolvedApps, pendingAppIds]);
   const activeSpec = assembled.spec;
+  // `layout: "sidebar"`: the page's `headerActions` subtree, rendered as a
+  // second root (same elements, same state) in the shell's sticky header.
+  const headerSpec = useMemo(
+    () =>
+      assembled.spec && assembled.headerRoot
+        ? { root: assembled.headerRoot, elements: assembled.spec.elements }
+        : null,
+    [assembled],
+  );
 
   // Named queries, each with the route params its `$param` filters need. A
   // query missing one is parked (not executed) and gets an explicit error slot.
@@ -678,6 +776,7 @@ export function AppSurface({
   // `handlers` prop on mount, so the handlers themselves must be identity
   // stable and read everything fresh through this ref.
   const modeParam = searchParams.get("mode");
+  const { userId } = useCurrentUser();
   const ctxRef = useRef<RuntimeCtx>({
     app,
     refetchModel,
@@ -687,6 +786,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   });
   ctxRef.current = {
     app,
@@ -697,6 +797,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   };
 
   // ── Task-watcher lifecycle + re-adoption ─────────────────────────────────
@@ -771,34 +872,10 @@ export function AppSurface({
     queryPlans.forEach((plan, index) => {
       const result = results[index];
       const prev = store.get(plan.statePath) as QuerySlot | undefined;
-      // A `$param` query whose params aren't all in the route never ran —
-      // say so in the slot instead of leaving it on a permanent spinner. The
-      // previous rows are RETAINED (not blanked) so content driven by the
-      // param — a closing Drawer mid slide-out — doesn't flash empty; a fresh
-      // deep link has no previous rows and still shows the empty state.
-      const next: QuerySlot = plan.missing.length
-        ? {
-            data: prev?.data ?? EMPTY_ROWS,
-            loading: false,
-            error: `missing route param(s): ${plan.missing.join(", ")}`,
-          }
-        : {
-            // `rows` is `[]` for a genuinely empty result, so `??` only falls
-            // through when the query has NO result yet (fresh mount, evicted
-            // cache) — exactly the case where the warm rows should survive
-            // under the spinner.
-            data: result?.data?.rows ?? prev?.data ?? EMPTY_ROWS,
-            loading: result?.isLoading ?? true,
-            error: errorMessage(result?.error),
-          };
-      if (
-        prev &&
-        prev.data === next.data &&
-        prev.loading === next.loading &&
-        prev.error === next.error
-      ) {
-        return;
-      }
+      // A `$param` query whose params aren't all in the route never ran — the
+      // slot says so instead of leaving a permanent spinner.
+      const next = buildQuerySlot(plan.missing, result, prev);
+      if (sameQuerySlot(prev, next)) return;
       store.set(plan.statePath, next);
     });
   }, [queryPlans, results, store]);
@@ -877,9 +954,16 @@ export function AppSurface({
   const handlersRef = useRef<ActionHandlerMap | null>(null);
 
   const compiled = useMemo(() => {
+    // A failed chain step shows as an error toast and halts its chain; the
+    // page banner is left to failures raised outside a chain (task watchers,
+    // Undo).
+    const reportStepFailure = (message: string) => {
+      toast.error(message);
+    };
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
       onError: (message) => setActionError(message),
+      onFailure: reportStepFailure,
     });
     const toastActions = createToastActionHandler({
       getHandlers: () => handlersRef.current,
@@ -910,6 +994,12 @@ export function AppSurface({
           if (!params) return;
           const ctx = ctxRef.current;
           const targetAppId = definingAppOf(params, ctx.app.id);
+          // A caller that must know whether the write landed (Table bulk
+          // actions) names a state path: it reads the outcome there, since a
+          // halted chain only says that some step failed.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
           try {
             if (params.op === "create") {
               setLastResponse(
@@ -934,13 +1024,18 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
+            if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
             // A mutate dispatched from a Form carries its formId — scope the
             // failure to that form (`/forms/<id>/$error`, rendered inline
-            // under the fields) instead of the page-level banner.
-            if (params.formId) ctx.store.set(`/forms/${params.formId}/$error`, message);
-            else setActionError(message);
+            // under the fields) instead of a toast. Either way the chain halts.
+            if (params.formId) {
+              ctx.store.set(`/forms/${params.formId}/$error`, message);
+              haltChain(message, () => {});
+            }
+            haltChain(message, reportStepFailure);
           }
         },
         "app.refresh": async (params) => {
@@ -971,6 +1066,15 @@ export function AppSurface({
             targetAppId === ctx.app.id
               ? `/actions/${name}`
               : `/refs/${targetAppId}/actions/${name}`;
+          // A Table bulk chain names a private outcome slot: `path` is shared
+          // with every other invocation of this action, so it cannot tell the
+          // chain how ITS invocation (and its task) ended.
+          const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
+          const outcomePath =
+            typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          const report = (slot: ActionSlot): void => {
+            if (outcomePath) ctx.store.set(outcomePath, slot);
+          };
           // A `$chain` binding only resolves inside a component that publishes
           // chain scope. Elsewhere the sentinel object arrives intact: json-render
           // hands it through, and `resolveScopedValue` keeps an unresolved `$chain`
@@ -986,26 +1090,37 @@ export function AppSurface({
             const message =
               "app.action parentTaskId must resolve to a task id; a $chain binding only resolves inside a component that publishes chain scope";
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
-            setActionError(message);
-            return;
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
           }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
+            const followUp: unknown = (params as Record<string, unknown>).followUp;
+            const session: unknown = (params as Record<string, unknown>).session;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
               params?.input,
               parentTaskId,
+              {
+                // `followUp: false` (SessionThread sets it) skips the Lead review.
+                followUp: typeof followUp === "boolean" ? followUp : undefined,
+                // A SessionThread's session; the server builds the context key.
+                session: isThreadSession(session) ? session : undefined,
+                requestedByUserId: ctx.userId ?? undefined,
+              },
             );
             setLastResponse(response);
 
             if (response.taskId) {
-              ctx.store.set(path, {
+              const running = {
                 status: "running",
                 taskId: response.taskId,
                 taskStatus: response.status,
-              } satisfies ActionSlot);
-              void pollActionTask(ctxRef, path, response.taskId, setActionError);
+              } satisfies ActionSlot;
+              ctx.store.set(path, running);
+              report(running);
+              void pollActionTask(ctxRef, path, response.taskId, setActionError, outcomePath);
               return;
             }
 
@@ -1016,6 +1131,7 @@ export function AppSurface({
               } satisfies ActionSlot);
               // A script action can touch any model of any app on the surface.
               await ctx.refetchAll();
+              report({ status: "ok" });
               return;
             }
 
@@ -1025,28 +1141,36 @@ export function AppSurface({
               error: message,
               result: response.result,
             } satisfies ActionSlot);
-            setActionError(message);
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
           } catch (e) {
+            if (isChainHalt(e)) throw e;
             const message = e instanceof Error ? e.message : String(e);
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
-            setActionError(message);
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
           }
         },
       },
     });
     return {
       registry,
-      handlers: handlers(
-        () => () => {
-          /* no-op SetState — handlers write through `store` / React state. */
-        },
-        () => ({}),
+      // A step's `onError` runs here and still halts its chain (`withChainOnError`).
+      handlers: withChainOnErrorHandlers(
+        handlers(
+          () => () => {
+            /* no-op SetState — handlers write through `store` / React state. */
+          },
+          () => ({}),
+        ),
+        { set: (path, value) => ctxRef.current.store.set(path, value) },
       ),
     };
   }, []);
   useEffect(() => {
     handlersRef.current = compiled.handlers;
   }, [compiled]);
+  useEffect(() => installChainHaltGuard(), []);
 
   let renderedSpec: React.ReactNode;
   if (!activePage) {
@@ -1077,6 +1201,23 @@ export function AppSurface({
   } else {
     try {
       renderedSpec = <Renderer spec={activeSpec as never} registry={compiled.registry} />;
+      // A `presentation: "split"` Drawer portals into a detail region beside
+      // the canvas; pages without one keep the canvas exactly as before.
+      const elements = (activeSpec as { elements?: Record<string, unknown> } | null)?.elements;
+      if (pageHasSplitDrawer(elements)) {
+        const rootId = (activeSpec as { root?: string }).root;
+        const rootProps = (elements?.[rootId ?? ""] as { props?: { fill?: unknown } } | undefined)
+          ?.props;
+        renderedSpec = (
+          <SplitDetailRegion
+            storageKey={deriveStorageKey(getConfig().apiUrl, `apps:${app.id}:split`)}
+            fill={rootProps?.fill === true}
+            scrollRef={scrollRef}
+          >
+            {renderedSpec}
+          </SplitDetailRegion>
+        );
+      }
     } catch (e) {
       renderedSpec = (
         <AlertCallout tone="error" icon={AlertCircle} title="Failed to render app page">
@@ -1091,8 +1232,19 @@ export function AppSurface({
   // navigating back. Owned by the runtime (not the definition) so every app
   // gets it for free — including `?mode=chromeless`, where the dashboard
   // breadcrumb bar doesn't exist and this is the only way back.
+  // The sidebar layout (`layout: "sidebar"`) lists the pages itself, so its
+  // header keeps crumbs only for pages the sidebar does not list.
+  const shellHref = (page: string) =>
+    page === defaultPage
+      ? `/apps/${encodeURIComponent(app.id)}${modeParam ? `?${new URLSearchParams({ mode: modeParam })}` : ""}`
+      : appPagePath(app.id, page, undefined, modeParam);
+  const shellItems =
+    definition.layout === "sidebar" && activePage ? shellNavItems(pages, shellHref) : null;
   const showPageCrumbs =
-    Boolean(activePage) && Object.keys(pages).length > 1 && activePageName !== defaultPage;
+    Boolean(activePage) &&
+    Object.keys(pages).length > 1 &&
+    activePageName !== defaultPage &&
+    !shellItems?.some((item) => item.name === activePageName);
   const pageCrumbs = showPageCrumbs ? (
     <nav
       aria-label="App pages"
@@ -1127,21 +1279,81 @@ export function AppSurface({
           {actionError}
         </AlertCallout>
       )}
-      <StateProvider store={store}>
-        <VisibilityProvider>
-          <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
-        </VisibilityProvider>
-      </StateProvider>
+      <AppScopeProvider value={app.id}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </AppScopeProvider>
     </JsonRenderThemeProvider>
   );
 
+  // Sidebar layout: the same providers around the shell, so the header's
+  // actions slot reads and writes the page's state and runs its actions.
+  const shellSurface =
+    shellItems && activePage ? (
+      <JsonRenderThemeProvider value={appThemeAttr ?? null}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>
+              <AppShell
+                items={shellItems}
+                activePage={activePageName}
+                onNavigate={(href) => navigate(href)}
+                // The dashboard header names the app in the default view only.
+                appName={mode === "default" ? undefined : app.name}
+                title={activePage.title ?? activePageName}
+                description={activePage.description}
+                crumbs={pageCrumbs}
+                actions={
+                  headerSpec ? (
+                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                  ) : null
+                }
+                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                scrollRef={scrollRef}
+              >
+                {actionError && (
+                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                    {actionError}
+                  </AlertCallout>
+                )}
+                {renderedSpec}
+              </AppShell>
+            </ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </JsonRenderThemeProvider>
+    ) : null;
+
   // Embed surface: the rendered page and nothing else — no SPA chrome, no
   // header, no debug drawer. Covers the layout so an iframe gets the full
-  // viewport.
+  // viewport. A sidebar-layout app keeps its shell here: it is the app's own
+  // navigation, and the only way between pages inside an iframe.
+  if (mode === "chromeless" && shellSurface) {
+    return (
+      <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
+        className="fixed inset-0 z-50 flex flex-col bg-background"
+        data-testid="app-runtime"
+        data-theme={appThemeAttr}
+      >
+        {shellSurface}
+      </div>
+    );
+  }
   if (mode === "chromeless") {
     return (
       <div
-        ref={scrollRef}
+        ref={(node) => {
+          scrollRef.current = node;
+          appVersion.scopeRef.current = node;
+        }}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
@@ -1155,6 +1367,9 @@ export function AppSurface({
   if (mode === "full") {
     return (
       <div
+        ref={appVersion.scopeRef}
+        onInputCapture={appVersion.markInteraction}
+        onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
         data-theme={appThemeAttr}
@@ -1172,33 +1387,49 @@ export function AppSurface({
             </Link>
           </Button>
         </div>
-        <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
-          {surface}
-        </div>
+        {shellSurface ?? (
+          <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
+            {surface}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4" data-testid="app-runtime">
+    <div
+      ref={appVersion.scopeRef}
+      onInputCapture={appVersion.markInteraction}
+      onClickCapture={appVersion.markInteraction}
+      className="flex flex-col flex-1 min-h-0 gap-4"
+      data-testid="app-runtime"
+    >
       {/* The header (title, open-full/chromeless actions) stays fixed; ONLY
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
-        // Below sm the actions take their own row under a full-width
-        // description; side by side they squeezed it to one word per line.
-        className="max-sm:flex-col max-sm:items-stretch"
+        // A phone folds the actions into one "more" button beside the
+        // description (`PageActions`), so the row stays a single line.
         title={app.name}
         description={app.description ?? undefined}
-        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
+        action={
+          <AppHeaderActions
+            title={app.name}
+            appIds={[...definitionsByApp.keys()]}
+            settingsApp={app}
+          />
+        }
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}
       <div
-        ref={scrollRef}
+        // The shell owns the scroll column (and `scrollRef`) in the sidebar layout.
+        ref={shellSurface ? undefined : scrollRef}
         className={cn(
-          "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          shellSurface
+            ? "flex flex-1 min-h-0 overflow-hidden rounded-lg border border-border"
+            : "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
           // Below md the canvas bleeds through `<main>`'s gutter to the screen
           // edges, so a phone gives the app its full width.
           "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
@@ -1208,7 +1439,7 @@ export function AppSurface({
         )}
         data-theme={appThemeAttr}
       >
-        {surface}
+        {shellSurface ?? surface}
       </div>
       {lastResponse !== undefined && (
         <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
@@ -1233,14 +1464,18 @@ export function AppSurface({
  * override, plus the declared `userConfig` fields when the app has any.
  */
 function AppHeaderActions({
+  title,
   appIds,
   settingsApp,
 }: {
+  /** The app's name: names the phone action sheet. */
+  title: string;
   appIds: string[];
   settingsApp: AppDetail | null;
 }) {
   const refresh = useAppRefresh(appIds);
   const location = useLocation();
+  const navigate = useNavigate();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1260,60 +1495,106 @@ function AppHeaderActions({
   const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
-        All apps
-      </Link>
-      <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
-        <Link to={fullUrl}>
-          <Maximize2 className="size-3.5" />
-          Open full
-        </Link>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Copy a header-less URL for embedding this app"
-        onClick={() => copy(chromelessUrl)}
+    <>
+      <PageActions
+        title={title}
+        more={
+          <>
+            <ActionSheetItem
+              icon={Maximize2}
+              label="Open full"
+              onSelect={() => void navigate(fullUrl)}
+            />
+            <ActionSheetItem
+              icon={Copy}
+              label="Copy chromeless link"
+              // The sheet closes on tap, so the toast is the confirmation.
+              onSelect={() =>
+                void copy(chromelessUrl).then((ok) =>
+                  ok
+                    ? toast.success("Chromeless link copied")
+                    : toast.error("Could not copy the link"),
+                )
+              }
+            />
+            <ActionSheetItem
+              icon={RefreshCw}
+              label="Refresh"
+              disabled={refreshing}
+              onSelect={() => void handleRefresh()}
+            />
+            {settingsApp ? (
+              <ActionSheetItem
+                icon={Settings}
+                label="App settings"
+                onSelect={() => setSettingsOpen(true)}
+              />
+            ) : null}
+            <ActionSheetItem
+              icon={LayoutGrid}
+              label="All apps"
+              onSelect={() => void navigate("/apps")}
+            />
+          </>
+        }
       >
-        {copied ? (
-          <Check className="size-3.5 text-status-success-strong" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-        {copied ? "Copied" : "Copy chromeless link"}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Re-read the app definition and re-run every query"
-        disabled={refreshing}
-        onClick={handleRefresh}
-      >
-        <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
-        Refresh
-      </Button>
-      {settingsApp && (
-        <>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
+            All apps
+          </Link>
+          <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
+            <Link to={fullUrl}>
+              <Maximize2 className="size-3.5" />
+              Open full
+            </Link>
+          </Button>
           <Button
             variant="outline"
-            size="icon"
-            aria-label="App settings"
-            title="Your settings for this app"
-            data-testid="app-settings-open"
-            onClick={() => setSettingsOpen(true)}
+            size="sm"
+            title="Copy a header-less URL for embedding this app"
+            onClick={() => copy(chromelessUrl)}
           >
-            <SettingsIcon size={14} />
+            {copied ? (
+              <Check className="size-3.5 text-status-success-strong" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            {copied ? "Copied" : "Copy chromeless link"}
           </Button>
-          <AppSettingsDrawer
-            appId={settingsApp.id}
-            appName={settingsApp.name}
-            appDefaultTheme={settingsApp.definition.theme}
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-          />
-        </>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Re-read the app definition and re-run every query"
+            disabled={refreshing}
+            onClick={handleRefresh}
+          >
+            <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+          {settingsApp && (
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="App settings"
+              title="Your settings for this app"
+              data-testid="app-settings-open"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <SettingsIcon size={14} />
+            </Button>
+          )}
+        </div>
+      </PageActions>
+      {settingsApp && (
+        <AppSettingsDrawer
+          appId={settingsApp.id}
+          appName={settingsApp.name}
+          appDefaultTheme={settingsApp.definition.theme}
+          appIcon={settingsApp.definition.icon}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
       )}
-    </div>
+    </>
   );
 }

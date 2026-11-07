@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { extractSlackMessageText, parseSlackTs } from "../slack/message-text";
+import {
+  collectSlackMessageFiles,
+  extractSlackMessageText,
+  parseSlackTs,
+  slackInboundMessageText,
+} from "../slack/message-text";
 
 describe("extractSlackMessageText", () => {
   test("returns top-level text when present", () => {
@@ -556,6 +561,213 @@ describe("extractSlackMessageText", () => {
   });
 });
 
+// Shape read from a table our own bot posted (raw_text cells).
+const RAW_TEXT_TABLE = {
+  type: "table",
+  block_id: "qhVnC",
+  rows: [
+    [
+      { type: "raw_text", text: "ID" },
+      { type: "raw_text", text: "Owner" },
+    ],
+    [
+      { type: "raw_text", text: "74df2fbd" },
+      { type: "raw_text", text: "Local" },
+    ],
+  ],
+  column_settings: [{ align: "left" }, { align: "left", is_wrapped: true }],
+};
+
+const richCell = (...elements: unknown[]) => ({
+  type: "rich_text",
+  elements: [{ type: "rich_text_section", elements }],
+});
+
+describe("extractSlackMessageText: table blocks", () => {
+  test("renders raw_text cells as a markdown table, header first", () => {
+    expect(extractSlackMessageText({ text: "", blocks: [RAW_TEXT_TABLE] })).toBe(
+      "| ID | Owner |\n| --- | --- |\n| 74df2fbd | Local |",
+    );
+  });
+
+  test("renders rich_text cells, keeping links, mentions and emoji", () => {
+    const table = {
+      type: "table",
+      rows: [
+        [
+          { type: "raw_text", text: "Case" },
+          { type: "raw_text", text: "Slug" },
+        ],
+        [
+          richCell(
+            { type: "text", text: "Acme", style: { bold: true } },
+            { type: "text", text: " Corp" },
+          ),
+          richCell({ type: "link", url: "https://ex.com/casos-de-exito/acme", text: "acme" }),
+        ],
+        [
+          richCell({ type: "user", user_id: "U123" }, { type: "emoji", name: "tada" }),
+          richCell({ type: "link", url: "https://ex.com/a" }),
+        ],
+        [
+          { type: "raw_number", value: 42, text: "42" },
+          { type: "raw_number", value: 7 },
+        ],
+      ],
+    };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe(
+      [
+        "| Case | Slug |",
+        "| --- | --- |",
+        "| Acme Corp | [acme](https://ex.com/casos-de-exito/acme) |",
+        "| <@U123>:tada: | https://ex.com/a |",
+        "| 42 | 7 |",
+      ].join("\n"),
+    );
+  });
+
+  test("escapes pipes and folds newlines so each row stays one line", () => {
+    const table = {
+      type: "table",
+      rows: [[{ type: "raw_text", text: "a|b" }], [{ type: "raw_text", text: "line1\nline2" }]],
+    };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe(
+      "| a\\|b |\n| --- |\n| line1 line2 |",
+    );
+  });
+
+  test("keeps the table after preceding text when rich_text dedupes against msg.text", () => {
+    // A pasted table: msg.text stops at the colon, the rows live only in the table block.
+    const lead = "te paso también los slug definitivos que usarás:";
+    const table = {
+      type: "table",
+      rows: [
+        [
+          { type: "raw_text", text: "Acme" },
+          { type: "raw_text", text: "/casos-de-exito/acme" },
+        ],
+        [
+          { type: "raw_text", text: "Globex" },
+          { type: "raw_text", text: "/casos-de-exito/globex" },
+        ],
+      ],
+    };
+    const msg = {
+      text: lead,
+      blocks: [
+        { type: "rich_text", elements: [richCell({ type: "text", text: lead }).elements[0]] },
+        table,
+      ],
+    };
+    expect(extractSlackMessageText(msg)).toBe(
+      `${lead}\n| Acme | /casos-de-exito/acme |\n| --- | --- |\n| Globex | /casos-de-exito/globex |`,
+    );
+  });
+
+  test("keeps block order: text, table, text", () => {
+    const msg = {
+      text: "",
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: "before" } },
+        RAW_TEXT_TABLE,
+        { type: "section", text: { type: "mrkdwn", text: "after" } },
+      ],
+    };
+    expect(extractSlackMessageText(msg)).toBe(
+      "before\n| ID | Owner |\n| --- | --- |\n| 74df2fbd | Local |\nafter",
+    );
+  });
+
+  test("a table is never deduped away against msg.text", () => {
+    expect(
+      extractSlackMessageText({ text: "ID Owner 74df2fbd Local", blocks: [RAW_TEXT_TABLE] }),
+    ).toBe("ID Owner 74df2fbd Local\n| ID | Owner |\n| --- | --- |\n| 74df2fbd | Local |");
+  });
+
+  test("renders a data_table block with its caption", () => {
+    const table = { type: "data_table", caption: "Teams", rows: RAW_TEXT_TABLE.rows };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe(
+      "Teams\n| ID | Owner |\n| --- | --- |\n| 74df2fbd | Local |",
+    );
+  });
+
+  test("pads a header narrower than its rows to the widest row", () => {
+    const cell = (text: string) => ({ type: "raw_text", text });
+    const table = { type: "table", rows: [[cell("H")], [cell("A"), cell("B")]] };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe("| H |  |\n| --- | --- |\n| A | B |");
+  });
+
+  test("pads an empty header row to the widest row", () => {
+    const cell = (text: string) => ({ type: "raw_text", text });
+    const table = { type: "table", rows: [[], [cell("A"), cell("B")]] };
+    expect(extractSlackMessageText({ blocks: [table] })).toBe("|  |  |\n| --- | --- |\n| A | B |");
+  });
+
+  test("skips a table with no cell text", () => {
+    const table = { type: "table", rows: [[{ type: "raw_text", text: "" }]] };
+    expect(extractSlackMessageText({ text: "hi", blocks: [table] })).toBe("hi");
+  });
+});
+
+describe("slackInboundMessageText", () => {
+  test("returns msg.text unchanged when there is no table", () => {
+    const msg = {
+      text: "hello <@U1>",
+      blocks: [
+        { type: "rich_text", elements: [richCell({ type: "text", text: "hello " }).elements[0]] },
+      ],
+      attachments: [{ text: "unfurl" }],
+    };
+    expect(slackInboundMessageText(msg)).toBe("hello <@U1>");
+    expect(slackInboundMessageText({})).toBe("");
+  });
+
+  test("adds the table rows msg.text leaves out", () => {
+    const msg = {
+      text: "slugs:",
+      blocks: [
+        { type: "rich_text", elements: [richCell({ type: "text", text: "slugs:" }).elements[0]] },
+        RAW_TEXT_TABLE,
+      ],
+    };
+    expect(slackInboundMessageText(msg)).toBe(
+      "slugs:\n| ID | Owner |\n| --- | --- |\n| 74df2fbd | Local |",
+    );
+  });
+});
+
+describe("collectSlackMessageFiles", () => {
+  test("returns files of a shared message when top-level files is null", () => {
+    // Shape of a message shared into a DM: the screenshot lives on the attachment.
+    const msg = {
+      files: null,
+      attachments: [
+        { is_share: true, is_msg_unfurl: true, files: [{ id: "F0CCTPG9A21", name: "image.png" }] },
+      ],
+    };
+    expect(collectSlackMessageFiles(msg).map((f) => f.id)).toEqual(["F0CCTPG9A21"]);
+  });
+
+  test("merges top-level and attachment files, deduped by id, top-level first", () => {
+    const msg = {
+      files: [{ id: "F1" }, { id: "F2" }],
+      attachments: [
+        { files: [{ id: "F2" }, { id: "F3" }] },
+        { text: "no files" },
+        { files: [{ id: "F3" }] },
+      ],
+    };
+    expect(collectSlackMessageFiles(msg).map((f) => f.id)).toEqual(["F1", "F2", "F3"]);
+  });
+
+  test("returns an empty list for a message without files", () => {
+    expect(collectSlackMessageFiles({})).toEqual([]);
+    expect(
+      collectSlackMessageFiles({ attachments: [{ files: [null, { name: "no id" }] }] }),
+    ).toEqual([]);
+  });
+});
+
 describe("parseSlackTs", () => {
   test("passes the dotted API form through unchanged", () => {
     expect(parseSlackTs("1783411554.596189")).toBe("1783411554.596189");
@@ -589,5 +801,85 @@ describe("parseSlackTs", () => {
 
   test("falls through unchanged for unrecognized input", () => {
     expect(parseSlackTs("not-a-ts")).toBe("not-a-ts");
+  });
+});
+
+describe("extractSlackMessageText — bot text that repeats its blocks", () => {
+  test("an outcome card's answer block and footer render once", () => {
+    const text =
+      ":bee-lgtm: Yes: every follow-up carries the context. 2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>";
+    const result = extractSlackMessageText({
+      text,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Yes: every follow-up carries the context." },
+        },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: "2m43s · Lead · <https://app.example.test/tasks/f66a807e|`f66a807e`>",
+            },
+          ],
+        },
+      ],
+    });
+    expect(result).toBe(text);
+  });
+
+  test("a block with a link the text lacks is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Alert fired",
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text: "Alert fired" } },
+        {
+          type: "context",
+          elements: [{ type: "mrkdwn", text: "<https://trace.example.test/1|View trace>" }],
+        },
+      ],
+    });
+    expect(result).toBe("Alert fired\n<https://trace.example.test/1|View trace>");
+  });
+
+  test("a block that differs only by an underscore is kept", () => {
+    const result = extractSlackMessageText({
+      text: "Incident in foobar",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "Incident in foo_bar" } }],
+    });
+    expect(result).toBe("Incident in foobar\nIncident in foo_bar");
+  });
+
+  test("a block found only inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "this is fine",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "hi" } }],
+    });
+    expect(result).toBe("this is fine\nhi");
+  });
+
+  test("a block ending in a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the caféteria",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the caféteria\ncafé");
+  });
+
+  test("a block starting with a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "see the résumé",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "ésumé" } }],
+    });
+    expect(result).toBe("see the résumé\nésumé");
+  });
+
+  test("a non-ASCII block on word boundaries is still dropped", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the café today",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the café today");
   });
 });

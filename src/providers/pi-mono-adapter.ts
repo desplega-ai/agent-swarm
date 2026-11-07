@@ -18,6 +18,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  CHATGPT_SUBSCRIPTION_PROVIDER,
+  chatgptSubscriptionModelId,
   ignoredBaseUrlVar,
   type OpenAICompatibleProvider,
   openAICompatibleKeyVars,
@@ -29,6 +31,7 @@ import {
   providerKeyFromEnv,
   providerKeyVars,
 } from "@desplega/model-catalog";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   getBuiltinModel as getModel,
   getBuiltinModels as getModels,
@@ -71,6 +74,12 @@ import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerEnvSecrets, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
+import {
+  chatgptSubscriptionAuthFailure,
+  loadChatgptSubscriptionCredential,
+} from "./codex-oauth/subscription.js";
+import type { CodexOAuthCredentials } from "./codex-oauth/types.js";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
@@ -328,6 +337,17 @@ export async function checkPiMonoCredentials(
     }
   }
 
+  // A ChatGPT subscription model runs on the codex_oauth pool only: the
+  // session gets a per-task in-memory credential, never auth.json or a key.
+  if (chatgptSubscriptionModelId(env.MODEL_OVERRIDE)) {
+    if (hasCodexOAuthPoolSlots(env)) return { ready: true, missing: [], satisfiedBy: "env" };
+    return {
+      ready: false,
+      missing: ["CODEX_OAUTH"],
+      hint: `MODEL_OVERRIDE=${env.MODEL_OVERRIDE} runs on the ChatGPT subscription pool; add a codex_oauth slot (codex-login) or pick a model with its own API key.`,
+    };
+  }
+
   const homeDir = opts.homeDir ?? env.HOME ?? "/root";
   const fsProbe = opts.fs?.existsSync ?? existsSync;
   const authFile = `${homeDir}/.pi/agent/auth.json`;
@@ -351,11 +371,13 @@ export async function checkPiMonoCredentials(
   // Permissive case: any one supported key works. A registry provider key
   // (NaN, Helmcode) only serves `<id>/*` models, but it is still a usable pi
   // credential (the task's explicit model is checked above once it is set).
+  // The codex_oauth pool likewise serves only `openai-codex/*` models.
   if (
     env.ANTHROPIC_API_KEY ||
     env.OPENROUTER_API_KEY ||
     env.OPENAI_API_KEY ||
-    openAICompatibleKeyVars().some((k) => env[k])
+    openAICompatibleKeyVars().some((k) => env[k]) ||
+    hasCodexOAuthPoolSlots(env)
   ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
@@ -518,12 +540,16 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
 export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
   modelsPath?: string,
+  subscription?: CodexOAuthCredentials,
 ): Promise<ModelRuntime> {
   // A per-session models.json (`writeSessionModelsJson`) still shares the
   // agent dir's catalog cache, which only holds built-in provider catalogs.
-  const modelRuntime = await ModelRuntime.create(
-    modelsPath ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") } : {},
-  );
+  const modelRuntime = await ModelRuntime.create({
+    ...(modelsPath
+      ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") }
+      : {}),
+    ...(subscription ? { credentials: await subscriptionCredentialStore(subscription) } : {}),
+  });
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
@@ -532,6 +558,28 @@ export async function createPiRuntimeAuth(
   }
 
   return modelRuntime;
+}
+
+/**
+ * A ChatGPT subscription session's credential store: in memory, per session,
+ * holding only the pool slot's `openai-codex` OAuth entry with the refresh
+ * token blanked (`loadChatgptSubscriptionCredential`). It replaces
+ * `~/.pi/agent/auth.json` for this session, so nothing reaches disk and
+ * concurrent sessions on different slots never share an entry. A refresh pi
+ * attempts fails on the empty token and stays in memory.
+ */
+async function subscriptionCredentialStore(
+  creds: CodexOAuthCredentials,
+): Promise<InMemoryCredentialStore> {
+  const store = new InMemoryCredentialStore();
+  await store.modify(CHATGPT_SUBSCRIPTION_PROVIDER, async () => ({
+    type: "oauth",
+    access: creds.access,
+    refresh: "",
+    expires: creds.expires,
+    accountId: creds.accountId,
+  }));
+  return store;
 }
 
 /**
@@ -783,6 +831,9 @@ function resolveModelInner(
 ) {
   if (!modelStr) return undefined;
 
+  const subscriptionId = chatgptSubscriptionModelId(modelStr);
+  if (subscriptionId) return resolveSubscriptionModel(subscriptionId, modelRuntime);
+
   const lower = modelStr.toLowerCase();
   const isAnthropicShortname =
     lower === "opus" || lower === "sonnet" || lower === "haiku" || lower === "fable";
@@ -845,6 +896,24 @@ function resolveModelInner(
   }
 
   return undefined;
+}
+
+/**
+ * `openai-codex/<id>`: pi-ai's ChatGPT backend provider. Its builtin list
+ * trails the OpenAI catalog ids the picker offers (the codex harness list), so
+ * an id it does not ship reuses a shipped model's transport settings under the
+ * requested id. The ChatGPT backend rejects an id the subscription does not
+ * serve, which fails the task with the upstream error.
+ */
+function resolveSubscriptionModel(
+  modelId: string,
+  modelRuntime: Pick<ModelRuntime, "getModel"> | undefined,
+) {
+  const provider = CHATGPT_SUBSCRIPTION_PROVIDER as "openai-codex";
+  const known = getModel(provider, modelId as never) ?? modelRuntime?.getModel(provider, modelId);
+  if (known) return known;
+  const template = getModels(provider)[0];
+  return template ? { ...template, id: modelId, name: modelId } : undefined;
 }
 
 /** Manage AGENTS.md symlink for pi-mono CLAUDE.md compatibility */
@@ -1008,6 +1077,8 @@ export class PiMonoSession implements ProviderSession {
    * surface it directly.
    */
   private prevOutputTokens = 0;
+  /** Pi SessionStats omits reasoning; assistant events report it as an output subset. */
+  private reasoningOutputTokens = 0;
   /**
    * Terminal error message captured from structured pi-coding-agent events.
    *
@@ -1137,8 +1208,13 @@ export class PiMonoSession implements ProviderSession {
           role?: string;
           stopReason?: string;
           errorMessage?: string;
+          usage?: { reasoning?: number };
         };
         if (endMsg.role === "assistant") {
+          const reasoning = endMsg.usage?.reasoning;
+          if (typeof reasoning === "number" && Number.isFinite(reasoning) && reasoning >= 0) {
+            this.reasoningOutputTokens += reasoning;
+          }
           const turn = describeAssistantTurn(event.message);
           this.lastAssistantTurn = turn;
           // Ahead of the turn's text and tool lines: the chip rides on the
@@ -1301,6 +1377,14 @@ export class PiMonoSession implements ProviderSession {
     }
   }
 
+  /** An AWS SDK failure, or a rejected ChatGPT subscription login. */
+  private classifyFailure(raw: string): { message: string; category: string } | undefined {
+    const aws = classifyAwsSdkError(raw);
+    if (aws) return aws;
+    const auth = chatgptSubscriptionAuthFailure(raw, this.config);
+    return auth ? { message: auth, category: "authentication_failed" } : undefined;
+  }
+
   private async runSession(): Promise<ProviderResult> {
     try {
       // Pi expands a leading `/skill:name` itself, with no tool call to observe.
@@ -1333,7 +1417,7 @@ export class PiMonoSession implements ProviderSession {
       // exactly like sibling adapters. AWS errors get a categorized, actionable
       // message; anything else surfaces its raw error text.
       if (this.terminalError) {
-        const classification = classifyAwsSdkError(this.terminalError);
+        const classification = this.classifyFailure(this.terminalError);
         const message = scrubSecrets(classification?.message ?? this.terminalError);
         const category = classification?.category;
         this.emit({ type: "error", message, category });
@@ -1382,16 +1466,17 @@ export class PiMonoSession implements ProviderSession {
           appliedReasoningEffort: this.appliedReasoningEffort,
         };
       }
-      // Defense-in-depth: AWS SDK failures surface as structured events (handled
-      // above in runSession), not thrown exceptions, so this catch is for genuine
-      // unexpected throws (MCP / transport / etc). Still classify in case an AWS
-      // signature ever reaches here, so the red box fires like sibling adapters.
-      const awsCatchError = classifyAwsSdkError(errorMessage);
-      if (awsCatchError) {
+      // Provider failures (AWS SDK, a rejected subscription login) arrive as
+      // structured events (the terminalError path above), so a throw here is
+      // MCP, transport or the harness itself. Classify it only for the red
+      // box: an MCP "HTTP 401 Unauthorized" reads like a rejected login but
+      // says nothing about the provider, so the origin stays "harness".
+      const classifiedError = this.classifyFailure(errorMessage);
+      if (classifiedError) {
         this.emit({
           type: "error",
-          message: awsCatchError.message,
-          category: awsCatchError.category,
+          message: classifiedError.message,
+          category: classifiedError.category,
         });
       }
       this.emit({ type: "raw_stderr", content: `[pi-mono] Error: ${errorMessage}\n` });
@@ -1402,8 +1487,9 @@ export class PiMonoSession implements ProviderSession {
         sessionId: this._sessionId,
         cost,
         isError: true,
-        errorCategory: awsCatchError?.category,
-        failureReason: scrubSecrets(awsCatchError?.message ?? errorMessage),
+        errorCategory: classifiedError?.category,
+        errorOrigin: "harness",
+        failureReason: scrubSecrets(classifiedError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };
     } finally {
@@ -1523,6 +1609,7 @@ export class PiMonoSession implements ProviderSession {
       totalCostUsd: stats.cost || 0,
       inputTokens: stats.tokens.input,
       outputTokens: stats.tokens.output,
+      reasoningOutputTokens: this.reasoningOutputTokens,
       cacheReadTokens: stats.tokens.cacheRead,
       cacheWriteTokens: stats.tokens.cacheWrite,
       // Phase 7: real wallclock duration; pi-ai SessionStats doesn't carry
@@ -1992,7 +2079,14 @@ export class PiMonoAdapter implements ProviderAdapter {
     const { createdSymlink, customTools, deferTools, piMcpServers } = setup;
     // The runtime is created before resolving so custom providers, which only
     // exist in its composed store, can resolve.
-    const modelRuntime = await createPiRuntimeAuth(sessionEnv, sessionModels.modelsPath);
+    const subscription = chatgptSubscriptionModelId(config.model)
+      ? await loadChatgptSubscriptionCredential(config)
+      : undefined;
+    const modelRuntime = await createPiRuntimeAuth(
+      sessionEnv,
+      sessionModels.modelsPath,
+      subscription,
+    );
     const resolvedModel = resolveModel(config.model, sessionEnv, modelRuntime);
     // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
     // to models resolved through the runtime's composed store; the builtin

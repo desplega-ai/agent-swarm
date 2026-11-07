@@ -6,7 +6,7 @@ import { useConfig } from "@/hooks/use-config";
 import { ConnectionsSection } from "@/pages/config/components/connections-section";
 
 /**
- * Connections settings page: server connections (API URL + key). Before any
+ * Settings › Servers: the swarm server connections (API URL + key). Before any
  * connection exists, `RootLayout` sends the operator to `/setup` step 1.
  */
 export default function ConnectionsPage() {
@@ -15,7 +15,7 @@ export default function ConnectionsPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
-      <PageHeader title="Connections" />
+      <PageHeader title="Servers" />
       {connectionLocked ? (
         <Alert>
           <LockKeyhole className="h-4 w-4" />

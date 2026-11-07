@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { approvalPollInterval } from "../../lib/approval-format";
 import { api } from "../client";
 
 export interface ApprovalRequestFilters {
@@ -17,12 +18,16 @@ export function useApprovalRequests(filters?: ApprovalRequestFilters) {
 }
 
 /** The approvals list page's slim rows; shares the `approval-requests` key prefix for invalidation. */
-export function useApprovalRequestSummaries(filters?: { status?: string; limit?: number }) {
+export function useApprovalRequestSummaries(
+  filters?: { status?: string; limit?: number },
+  options?: { enabled?: boolean; refetchInterval?: number },
+) {
   return useQuery({
     queryKey: ["approval-requests", "slim", filters],
     queryFn: () => api.fetchApprovalRequestSummaries(filters),
     select: (data) => data.approvalRequests,
-    refetchInterval: 5000,
+    refetchInterval: options?.refetchInterval ?? 5000,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -33,6 +38,36 @@ export function useApprovalRequest(id: string) {
     select: (data) => data.approvalRequest,
     enabled: !!id,
     refetchInterval: 5000,
+  });
+}
+
+/**
+ * One request for an embedded card (the apps `Approval` component). Same cache
+ * entry as `useApprovalRequest`, but polling stops once the request resolves.
+ */
+export function useLiveApprovalRequest(id: string) {
+  return useQuery({
+    queryKey: ["approval-request", id],
+    queryFn: () => api.fetchApprovalRequest(id),
+    select: (data) => data.approvalRequest,
+    enabled: !!id,
+    refetchInterval: (query) => approvalPollInterval(query.state.data?.approvalRequest.status),
+  });
+}
+
+/**
+ * One request for a session's approval card. No polling: the session detail
+ * already polls, and the card refetches once the request leaves its pending
+ * list, so N cards never mean N timers.
+ */
+export function useSessionApprovalRequest(id: string) {
+  return useQuery({
+    queryKey: ["approval-request", id],
+    queryFn: () => api.fetchApprovalRequest(id),
+    select: (data) => data.approvalRequest,
+    enabled: !!id,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
   });
 }
 

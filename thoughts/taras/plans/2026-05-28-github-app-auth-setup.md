@@ -54,7 +54,7 @@ The swarm supports two explicit GitHub auth modes:
 - We are not changing GitLab auth behavior.
 - We are not storing GitHub App private keys in worker containers.
 - We are not replacing every ad hoc `gh` command an agent might type inside a task. The plan covers swarm-managed clone/pull/push setup and a documented token-refresh helper; arbitrary long-running human/agent `gh` usage may still need retry guidance if the token expires mid-session.
-- We are not adding GitHub Enterprise host support unless it falls out naturally from existing URL parsing; default target remains `github.com`.
+- We are not adding GitHub Enterprise host support unless it falls out naturally from existing URL parsing; default target remains `github.com`. (Superseded 2026-11-06: GHES support is planned in `thoughts/taras/plans/2026-11-06-ghes-base-url.md`.)
 
 ## Implementation Approach
 
@@ -318,7 +318,7 @@ Run these after all phases land, using disposable or low-risk test repositories.
   - A future helper tool could expose "refresh GitHub token for current repo" to agents for arbitrary `gh` commands inside long sessions.
 - **Derail notes**:
   - The current `src/be/db.ts` import of GitHub reaction code means task state transitions can fire external GitHub API calls from DB helpers. This is existing behavior; this plan does not move those side effects, but a future cleanup could relocate it to a service/event boundary.
-  - GitHub Enterprise support would need host-aware App credentials and API base URL handling; keep that out unless specifically requested.
+  - GitHub Enterprise support would need host-aware App credentials and API base URL handling; keep that out unless specifically requested. (Superseded 2026-11-06: GHES support is planned in `thoughts/taras/plans/2026-11-06-ghes-base-url.md`.)
 - **References**:
   - Existing App token code: `src/github/app.ts:189`
   - Existing reaction code: `src/github/reactions.ts:1`

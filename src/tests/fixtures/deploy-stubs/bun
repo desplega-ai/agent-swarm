@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake bun for the deploy tests: install.sh only asks for its version.
+echo 1.3.0

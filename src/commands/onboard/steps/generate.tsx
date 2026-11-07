@@ -1,7 +1,13 @@
 import { Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
+import { scrubSecrets } from "../../../utils/secret-scrubber.ts";
 import { generateCompose } from "../compose-generator.ts";
+import {
+  buildOnboardDashboardUrl,
+  SETUP_URL_PATH,
+  writeDashboardSetupUrl,
+} from "../dashboard-url.ts";
 import { generateEnv } from "../env-generator.ts";
 import { generateManifest } from "../manifest.ts";
 import type { StepProps } from "../types.ts";
@@ -25,11 +31,12 @@ export function GenerateStep({ state, dryRun, addLog, goToNext, goToStep, goToEr
         const composeLines = composeContent.split("\n").slice(0, 30).join("\n");
         const envLines = envContent.split("\n").slice(0, 20).join("\n");
         setComposePreview(composeLines);
-        setEnvPreview(envLines);
+        setEnvPreview(scrubSecrets(envLines));
 
         addLog("Write docker-compose.yml", true);
         addLog("Write .env", true);
         addLog("Write .agent-swarm/config.json", true);
+        addLog(`Write ${SETUP_URL_PATH} (mode 600)`, true);
         // In dry-run, skip prereq/start/health — go straight to done
         goToStep("done");
         return;
@@ -50,6 +57,15 @@ export function GenerateStep({ state, dryRun, addLog, goToNext, goToStep, goToEr
       const manifestPath = `${state.outputDir}/.agent-swarm/config.json`;
       await Bun.write(manifestPath, JSON.stringify(manifest, null, 2));
       addLog(`Wrote ${manifestPath}`);
+
+      await writeDashboardSetupUrl(
+        state.outputDir,
+        buildOnboardDashboardUrl({
+          apiUrl: `http://localhost:${state.apiPort || 3013}`,
+          apiKey: state.apiKey,
+        }),
+      );
+      addLog(`Wrote ${SETUP_URL_PATH} (mode 600)`);
 
       // Add to .gitignore if in a git repo
       try {

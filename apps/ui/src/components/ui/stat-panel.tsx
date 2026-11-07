@@ -5,7 +5,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/utils";
 
 // StatPanel — a Card-sized stat tile with an icon-bg, label, and value. The
-// canonical pre-Phase-9 form lives in api-keys/page.tsx (5 instances) where
+// canonical pre-Phase-9 form lived in the old api-keys page (5 instances) where
 // each summary card opens with:
 //
 //   <Card>
@@ -93,6 +93,8 @@ export interface StatPanelProps {
   // api-keys "Available" / "Rate Limited" cards). When false (default), only
   // the icon picks up the tone — the value stays foreground for legibility.
   colorValue?: boolean;
+  /** Full-width content under the tile's row (the json-render Metric sparkline). */
+  footer?: ReactNode;
   className?: string;
 }
 
@@ -104,32 +106,56 @@ export function StatPanel({
   info,
   tone = "neutral",
   colorValue = false,
+  footer,
   className,
 }: StatPanelProps) {
   const t = TONE_CLASSES[tone];
+  const rowClass = cn("flex gap-3", Icon ? "items-center" : "items-start");
+  const padClass = Icon ? "p-3" : "p-4";
   return (
     // Number-first tiles (no icon) drop the Card's own vertical padding and
     // top-align: label, value, and detail read as one block, about 96px tall.
     <Card className={cn(!Icon && "py-0", className)}>
-      <CardContent className={cn("flex gap-3", Icon ? "items-center p-3" : "items-start p-4")}>
-        {Icon ? (
-          <div className={cn("rounded-md p-2", t.iconBg)}>
-            <Icon className={cn("h-4 w-4", t.iconText)} />
+      <CardContent
+        className={footer ? cn("flex flex-col gap-2", padClass) : cn(rowClass, padClass)}
+      >
+        <StatPanelRow footer={footer} className={rowClass}>
+          {Icon ? (
+            <div className={cn("rounded-md p-2", t.iconBg)}>
+              <Icon className={cn("h-4 w-4", t.iconText)} />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="truncate">{label}</span>
+              {info ? <InfoTip content={info} /> : null}
+            </p>
+            <p
+              className={cn(
+                "text-lg font-semibold",
+                colorValue && t.valueText ? t.valueText : null,
+              )}
+            >
+              {value}
+            </p>
+            {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
           </div>
-        ) : null}
-        <div className="min-w-0">
-          <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <span className="truncate">{label}</span>
-            {info ? <InfoTip content={info} /> : null}
-          </p>
-          <p
-            className={cn("text-lg font-semibold", colorValue && t.valueText ? t.valueText : null)}
-          >
-            {value}
-          </p>
-          {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
-        </div>
+        </StatPanelRow>
+        {footer}
       </CardContent>
     </Card>
   );
+}
+
+/** Without a footer the row IS the CardContent (markup unchanged); with one it nests above it. */
+function StatPanelRow({
+  footer,
+  className,
+  children,
+}: {
+  footer: ReactNode;
+  className: string;
+  children: ReactNode;
+}) {
+  return footer ? <div className={className}>{children}</div> : children;
 }

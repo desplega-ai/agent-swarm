@@ -138,11 +138,8 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-async function mount(
-  trace: boolean,
-  callCompositions?: ReturnType<typeof deriveCallCompositions>["byCall"],
-) {
-  const viewer = <SessionLogViewer logs={logs} trace={trace} />;
+async function mount(callCompositions?: ReturnType<typeof deriveCallCompositions>["byCall"]) {
+  const viewer = <SessionLogViewer logs={logs} />;
   const router = createMemoryRouter(
     [
       {
@@ -172,23 +169,19 @@ async function mount(
 }
 
 describe("SessionLogViewer sub-agent row usage", () => {
-  for (const trace of [false, true]) {
-    const layout = trace ? "trace" : "default";
+  test("an Agent-only call's usage shows on the run's row", async () => {
+    setUsageDetails(true);
+    const runRowText = await mount();
+    expect(runRowText()).toContain("Inspect fixtures");
+    expect(runRowText()).toContain(SPAWN_CHIP);
+  });
 
-    test(`${layout} layout: an Agent-only call's usage shows on the run's row`, async () => {
-      setUsageDetails(true);
-      const runRowText = await mount(trace);
-      expect(runRowText()).toContain("Inspect fixtures");
-      expect(runRowText()).toContain(SPAWN_CHIP);
-    });
-
-    test(`${layout} layout: the chip stays hidden with usage details off`, async () => {
-      setUsageDetails(false);
-      const runRowText = await mount(trace);
-      expect(runRowText()).toContain("Inspect fixtures");
-      expect(runRowText()).not.toContain("cached");
-    });
-  }
+  test("the chip stays hidden with usage details off", async () => {
+    setUsageDetails(false);
+    const runRowText = await mount();
+    expect(runRowText()).toContain("Inspect fixtures");
+    expect(runRowText()).not.toContain("cached");
+  });
 });
 
 describe("SessionLogViewer call composition", () => {
@@ -247,7 +240,7 @@ describe("SessionLogViewer call composition", () => {
 
   test("the chip opens the call's stacked bar, whose segments sum to its prompt", async () => {
     setUsageDetails(true);
-    const runRowText = await mount(false, byCall);
+    const runRowText = await mount(byCall);
     expect(runRowText()).toContain(SPAWN_CHIP);
     const chip = document.querySelector<HTMLButtonElement>('[data-testid="call-usage-chip"]');
     expect(chip).not.toBeNull();
@@ -265,7 +258,7 @@ describe("SessionLogViewer call composition", () => {
 
   test("without a composition the chip stays a plain tooltip", async () => {
     setUsageDetails(true);
-    await mount(false);
+    await mount();
     expect(document.querySelector('[data-testid="call-usage-chip"]')).toBeNull();
   });
 });

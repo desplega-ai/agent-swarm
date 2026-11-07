@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Fake `bunx --package @desplega.ai/agent-swarm agent-swarm onboard` for the
+# deploy tests. Like the CLI release on npm before AGENT_SWARM_BIND_ADDRESS
+# (2.7.1), it writes port mappings without a host address and starts the stack.
+# After the stack is up, FAKE_ONBOARD_FAIL=1 makes it fail and
+# FAKE_ONBOARD_FAIL=term sends SIGTERM to the installer, like a Ctrl-C.
+# FAKE_ONBOARD_API_PORT replaces the API's "3013:3013" mapping.
+set -euo pipefail
+cat >docker-compose.yml <<YAML
+services:
+  swarm-api:
+    image: ghcr.io/desplega-ai/agent-swarm:latest
+    ports:
+      - "${FAKE_ONBOARD_API_PORT:-3013:3013}"
+    volumes:
+      - swarm_data:/app/data
+  coder:
+    image: ghcr.io/desplega-ai/agent-swarm-worker:latest
+    ports:
+      - "3201:3000"
+YAML
+printf 'API_KEY=%s\nMCP_BASE_URL=http://localhost:3013\n' "${FAKE_API_KEY:-test-api-key}" >.env
+docker compose --env-file .env up -d
+case "${FAKE_ONBOARD_FAIL:-}" in
+  1) echo "onboard: health check failed" >&2; exit 1 ;;
+  term) kill -TERM "$PPID" ;;
+esac

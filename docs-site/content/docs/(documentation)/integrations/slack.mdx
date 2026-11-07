@@ -26,6 +26,8 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`, `member_joined_channel`, `channel_shared`, `channel_unshared`
 7. Install to your workspace and copy tokens
 
+`chat:write.customize` lets each agent post under its own name and [Slack icon](/docs/architecture/agents#slack-icon), including streamed replies. An agent set to the Slack app icon posts with no icon override, so Slack shows the app's avatar.
+
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
 
 The manifest's `oauth_config.redirect_urls` lists two generic placeholders (a hosted-cloud callback and a `web.localhost` dev callback). Replace or extend these with your own deployment's HTTPS callback URL(s) before installing — do not reuse another deployment's callback host.
@@ -51,7 +53,20 @@ SLACK_DISABLE=true
 
 `SLACK_MODE` accepts only `socket` or `http` and defaults to `socket`. Invalid values fail closed. In the current phase, selecting `http` validates the bot token and signing-secret configuration but deliberately leaves Slack unavailable; it does not open a Socket Mode fallback, HTTP route, listener, or ingress. Keep `socket` selected until the signed HTTP receiver is installed.
 
+A socket watchdog restarts the Slack app when the Socket Mode link stays down for 60 seconds, for example after `@slack/socket-mode` gives up on a failed reconnect. Retries back off exponentially from 30 seconds to 5 minutes, and a restart never overlaps a config reload. Each down and restart transition is logged.
+
 Development API processes do not open Socket Mode by default, even when Slack tokens are present in the ambient environment. This prevents a local `bun run start:http` process from consuming events intended for production. Set `SLACK_ALLOW_DEV_SOCKET_MODE=true` only when that development process must connect to the configured Slack app; the server logs the blocked reason and this opt-in name otherwise.
+
+### Workspace guard
+
+Socket Mode sends each payload to any one of a Slack app's open connections, whatever workspace it came from. When several swarms share one Slack app (same `SLACK_APP_TOKEN`, different bot tokens), a swarm receives deliveries meant for the others. The swarm processes only deliveries proven to belong to its own installation:
+
+- At startup it calls `auth.test` with the bot token and opens the socket only after that succeeds. While it fails, Slack stays disconnected and the start is retried with backoff (5 seconds up to 5 minutes).
+- A delivery belongs to a workspace install when its `authorizations` (events) or `team` (interactive payloads, slash commands) names the bot's workspace. An enterprise id alone never matches.
+- Set `SLACK_ENTERPRISE_INSTALL=true` when the bot token comes from an org-wide Enterprise Grid install (`is_enterprise_install` in the `oauth.v2.access` response). The swarm then matches deliveries made to an org-wide install of its enterprise. Slash commands and some interactive payloads omit `is_enterprise_install`. A button or view without it belongs to the installation whose bot posted the message or opened the view. Any other flag-less delivery belongs to the workspace it names, as Slack's Bolt SDK reads it, so an org install claims it only when it names no workspace.
+- Any other delivery, or one with no installation field, is neither acked nor dispatched. Slack retries an unacked event a few times, and a retry can reach the owning swarm's connection. Interactive payloads and slash commands are not retried; the user sees an error.
+
+Retries make a misrouted event likely, not certain, to reach its owner. For reliable delivery, give each swarm its own Slack app.
 
 ## How It Works
 
@@ -84,7 +99,7 @@ When the swarm accepts a Slack message, it adds an :eyes: reaction after it has 
 
 Additive thread buffering uses a slightly richer vocabulary: :eyes: for the first captured message, :heavy_plus_sign: for later messages appended to that buffer, and :zap: when `!now` triggers an immediate flush.
 
-Each of the 6 reactions is configurable through a `swarm_config` key, scope `global`. An unset key keeps the default shown below.
+Each of the 7 reactions is configurable through a `swarm_config` key, scope `global`. An unset key keeps the default shown below.
 
 | Key | Event | Default |
 |---|---|---|
@@ -94,10 +109,11 @@ Each of the 6 reactions is configurable through a `swarm_config` key, scope `glo
 | `SLACK_REACTION_STEERED` | A thread message is accepted as steering for a running task. | `speech_balloon` |
 | `SLACK_REACTION_COMPLETED` | Every task linked to the trigger message reached status `completed`. | `white_check_mark` |
 | `SLACK_REACTION_FAILED` | Any linked task reached `failed`, `cancelled` or `superseded`. | `x` |
+| `SLACK_REACTION_SKIPPED` | Every linked task ended `skipped` (the agent decided the message was not its to answer), or a `pre.task.create` extension blocked the task. | `mute` |
 
 A value is trimmed, has at most one leading and one trailing colon stripped, and is lowercased before Slack sees it — `:ThumbsUp:` and `thumbsup` both resolve to `thumbsup`. A value that is empty afterward, or contains anything outside lowercase letters, digits, `_`, `+`, `'` and `-`, is rejected at write time and falls back to the default at read time.
 
-If Slack rejects a configured name with `invalid_name` (the emoji does not exist in the workspace), the bot logs one error-level line, increments an OTel counter, and retries once with the default for that event before giving up on the reaction. Task state and the outcome card never depend on a reaction landing. A terminal reaction (`completed` or `failed`) is never removed once added.
+If Slack rejects a configured name with `invalid_name` (the emoji does not exist in the workspace), the bot logs one error-level line, increments an OTel counter, and retries once with the default for that event before giving up on the reaction. Task state and the outcome card never depend on a reaction landing. A terminal reaction (`completed`, `failed` or `skipped`) is never removed once added.
 
 When a task finalizes, the bot removes the acceptance-stage reactions and adds the terminal reaction. The removal list is the configured name for each of the four acceptance-stage events (`SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`). With no configuration, that list is `eyes`, `heavy_plus_sign`, `zap` and `speech_balloon`, the same fixed list the bot removed before these keys existed. The bot keeps no record of which reaction it applied to which message, so an API restart between acceptance and finalization does not change the result. `reactions.remove` only removes the bot's own reaction, so a reaction that a person or another bot applied with the same name stays in place. If you change an acceptance-stage key while a task is active, the bot removes the new name at finalization and the old reaction stays on the message.
 
@@ -114,6 +130,8 @@ When you @mention the bot in a thread where a worker is already handling a task,
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
 By default, thread follow-ups route automatically without requiring an @mention. That includes human replies to swarm-started root messages, even when no task row existed yet for the thread. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
+
+A thread reply that @mentions another user but not the bot (for example `@Alice wdyt?`) is addressed to that user, so the swarm ignores it. This applies to follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to make the swarm wake on these replies too. Each such reply then becomes a follow-up, so pair the flag with `ADDITIVE_SLACK=true` to batch side conversations into one task. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` takes precedence over this flag.
 
 #### Live steering instead of follow-up tasks
 
@@ -345,6 +363,14 @@ Limitations:
 - With `ADDITIVE_SLACK=true`, follow-ups that are buffered (rather than turned into a task right away) carry only the metadata line, marked as not attached, and the bot says so in the thread.
 - With thread steering enabled, a lead follow-up that includes files creates a follow-up task instead of steering the running session, because steering only carries text.
 - When the bot reads earlier messages of a thread for context, messages that contain only a file are skipped.
+
+## Leaving a thread
+
+An agent calls `slack-leave-thread` when a thread no longer needs the swarm: people are talking among themselves, someone tells the bot to stop, or the work is done. The swarm then ignores every message in that thread that does not @mention the bot. The check runs in code before the `slack.message` workflow event, buffering, routing, or any model call, so no workflow starts, no task is created and nothing is posted. Replies already buffered when the thread is left are dropped too. The next message that @mentions the bot clears the state and is handled as usual. Other threads are unaffected, and leaving posts nothing to Slack.
+
+A person can do the same without waiting for an agent: reply `!leave` in the thread (an @mention of the bot before it is allowed). The swarm leaves the thread in code, with no task, workflow event, or model call, and the `!leave` message is never buffered as a follow-up. Only the sender sees the confirmation, an ephemeral "Left this thread. @mention the swarm to bring it back." `!leave` works only in a thread the swarm is part of: one with a task, assigned or not, or one the swarm started. Elsewhere it is an ordinary message. It is a text command rather than a slash command because Slack does not allow [custom slash commands in threads](https://docs.slack.dev/interactivity/implementing-slash-commands), so no Slack app setup is needed.
+
+Set `SLACK_LEAVE_THREAD_DISABLE=true` to turn leaving off. `!leave` is then an ordinary message and `/agent-swarm-help` stops listing it. New agent sessions do not get the tool, and a session that already has it gets an error naming the flag when it calls it. Scripts always see the tool and get the same error while the flag is set. A global config change applies without a restart. Threads left before the flag was set stay left until someone @mentions the bot.
 
 ## File Handling
 

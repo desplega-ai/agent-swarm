@@ -19,10 +19,18 @@ mock.module("@/api/fs", () => ({
   useTaskAttachments: () => ({ data: undefined }),
 }));
 mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => agentFs }));
+// No link preview scope here: links keep their behavior.
+mock.module("@/components/link-preview/link-preview-state", () => ({
+  useLinkPreviewClick: () => undefined,
+}));
+mock.module("@/components/shared/markdown-link-chip", () => ({ useSwarmLinkOrigins: () => null }));
 mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/components/shared/animated-reveal", () => require("./animated-reveal"));
 mock.module("@/components/shared/collapsible-section", () => require("./collapsible-section"));
+mock.module("@/components/shared/copy-value-button", () => require("./copy-value-button"));
+mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy-to-clipboard"));
+mock.module("@/components/ui/alert-dialog", () => require("../ui/alert-dialog"));
 mock.module("@/components/shared/in-app-or-external-link", () =>
   require("./in-app-or-external-link"),
 );
@@ -33,9 +41,10 @@ mock.module("@/components/ui/dialog", () => require("../ui/dialog"));
 mock.module("@/components/ui/middle-truncation", () => require("../ui/middle-truncation"));
 mock.module("@/lib/format-bytes", () => require("../../lib/format-bytes"));
 mock.module("@/lib/scrub-secrets", () => require("../../lib/scrub-secrets"));
+mock.module("@/lib/swarm-links", () => require("../../lib/swarm-links"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 
-const { TaskAttachmentsSection, TaskPromptAttachments } = await import(
+const { TaskAttachmentsSection, TaskPromptAttachments, isPersonUpload } = await import(
   "./task-attachments-section"
 );
 
@@ -183,7 +192,12 @@ describe("an attachment row without org/drive ids", () => {
   test("uses the swarm drive only while Comb is on", () => {
     expect(agentFsAttachmentLinks(ID_LESS, null)).toEqual({ href: null, combTo: null });
     expect(agentFsAttachmentLinks(ID_LESS, COMB_OFF)).toEqual({ href: null, combTo: null });
+    // The browser is minting its key: the row already opens in Comb.
     expect(agentFsAttachmentLinks(ID_LESS, { ...COMB_READY, state: "needs-connect" })).toEqual({
+      href: SWARM_LIVE,
+      combTo: SWARM_COMB,
+    });
+    expect(agentFsAttachmentLinks(ID_LESS, { ...COMB_READY, state: "unreachable" })).toEqual({
       href: SWARM_LIVE,
       combTo: null,
     });
@@ -223,5 +237,65 @@ describe("an attachment row without org/drive ids", () => {
       expect(html).toContain('aria-label="Open notes.md in agent-fs"');
     }
     expect(prompt).not.toContain("Expand notes.md preview");
+  });
+});
+
+describe("whose attachment a session shows where", () => {
+  const row = (name: string, extra: Partial<TaskAttachment>) =>
+    ({ ...ID_LESS, id: name, name, ...extra }) as TaskAttachment;
+  // Shapes of real rows: a composer upload has no agent; a Slack file shared
+  // with the bot carries the lead's id; a Slack file an agent fetched, its
+  // and its store-progress output are the agent's. A legacy row with no intent
+  // is the agent's when it has an agent id, else the person's.
+  const composer = row("composer.png", { intent: "user-upload", agentId: null });
+  const slackShared = row("shared.png", { intent: "user-upload", agentId: "lead-1" });
+  const slackFetched = row("asset-list.md", { intent: "slack-file", agentId: "lead-1" });
+  const output = row("report.md", { intent: "task-deliverable", agentId: "worker-1" });
+  const legacyAgent = row("legacy.md", { agentId: "worker-1" });
+  const legacyNoAgent = row("legacy-upload.png", { agentId: null });
+  const all = [composer, slackShared, slackFetched, output, legacyAgent, legacyNoAgent];
+
+  test("user-upload rows and legacy rows with no agent are the person's", () => {
+    expect(all.filter(isPersonUpload).map((a) => a.name)).toEqual([
+      "composer.png",
+      "shared.png",
+      "legacy-upload.png",
+    ]);
+  });
+
+  test("the bubble shows the person's files, right-aligned", () => {
+    agentFs = COMB_OFF;
+    const html = render(<TaskPromptAttachments taskId="task-1" attachments={all} from="person" />);
+
+    expect(html).toContain('aria-label="Prompt attachments"');
+    expect(html).toContain("justify-end");
+    expect(html).toContain("composer.png");
+    expect(html).toContain("shared.png");
+    expect(html).toContain("legacy-upload.png");
+    for (const name of ["asset-list.md", "report.md", "legacy.md"]) {
+      expect(html).not.toContain(name);
+    }
+  });
+
+  test("the reply shows the agent's files, left-aligned", () => {
+    agentFs = COMB_OFF;
+    const html = render(<TaskPromptAttachments taskId="task-1" attachments={all} from="agent" />);
+
+    expect(html).toContain('aria-label="Reply attachments"');
+    expect(html).toContain("justify-start");
+    expect(html).not.toContain("justify-end");
+    for (const name of ["asset-list.md", "report.md", "legacy.md"]) {
+      expect(html).toContain(name);
+    }
+    expect(html).not.toContain("composer.png");
+    expect(html).not.toContain("shared.png");
+    expect(html).not.toContain("legacy-upload.png");
+  });
+
+  test("no rows for a side renders nothing", () => {
+    const html = render(
+      <TaskPromptAttachments taskId="task-1" attachments={[output]} from="person" />,
+    );
+    expect(html).toBe("");
   });
 });

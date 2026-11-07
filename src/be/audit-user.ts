@@ -1,7 +1,33 @@
 import type { IncomingMessage } from "node:http";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { isGroupKey } from "../assets/key";
+import { sourceOfKey } from "../assets/source-key";
+import { authUserId, getRequestAuth } from "../utils/request-auth-context";
 import { getAgentCurrentTask, getTaskById } from "./db";
 import { findUserByExternalId } from "./users";
+
+/** Resolve a source task only when the calling agent owns it. */
+export async function resolveCallerTask(
+  sourceTaskId: string | undefined,
+  callerAgentId: string | undefined,
+) {
+  if (!callerAgentId) return null;
+  const task = sourceTaskId
+    ? await getTaskById(sourceTaskId)
+    : await getAgentCurrentTask(callerAgentId);
+  return task?.agentId === callerAgentId ? task : null;
+}
+
+/**
+ * Return the calling task's group key, excluding namespace roots, resource
+ * leaves and source groups (a Slack channel or chat thread is not a user group).
+ */
+export async function resolveTaskGroupKey(
+  sourceTaskId: string | undefined,
+  callerAgentId: string | undefined,
+): Promise<string | undefined> {
+  const task = await resolveCallerTask(sourceTaskId, callerAgentId);
+  return task && isGroupKey(task.key) && !sourceOfKey(task.key) ? task.key : undefined;
+}
 
 /**
  * Resolve the trusted audit-actor user id for a write to an audited table
@@ -29,20 +55,8 @@ export async function resolveTaskAuditUserId(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
 ): Promise<string | null> {
-  if (!callerAgentId) return null;
-
-  let resolvedSourceTaskId = sourceTaskId;
-  if (!resolvedSourceTaskId) {
-    const currentTask = await getAgentCurrentTask(callerAgentId);
-    if (currentTask) resolvedSourceTaskId = currentTask.id;
-  }
-  if (!resolvedSourceTaskId) return null;
-
-  const task = await getTaskById(resolvedSourceTaskId);
+  const task = await resolveCallerTask(sourceTaskId, callerAgentId);
   if (!task) return null;
-  // Bind the header to the caller's own task — otherwise it is just a
-  // client-chosen value and its requester cannot be trusted.
-  if (task.agentId !== callerAgentId) return null;
 
   if (task.requestedByUserId) return task.requestedByUserId;
 
@@ -65,8 +79,8 @@ export async function resolveHttpAuditUserId(
   req: IncomingMessage,
   callerAgentId: string | undefined,
 ): Promise<string | null> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return auth.userId;
+  const userId = authUserId(getRequestAuth(req));
+  if (userId) return userId;
   const header = req.headers["x-source-task-id"];
   const sourceTaskId = Array.isArray(header) ? header[0] : header;
   return resolveTaskAuditUserId(sourceTaskId, callerAgentId);

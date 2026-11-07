@@ -1,4 +1,5 @@
 import {
+  Activity,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -15,6 +16,7 @@ import { api } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus, AgentWithTasks } from "@/api/types";
+import { HomeWidget, HomeWidgetCount } from "@/components/home/home-widget";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -86,6 +88,7 @@ const TIMELINE_STATUSES: ReadonlySet<AgentTaskStatus> = new Set<AgentTaskStatus>
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 // Deep end matters: real tasks median ~2min (prod), so the tightest levels
 // resolve sub-minute work — at "30s" the axis splits into 5-second ticks.
@@ -176,6 +179,7 @@ function statusBarClass(status: AgentTaskStatus): string {
     case "offered":
       return "border-status-info bg-status-info/80 text-status-info-foreground";
     case "cancelled":
+    case "skipped":
     case "backlog":
     case "unassigned":
       return "border-status-neutral bg-status-neutral/75 text-status-neutral-foreground";
@@ -578,7 +582,12 @@ function TimelineIconButton({
   );
 }
 
-export function AgentActivityTimeline() {
+export function AgentActivityTimeline({
+  viewToggle,
+}: {
+  /** Home's Density / Detail switch, first in the header actions. */
+  viewToggle?: ReactNode;
+} = {}) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const labelWidth = isMobile ? LABEL_WIDTH_MOBILE : LABEL_WIDTH;
@@ -1006,7 +1015,8 @@ export function AgentActivityTimeline() {
   // `isLoading` no longer implies "nothing to draw".
   if (!liveTasksQ.data && (agentsQ.isLoading || liveTasksQ.isLoading)) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border bg-card">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     );
@@ -1014,7 +1024,8 @@ export function AgentActivityTimeline() {
 
   if (visibleTasks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border bg-card">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <EmptyState
           icon={Clock}
           title="No task activity yet"
@@ -1026,24 +1037,25 @@ export function AgentActivityTimeline() {
   }
 
   return (
-    <section className="flex h-full flex-col overflow-hidden rounded-lg border bg-card">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
-        {/* Phones get an abbreviated title — at 320px the full one truncates to
-            "Swarm a…", which reads worse than a short honest label. */}
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">
-            {isMobile ? "Activity" : "Swarm activity timeline"}
-          </h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {visibleTasks.length.toLocaleString()} tasks ·{" "}
-            {isMobile
-              ? formatWindowLabel(windowMs)
-              : `visible window ${formatWindowLabel(windowMs)}`}
-          </p>
-        </div>
-        {/* Controls stay on a single row: below `sm` the live toggle collapses
-            to its icon so all five buttons fit next to the title. */}
+    <HomeWidget
+      className="h-full"
+      bodyClassName="flex min-h-0 flex-1"
+      // Phones get an abbreviated title: at 320px the full one truncates.
+      title={isMobile ? "Activity" : "Swarm activity"}
+      icon={<Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+      // Phones keep the title: the five controls leave no room for the count.
+      meta={
+        isMobile ? null : (
+          <HomeWidgetCount>
+            {visibleTasks.length.toLocaleString()} tasks · {formatWindowLabel(windowMs)}
+          </HomeWidgetCount>
+        )
+      }
+      // Controls stay on a single row: below `sm` the live toggle collapses
+      // to its icon so all five buttons fit next to the title.
+      action={
         <div className="flex shrink-0 items-center gap-1.5">
+          {viewToggle}
           <Button
             type="button"
             variant={live ? "secondary" : "outline"}
@@ -1102,9 +1114,9 @@ export function AgentActivityTimeline() {
             )}
           </TimelineIconButton>
         </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1">
+      }
+    >
+      <div className="flex min-h-0 min-w-0 flex-1">
         <div
           className="shrink-0 overflow-hidden border-r bg-muted/35"
           style={{ width: labelWidth, paddingTop: HEADER_HEIGHT }}
@@ -1359,6 +1371,6 @@ export function AgentActivityTimeline() {
           </div>
         </div>
       </div>
-    </section>
+    </HomeWidget>
   );
 }

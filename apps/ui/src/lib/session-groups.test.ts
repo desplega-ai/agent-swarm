@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { sessionGroupKey, sessionResourceGroupOf } from "../../../../src/assets/key";
 import type { AgentTaskSource, SessionTreeGroup } from "../api/types";
 import { stillEmpty, withEmptyGroups } from "./empty-groups";
 import {
@@ -15,6 +16,8 @@ import {
   PERSONAL_WRITE_REASON,
   personalOwner,
   renamedGroupKey,
+  resourceGroupLabel,
+  resourceOfGroupKey,
   restoreKey,
   sessionSourceOf,
   sourceGroupLabel,
@@ -435,5 +438,130 @@ describe("session source marks (sources Phase 6)", () => {
     expect(chatSourceOf(root("shared/", "chat", ["chat-sdk", "teams"]))).toBe("chat");
     expect(chatSourceOf(root("shared/task:t1/", "ui"))).toBeNull();
     expect(chatSourceOf(root("shared/task:t1/", "github"))).toBeNull();
+  });
+});
+
+describe("resource sections", () => {
+  const at = (hour: number) => `2026-10-25T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const labels = {
+    "shared/page:p1/": "Pricing review",
+    "shared/workflow:w1/": "Nightly digest",
+    [`personal/${ME}/schedule:s1/`]: "Morning sweep",
+    "shared/app:a1/": "Support desk",
+    "shared/app:a1/action:send/": "send",
+    "personal/lena/workflow:w9/": "Lena's flow",
+  };
+  const tree = buildSessionGroupTree(
+    [
+      group("shared/page:p1/", at(9), { total: 2, unread: 1 }),
+      group("shared/page:0f3a9c12-dead-beef-0000-000000000000/", at(8)),
+      group("shared/workflow:w1/", at(7), { total: 3, running: 1 }),
+      group(`personal/${ME}/schedule:s1/`, at(6)),
+      group("shared/app:a1/action:send/", at(5), { needsYou: 1 }),
+      group("personal/lena/workflow:w9/", at(4)),
+      group("shared/infra/", at(3)),
+    ],
+    ME,
+    labels,
+  );
+
+  test("resource keys leave My groups, and so every move and Start in target", () => {
+    expect(tree.myGroups.map((node) => node.key)).toEqual(["shared/infra/"]);
+    expect(groupTargets(tree, ME).map((target) => target.key)).toEqual(["shared/infra/"]);
+  });
+
+  test("one section per kind, in kind order, named by the resource, never `kind:id`", () => {
+    expect(tree.resources.map((section) => section.kind)).toEqual([
+      "page",
+      "workflow",
+      "schedule",
+      "app",
+    ]);
+    const [pages, workflows, schedules, apps] = tree.resources;
+    expect(pages.nodes.map((node) => node.name)).toEqual(["Pricing review", "Page · 0f3a9c12"]);
+    expect(pages.counts).toEqual({ total: 3, unread: 1, running: 0, needsYou: 0 });
+    expect(workflows.nodes.map((node) => node.name)).toEqual(["Nightly digest"]);
+    // My personal resource groups join the same section.
+    expect(schedules.nodes.map((node) => node.key)).toEqual([`personal/${ME}/schedule:s1/`]);
+    expect(schedules.nodes[0].name).toBe("Morning sweep");
+    // An app action nests under its app, which holds no sessions of its own.
+    expect(apps.nodes.map((node) => [node.name, node.own.total, node.subtree.total])).toEqual([
+      ["Support desk", 0, 1],
+    ]);
+    expect(apps.nodes[0].children.map((node) => node.name)).toEqual(["send"]);
+    expect(apps.counts.needsYou).toBe(1);
+  });
+
+  test("another person's resource group sits under Shared with me by its name", () => {
+    expect(tree.sharedWithMe.map((owner) => owner.groups.map((node) => node.name))).toEqual([
+      ["Workflows › Lena's flow"],
+    ]);
+  });
+
+  test("flat rows, cards, and crumbs name a resource group by its label", () => {
+    expect(groupLabel("shared/page:p1/", ME, labels)).toBe("Pricing review");
+    expect(groupCrumb("shared/page:p1/", ME, () => "", labels)).toBe("Pages › Pricing review");
+    expect(groupCrumb("shared/app:a1/action:send/", ME, () => "", labels)).toBe(
+      "Apps › Support desk › send",
+    );
+    expect(groupCrumb("personal/lena/workflow:w9/", ME, () => "Lena", labels)).toBe(
+      "Lena › Workflows › Lena's flow",
+    );
+    expect(groupCrumb("shared/workflow:gone1234567/", ME, () => "", {})).toBe(
+      "Workflows › Workflow · gone1234",
+    );
+    expect(resourceGroupLabel("shared/fs:agent-fs:abcdef123456/")).toBe("File · abcdef12");
+  });
+
+  test("resourceOfGroupKey reads exact resource groups only", () => {
+    expect(resourceOfGroupKey("shared/app:a1/action:send/")).toMatchObject({
+      kind: "app",
+      resourceKey: "shared/app:a1/",
+      action: "send",
+    });
+    expect(resourceOfGroupKey("shared/northwind/page:p1/")).toBeNull();
+    expect(resourceOfGroupKey("shared/page:p1/action:x/")).toBeNull();
+    expect(resourceOfGroupKey("shared/task:t1/")).toBeNull();
+  });
+});
+
+/** The server's rule (`src/assets/key.ts`) and this one must file every key the same way. */
+describe("group rule parity with the server", () => {
+  const keys = [
+    "shared/",
+    "shared/task:t1/",
+    "shared/thread:t1/",
+    `personal/${ME}/`,
+    `personal/${ME}/task:t1/`,
+    `personal/${ME}/schedule:s1/`,
+    "personal/lena/workflow:w9/",
+    "shared/page:p1/",
+    "shared/workflow:w1/",
+    "shared/workflow:w1/task:c1/",
+    "shared/schedule:s1/",
+    "shared/script:x1/",
+    "shared/fs:agent-fs:f1/",
+    "shared/app:a1/",
+    "shared/app:a1/action:send/",
+    "shared/app:a1/action:send/task:t1/",
+    "shared/page:p1/action:x/",
+    "shared/northwind/",
+    "shared/northwind/page:p1/",
+    "shared/northwind/workflow:w1/",
+    "shared/northwind/task:t1/",
+    "shared/release:v2/",
+    "shared/footask:x/",
+    "shared/slack/c1/thread:1.2/",
+    "shared/slack/d1/task:t1/",
+  ];
+
+  test("groupKeyOf matches sessionGroupKey", () => {
+    for (const key of keys) expect([key, groupKeyOf(key)]).toEqual([key, sessionGroupKey(key)]);
+  });
+
+  test("resourceOfGroupKey matches sessionResourceGroupOf", () => {
+    for (const key of keys) {
+      expect([key, resourceOfGroupKey(key)]).toEqual([key, sessionResourceGroupOf(key)]);
+    }
   });
 });

@@ -27,7 +27,9 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { IncomingHttpHeaders } from "node:http";
 import path from "node:path";
+import { isDevOrTestNodeEnv } from "./node-env";
 
 const ENV_SECRET = "PAGE_SESSION_SECRET";
 const ENV_SECRET_FILE = "PAGE_SESSION_SECRET_FILE";
@@ -335,6 +337,41 @@ export async function extractAndVerifyCookie(
  * standalone; if the value diverges anywhere, that's the bug).
  */
 const PAGE_SESSION_TTL_SECONDS = 3600;
+
+const LOCAL_DEV_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
+
+/** True only for a parsed `http:` URL whose hostname is exactly a loopback dev name. */
+function isLocalHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && LOCAL_DEV_HOSTNAMES.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decide the `dev` flag for `issuePageSessionCookie`. Shared by the launch
+ * endpoint (`src/http/pages.ts`) and the password flow on `/p/:id`
+ * (`src/http/pages-public.ts`) so both issue the same cookie.
+ *
+ * Fails closed: only an explicit development or test NODE_ENV can soften the
+ * cookie. Deployed images leave NODE_ENV unset and get `SameSite=None; Secure`.
+ * In dev, the request must come from `http://localhost` or `http://127.0.0.1`
+ * (parsed, so `http://localhost.evil.example` does not match). Without an
+ * Origin, the Host header decides; a missing Host counts as local.
+ * Anything else, including portless `https://*.localhost`, keeps
+ * `SameSite=None; Secure` so the cookie travels on cross-site fetches.
+ * Chrome treats localhost as a secure context, so Secure also works over http.
+ */
+export function isLocalDevPageRequest(req: { headers: IncomingHttpHeaders }): boolean {
+  if (!isDevOrTestNodeEnv()) return false;
+  const origin = req.headers.origin ?? "";
+  if (origin !== "") return isLocalHttpUrl(origin);
+  const host = req.headers.host;
+  if (!host) return true;
+  return isLocalHttpUrl(`http://${host}`);
+}
 
 /**
  * Mint a signed page-session token + build the `Set-Cookie` header value for

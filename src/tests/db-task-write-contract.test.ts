@@ -96,6 +96,7 @@ type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
 type:PendingChatRelay
+type:PinnedWorkflowDefinition
 type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
@@ -131,6 +132,7 @@ value:ExtensionAgentAssignmentError
 value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
 value:NOT_EXTENSION_AGENT_SQL
+value:PINNED_WORKFLOW_KEYS
 value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
@@ -167,6 +169,7 @@ value:completeApprovalCancellationNotificationClaim
 value:completeTask
 value:computeContentHash
 value:countActiveScriptRuns
+value:countAgentDispatchesInThread
 value:countAllMetrics
 value:countAllPages
 value:countKv
@@ -241,9 +244,10 @@ value:extensionAgentAssignmentError
 value:failPendingResumeIfUnclaimed
 value:failTask
 value:findActiveTasksByVcs
-value:findCompletedTaskInThread
+value:findCompletedTasksInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread
+value:findRecentFailedTaskInThread
 value:findRecentSimilarTasks
 value:findTaskByAgentMailThread
 value:findTaskByGitHub
@@ -315,6 +319,7 @@ value:getDueScheduledTasks
 value:getDueWaitStates
 value:getExpiredPendingApprovals
 value:getFavoriteItemIdSet
+value:getFirstTaskInThread
 value:getIdleWorkersWithCapacity
 value:getInProgressSlackTasks
 value:getInProgressTasksByContextKey
@@ -337,6 +342,7 @@ value:getLatestPageBySlug
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestStepForNode
 value:getLatestTaskByContextKey
+value:getLatestTaskByContextKeyPrefix
 value:getLeadAgent
 value:getLiveAgentCounts
 value:getLogsByAgentId
@@ -385,6 +391,7 @@ value:getResolvableDeferralOutcomes
 value:getResolvedConfig
 value:getRetryableSteps
 value:getRootTaskChain
+value:getRunWorkflow
 value:getRunningScriptRuns
 value:getScheduledTaskById
 value:getScheduledTaskByName
@@ -392,6 +399,7 @@ value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
 value:getScriptRunExecutionArgs
+value:getScriptRunFollowUpGuard
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -445,6 +453,7 @@ value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
 value:getTasksCount
+value:getTasksDispatchedFrom
 value:getUnassignedPoolTasks
 value:getUnassignedTaskIds
 value:getUnassignedTaskIdsForAgent
@@ -540,6 +549,7 @@ value:normalizeSkillFilePath
 value:noteSlackOutcomeDeliveryFailure
 value:overwriteTerminalTaskResultText
 value:pauseTask
+value:pinWorkflowDefinition
 value:postMessage
 value:promoteAbandonedDraftTasks
 value:promoteDraftTask
@@ -584,14 +594,18 @@ value:setApiKeyName
 value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
+value:setScriptRunFollowUpGuard
 value:setSlackMessageTracking
+value:setTaskTitleIfUnset
 value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
+value:skipTask
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv
 value:sweepExpiredKvPrefix
+value:toPinnedDefinition
 value:toggleAgentSkill
 value:uninstallMcpServer
 value:uninstallSkill
@@ -655,7 +669,9 @@ value:pauseTask
 value:recordTaskProviderIfUnset
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
+value:setTaskTitleIfUnset
 value:settleSupersededTaskDependents
+value:skipTask
 value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId
@@ -668,7 +684,6 @@ const internal = ["value:configureTaskWriteDependencies"];
 const frozenFacadeBodies = `BINARY_SKILL_FILE_PLACEHOLDER
 BUDGETED_IDENTITY_FIELDS
 ELIGIBILITY_SCAN_BATCH_SIZE
-ELIGIBILITY_SCAN_CAP
 GENERATED_PULL_REQUEST_DESCRIPTION
 GENERATED_PULL_REQUEST_INTENT
 GENERATED_PULL_REQUEST_PROVIDER_ID

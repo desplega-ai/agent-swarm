@@ -12,6 +12,8 @@ const RESERVED_FAMILIES = new Map([
   ["worker", "namespace is reserved for worker nudges"],
   // Durable dedupe for SLACK_BLOCK_EXTERNAL_CHANNELS alerts (src/slack/external-channel.ts).
   ["slack-external-alert", "namespace is reserved for Slack external channel alerts"],
+  // Threads the swarm left via slack-leave-thread (src/slack/left-threads.ts).
+  ["slack-left-thread", "namespace is reserved for left Slack threads; use slack-leave-thread"],
   // Source group labels (src/be/db/session-labels.ts). Private, see PRIVATE_FAMILIES.
   [
     "session-labels",
@@ -25,6 +27,18 @@ const RESERVED_FAMILIES = new Map([
  * source label names a private channel or a DM partner).
  */
 const PRIVATE_FAMILIES = new Set(["session-labels"]);
+
+/**
+ * Families only the Lead may write. `usecase:<key>` holds the Slack or chat
+ * thread a use case reports to; the Lead posts run summaries there, so a
+ * worker must not be able to point it at another thread.
+ */
+const LEAD_ONLY_FAMILIES = new Set(["usecase"]);
+
+/** True when writes to `namespace` need a Lead agent (`kv.write.any`). */
+export function requiresLeadToWrite(namespace: string): boolean {
+  return LEAD_ONLY_FAMILIES.has(namespace.split(":", 1)[0] ?? "");
+}
 
 export function isReservedNamespace(namespace: string): boolean {
   return reservedNamespaceError(namespace) !== null;

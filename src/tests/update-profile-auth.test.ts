@@ -55,6 +55,10 @@ async function callUpdateProfile(
   return result as { structuredContent: StructuredContent };
 }
 
+type RegisteredTool = { inputSchema: { safeParse: (v: unknown) => { success: boolean } } };
+const registeredTools = (server: McpServer) =>
+  (server as unknown as { _registeredTools: Record<string, RegisteredTool> })._registeredTools;
+
 describe("update-profile authorization", () => {
   let server: McpServer;
 
@@ -247,6 +251,30 @@ describe("update-profile authorization", () => {
       expect(log).toContain("+echo audit-test");
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  test("an agent sets, keeps and resets its own slackIcon", async () => {
+    const owl = { type: "emoji", emoji: ":owl:" };
+    const set = await callUpdateProfile(server, OTHER_WORKER_ID, { slackIcon: owl });
+    expect(set.structuredContent.success).toBe(true);
+    expect(set.structuredContent.message).toContain("slackIcon");
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toEqual(owl);
+
+    await callUpdateProfile(server, OTHER_WORKER_ID, { role: "Owl" });
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toEqual(owl);
+
+    await callUpdateProfile(server, OTHER_WORKER_ID, { slackIcon: null });
+    expect((await getAgentById(OTHER_WORKER_ID))?.slackIcon).toBeNull();
+
+    const { inputSchema } = registeredTools(server)["update-profile"];
+    expect(inputSchema.safeParse({ slackIcon: owl }).success).toBe(true);
+    for (const slackIcon of [
+      { type: "emoji", emoji: "owl" },
+      { type: "url", url: "https://" },
+      { type: "url", url: "https://exa mple.com/owl.png" },
+    ]) {
+      expect(inputSchema.safeParse({ slackIcon }).success).toBe(false);
     }
   });
 

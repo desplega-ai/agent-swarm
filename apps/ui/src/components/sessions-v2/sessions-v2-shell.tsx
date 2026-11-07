@@ -7,41 +7,33 @@
  * pane area (Phase 8) holds the main pane with its tabs and one split pane.
  * A tab shows the New session composer (it keeps the `?seed=` and
  * `?prefill=` links working), the group tab (`?view=`), or a session: the
- * header (Phase 6) over the turn timeline (Phase 7). The first-run guide
+ * header (Phase 6) over the turn timeline (Phase 7). A use-case group (one
+ * with a schedule or files under its key) gets a pinned Overview tab first
+ * (step-10), and `?tab=overview|list` picks its face. The first-run guide
  * and the "Open in split…" picker mount here too.
  */
 
 import { History } from "lucide-react";
-import {
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent,
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSession } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
+import { LinkPreviewDock } from "@/components/link-preview/link-preview-dock";
+import { ResizeHandle } from "@/components/shared/resize-handle";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import {
-  detailGroupKey,
-  GROUP_TAB,
-  isSessionTab,
-  NEW_SESSION_TAB,
-  SESSIONS_TOAST_POSITION,
-} from "@/lib/sessions-v2";
+import { detailGroupKey, GROUP_TAB, isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
 import { GroupTab } from "./group-tab";
 import { NewSessionTab } from "./new-session-tab";
+import { GroupPanePending, useGroupPane } from "./overview/group-pane";
+import { OverviewTab } from "./overview/overview-tab";
 import { SessionPane } from "./pane/session-pane";
 import { usePaneKeys } from "./pane/use-pane-keys";
 import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
@@ -56,6 +48,8 @@ const WIDTH_MIN = 260;
 const WIDTH_MAX = 520;
 const WIDTH_STEP = 16;
 const WIDTH_STORAGE_KEY = "agent-swarm-sessions-v2-sidebar-width";
+/** The room the panes need next to a link preview. */
+const PANE_MIN_WIDTH = 400;
 
 function clampWidth(width: number): number {
   return Math.round(Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, width)));
@@ -86,94 +80,6 @@ function useSidebarWidth() {
   return [width, setWidth] as const;
 }
 
-/**
- * The drag edge of the sidebar. Drag it, or focus it and use the arrow keys.
- * Home and a double-click reset the width. No animation: the width follows
- * the pointer and the keys at once.
- */
-function SidebarResizeHandle({
-  width,
-  onResize,
-  sidebarId,
-}: {
-  width: number;
-  onResize: (width: number, save: boolean) => void;
-  sidebarId: string;
-}) {
-  // The width and the pointer at pointer down. The width follows the
-  // pointer's travel, so the grab point stays under the pointer, and a click
-  // with no travel stores nothing.
-  const drag = useRef<{ startX: number; startWidth: number; next: number | null } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  // The pointer leaves the 8 px handle during a drag: keep the resize cursor
-  // and stop text selection on the whole page until it ends.
-  useEffect(() => {
-    if (!dragging) return;
-    const { cursor, userSelect } = document.body.style;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    return () => {
-      document.body.style.cursor = cursor;
-      document.body.style.userSelect = userSelect;
-    };
-  }, [dragging]);
-
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { startX: event.clientX, startWidth: width, next: null };
-    setDragging(true);
-  };
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const current = drag.current;
-    if (!current || event.clientX === current.startX) return;
-    current.next = current.startWidth + (event.clientX - current.startX);
-    onResize(current.next, false);
-  };
-  const endDrag = () => {
-    const current = drag.current;
-    if (!current) return;
-    drag.current = null;
-    setDragging(false);
-    if (current.next !== null) onResize(current.next, true);
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowLeft") onResize(width - WIDTH_STEP, true);
-    else if (event.key === "ArrowRight") onResize(width + WIDTH_STEP, true);
-    else if (event.key === "Home") onResize(WIDTH_DEFAULT, true);
-    else return;
-    event.preventDefault();
-  };
-
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a focusable splitter is a widget; <hr> is not
-    <div
-      role="separator"
-      tabIndex={0}
-      aria-orientation="vertical"
-      aria-label="Resize the sidebar"
-      aria-controls={sidebarId}
-      aria-valuemin={WIDTH_MIN}
-      aria-valuemax={WIDTH_MAX}
-      aria-valuenow={width}
-      data-dragging={dragging ? "" : undefined}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onDoubleClick={() => onResize(WIDTH_DEFAULT, true)}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none outline-none md:block",
-        "after:absolute after:inset-y-0 after:left-[3px] after:w-0.5 after:bg-transparent after:transition-colors after:duration-150 after:ease-snappy",
-        "hover:after:bg-primary focus-visible:after:bg-primary data-dragging:after:bg-primary",
-      )}
-    />
-  );
-}
-
 export interface SessionsV2ShellProps {
   /** Switch views. The page owns the one `useSessionsView()` instance. */
   onViewChange: (view: SessionsViewMode) => void;
@@ -183,6 +89,13 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
   const url = useSessionsUrlState();
   const { focused, tabs, split, view, q, setQuery, focusTab } = url;
+  // A use case is one tab: its Overview and its session list are two faces
+  // of that tab, switched inside it (`?tab=`), never two strip tabs.
+  const groupPane = useGroupPane(view, url.groupPane);
+  const focusStripTab = (tab: string) => {
+    setActivePane(0);
+    focusTab(tab);
+  };
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
   // The pane that holds the pane keys, Cmd+K's session, and sidebar clicks.
@@ -216,9 +129,15 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
       treeRef.current?.move(sessions, returnFocus),
     [],
   );
+  // The session header's group crumb: open the group in its tab, next to
+  // the session, and show it in the sidebar tree.
+  const { openView } = url;
   const revealGroup = useCallback(
-    (groupKey: string | null) => treeRef.current?.revealGroup(groupKey),
-    [],
+    (groupKey: string | null) => {
+      treeRef.current?.revealGroup(groupKey);
+      openView(groupKey ?? "nogroup");
+    },
+    [openView],
   );
 
   /**
@@ -236,11 +155,10 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     id: string,
     options: { newTab?: boolean; background?: boolean; pane?: PaneIndex } = {},
   ) => {
-    const position = SESSIONS_TOAST_POSITION;
     if (options.background) {
       const open = id === split || tabs.includes(id);
       if (!open) url.openSession(id, { background: true });
-      toast(open ? "Already open in a tab." : "Opened in a new tab.", { position });
+      toast(open ? "Already open in a tab." : "Opened in a new tab.");
     } else if (id === split) setActivePane(1);
     else if (options.newTab || (options.pane ?? activePane) === 0 || split === NEW_SESSION_TAB) {
       setActivePane(0);
@@ -252,7 +170,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   };
   const openInSplit = (id: string) => {
     const message = url.openInSplit(id);
-    if (message) toast(message, { position: SESSIONS_TOAST_POSITION });
+    if (message) toast(message);
     else setActivePane(1);
   };
   const closeSplit = (keep: boolean) => {
@@ -282,7 +200,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     const group = startGroupOfPane();
     const message = url.openInSplit(id);
     if (message) {
-      toast(message, { position: SESSIONS_TOAST_POSITION });
+      toast(message);
       return;
     }
     setActivePane(1);
@@ -318,8 +236,29 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     ) : null;
     const body =
       tab === NEW_SESSION_TAB ? null : tab === GROUP_TAB && view ? (
-        // A row opens next to the group tab, in the main pane.
-        <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+        groupPane.pane === "pending" ? (
+          // A link with no `?tab=` waits for the group's schedules and files.
+          <GroupPanePending />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {groupPane.qualifies ? (
+              <GroupPaneSwitch pane={groupPane.pane} onPick={url.focusGroupPane} />
+            ) : null}
+            {groupPane.pane === "overview" && groupPane.qualifies ? (
+              // A new key per group: the last visit and the Ask the Lead draft
+              // never carry over to the next group.
+              <OverviewTab
+                key={view}
+                view={view}
+                onOpen={(id) => openSession(id, { pane: 0 })}
+                onOpenList={() => url.focusGroupPane("list")}
+              />
+            ) : (
+              // A row opens next to the group tab, in the main pane.
+              <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+            )}
+          </div>
+        )
       ) : (
         renderSession(tab, 0)
       );
@@ -390,7 +329,18 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
                 ref={treeRef}
               />
             </div>
-            <SidebarResizeHandle width={width} onResize={setWidth} sidebarId={sidebarId} />
+            <ResizeHandle
+              edge="right"
+              width={width}
+              min={WIDTH_MIN}
+              max={WIDTH_MAX}
+              defaultWidth={WIDTH_DEFAULT}
+              step={WIDTH_STEP}
+              onResize={setWidth}
+              label="Resize the sidebar"
+              controls={sidebarId}
+              className="hidden md:block"
+            />
           </nav>
 
           <SplitPanes
@@ -400,16 +350,19 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
             view={view}
             activePane={activePane}
             onActivatePane={setActivePane}
-            onFocusTab={(tab) => {
-              setActivePane(0);
-              focusTab(tab);
-            }}
+            onFocusTab={focusStripTab}
             onCloseTab={url.closeTab}
             onNewSession={() => newSession(null)}
             onPickSplit={() => setPickingSplit(true)}
             onCloseSplit={closeSplit}
             onDropToSplit={openInSplit}
             renderPane={renderPane}
+          />
+          {/* A link preview opens here, next to the panes (T3 Code's preview panel). */}
+          <LinkPreviewDock
+            storageKey="agent-swarm-sessions-link-preview-width"
+            siblingMinWidth={width + PANE_MIN_WIDTH}
+            className="max-md:hidden"
           />
         </div>
         <StatusBar
@@ -428,5 +381,31 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         <FirstRunGuide state={guide.state} onStep={guide.setStep} onClose={guide.close} />
       </div>
     </TooltipProvider>
+  );
+}
+
+const GROUP_PANES = [
+  { value: "overview", label: "Overview" },
+  { value: "list", label: "Sessions" },
+] as const;
+
+/** The use case tab's two faces: its Overview and its session list. */
+function GroupPaneSwitch({
+  pane,
+  onPick,
+}: {
+  pane: "overview" | "list";
+  onPick: (pane: "overview" | "list") => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center border-b border-border-subtle px-4 py-2">
+      <SegmentedControl
+        size="sm"
+        aria-label="Use case view"
+        value={pane}
+        onValueChange={onPick}
+        options={GROUP_PANES}
+      />
+    </div>
   );
 }

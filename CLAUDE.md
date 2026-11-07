@@ -252,7 +252,7 @@ Rules + traps before you change anything: [runbooks/docker-images.md](./runbooks
 
 Top rules — internalize these before editing:
 - **`Dockerfile.worker` is multi-target**: `worker-base` → `worker-slim` (CI/E2E, published as `:slim`) and `worker-full-base` → `worker-full` (default `:latest`, MUST stay the last stage). Repo-artifact COPYs live in a duplicated "leaf block" in both leaf stages — keep the two blocks identical. New heavy tools go in `worker-full-base` unless boot-critical; guard full-only tools in `docker-entrypoint.sh` with `command -v`. The PR merge gate builds only `worker-slim` — build `worker-full` locally when you touch full-only stages.
-- **Skills install via pinned `npx skills`, not plugin marketplaces** (the context-mode claude/codex plugins are the only marketplace exception — they ship hooks). Pin sources to tags; keep the `test -e .../SKILL.md` asserts.
+- **Skills install via pinned `npx skills`, not plugin marketplaces.** Pin sources to tags; keep the `test -e .../SKILL.md` asserts.
 - **Never `chown -R /home/worker` in its own layer** — it duplicates the full HOME (multi-GB layer). Either don't pollute HOME under `USER root`, or chown in the same RUN as the install.
 - **`ENV HOME=/home/worker` survives `USER root`** — `npm install` / `playwright install` / curl-pipe-bash under root will dump caches into `/home/worker/.{npm,cache}`. Override `HOME=/root` and redirect caches (`NPM_CONFIG_CACHE=/tmp/...`, `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright`) inline, then clean in the same RUN.
 - **`npm overrides` only apply at the install root** — monorepo root overrides do NOT travel with packages published to npm. To stub a transitive bloater (e.g. chromadb, onnxruntime variants) for a globally-installed dep, put the override in `/opt/global-deps/package.json` (base) or `/opt/global-deps-full/package.json` (full extras) inside the Dockerfile, not in the source repo.
@@ -313,6 +313,12 @@ Hard rules:
 
 - **LOCAL / dev agent-swarm (Slack):** Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
 - **PRODUCTION / deployed swarm (MCP):** use `mcp__agent-swarm-user__send-task`. It queues work directly for the online Lead. The call fails without creating a task when no Lead is online. Read results with `mcp__agent-swarm-user__get-tasks`. Do **NOT** use the dev Slack channel for production swarm work. The MCP may not be enabled in every session. Check for `mcp__agent-swarm-user__*` first.
+
+</important>
+
+<important if="you are adding or changing an HTTP route, an MCP tool, or a workflow executor, or the merge-gate job 'E2E Contract' failed on coverage">
+
+`bun run e2e --strict` (CI) fails when a route operation, MCP tool or workflow node type the server exposes has no black-box scenario and no reasoned exclusion in `scripts/e2e/coverage-manifest.json`. A new route or tool ships with a scenario in `scripts/e2e/scenarios/` in the same PR. Authoring rules, the mocked edges (inference, embeddings, SystemOne, Slack) and the simulated agent: [scripts/e2e/README.md](./scripts/e2e/README.md). Operator view and failure triage: [runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md).
 
 </important>
 

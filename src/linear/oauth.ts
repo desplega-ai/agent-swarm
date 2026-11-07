@@ -16,7 +16,10 @@ export async function getLinearOAuthConfig(): Promise<OAuthProviderConfig | null
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
-export async function getLinearAuthorizationUrl(finalRedirect?: string): Promise<string | null> {
+export async function getLinearAuthorizationUrl(
+  finalRedirect?: string,
+  userId?: string | null,
+): Promise<string | null> {
   const config = await getLinearOAuthConfig();
   if (!config) return null;
   // flow='tracker' so the unified state-keyed callback runs the tracker
@@ -26,6 +29,9 @@ export async function getLinearAuthorizationUrl(finalRedirect?: string): Promise
     flow: "tracker",
     label: "default",
     ...(finalRedirect ? { finalRedirect } : {}),
+    // The initiating user, recorded on the pending row and then on the
+    // authorization (connectedByUserId), same as the generic authorize-url route.
+    ...(userId ? { userId } : {}),
   });
   return result.url;
 }

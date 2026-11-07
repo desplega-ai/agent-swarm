@@ -4,6 +4,7 @@ import { api } from "../client";
 import type {
   AcpRuntimeConfig,
   AgentAvatar,
+  AgentSlackIcon,
   AgentWithTasks,
   ClaudeRuntimeConfig,
   ProviderName,
@@ -109,6 +110,7 @@ export function useUpdateAgentProfile() {
         heartbeatMd?: string;
         /** `null` resets to the deterministic fallback; omit to leave untouched. */
         avatar?: AgentAvatar | null;
+        slackIcon?: AgentSlackIcon | null;
       };
     }) => api.updateAgentProfile(id, profile),
     onSuccess: () => {
@@ -149,10 +151,12 @@ export function useUpdateAgentRuntime() {
         | "dsh"
         | "cursor"
         | "amp"
-        | "grok";
-      model: string | null;
+        | "grok"
+        | "fx";
+      model?: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;
+      profile?: string;
       acp?: AcpRuntimeConfig;
       claude?: ClaudeRuntimeConfig;
     }) => api.updateAgentRuntime(data),
@@ -161,6 +165,7 @@ export function useUpdateAgentRuntime() {
       queryClient.invalidateQueries({ queryKey: ["agent"] });
       queryClient.invalidateQueries({ queryKey: ["configs"] });
       queryClient.invalidateQueries({ queryKey: ["agent-runtime"] });
+      queryClient.invalidateQueries({ queryKey: ["model-profiles"] });
     },
   });
 }

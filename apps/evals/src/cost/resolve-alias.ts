@@ -1,6 +1,7 @@
 import {
   type ParsedAlias as CatalogParsedAlias,
   parseAlias as parseCatalogAlias,
+  providerForModel,
   resolveAlias as resolveCatalogAlias,
 } from "@desplega/model-catalog";
 import type { HarnessConfig } from "../types.ts";
@@ -92,6 +93,18 @@ export function validateConfigResolves(config: HarnessConfig, catalog: ModelsDev
     return errors;
   }
   const model = config.model ?? "";
+  // nan/, helmcode/, vercel/ models live in the provider registry, not models.dev's openrouter section.
+  const registry =
+    config.provider === "pi" || config.provider === "opencode"
+      ? providerForModel(model)
+      : undefined;
+  if (registry) {
+    const bare = model.slice(registry.id.length + 1);
+    if (!registry.models.some((m) => m.id === bare)) {
+      errors.push(`model "${model}" is not in the ${registry.id} provider registry`);
+    }
+    return errors;
+  }
   const section = PROVIDER_SECTION[config.provider];
   let id = model;
   if (section === "openrouter") {

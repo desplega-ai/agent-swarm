@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById } from "../be/db";
 import { ExtensionAssetConflictError } from "../be/extensions/assets";
 import {
   ExtensionOwnershipError,
@@ -45,8 +44,8 @@ import {
   ExtensionVersionSchema,
 } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -404,15 +403,7 @@ async function extensionPrincipal(
   req: IncomingMessage,
   callerAgentId: string | undefined,
 ): Promise<RbacPrincipal> {
-  if (callerAgentId) {
-    const agent = await getAgentById(callerAgentId);
-    return { kind: "agent", agentId: callerAgentId, isLead: agent?.isLead ?? false };
-  }
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return { kind: "operator" };
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  return { kind: "agent", agentId: "", isLead: false };
+  return agentFirstPrincipal(req, callerAgentId, { unauthenticatedFallback: "anonymous-agent" });
 }
 
 /** Restrict ordinary agents; retain the existing blanket access for elevated writers. */

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Decide what an aging open PR should become, then do only that: MODERNIZE (rebase, compare with git range-diff, push with a lease on the old head), REWORK (describe the smallest rewrite, then stop) or CLOSE (cite the evidence and ask a human). Use when asked to rebase, refresh, revive or modernize an old PR, or to judge whether a stale PR still belongs.",
+  "displayName": "Modernize PR",
+  "kind": "skill",
+  "name": "modernize-pr",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "modernize-pr",
+  "systemDefault": true,
+  "tags": [
+    "github",
+    "pull-requests",
+    "git"
+  ],
+  "title": "Modernize PR",
+  "version": "1.0.0"
+}

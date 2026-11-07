@@ -23,6 +23,7 @@ import {
   getSlackInboundReceiptById,
   getSlackInboundReceiptByKey,
   purgeSlackInboundReceipts,
+  recordSlackInboundInline,
   SLACK_INBOUND_LIMITS,
 } from "../be/db-queries/slack-inbound";
 import { registerActionHandlers } from "../slack/actions";
@@ -41,6 +42,11 @@ import {
   resetSlackInboundCountersForTests,
   slackInboundOutcomeMiddleware,
 } from "../slack/inbound-dispatch";
+import {
+  getSlackWorkspaceIdentity,
+  resetSlackWorkspaceGuardForTests,
+  setSlackWorkspaceIdentitySource,
+} from "../slack/workspace-guard";
 
 const TEST_DB_PATH = "./test-slack-inbound-receipts.sqlite";
 const testGlobals = globalThis as typeof globalThis & {
@@ -67,7 +73,14 @@ let channelMessage: Handler;
 let followUpSubmit: Handler;
 const resolveSlackUserIdSpy = spyOn(slackEnrichModule, "resolveSlackUserId");
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The workspace guard fails closed without this swarm's identity.
+  setSlackWorkspaceIdentitySource(async () => ({
+    teamId: "T_TEST",
+    enterpriseId: null,
+    isEnterpriseInstall: false,
+  }));
+  await getSlackWorkspaceIdentity();
   closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
@@ -90,6 +103,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  resetSlackWorkspaceGuardForTests();
   resolveSlackUserIdSpy.mockRestore();
   for (const [key, value] of Object.entries(previousEnv)) {
     if (value === undefined) delete process.env[key];
@@ -134,12 +148,18 @@ function messageEnvelope(eventId: string, ts: string, text = "<@U_SWARM_BOT> ple
   };
 }
 
+/** A delivery for the swarm's own workspace (see the identity set in beforeAll). */
+const OWN_BODY = {
+  type: "event_callback",
+  authorizations: [{ team_id: "T_TEST", enterprise_id: null, is_enterprise_install: false }],
+};
+
 /** Mirrors Bolt: the global outcome middleware wraps the listener; Bolt's
  * error handler swallows what the middleware rethrows. */
 async function runThroughBolt(listener: () => Promise<void>): Promise<void> {
   const middleware = slackInboundOutcomeMiddleware();
   try {
-    await middleware({ next: listener } as unknown as AnyMiddlewareArgs & {
+    await middleware({ next: listener, body: OWN_BODY } as unknown as AnyMiddlewareArgs & {
       next: () => Promise<void>;
     });
   } catch {
@@ -619,6 +639,39 @@ describe("retention", () => {
   });
 });
 
+describe("inline tombstones", () => {
+  const input = {
+    dedupKey: "event:A_TEST:Ev_INLINE",
+    transport: "socket",
+    kind: "event",
+    payloadType: "event_callback",
+    eventId: "Ev_INLINE",
+  } as const;
+
+  test("a recorded key is terminal, holds no payload, is never claimable and expires", async () => {
+    await getDbClient().run("DELETE FROM slack_inbound_receipts");
+    const at = new Date("2026-09-01T00:00:00.000Z");
+    expect(await recordSlackInboundInline(input, at)).toBe("recorded");
+    expect(await recordSlackInboundInline(input, at)).toBe("duplicate");
+
+    const receipt = await getSlackInboundReceiptByKey(input.dedupKey);
+    expect(receipt).toMatchObject({
+      state: "processed",
+      outcomeCode: "ran_inline",
+      payloadCiphertext: null,
+      payloadBytes: 0,
+      duplicateCount: 1,
+    });
+    expect(await claimSlackInboundReceipt(new Date("2026-09-01T00:01:00.000Z"))).toBeNull();
+
+    // Retention drops it with the other completed keys.
+    await purgeSlackInboundReceipts(new Date("2026-09-02T00:00:00.000Z"));
+    expect(await getSlackInboundReceiptByKey(input.dedupKey)).not.toBeNull();
+    await purgeSlackInboundReceipts(new Date(at.getTime() + 49 * 60 * 60 * 1000));
+    expect(await getSlackInboundReceiptByKey(input.dedupKey)).toBeNull();
+  });
+});
+
 describe("Socket Mode ingress is unchanged", () => {
   test("SLACK_MODE defaults to socket", () => {
     expect(getSlackConfiguration({}).mode).toBe("socket");
@@ -653,6 +706,7 @@ describe("Socket Mode ingress is unchanged", () => {
     const boom = new Error("listener exploded");
     await expect(
       middleware({
+        body: OWN_BODY,
         next: async () => {
           noteSlackInboundSideEffect("task_created");
           throw boom;

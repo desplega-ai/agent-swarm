@@ -62,11 +62,64 @@ afterEach(() => {
 });
 
 describe("/status agent_fs.comb", () => {
-  test("is off by default", async () => {
+  test("proxy disabled, no public URL, COMB_ENABLED unset: off, and says why", async () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PROXY = "false";
     const result = await comb();
     expect(result.enabled).toBe(false);
+    expect(result.reason).toContain("AGENT_FS_PUBLIC_URL is not set");
     expect(result.api_url).toBe("http://agent-fs:7433");
+  });
+
+  test("proxy disabled and COMB_ENABLED=true: on, the browser gets AGENT_FS_API_URL", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PROXY = "false";
+    process.env.COMB_ENABLED = "true";
+    const result = await comb();
+    expect(result.enabled).toBe(true);
+    expect(result.reason).toBeNull();
+    expect(result.api_url).toBe("http://agent-fs:7433");
+  });
+
+  test("proxy unset: on by default, through the API", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
+    const result = await comb();
+    expect(result.enabled).toBe(true);
+    expect(result.reason).toBeNull();
+    expect(result.api_url).toBe("https://swarm.example.com/agentfs");
+  });
+
+  test("an internal API address no longer turns Comb off", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.MCP_BASE_URL = "http://api:3013";
+    const result = await comb();
+    expect(result.enabled).toBe(true);
+    expect(result.api_url).toBe("http://api:3013/agentfs");
+  });
+
+  test("unset and AGENT_FS_PUBLIC_URL set: on", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
+    const result = await comb();
+    expect(result.enabled).toBe(true);
+    expect(result.api_url).toBe("https://fs.example.com");
+  });
+
+  test("COMB_ENABLED=false wins over AGENT_FS_PUBLIC_URL", async () => {
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
+    process.env.COMB_ENABLED = "false";
+    const result = await comb();
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toBe("COMB_ENABLED is false.");
+  });
+
+  test("unset and no AGENT_FS_API_URL: off, and says so", async () => {
+    process.env.AGENT_FS_PUBLIC_URL = "https://fs.example.com";
+    const result = await comb();
+    expect(result.enabled).toBe(false);
+    expect(result.reason).toBe("AGENT_FS_API_URL is not set.");
   });
 
   test("stays off with the flag on but no AGENT_FS_API_URL", async () => {
@@ -81,15 +134,21 @@ describe("/status agent_fs.comb", () => {
       process.env.COMB_ENABLED = value;
       expect((await comb()).enabled).toBe(true);
     }
-    for (const value of ["false", "0", "yes", ""]) {
+    for (const value of ["false", "0", " FALSE "]) {
       process.env.COMB_ENABLED = value;
       expect((await comb()).enabled).toBe(false);
+    }
+    // Unrecognized or blank means unset: the default proxy enables Comb.
+    for (const value of ["yes", ""]) {
+      process.env.COMB_ENABLED = value;
+      expect((await comb()).enabled).toBe(true);
     }
   });
 
   test("AGENT_FS_PUBLIC_URL wins over AGENT_FS_API_URL, without a trailing slash", async () => {
     process.env.COMB_ENABLED = "true";
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433/";
+    process.env.AGENT_FS_PROXY = "false";
     expect((await comb()).api_url).toBe("http://agent-fs:7433");
     process.env.AGENT_FS_PUBLIC_URL = "https://files.example.com/";
     expect((await comb()).api_url).toBe("https://files.example.com");
@@ -124,9 +183,8 @@ describe("/status agent_fs.comb", () => {
     process.env.COMB_ENABLED = "true";
     process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
     process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
-    for (const value of [undefined, "false", "0", ""]) {
-      if (value === undefined) delete process.env.AGENT_FS_PROXY;
-      else process.env.AGENT_FS_PROXY = value;
+    for (const value of ["false", "0"]) {
+      process.env.AGENT_FS_PROXY = value;
       expect((await comb()).api_url).toBe("http://agent-fs:7433");
     }
     process.env.AGENT_FS_PROXY = "true";
@@ -150,7 +208,8 @@ describe("/status agent_fs.comb", () => {
     result = await comb();
     expect(result).toEqual({
       enabled: true,
-      api_url: "http://agent-fs:7433",
+      reason: null,
+      api_url: "http://localhost:3013/agentfs",
       live_url: "https://live.example.com",
       org_id: "org-1",
       drive_id: "drive-1",
@@ -177,6 +236,7 @@ describe("/status agent_fs.comb", () => {
       process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
 
       // Comb off: no lookup.
+      process.env.COMB_ENABLED = "false";
       expect((await comb()).service_user_id).toBeNull();
       expect(meCalls).toBe(0);
 

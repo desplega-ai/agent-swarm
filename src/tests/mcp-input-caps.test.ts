@@ -187,12 +187,13 @@ function postChunked(
         res.on("data", (chunk: string) => {
           body += chunk;
         });
+        res.on("error", reject);
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       },
     );
-    // The server may close the socket mid-upload after answering 413.
-    req.on("error", (error) => {
-      if (!req.writableFinished) return;
+    // The server can answer 413 before the upload finishes. Still require its response after EPIPE.
+    req.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EPIPE") return;
       reject(error);
     });
     const chunk = Buffer.alloc(64 * 1024, 0x20);

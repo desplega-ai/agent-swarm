@@ -1,5 +1,6 @@
 import { RouterProvider } from "react-router-dom";
 import { AppUpdateWatcher } from "@/components/shared/app-update-prompt";
+import { CommandMenuRoutesProvider } from "@/components/shared/command-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { isDemoMode } from "@/lib/deployment-config";
 import { Providers } from "./providers";
@@ -8,7 +9,11 @@ import { router } from "./router";
 export default function App() {
   return (
     <Providers>
-      <RouterProvider router={router} />
+      {/* One root toaster keeps notifications in the bottom-right corner. */}
+      <Toaster position="bottom-right" />
+      <CommandMenuRoutesProvider routes={router.routes}>
+        <RouterProvider router={router} />
+      </CommandMenuRoutesProvider>
       {isDemoMode ? (
         <aside
           aria-label="Live demo environment"
@@ -19,7 +24,6 @@ export default function App() {
           </div>
         </aside>
       ) : null}
-      <Toaster position="bottom-right" />
       <AppUpdateWatcher />
     </Providers>
   );

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider, queryOptions } from "@tanstack/react-query";
 import { MotionGlobalConfig } from "motion/react";
@@ -36,6 +36,9 @@ let skips = 0;
 let liveAutosave = false;
 // Set by a test: each write waits for it, then stores its setting (as the API does).
 let writeGate: Promise<void> | null = null;
+let liveRuntime = false;
+let readResolvedConfigs: ((agentId: string) => Promise<{ configs: typeof storedConfigs }>) | null =
+  null;
 
 mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({
@@ -55,26 +58,35 @@ mock.module("@/api/hooks/use-models-catalog", () => ({
 // later file importing another name fails to link.
 // The real hook modules import the API client, which reads `@/lib/config`.
 mock.module("@/lib/config", () => require("../../../../lib/config"));
-mock.module("@/api/hooks/use-agents", () => ({
-  ...require("../../../../api/hooks/use-agents"),
-  useUpdateAgentRuntime: () => ({
-    mutateAsync: async (input: Record<string, unknown>) => {
-      writes.push(input);
-      if (!writeGate) return;
-      await writeGate;
-      storedConfigs = [
-        { key: "MODEL_OVERRIDE", value: String(input.model) },
-        { key: "REASONING_EFFORT_OVERRIDE", value: String(input.reasoningEffort) },
-      ];
+mock.module("@/api/hooks/use-agents", () => {
+  const real = require("../../../../api/hooks/use-agents");
+  return {
+    ...real,
+    useUpdateAgentRuntime: () => {
+      const runtime = real.useUpdateAgentRuntime();
+      return liveRuntime
+        ? runtime
+        : {
+            mutateAsync: async (input: Record<string, unknown>) => {
+              writes.push(input);
+              if (!writeGate) return;
+              await writeGate;
+              storedConfigs = [
+                { key: "MODEL_OVERRIDE", value: String(input.model) },
+                { key: "REASONING_EFFORT_OVERRIDE", value: String(input.reasoningEffort) },
+              ];
+            },
+          };
     },
-  }),
-}));
+  };
+});
 mock.module("@/api/hooks/use-config-api", () => ({
   ...require("../../../../api/hooks/use-config-api"),
   resolvedConfigsQuery: (filters: { agentId: string }) =>
     queryOptions({
       queryKey: ["configs", "resolved", filters],
-      queryFn: async () => ({ configs: storedConfigs }),
+      queryFn: async () =>
+        readResolvedConfigs ? readResolvedConfigs(filters.agentId) : { configs: storedConfigs },
       select: (data: { configs: typeof storedConfigs }) => data.configs,
     }),
 }));
@@ -122,6 +134,25 @@ for (const [alias, path] of [
 
 const { AgentModels } = await import("./agent-models");
 const { TooltipProvider } = await import("../../../../components/ui/tooltip");
+const { api } = await import("../../../../api/client");
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(condition: () => boolean) {
+  const deadline = performance.now() + 3_000;
+  while (!condition() && performance.now() < deadline) {
+    await act(async () => {
+      await Bun.sleep(10);
+    });
+  }
+  expect(condition()).toBe(true);
+}
 
 const agent = (id: string, harnessProvider: string, isLead = false) =>
   ({
@@ -132,7 +163,7 @@ const agent = (id: string, harnessProvider: string, isLead = false) =>
     harnessProvider,
   }) as unknown as AgentWithTasks;
 
-async function mount(agents: AgentWithTasks[]) {
+async function mount(agents: AgentWithTasks[], presence: Record<string, boolean> = {}) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -144,7 +175,7 @@ async function mount(agents: AgentWithTasks[]) {
           agents={agents}
           agentsLoading={false}
           configs={[]}
-          presence={{}}
+          presence={presence}
           completed={null}
           onComplete={async () => {}}
           onSkip={async () => {
@@ -162,13 +193,17 @@ async function mount(agents: AgentWithTasks[]) {
   });
   return {
     container,
+    queryClient,
     rerender: async () => {
       await act(async () => root.render(element()));
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       });
     },
-    unmount: () => act(async () => root.unmount()),
+    unmount: async () => {
+      await act(async () => root.unmount());
+      queryClient.clear();
+    },
   };
 }
 
@@ -201,8 +236,12 @@ beforeEach(() => {
   skips = 0;
   liveAutosave = false;
   writeGate = null;
+  liveRuntime = false;
+  readResolvedConfigs = null;
   document.body.innerHTML = "";
 });
+
+afterEach(() => mock.restore());
 
 describe("AgentModels reads the model tiers", () => {
   test("nothing shows or stores until the tiers load: Continue holds", async () => {
@@ -340,6 +379,95 @@ describe("AgentModels reads the model tiers", () => {
     });
     expect(writes.map((w) => w.reasoningEffort)).toEqual(["xhigh"]);
     await view.unmount();
+  });
+
+  for (const [count, harness] of [
+    [2, "codex"],
+    [11, "pi"],
+  ] as const) {
+    test(`${count} ${harness} saves stay saving when another save cancels their refetch`, async () => {
+      liveAutosave = true;
+      liveRuntime = true;
+      const agents = Array.from({ length: count }, (_, index) =>
+        agent(`00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, harness),
+      );
+      const stored = new Map<string, typeof storedConfigs>();
+      const gates = new Map(agents.map((a) => [a.id, deferred<void>()]));
+      const reads: Array<{ id: string; finish: () => void }> = [];
+      let picked = false;
+      readResolvedConfigs = async (id) => {
+        const configs = stored.get(id) ?? [];
+        if (!picked) return { configs };
+        const gate = deferred<{ configs: typeof storedConfigs }>();
+        reads.push({ id, finish: () => gate.resolve({ configs }) });
+        return gate.promise;
+      };
+      spyOn(api, "updateAgentRuntime").mockImplementation(async (input) => {
+        writes.push(input);
+        await gates.get(input.id)!.promise;
+        stored.set(input.id, [
+          { key: "MODEL_OVERRIDE", value: String(input.model) },
+          { key: "REASONING_EFFORT_OVERRIDE", value: String(input.reasoningEffort) },
+        ]);
+        return agents.find((a) => a.id === input.id)!;
+      });
+      const view = await mount(agents, { OPENROUTER_API_KEY: true });
+      try {
+        picked = true;
+        await act(async () => {
+          view.container.querySelectorAll<HTMLButtonElement>("fieldset button")[1].click();
+        });
+        await waitFor(() => writes.length === count);
+        for (const a of agents) {
+          const previousReads = reads.length;
+          await act(async () => gates.get(a.id)!.resolve());
+          await waitFor(() => reads.length >= previousReads + count);
+        }
+        // Only the last writer's own refetch finishes. Every earlier awaited
+        // refetch was cancelled and replaced by another save's invalidation.
+        await act(async () => reads.findLast((r) => r.id === agents.at(-1)!.id)!.finish());
+        await waitFor(
+          () => view.queryClient.isFetching({ queryKey: ["configs", "resolved"] }) === count - 1,
+        );
+        expect(customize(view.container).text).toContain("Saving…");
+        expect(customize(view.container).text).not.toContain("Saved.");
+        await act(async () => {
+          for (const read of reads) read.finish();
+        });
+        await waitFor(() => customize(view.container).text.includes("Saved."));
+        await act(async () => {
+          await continueAction?.();
+        });
+        expect(writes).toHaveLength(count);
+      } finally {
+        for (const gate of gates.values()) gate.resolve();
+        for (const read of reads) read.finish();
+        await view.unmount();
+      }
+    });
+  }
+
+  test("a failed config refresh reports a save error", async () => {
+    liveAutosave = true;
+    writeGate = Promise.resolve();
+    let picked = false;
+    readResolvedConfigs = async () => {
+      if (picked) throw new Error("Config refresh failed");
+      return { configs: storedConfigs };
+    };
+    const view = await mount([agent("00000000-0000-4000-8000-000000000001", "codex")]);
+    try {
+      picked = true;
+      await act(async () => {
+        view.container.querySelectorAll<HTMLButtonElement>("fieldset button")[1].click();
+      });
+      await waitFor(() => writes.length === 1);
+      await waitFor(() => !customize(view.container).text.includes("Saving…"));
+      expect(customize(view.container).text).toContain("1 agent did not save.");
+      expect(customize(view.container).text).not.toContain("Saved.");
+    } finally {
+      await view.unmount();
+    }
   });
 
   test("a pick back to the stored level while a write runs stores it again", async () => {

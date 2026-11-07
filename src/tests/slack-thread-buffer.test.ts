@@ -260,6 +260,49 @@ describe("Slack thread buffer", () => {
       expect(latest?.id).toBe(existingTask.id);
     });
 
+    test("buffers a threaded reply that mentions another user when SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true", async () => {
+      expect(messageHandler).toBeDefined();
+      const originalWake = process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+      process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = "true";
+      try {
+        const channelId = "C_WAKE_ANY_MESSAGE";
+        const threadTs = "14005.0001";
+        const existingTask = await createTaskExtended("original swarm task", {
+          agentId: leadAgent.id,
+          source: "slack",
+          slackChannelId: channelId,
+          slackThreadTs: threadTs,
+        });
+
+        await messageHandler!({
+          event: {
+            channel: channelId,
+            thread_ts: threadTs,
+            ts: "14005.0002",
+            text: "<@UOTHERBOT> what do you think?",
+            user: "U_HUMAN_WAKE_ANY",
+          },
+          body: { event_id: "evt_wake_any_message" },
+          client: handlerClient,
+          say: async () => {},
+        });
+
+        expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(1);
+        expect(reactionCalls).toHaveLength(1);
+
+        await instantFlush(`${channelId}:${threadTs}`);
+
+        const followUps = (await getSlackTasksInThread(channelId, threadTs)).filter(
+          (task) => task.id !== existingTask.id,
+        );
+        expect(followUps).toHaveLength(1);
+        expect(followUps[0]!.task).toContain("what do you think?");
+      } finally {
+        if (originalWake === undefined) delete process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+        else process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = originalWake;
+      }
+    });
+
     test("creates a follow-up task for a human reply in a thread with swarm activity", async () => {
       expect(messageHandler).toBeDefined();
       const channelId = "C_SWARM_ACTIVITY";

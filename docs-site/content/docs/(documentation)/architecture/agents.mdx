@@ -46,7 +46,7 @@ Existing undated lines may remain or be deleted. A replacement is recognized as 
 
 ### Agent Appearance
 
-An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.
+An agent profile can optionally store an avatar: a Lucide icon and hex color, an https image link, or an image in agent-fs. In the dashboard, open an agent's detail page and use the **Avatar** field on the Profile tab. **Glyph** opens the appearance picker: search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. **Link** saves an https image URL on Enter. **Upload** stores a file on the swarm's agent-fs drive at `/agents/<agentId>/avatar-<epochMs>.<ext>`; it needs agent-fs connected in this browser. Each choice saves at once. In edit mode, clicking the avatar disc still opens the glyph picker. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color. An image that cannot load, or an agent-fs image in a browser without agent-fs connected, shows the deterministic icon instead.
 
 The same setting is available through `update-profile`:
 
@@ -60,7 +60,27 @@ The same setting is available through `update-profile`:
 }
 ```
 
+The other shapes are `{ "type": "url", "url": "https://…" }` (https only, no credentials, up to 2048 characters) and `{ "type": "agent-fs", "path": "/agents/<agentId>/avatar.png" }`. An agent-fs avatar names both `orgId` and `driveId`, or neither for the swarm drive.
+
 Pass `"avatar": null` to restore the deterministic default. Omitting `avatar` leaves the current appearance unchanged.
+
+#### Slack icon
+
+The agent's Slack messages use a separate icon, so an agent can keep its dashboard avatar and still post with its own emoji or picture. Set it in the **Slack icon** row of the agent's Profile tab, which previews the icon Slack will show (custom workspace emoji appear as their code), or through `update-profile`:
+
+```json
+{ "slackIcon": { "type": "emoji", "emoji": ":owl:" } }
+```
+
+```json
+{ "slackIcon": { "type": "url", "url": "https://example.com/owl.png" } }
+```
+
+```json
+{ "slackIcon": { "type": "app" } }
+```
+
+Every message the agent posts uses it, including streamed replies. An emoji is a Slack shortcode such as `:owl:`. A URL must be `https` with no username or password. Slack fetches the image when the message is posted and stores its own copy, so the link must be publicly reachable then. A broken link does not stop the post: the message falls back to the Slack app's icon. Editing a message keeps the icon it was posted with, and a change to the setting applies to new messages only. `{ "type": "app" }` (the **Use Slack app icon** button) sends no icon override, so Slack shows the app's own avatar. Pass `"slackIcon": null` to restore the default: `:crown:` for the lead and an emoji picked from the name for workers.
 
 ### Version History
 
@@ -112,7 +132,7 @@ Each agent has access to:
 |------|-------------|
 | `/workspace/personal/` | Agent's private workspace (isolated per agent) |
 | `/workspace/shared/` | Shared workspace between all agents |
-| `/workspace/personal/memory/` | Private searchable memory files |
+| `/workspace/personal/memory/` | Personal memory files, also searchable by the lead agent |
 | `/workspace/shared/` | Read-only shared disk (all agents' directories visible) |
 | `/logs` | Session logs |
 

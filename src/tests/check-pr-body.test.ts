@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   checkPrBody,
   isFixTitle,
@@ -9,6 +12,7 @@ import {
   templateLeadLines,
   templateSections,
 } from "../../scripts/check-pr-body";
+import { runChild } from "./test-proc";
 
 const TEMPLATE = `<!-- top comment -->
 
@@ -244,5 +248,41 @@ describe("check-pr-body: prose budget", () => {
   test("a long body warns but never fails", () => {
     expect(prBodyWarnings("word ".repeat(300))).toEqual([]);
     expect(prBodyWarnings("word ".repeat(301))).toHaveLength(1);
+  });
+});
+
+describe("check-pr-body: PR_TEMPLATE_PATH", () => {
+  // The org-wide check (desplega-ai/.github) runs this script against another
+  // repo's template or the org default, so the CLI must honor the override.
+  test("the CLI checks the body against the template the env names", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pr-body-template-"));
+    try {
+      const templatePath = join(dir, "template.md");
+      const bodyPath = join(dir, "body.md");
+      await Bun.write(templatePath, "## Only section\n\n<!-- guidance -->\n");
+      await Bun.write(bodyPath, "## Only section\n\nFilled.\n");
+      const run = (env: Record<string, string>) =>
+        runChild(["bun", "scripts/check-pr-body.ts", "--body-file", bodyPath], {
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            PR_TITLE: "chore: x",
+            PR_AUTHOR: "someone",
+            PR_CHANGED_FILES_FILE: bodyPath,
+            ...env,
+          },
+        });
+
+      const custom = await run({ PR_TEMPLATE_PATH: templatePath });
+      expect(custom.stderr).not.toContain("does not match");
+      expect(custom.exitCode).toBe(0);
+
+      // Control: without the override, the repo template applies and this body fails it.
+      const repoDefault = await run({});
+      expect(repoDefault.exitCode).toBe(1);
+      expect(repoDefault.stderr).toContain("does not match .github/pull_request_template.md");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

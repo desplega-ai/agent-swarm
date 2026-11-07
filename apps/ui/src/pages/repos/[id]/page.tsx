@@ -14,6 +14,7 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useDeleteRepo, useRepo, useUpdateRepo } from "@/api/hooks/use-repos";
 import type { RepoGuidelines, SwarmRepo } from "@/api/types";
+import { useGitHubWebUrl } from "@/app/status-context";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +48,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { githubHostOf, githubOrigin } from "@/lib/swarm-links";
 import { formatSmartTime } from "@/lib/utils";
 
 interface RepoFormData {
@@ -77,6 +79,7 @@ function RepoEditDialog({
     autoClone: repo.autoClone,
     hooks: repo.hooks,
   });
+  const githubWebUrl = useGitHubWebUrl();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +100,7 @@ function RepoEditDialog({
               <Label htmlFor="repo-url">Repository URL</Label>
               <Input
                 id="repo-url"
-                placeholder="https://github.com/org/repo"
+                placeholder={`${githubOrigin(githubWebUrl)}/org/repo`}
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 required
@@ -227,10 +230,13 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
   );
 }
 
-function detectProvider(url: string): "github" | "gitlab" | "bitbucket" | null {
+function detectProvider(
+  url: string,
+  githubWebUrl: string,
+): "github" | "gitlab" | "bitbucket" | null {
   if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
   if (url.includes("bitbucket.org")) return "bitbucket";
-  if (url.includes("github.com")) return "github";
+  if (url.includes("github.com") || url.includes(githubHostOf(githubWebUrl))) return "github";
   return null;
 }
 
@@ -241,6 +247,7 @@ export default function RepoDetailPage() {
   const updateRepo = useUpdateRepo();
   const deleteRepo = useDeleteRepo();
   const [editOpen, setEditOpen] = useState(false);
+  const githubWebUrl = useGitHubWebUrl();
 
   if (isLoading) {
     return (
@@ -255,7 +262,7 @@ export default function RepoDetailPage() {
     return <p className="text-muted-foreground">Repository not found.</p>;
   }
 
-  const provider = detectProvider(repo.url);
+  const provider = detectProvider(repo.url, githubWebUrl);
 
   function handleEditSubmit(data: RepoFormData) {
     updateRepo.mutate({ id: repo!.id, data });

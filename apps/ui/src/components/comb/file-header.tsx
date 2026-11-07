@@ -1,7 +1,8 @@
 import { useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { FolderTrail } from "@/components/comb/breadcrumbs";
+import { CopyFileButton } from "@/components/comb/copy-file-button";
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
-import { CopyPathButton, FileMenuButton } from "@/components/comb/file-menu";
+import { FileMenuButton } from "@/components/comb/file-menu";
 import { UpdatedChip } from "@/components/comb/live-indicator";
 import { PinButton } from "@/components/comb/pin-button";
 import { PresenceAvatars } from "@/components/comb/presence-avatars";
@@ -63,7 +64,7 @@ function FileFacts({ file, stat }: { file: DrivePath; stat: StatResult }) {
 
 /**
  * The other people on the file, then its actions as icon buttons: Versions,
- * Pin, Share link, Copy path, Download, Open in agent-fs, and the file menu.
+ * Pin, Share link, Copy (contents, path on hover), Download, Open in agent-fs, and the file menu.
  */
 export function FileActions({ file }: { file: DrivePath }) {
   const stat = useFileStat(file);
@@ -77,7 +78,7 @@ export function FileActions({ file }: { file: DrivePath }) {
       <ShareButton file={file} />
       {/* Phones keep the subtitle readable: these three are in the ... menu too. */}
       <span className="hidden sm:contents">
-        <CopyPathButton target={file} />
+        <CopyFileButton file={file} stat={stat} />
         <DownloadButton file={file} bytes={stat.size} iconOnly />
         <OpenInAgentFsButton target={file} iconOnly />
       </span>

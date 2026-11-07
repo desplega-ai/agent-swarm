@@ -98,6 +98,22 @@ export function SetupPill() {
   );
 }
 
+/**
+ * The pill's numbers for the phone header menu, which shows setup as one row.
+ * `null` exactly when the pill renders nothing.
+ */
+export function useSetupProgress() {
+  const { data } = useOnboarding();
+  const steps = useVisibleOnboardingSteps();
+  const canSetup = useCan("config.write.any");
+  if (!canSetup || !data || !isOnboardingOpen(data)) return null;
+  return {
+    done: onboardingDoneCount(data.state, steps),
+    total: steps.length,
+    resumeStep: onboardingResumeStep(data.state, steps),
+  };
+}
+
 /** 17px ring: muted track, amber arc for the done share. */
 function ProgressRing({ value, total }: { value: number; total: number }) {
   const radius = 7;

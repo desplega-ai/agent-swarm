@@ -8,6 +8,7 @@ import {
   useUsageSummary,
 } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
+import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusLine } from "@/components/shared/status-icon";
@@ -352,6 +353,8 @@ export function UsageContent() {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pb-6">
+      {/* The fleet benchmark (and its Slack Connect perk) moved here from Home. */}
+      <FleetBenchmarkCard />
       {toolbar}
       {body}
     </div>

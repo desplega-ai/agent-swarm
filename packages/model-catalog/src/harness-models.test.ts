@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  fxModelRoute,
   type HarnessCatalogSections,
   harnessModelIds,
   harnessModelMismatch,
+  isHarnessModelJudged,
   normalizeGrokModel,
 } from "./index.ts";
 
@@ -230,5 +232,80 @@ describe("normalizeGrokModel", () => {
     expect(normalizeGrokModel(" xai/grok-4.6 ")).toBe("grok-4.6");
     expect(normalizeGrokModel("grok-4.6")).toBe("grok-4.6");
     expect(normalizeGrokModel("openrouter/x-ai/grok-4")).toBe("openrouter/x-ai/grok-4");
+  });
+});
+
+describe("fxModelRoute", () => {
+  test("routes openrouter/, vercel/ and bare ids to their fx provider and key", () => {
+    expect(fxModelRoute("openrouter/deepseek/deepseek-v4.1-flash")).toEqual({
+      fxProvider: "openrouter",
+      fxModel: "deepseek/deepseek-v4.1-flash",
+      keyVar: "OPENROUTER_API_KEY",
+    });
+    expect(fxModelRoute(" vercel/anthropic/claude-opus-5.5 ")).toEqual({
+      fxProvider: "gateway",
+      fxModel: "anthropic/claude-opus-5.5",
+      keyVar: "AI_GATEWAY_API_KEY",
+    });
+    expect(fxModelRoute("gpt-5-mini")).toEqual({
+      fxProvider: "openai",
+      fxModel: "gpt-5-mini",
+      keyVar: "OPENAI_API_KEY",
+    });
+  });
+
+  test("rejects NaN, Helmcode, Anthropic-direct, other namespaces and empty values with a reason", () => {
+    const reason = (model: string) => {
+      const route = fxModelRoute(model);
+      return "error" in route ? route.error : null;
+    };
+    expect(reason("nan/glm5.3-flash")).toContain("InconsistentFinishReason");
+    expect(reason("helmcode/qwen3.6")).toContain("Helmcode is not verified on fx");
+    expect(reason("anthropic/claude-opus-5-5")).toContain("Anthropic Messages API");
+    expect(reason("openai/gpt-5-mini")).toContain('Model "openai/gpt-5-mini" has no fx route.');
+    expect(reason("openrouter/")).toContain("has no fx route");
+    expect(reason("  ")).toContain("An empty model has no fx route");
+    for (const model of ["nan/x", "openai/x", "openrouter/"]) {
+      expect(reason(model)).toContain("vercel/<vendor>/<id> (AI_GATEWAY_API_KEY)");
+    }
+  });
+});
+
+describe("harnessModelMismatch on fx", () => {
+  test("is judged", () => {
+    expect(isHarnessModelJudged("fx")).toBe(true);
+  });
+
+  test("the three routes, an uncatalogued bare id and openrouter/openai aliases pass", () => {
+    for (const model of [
+      "openrouter/anthropic/claude-opus-5.5",
+      "openrouter/acme/uncatalogued",
+      "vercel/anthropic/claude-opus-5.5",
+      "gpt-5.6-sol",
+      "gpt-uncatalogued",
+      "latest:openrouter/deepseek/deepseek-v4*",
+      "latest:openai/gpt-5*",
+    ]) {
+      expect(harnessModelMismatch(model, "fx", catalog)).toBeNull();
+    }
+  });
+
+  test("another vendor's bare id, a claude shortname, an unrouted namespace or a latest:anthropic alias fails", () => {
+    for (const [model, reason] of [
+      ["claude-opus-5-5", "is in the anthropic catalog"],
+      ["opus", "is in the anthropic catalog"],
+      ["anthropic/claude-opus-5-5", "Anthropic Messages API"],
+      ["nan/glm5.3-flash", "InconsistentFinishReason"],
+      ["openai/gpt-5.6-sol", "has no fx route"],
+      ["latest:anthropic/opus", "latest:anthropic alias"],
+    ] as const) {
+      const error = harnessModelMismatch(model, "fx", catalog, {
+        agentName: "Fixer",
+        agentId: "a3b9cca2-1b37-9078-b000-000000000002",
+      });
+      expect(error).toContain(`Model "${model}" does not run on the fx harness`);
+      expect(error).toContain(reason);
+      expect(error).toContain('of agent "Fixer"');
+    }
   });
 });

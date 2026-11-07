@@ -20,7 +20,9 @@ test("pages list opens the public page and its share URL", async ({
   const shareUrl = `${swarm.apiUrl}/p/${seed!.pages.public.id}`;
   // `exact` keeps the header's "Open agent-swarm on GitHub" link out of the match.
   const openLink = page.getByRole("link", { name: "Open", exact: true });
-  await expect(openLink).toHaveAttribute("href", shareUrl);
+  // A fresh browser runs the dashboard in dark mode, and the viewer passes
+  // that mode on to the page.
+  await expect(openLink).toHaveAttribute("href", `${shareUrl}?__swarm-mode=dark`);
   expect(new URL(shareUrl).pathname).toBe(new URL(seed!.pages.public.apiUrl).pathname);
 
   const anonymous = await browser.newContext();
@@ -147,8 +149,12 @@ test("page viewer forwards its query params to the page body", async ({
   // everything else rides along so a page can deep-link on its own params.
   await page.goto(`/pages/${id}?target=pr-1373&status=failed&key=secret`);
   const frame = page.locator("iframe[title='e2e public page']");
-  const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed$`);
-  await expect(frame).toHaveAttribute("src", forwarded);
+  // The viewer appends its dark mode after the forwarded params.
+  const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed&__swarm-mode=dark$`);
+  const frameUrl = new RegExp(
+    `/p/${id}\\?target=pr-1373&status=failed&__swarm-mode=dark&__swarm_revision=.+$`,
+  );
+  await expect(frame).toHaveAttribute("src", frameUrl);
   await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
     "href",
     forwarded,
@@ -160,7 +166,7 @@ test("page viewer forwards its query params to the page body", async ({
   // Toggling full mode keeps the forwarded params on both the route and the body.
   await page.getByRole("link", { name: "Full" }).click();
   await expect(page).toHaveURL(`/pages/${id}?target=pr-1373&status=failed&mode=full`);
-  await expect(page.locator("iframe[title='e2e public page']")).toHaveAttribute("src", forwarded);
+  await expect(page.locator("iframe[title='e2e public page']")).toHaveAttribute("src", frameUrl);
   await expect(page.getByRole("link", { name: "Exit full" })).toHaveAttribute(
     "href",
     `/pages/${id}?target=pr-1373&status=failed`,
@@ -168,6 +174,51 @@ test("page viewer forwards its query params to the page body", async ({
 
   await clean.assertClean();
 });
+
+for (const authMode of ["authed", "password"] as const) {
+  test(`page refresh preserves ${authMode} access`, async ({ page, seed, swarm }) => {
+    test.skip(!seed, "remote run without seed");
+    const headers = {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "X-Agent-ID": seed!.agents.lead,
+    };
+    const title = `refresh ${authMode}`;
+    const createdResponse = await page.request.post(`${swarm.apiUrl}/api/pages`, {
+      headers,
+      data: {
+        title,
+        contentType: "text/html",
+        authMode,
+        ...(authMode === "password" ? { password: "e2e-password" } : {}),
+        body: "<h1>First version</h1>",
+      },
+    });
+    expect(createdResponse.status()).toBe(201);
+    const { id } = (await createdResponse.json()) as { id: string };
+    try {
+      await page.goto(`/pages/${id}`);
+      if (authMode === "password") {
+        await page.getByLabel("Password").fill("e2e-password");
+        await page.getByRole("button", { name: "Unlock" }).click();
+      }
+      const frame = page.frameLocator("main iframe");
+      await expect(frame.getByRole("heading", { name: "First version" })).toBeVisible();
+      const update = await page.request.put(`${swarm.apiUrl}/api/pages/${id}`, {
+        headers,
+        data: { body: "<h1>Second version</h1>" },
+      });
+      expect(update.status()).toBe(200);
+      await expect(page.getByText("A newer version is available")).toBeVisible({ timeout: 20_000 });
+      await expect(frame.getByRole("heading", { name: "First version" })).toBeVisible();
+      await page.getByRole("button", { name: "Load latest" }).click();
+      await expect(frame.getByRole("heading", { name: "Second version" })).toBeVisible();
+      await expect(page.getByLabel("Password")).toHaveCount(0);
+    } finally {
+      const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${id}`, { headers });
+      expect(removed.status()).toBe(204);
+    }
+  });
+}
 
 test("saved room inspector decodes persisted state without creating a missing room", async ({
   api,
@@ -229,4 +280,78 @@ test("saved room inspector decodes persisted state without creating a missing ro
   expect(await listRooms(missingRoom)).toMatchObject({ entries: [], total: 0 });
 
   await clean.assertClean();
+});
+
+test.describe("phone header", () => {
+  test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+
+  test("a tap on the header summary reveals the full description and the hidden slug", async ({
+    page,
+    seed,
+    swarm,
+  }, testInfo) => {
+    test.skip(!seed, "remote run without seed");
+    const slug = `e2e-phone-header-${crypto.randomUUID()}`;
+    const description =
+      "A description long enough to truncate on a phone, so its end only shows in the details";
+    const createResponse = await page.request.post(`${swarm.apiUrl}/api/pages`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "X-Agent-ID": seed!.agents.lead },
+      data: {
+        title: "e2e phone header",
+        slug,
+        description,
+        contentType: "text/html",
+        authMode: "public",
+        body: "<!doctype html><html><body><p>phone header</p></body></html>",
+      },
+    });
+    expect(createResponse.status()).toBe(201);
+    const created = (await createResponse.json()) as { id: string };
+
+    try {
+      await page.goto(`/pages/${created.id}`);
+      const summary = page.getByRole("button", { name: description });
+      await expect(summary).toBeVisible();
+      // Below sm the slug leaves the row. On a phone the actions fold into
+      // one "More actions" button, which stays on the summary's line.
+      await expect(summary.getByText(slug, { exact: true })).toBeHidden();
+      const more = page.getByRole("button", { name: "More actions", exact: true });
+      const moreBox = await more.boundingBox();
+      const summaryBox = await summary.boundingBox();
+      expect(
+        Math.abs(moreBox!.y + moreBox!.height / 2 - (summaryBox!.y + summaryBox!.height / 2)),
+      ).toBeLessThan(8);
+      await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveCount(0);
+      // The folded actions are one tap away, in the bottom sheet.
+      await more.tap();
+      const sheet = page.getByRole("dialog", { name: "e2e phone header" });
+      for (const action of ["Open in a new tab", "Export PDF", "Saved room state", "Full screen"]) {
+        await expect(sheet.getByRole("button", { name: action, exact: true })).toBeVisible();
+      }
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+
+      await summary.tap();
+      const details = page.getByRole("dialog");
+      await expect(details.getByText(description, { exact: true })).toBeVisible();
+      await expect(details.getByText(`slug: ${slug}`)).toBeVisible();
+      // Let the popover open animation settle for the attached screenshot.
+      await page.waitForTimeout(300);
+      const screenshot = testInfo.outputPath("phone-header-details.png");
+      await page.screenshot({ path: screenshot });
+      await testInfo.attach("phone-header-details", { path: screenshot, contentType: "image/png" });
+
+      await page.keyboard.press("Escape");
+      await expect(details).toBeHidden();
+      await expect(summary).toBeFocused();
+      // Keyboard reaches the same details: Enter on the focused summary.
+      await page.keyboard.press("Enter");
+      await expect(details).toBeVisible();
+    } finally {
+      const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${created.id}`, {
+        headers: { Authorization: `Bearer ${swarm.apiKey}` },
+      });
+      expect(removed.status()).toBe(204);
+    }
+  });
 });

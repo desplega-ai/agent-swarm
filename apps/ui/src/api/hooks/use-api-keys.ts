@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type { ApiKeyStatusResponse, UsageSummaryResponse } from "../types";
 
-export function useApiKeyStatuses(keyType?: string) {
+export function useApiKeyStatuses(keyType?: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["api-key-statuses", keyType],
     queryFn: () => api.fetchApiKeyStatuses(keyType),
     select: (data) => data.keys,
+    enabled: options.enabled ?? true,
   });
 }
 

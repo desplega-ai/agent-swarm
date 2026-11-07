@@ -1,70 +1,82 @@
 /**
- * Unified Home — the `/` landing page. This is the only home surface; there is
- * no `/old-home` or `/old-dashboard`. To change what `/` shows, change this file.
+ * Unified Home: the `/` landing page and the command center. This is the only
+ * home surface; there is no `/old-home` or `/old-dashboard`. To change what
+ * `/` shows, change this file.
  *
- * A welcome heading above the full swarm `AgentActivityTimeline` (from `md`;
- * phones get the stacked `MobileNow` view instead). The timeline
- * fetches its own data and owns its loading/error/empty states, and fills the
- * height it is given, so this page contributes only the header and padding.
+ * The admin nudge banner and the metrics strip on top, then two columns. The
+ * main column: Needs you (up to half the height, scrolling inside; one quiet
+ * line when nothing waits) over the swarm activity, which takes the rest. The
+ * side column: Favorites, then "Getting started" (Set up, then Get the swarm
+ * working). Breakpoints follow the page's own width (container `home`), so a
+ * wide side panel narrows Home like a narrow window: from `@5xl` the strip
+ * stays put and the columns scroll on their own; below it the page scrolls as
+ * one column.
  *
- * The `flex-1 min-h-0` chain from the root down to the timeline slot is
- * load-bearing: break it and the timeline's `h-full` resolves against an auto
- * height and collapses.
+ * The page owns its scroll: from `lg` the layout's `main` does not scroll.
  *
- * The timeline is feature-gated on API ≥1.76.0. The gate is evaluated against
+ * The activity is feature-gated on API ≥1.76.0. The gate is evaluated against
  * the *resolved* version: while the version query is pending we render a
- * skeleton, never the "requires 1.76+" notice — that only shows on a confirmed
+ * skeleton, never the "requires 1.76+" notice. That only shows on a confirmed
  * unsupported version.
  */
 
 import { AlertTriangle } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { PostOnboardingChecklistCard } from "@/components/checklist/post-onboarding-checklist-card";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
-import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
-import { MobileNow } from "@/components/dashboard/mobile-now";
-import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
+import { ActivityDensity } from "@/components/home/activity-density";
+import { Favorites } from "@/components/home/favorites";
+import { HomeMetrics } from "@/components/home/home-metrics";
+import { NeedsYou } from "@/components/home/needs-you";
 import { LocalNetworkHelp } from "@/components/shared/local-network-help";
 import { AlertCallout } from "@/components/ui/alert-callout";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfig } from "@/hooks/use-config";
-import { useIsMobile } from "@/hooks/use-mobile";
+
+/** The side column from `@5xl` (container `home`): it scrolls on its own under the fixed strip. */
+const SIDE_COLUMN =
+  "flex min-w-0 flex-col gap-4 @5xl/home:min-h-0 @5xl/home:overflow-y-auto @5xl/home:pb-6 @5xl/home:[scrollbar-gutter:stable] [&>*]:shrink-0";
+/** The main column from `@5xl` (container `home`): Needs you and the activity share its height. */
+const MAIN_COLUMN = "flex min-w-0 flex-col gap-4 @5xl/home:min-h-0 @5xl/home:pb-6";
 
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
   const { config, pendingConnection } = useConfig();
 
-  // The greeting lives in the top bar's breadcrumb slot now (Breadcrumbs
-  // renders it on `/`) — this page is just the timeline region.
+  // The greeting lives in the top bar's breadcrumb slot (Breadcrumbs renders
+  // it on `/`).
 
   // Gate on the *resolved* version: `supported` is `false` while the version
   // query is pending, so distinguish "still resolving" from "confirmed too old".
   const versionResolved = currentVersion !== null;
-  const isMobile = useIsMobile();
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      {/* A column below `xl`, a row from `xl`: the setup checklist (only while
-          onboarding is open) becomes a right sidebar next to the main column. */}
-      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 xl:flex-row">
-        <SetupChecklistCard />
-        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
-          <DashboardNudges />
-          <FleetBenchmarkCard />
-          {/* Below `md` the timeline cannot show a useful window, so phones
-              get the stacked "Now" view (approvals, running, failures). */}
-          <div className={isMobile ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"}>
-            <TimelineRegion
-              isMobile={isMobile}
-              versionResolved={versionResolved}
-              supported={supported}
-              // A connection from URL params is not stored until the naming
-              // dialog saves it: no attempt has failed yet.
-              isError={isError && !pendingConnection}
-              error={error}
-              apiUrl={config.apiUrl}
-            />
+    <div className="@container/home flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:pb-0">
+        <DashboardNudges />
+        <HomeMetrics className="shrink-0" />
+        <div className="grid grid-cols-1 gap-4 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] @5xl/home:grid-rows-[minmax(0,1fr)]">
+          <div className={MAIN_COLUMN}>
+            <NeedsYou className="shrink-0 @5xl/home:max-h-[50%] @5xl/home:min-h-0" />
+            <div className="flex min-h-0 flex-col @5xl/home:flex-1">
+              <TimelineRegion
+                versionResolved={versionResolved}
+                supported={supported}
+                // A connection from URL params is not stored until the naming
+                // dialog saves it: no attempt has failed yet.
+                isError={isError && !pendingConnection}
+                error={error}
+                apiUrl={config.apiUrl}
+              />
+            </div>
+          </div>
+          <div className={SIDE_COLUMN}>
+            <Favorites />
+            <PostOnboardingChecklistCard />
           </div>
         </div>
       </div>
@@ -72,22 +84,64 @@ export function UnifiedHome() {
   );
 }
 
+type ActivityView = "density" | "detail";
+const VIEW_KEY = "agent-swarm:home:activity-view";
+const VIEW_OPTIONS = [
+  { value: "density", label: "Density", tooltip: "Counts per 15 minutes: calm at any volume" },
+  { value: "detail", label: "Detail", tooltip: "Every task as a bar, with zoom and history" },
+] as const;
+
+function readView(): ActivityView {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === "detail" ? "detail" : "density";
+  } catch {
+    return "density";
+  }
+}
+
+/** Density by default; Detail is the full task timeline. The pick is kept per browser. */
+function HomeActivity() {
+  const [view, setView] = useState<ActivityView>(readView);
+  const pick = (next: ActivityView) => {
+    setView(next);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      /* best-effort */
+    }
+  };
+  const toggle = (
+    <SegmentedControl
+      size="sm"
+      aria-label="Activity view"
+      value={view}
+      onValueChange={pick}
+      options={VIEW_OPTIONS}
+    />
+  );
+  return view === "density" ? (
+    <ActivityDensity viewToggle={toggle} className="@5xl/home:min-h-0 @5xl/home:flex-1" />
+  ) : (
+    <div className="h-80 shrink-0 md:h-[28rem] @5xl/home:h-auto @5xl/home:min-h-[20rem] @5xl/home:flex-1">
+      <AgentActivityTimeline viewToggle={toggle} />
+    </div>
+  );
+}
+
 function TimelineRegion({
-  isMobile,
   versionResolved,
   supported,
   isError,
   error,
   apiUrl,
 }: {
-  isMobile: boolean;
   versionResolved: boolean;
   supported: boolean;
   isError: boolean;
   error: Error | null;
   apiUrl: string;
 }) {
-  // The version probe failed outright (dead apiUrl, bad key, CORS, network) —
+  // The version probe failed outright (dead apiUrl, bad key, CORS, network):
   // stop spinning a skeleton forever and tell the user why, with a way out.
   if (!versionResolved && isError) {
     return (
@@ -95,7 +149,7 @@ function TimelineRegion({
         {error?.message ? `${error.message}.` : "The health check failed."} Check your connection
         under{" "}
         <Link to="/settings/connections" className="underline underline-offset-2">
-          Settings → Connections
+          Settings → Servers
         </Link>
         .{/* `fetch` rejects with a TypeError when no response came back. */}
         {error instanceof TypeError ? <LocalNetworkHelp apiUrl={apiUrl} /> : null}
@@ -103,19 +157,19 @@ function TimelineRegion({
     );
   }
 
-  // Version query still in flight — placeholder, no premature notice.
+  // Version query still in flight: placeholder, no premature notice.
   if (!versionResolved) {
-    return <Skeleton className="h-full w-full rounded-lg" />;
+    return <Skeleton className="h-64 w-full shrink-0 rounded-xl" />;
   }
 
-  // Confirmed older API server — the timeline surface isn't available.
+  // Confirmed older API server: the timeline surface isn't available.
   if (!supported) {
     return (
       <AlertCallout tone="info">Agent activity view requires Agent Swarm API 1.76+.</AlertCallout>
     );
   }
 
-  return isMobile ? <MobileNow /> : <AgentActivityTimeline />;
+  return <HomeActivity />;
 }
 
 export default UnifiedHome;

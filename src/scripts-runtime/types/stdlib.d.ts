@@ -9,11 +9,35 @@ declare module "stdlib" {
     meta<T>(self: Redacted<T>): { type: "system" | "user"; isSecret: boolean };
     isSecret<T>(self: Redacted<T>): boolean;
   };
-  export function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-  export function fetchJson(input: string | URL | Request, init?: RequestInit): Promise<unknown>;
+  export function fetch(input: string | URL | Request, init?: FetchOptions): Promise<Response>;
+  export function fetchJson(input: string | URL | Request, init?: FetchOptions): Promise<unknown>;
   export function grep(pattern: string, files?: string | string[]): Promise<string>;
   export function glob(pattern: string): Promise<string[]>;
   export function table(rows: Array<Record<string, unknown>>): string;
+  export interface RetryOptions {
+    retries?: number;
+    minDelayMs?: number;
+    maxDelayMs?: number;
+    budgetMs?: number;
+    retryOn?: (errorOrResult: unknown, attempt: number) => boolean | Promise<boolean>;
+    signal?: AbortSignal;
+  }
+  export interface FetchRetryOptions extends RetryOptions {
+    idempotencyKey?: boolean | string;
+  }
+  export type FetchOptions = RequestInit & {
+    retry?: boolean | FetchRetryOptions;
+    /** @deprecated Use retry: { retries }. Total attempts. */
+    retries?: number;
+    timeoutMs?: number;
+  };
+  export const retry: {
+    <T>(fn: (attempt: number) => T | Promise<T>, options?: RetryOptions): Promise<Awaited<T>>;
+    wrap<A extends unknown[], T>(
+      fn: (...args: A) => T | Promise<T>,
+      options?: RetryOptions,
+    ): (...args: A) => Promise<Awaited<T>>;
+  };
 }
 
 declare module "swarm-sdk" {
@@ -63,6 +87,8 @@ declare module "swarm-sdk" {
     parentTaskId?: string;
     requestedByUserId?: string;
     outputSchema?: Record<string, unknown>;
+    /** Dispatch even when the follow-up re-delegation guard blocks this step (a run launched from a follow-up task in a Slack thread, checked at its first new step). */
+    allowRedelegation?: boolean;
     /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
     waitForCompletion?: boolean;
     /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
@@ -308,6 +334,15 @@ declare module "swarm-sdk" {
       executor?: ScriptExecutorName | null;
       idempotencyKey?: string;
     }): Promise<unknown>;
+    // --- savings calibration (REST only) ---
+    /** The savings curve in use (shipped or derived from this deployment) and the stored row's metadata. */
+    savings_calibrationGet(): Promise<unknown>;
+    /** Derive the curve from the last `days` of sessions. Read-only unless `apply` is true (needs config write access). One run at a time; takes up to 120 s, so call it from a script with a long enough timeout. */
+    savings_calibrationRun(args?: {
+      days?: number;
+      end?: string;
+      apply?: boolean;
+    }): Promise<unknown>;
     // --- swarm / agent ---
     swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
     agent_info(args?: Record<string, unknown>): Promise<unknown>;
@@ -335,6 +370,7 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
     // --- model profiles ---
     modelProfile_list(args?: { harness?: string }): Promise<unknown>;
+    modelProfile_check(args: { agentId: string; profile: string }): Promise<unknown>;
     // --- slack ---
     slack_read(args?: {
       inboxMessageId?: string;
@@ -473,13 +509,19 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
 
     // --- write: slack ---
-    slack_post(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
+    slack_post(args: {
+      channelId: string;
+      message?: string;
+      blocks?: unknown;
+      card?: unknown;
+    }): Promise<unknown>;
     slack_reply(args: {
       channelId?: string;
       threadTs?: string;
-      message: string;
+      message?: string;
       taskId?: string;
       blocks?: unknown;
+      card?: unknown;
     }): Promise<unknown>;
     slack_startThread(args: {
       channelId: string;
@@ -493,14 +535,20 @@ declare module "swarm-sdk" {
     slack_downloadFile(args: { url: string }): Promise<unknown>;
     slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
     slack_update(args: { channelId: string; messageTs: string; message: string }): Promise<unknown>;
+    slack_leaveThread(args: {
+      taskId?: string;
+      channelId?: string;
+      threadTs?: string;
+    }): Promise<unknown>;
 
     // --- write: chat sdk ---
-    chat_reply(args: { text: string }): Promise<unknown>;
+    chat_reply(args: { text?: string; card?: unknown }): Promise<unknown>;
     chat_post(args: {
       adapter: "telegram" | "slack" | "discord" | "teams";
       threadId?: string;
       channelId?: string;
-      text: string;
+      text?: string;
+      card?: unknown;
     }): Promise<unknown>;
     chat_openDm(args: {
       adapter: "telegram" | "slack" | "discord" | "teams";
@@ -733,12 +781,70 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
   }
 
+  export interface RetryOptions {
+    /** Retries after the first call. Default 3, so at most 4 calls. */
+    retries?: number;
+    /** First backoff delay in ms. Doubles on each retry, with jitter. Default 200. */
+    minDelayMs?: number;
+    /** Cap on a single wait, including a Retry-After wait. Default 5000. */
+    maxDelayMs?: number;
+    /** Total time across all calls and waits, in ms. Default 30000. */
+    budgetMs?: number;
+    /**
+     * Decides whether to retry: gets the thrown error or the returned value and
+     * the 1-based attempt. Default: retry any throw, plus a failed fetch Response,
+     * ctx.api raw result or ctx.swarm envelope with status 429, 502, 503 or 504.
+     */
+    retryOn?: (errorOrResult: unknown, attempt: number) => boolean | Promise<boolean>;
+    /** Stops the retries: once it aborts, the wait ends and retry rejects with its reason. */
+    signal?: AbortSignal;
+  }
+
+  export interface FetchRetryOptions extends RetryOptions {
+    /**
+     * Sends an Idempotency-Key header, the same value on every attempt: true
+     * generates a UUID per call, a string is used as is. A POST or PATCH with
+     * the header also retries 502/503/504 and network errors. It only prevents
+     * a duplicate when the server dedupes by the key.
+     */
+    idempotencyKey?: boolean | string;
+  }
+
+  /**
+   * ctx.stdlib.fetch options. Default retries: 429 on every method (Retry-After
+   * honoured); 502/503/504 and network errors on GET, HEAD, OPTIONS, PUT, DELETE,
+   * or any request with an Idempotency-Key. A stream body gets one attempt.
+   */
+  export type FetchOptions = RequestInit & {
+    /** false: one attempt. true or omitted: the defaults above. An object tunes them. */
+    retry?: boolean | FetchRetryOptions;
+    /** @deprecated Use retry: { retries }. Total attempts, so retries: 1 is one attempt. */
+    retries?: number;
+    /** Per-attempt timeout in ms. Default 30000. */
+    timeoutMs?: number;
+  };
+
+  export interface Retry {
+    /**
+     * Calls fn(attempt) (sync or async) until it succeeds or a retry is not
+     * warranted. Out of attempts or budget: rethrows the last error or returns
+     * the last result. Honours Retry-After on a 429, capped by maxDelayMs.
+     */
+    <T>(fn: (attempt: number) => T | Promise<T>, options?: RetryOptions): Promise<Awaited<T>>;
+    /** Returns a reusable function with fn's arguments that retries each call. */
+    wrap<A extends unknown[], T>(
+      fn: (...args: A) => T | Promise<T>,
+      options?: RetryOptions,
+    ): (...args: A) => Promise<Awaited<T>>;
+  }
+
   export interface ScriptStdlib {
-    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-    fetchJson(input: string | URL | Request, init?: RequestInit): Promise<unknown>;
+    fetch(input: string | URL | Request, init?: FetchOptions): Promise<Response>;
+    fetchJson(input: string | URL | Request, init?: FetchOptions): Promise<unknown>;
     grep(pattern: string, files?: string | string[]): Promise<string>;
     glob(pattern: string): Promise<string[]>;
     table(rows: Array<Record<string, unknown>>): string;
+    retry: Retry;
     Redacted: RedactedStatic;
   }
 
@@ -755,6 +861,26 @@ declare module "swarm-sdk" {
       label: string,
       config: { prompt: string; model?: string; schema?: Record<string, unknown> },
     ): Promise<unknown>;
+    /**
+     * Dispatch a task and journal its result under `label`.
+     *
+     * Resolves to the task's OUTPUT on success: the stored output string (JSON
+     * text under `outputSchema`, so parse it yourself), or `null` when the task
+     * stored none. It is never a task record: on a string, `result.taskId` and
+     * `result.status` are undefined; on `null`, reading them throws a TypeError.
+     * Other shapes:
+     * - `failOnTaskFailure: false` and the task ends failed/cancelled/superseded:
+     *   `{ taskId, status: "failed", error }`.
+     * - `waitForCompletion: false`: the first call still waits up to ~30s while
+     *   the server polls the task. Done in that window: the output, as on
+     *   success. Failed or cancelled in that window: throws, or
+     *   `{ taskId, status: "failed", error }` with `failOnTaskFailure: false`.
+     *   Still running: `{ taskId, status }`.
+     *
+     * To get a step's task id, query by its context key:
+     * `SELECT id, status, output FROM agent_tasks WHERE contextKey = 'script-run:<runId>:<label>'
+     * AND taskType = 'script-run-step' ORDER BY createdAt DESC, rowid DESC LIMIT 1`.
+     */
     agentTask(label: string, config: AgentTaskStepConfig): Promise<unknown>;
     swarmScript(
       label: string,

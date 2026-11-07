@@ -11,7 +11,7 @@ import { getDbClient } from "@/be/db";
 import type { ScriptScope } from "@/types";
 import { embeddingProvider, embedScript } from "./embeddings";
 
-type ScriptRow = {
+export type ScriptRow = {
   id: string;
   name: string;
   scope: ScriptScope;
@@ -32,7 +32,7 @@ type ScriptRow = {
   updatedAt: string;
 };
 
-function toScriptRecord(row: ScriptRow) {
+export function toScriptRecord(row: ScriptRow) {
   return {
     ...row,
     scopeId: row.scopeId ?? null,

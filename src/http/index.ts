@@ -15,8 +15,11 @@ import {
   getSwarmConfigs,
   upsertSwarmConfig,
 } from "../be/db";
+import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -28,9 +31,11 @@ import {
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
+import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import { initBitbucket } from "../bitbucket";
@@ -65,7 +70,7 @@ import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { ensure, initialize } from "../utils/business-use";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getConfiguredAppUrls, getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -77,13 +82,14 @@ import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleChecklist } from "./checklist";
 import { handleCodexOAuthAccounts } from "./codex-oauth-accounts";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
-import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
@@ -91,6 +97,7 @@ import { handleFavorites } from "./favorites";
 import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
+import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
@@ -127,6 +134,8 @@ import { handleRequestComposition } from "./request-composition";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
+import { handleSavings, savingsRollupSql } from "./savings";
+import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -148,6 +157,7 @@ import { handleUsers } from "./users";
 import {
   getPathSegments,
   httpServerSemconvAttributes,
+  loopPathForRequest,
   parseQueryParams,
   redactShareTokenInPath,
   safeRequestUrlForLog,
@@ -222,7 +232,8 @@ function startApiGcInterval() {
   }
 
   const interval = setInterval(() => {
-    void sweepRooms().catch((error) =>
+    // The rooms sweep is the DB work of this tick; name it for the stall line.
+    void withLoopPath("http.gc-interval", () => sweepRooms()).catch((error) =>
       console.error("[rooms] Sweep failed:", scrubSecrets(String(error))),
     );
     const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
@@ -413,6 +424,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
         () => handleUsers(req, res, pathSegments, queryParams),
@@ -420,8 +432,11 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
+        () => handleImprovements(req, res, pathSegments, queryParams),
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
+        () => handleSavings(req, res, pathSegments, queryParams),
+        () => handleSavingsCalibration(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
@@ -452,11 +467,10 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    if (span) {
-      await withSpanContext(span, handleRequest);
-    } else {
-      await handleRequest();
-    }
+    // Name the entry point for the event-loop stall line.
+    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
+      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    );
   });
 });
 
@@ -465,6 +479,7 @@ const detachRealtime = attachRealtimeTransport(httpServer);
 const { attachControllerTransport } = await import("./controllers-connect");
 const detachControllers = attachControllerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
+const taskAutoTitles = startTaskAutoTitleListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
   void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
     console.error("[rooms] Deletion failed:", scrubSecrets(String(error))),
@@ -474,6 +489,7 @@ globalState.__closeRealtime = () => {
   detachRealtime();
   detachControllers();
   stopWorkerNudges();
+  taskAutoTitles.stop();
   stopRoomDeletion();
 };
 globalState.__httpServer = httpServer;
@@ -530,14 +546,23 @@ async function shutdown() {
   // Stop the unified OAuth pending-session garbage collector (all flows)
   stopOAuthPendingGc();
 
+  // Stop the expired MCP overflow sweep
+  stopMcpOverflowSweep();
+
   // Stop memory expired-row garbage collector
   stopMemoryGc();
 
   // Stop opt-in session, agent-log, and event retention before closing SQLite.
   await stopDbRetention();
 
+  // Stop the automation-savings rollup before closing SQLite.
+  await stopSavingsRollup();
+
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
+
+  // Stop the task search index backfill after its current batch.
+  await stopTaskSearchBackfill();
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
@@ -554,6 +579,7 @@ async function shutdown() {
     clearInterval(globalState.__apiGcInterval);
     delete globalState.__apiGcInterval;
   }
+  stopEventLoopLagProbe();
 
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
@@ -613,6 +639,7 @@ if (!globalState.__runId) {
 }
 
 startApiGcInterval();
+startEventLoopLagProbe();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
@@ -711,6 +738,17 @@ try {
   console.error("[startup] Failed to seed built-in entities:", err);
 }
 
+// Opt-in file import (SWARM_IMPORT_SOURCES[_FILE]); a no-op when unset. See src/be/import.
+try {
+  const { runImports } = await import("../be/import");
+  await runImports();
+} catch (err) {
+  console.error(
+    "[startup] File import failed:",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 try {
   await loadEnabledExtensions();
 } catch (err) {
@@ -797,6 +835,19 @@ httpServer
       );
     });
 
+    // The shared agent-fs org learns this swarm's URL at boot, for the live
+    // app's "Continue with <swarm>", while the org has none. A URL that an org
+    // admin set stays. Only an explicit APP_URL: the hosted fallback would
+    // point a self-hosted org at another swarm. Not awaited: agent-fs is optional.
+    void import("../be/seed/agent-fs-provision")
+      .then(({ syncAgentFsOrgSwarmUrl }) => syncAgentFsOrgSwarmUrl(getConfiguredAppUrls()[0]))
+      .catch((err: unknown) => {
+        console.warn(
+          "[agent-fs] Failed to set the org swarm URL:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
+
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();
 
@@ -843,9 +894,8 @@ httpServer
     // restart — which is what the Configuration page's "Restart required"
     // badge promises for HEARTBEAT_DISABLE / HEARTBEAT_INTERVAL_MS.
     if (!isEnvFlagEnabled("HEARTBEAT_DISABLE", false)) {
-      const { startHeartbeat } = await import("../heartbeat");
-      const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
-      startHeartbeat(heartbeatMs);
+      const { parseHeartbeatIntervalMs, startHeartbeat } = await import("../heartbeat");
+      startHeartbeat(parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS));
     }
 
     startPoolRouting();
@@ -868,35 +918,48 @@ httpServer
     // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
     startOAuthPendingGc();
 
-    // Start expired-memory garbage collector (1-hour tick, immediate first run)
+    // Delete expired MCP overflow values (10-min tick, off the spill path)
+    startMcpOverflowSweep();
+
+    // Start expired-memory garbage collector (1-hour tick, first run 2 min after boot)
     await startMemoryGc();
 
     // Start the opt-in DB retention sweep after config hydration. Every key is
     // read on each tick, so config reloads take effect without a restart.
     await startDbRetention();
 
+    // Hourly automation-savings rollup (backfills 90 days in the background).
+    startSavingsRollup(savingsRollupSql);
+
     // Finish the human-free reclassification a request left queued (a very large
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
 
+    // Index the task rows migration 256 left out, in batches. Task search
+    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    void startTaskSearchBackfill();
+
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 
-    // Background backfill: re-embed any agent_memory rows with wrong-dimension
-    // embeddings (e.g. 1536d instead of 512d). Non-blocking, idempotent, no-op
-    // when the DB is clean. See src/be/memory/boot-reembed.ts.
-    import("../be/memory/boot-reembed")
-      .then(({ runBootReembed }) => runBootReembed())
+    // Background embedding maintenance: re-embed every memory and script
+    // vector when the embedding space (endpoint, model, dimensions, document
+    // prefix) changed, then embed rows with a missing or wrong-length vector.
+    // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
+    import("../be/memory/embedding-space")
+      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
+        setDeploymentEnvReader(getDeploymentEnvValue);
+        return runEmbeddingMaintenance({ backfill: true });
+      })
       .catch((err) => {
-        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
+        console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
 
-    // Background backfill: embed any scripts that were seeded without embeddings
-    // (scriptEmbeddingMode: "skip" during boot). Non-blocking, idempotent, no-op
-    // when every non-scratch script already has an embedding.
-    import("../be/scripts/boot-reembed")
-      .then(({ runBootReembedScripts }) => runBootReembedScripts())
+    // Normalize stored schema JSON so defaulted fields become optional.
+    // This repair never executes script source. It is idempotent and non-fatal.
+    import("../be/scripts/boot-args-schema")
+      .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
       .catch((err) => {
-        console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
+        console.error("[boot-args-schema] startup backfill failed (non-fatal):", err);
       });
 
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored

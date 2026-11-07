@@ -11,7 +11,14 @@ import { type IncomingMessage, ServerResponse } from "node:http";
 import type { Subprocess } from "bun";
 import { getOperatorActor } from "../http/operator-actor";
 import { isGuestAllowedProxyPath } from "../http/page-proxy";
-import { agentFirstPrincipal, requestPrincipal } from "../http/request-principal";
+import {
+  agentFirstPrincipal,
+  authUser,
+  authUserId,
+  isOperatorAuth,
+  requestPrincipal,
+  requireAuthKind,
+} from "../http/request-principal";
 import { can } from "../rbac";
 import { signPageSession } from "../utils/page-session";
 import { setRequestAuth } from "../utils/request-auth-context";
@@ -419,6 +426,23 @@ describe("in-process principal helpers", () => {
     const res = new ServerResponse(req);
     expect(getOperatorActor(req, res)).toBeNull();
     expect(res.statusCode).toBe(403);
+  });
+
+  test("requireAuthKind narrows allowed kinds and writes 403 otherwise", () => {
+    const req = fakeReq();
+    setRequestAuth(req, { kind: "guest" });
+    const res = new ServerResponse(req);
+    expect(requireAuthKind(req, res, ["operator", "user"])).toBeNull();
+    expect(res.statusCode).toBe(403);
+
+    const opReq = fakeReq();
+    setRequestAuth(opReq, { kind: "operator", fingerprint: "fp" });
+    const opRes = new ServerResponse(opReq);
+    const narrowed = requireAuthKind(opReq, opRes, ["operator", "user"]);
+    expect(narrowed).toEqual({ kind: "operator", fingerprint: "fp" });
+    expect(isOperatorAuth(narrowed)).toBe(true);
+    expect(authUserId(narrowed)).toBeUndefined();
+    expect(authUser(narrowed)).toBeUndefined();
   });
 
   test("can() denies every verb for a guest and still allows the operator", () => {

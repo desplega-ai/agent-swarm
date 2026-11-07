@@ -58,6 +58,17 @@ function restoreEnvValue(key: keyof typeof originalEnv): void {
   }
 }
 
+async function withWakeOnAnyMessage(fn: () => Promise<void>): Promise<void> {
+  const original = process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+  process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = "true";
+  try {
+    await fn();
+  } finally {
+    if (original === undefined) delete process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE;
+    else process.env.SLACK_THREAD_WAKE_ON_ANY_MESSAGE = original;
+  }
+}
+
 function installSpyImplementations(): void {
   createTaskWithSiblingAwarenessSpy.mockImplementation(async () => ({
     id: "mock-task-id-prod-path",
@@ -229,6 +240,26 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
 
     expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
   });
+  test("DOES spawn a task for an other-user mention when SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true", async () => {
+    await withWakeOnAnyMessage(async () => {
+      await userMessageHandler({
+        message: {
+          channel: "D_ASSISTANT_PROD_TEST",
+          ts: "1000000001.000004",
+          text: `<@${DEVIN_USER_ID}> Are you here?`,
+          user: "U_HUMAN_ASST_001",
+        },
+        body: { event_id: "evt_prod_asst_wake_any_001" },
+        say: mock(async () => {}),
+        setStatus: mock(async () => {}),
+        setTitle: mock(async () => {}),
+        getThreadContext: mock(async () => ({})),
+        client: mockClient,
+      });
+    });
+
+    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -335,5 +366,26 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     });
 
     expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+  });
+  test("DOES spawn a task for an assistant_thread other-user mention when SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true", async () => {
+    expect(capturedHandler).not.toBeNull();
+    const delivery = nextSlackDelivery("evt_prod_hdlr_wake_any");
+
+    await withWakeOnAnyMessage(async () => {
+      await capturedHandler!({
+        event: {
+          channel: "D_HANDLER_PROD_TEST",
+          ts: delivery.ts,
+          text: `<@${DEVIN_USER_ID}> Are you here?`,
+          user: "U_HUMAN_HDLR_001",
+          assistant_thread: { channel_id: "D_HANDLER_PROD_TEST" },
+        },
+        body: { event_id: delivery.eventId },
+        client: mockClient,
+        say: mock(async () => {}),
+      });
+    });
+
+    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -27,7 +27,93 @@ You are Lead. Produce one digest covering workflows, schedule runs, agents, task
 Call `GET $MCP_BASE_URL/status` and read `status.automations`. List every automation whose state is `needs_setup`, its missing parameters/integrations, and its `fixUrl`. This is the first digest section and the first failure classification; it is setup work, not an automation failure.
 
 ### 1B. Workflows and schedules
-Run the same six-query set as `daily-workflow-health-audit` Phase 1 (hard-failed workflow runs, hard-failed schedule-spawned tasks, halted >24h runs, silent-empty-output completions, cron-didn't-fire, schedules with ≥3 consecutive errors — all against `workflow_runs` / `agent_tasks` / `scheduled_tasks` via `db-query`), plus:
+Run these six failure-mode queries with `db-query`:
+
+**1.** Hard-failed workflow runs (last 24h)
+
+```sql
+SELECT wr.id, w.name AS workflowName, wr.status,
+       wr.finishedAt, wr.lastUpdatedAt,
+       SUBSTR(COALESCE(wr.error, ''), 1, 220) AS errSnippet
+FROM workflow_runs wr
+JOIN workflows w ON w.id = wr.workflowId
+WHERE wr.status = 'failed'
+  AND datetime(COALESCE(wr.finishedAt, wr.lastUpdatedAt, wr.startedAt)) > datetime('now', '-24 hours')
+ORDER BY wr.lastUpdatedAt DESC;
+```
+
+**2.** Hard-failed schedule-spawned tasks (last 24h)
+
+```sql
+SELECT t.id, s.name AS scheduleName, t.status,
+       SUBSTR(COALESCE(t.failureReason, ''), 1, 220) AS reasonSnippet,
+       SUBSTR(COALESCE(t.output, ''), 1, 220) AS outSnippet,
+       t.lastUpdatedAt
+FROM agent_tasks t
+LEFT JOIN scheduled_tasks s ON s.id = t.scheduleId
+WHERE t.status = 'failed'
+  AND t.scheduleId IS NOT NULL
+  AND datetime(t.lastUpdatedAt) > datetime('now', '-24 hours')
+ORDER BY t.lastUpdatedAt DESC;
+```
+
+**3.** Halted >24h workflow runs (silent stuck)
+
+```sql
+SELECT wr.id, w.name AS workflowName, wr.status, wr.lastUpdatedAt
+FROM workflow_runs wr
+JOIN workflows w ON w.id = wr.workflowId
+WHERE wr.status IN ('running', 'waiting')
+  AND datetime(wr.lastUpdatedAt) < datetime('now', '-24 hours')
+ORDER BY wr.lastUpdatedAt ASC;
+```
+
+**4.** Silent: schedule-spawned task completed with empty/sentinel output
+
+```sql
+SELECT t.id, s.name AS scheduleName, t.status,
+       SUBSTR(COALESCE(t.output, ''), 1, 220) AS outSnippet,
+       LENGTH(TRIM(COALESCE(t.output, ''))) AS outLen,
+       t.lastUpdatedAt
+FROM agent_tasks t
+LEFT JOIN scheduled_tasks s ON s.id = t.scheduleId
+WHERE t.status = 'completed'
+  AND t.scheduleId IS NOT NULL
+  AND datetime(t.lastUpdatedAt) > datetime('now', '-24 hours')
+  AND (
+    t.output IS NULL
+    OR TRIM(t.output) = ''
+    OR TRIM(t.output) = '⚡ Running shell command'
+    OR LENGTH(TRIM(t.output)) < 10
+  )
+ORDER BY t.lastUpdatedAt DESC;
+```
+
+**5.** Cron didn't fire (nextRunAt in the past)
+
+```sql
+SELECT s.id, s.name, s.cronExpression, s.lastRunAt, s.nextRunAt, s.consecutiveErrors,
+       SUBSTR(COALESCE(s.lastErrorMessage, ''), 1, 220) AS lastErrSnippet
+FROM scheduled_tasks s
+WHERE s.enabled = 1
+  AND s.scheduleType = 'recurring'
+  AND s.nextRunAt IS NOT NULL
+  AND datetime(s.nextRunAt) < datetime('now', '-1 hour')
+ORDER BY s.nextRunAt ASC;
+```
+
+**6.** Schedules with consecutive errors (defensive)
+
+```sql
+SELECT s.id, s.name, s.cronExpression, s.consecutiveErrors, s.lastErrorAt,
+       SUBSTR(COALESCE(s.lastErrorMessage, ''), 1, 220) AS lastErrSnippet
+FROM scheduled_tasks s
+WHERE s.enabled = 1
+  AND s.consecutiveErrors >= 3
+ORDER BY s.consecutiveErrors DESC;
+```
+
+Plus:
 - Enabled/disabled counts: `SELECT enabled, COUNT(*) FROM scheduled_tasks GROUP BY enabled` and the workflow equivalent.
 - 7-day rollup, not just 24h: repeat the hard-failure and cron-didn't-fire queries with a `-7 days` window for a weekly trend line.
 
@@ -87,7 +173,7 @@ More than 3 qualify ⇒ post the 3 that matter and put the rest in the task outp
 `store-progress` with `status: "completed"`. **This is where the detail goes** — every count from Phase 1, the per-class failure breakdown, and the Slack message ts. The Slack post is the headline; the task output is the record. Cutting the post does not mean cutting the work.
 
 ## Anti-patterns
-- ❌ Modifying anything — this schedule reports, it doesn't fix (that's `daily-workflow-health-audit` for plumbing and `daily-compounding-reflection` for agent/skill/memory evolution).
+- ❌ Modifying anything — this schedule reports, it doesn't fix (that's `daily-compounding-reflection` for agent/skill/memory evolution).
 - ❌ Folding the unclassified-failure bucket into "real defect" to make the number look more actionable than it is.
 - ❌ Narrating a zero. The all-clear line already covers `needs_setup` and integrations; only a non-verified integration or a real `needs_setup` automation earns its own line.
 - ❌ Exceeding 600 characters, or posting more than one message.

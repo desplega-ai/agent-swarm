@@ -12,6 +12,11 @@ import {
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
+import {
+  isFollowUpGateScheduleId,
+  parseFollowUpGateScheduleIds,
+} from "../utils/follow-up-gate-schedule-ids";
+import { kindForModelString } from "../utils/internal-ai/models";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -61,6 +66,16 @@ const RESERVED_KEYS = new Set([
   "CORS_ALLOW_ANY_ORIGIN",
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
   "CHAT_SDK_API_URL_OVERRIDES",
+  // Test knobs that redirect credential or telemetry traffic. Deployment env only: a
+  // config writer must not be able to point the Codex device login or the telemetry
+  // relay at a host of their choosing.
+  "CODEX_OAUTH_DEVICE_BASE_URL",
+  "DESPLEGA_TELEMETRY_ENDPOINT",
+  "CLOUDFLARE_API_BASE_URL",
+  // GitHub host (GHES): the API base receives the PAT, the App JWT and installation
+  // tokens, so only the deployment env may redirect it.
+  "GITHUB_URL",
+  "GITHUB_API_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -177,6 +192,14 @@ export const SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS = [
   "openai",
   "cloudflare",
 ] as const;
+
+/**
+ * Extraction hosts `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_EXTRACT_PROVIDER_IDS`
+ * in `src/workflows/executors/system-one-providers.ts`, listed here because that
+ * module's credential readers would pull the LLM stack into every `db.ts` import.
+ * A test keeps the two lists equal.
+ */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS = ["cloudflare"] as const;
 
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
@@ -306,6 +329,24 @@ export function validateRuntimeTokenTtlHours(value: unknown): string | null {
     : "Invalid RUNTIME_TOKEN_TTL_HOURS (must be greater than zero and at most 168)";
 }
 
+/**
+ * `TASK_AUTO_TITLE_MODEL` pins the task-title model: `provider/model-id` for a
+ * provider the internal-ai layer can call, or a bare `claude -p` alias. Empty
+ * clears the pin. The model id itself is checked at call time (an unknown id
+ * logs and falls through to the next candidate).
+ */
+export function validateTaskAutoTitleModel(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid TASK_AUTO_TITLE_MODEL (must be a string)";
+  const model = value.trim();
+  if (!model) return null;
+  if (/\s/.test(model) || model.endsWith("/")) {
+    return "Invalid TASK_AUTO_TITLE_MODEL (use provider/model-id or a claude -p alias)";
+  }
+  return kindForModelString(model)
+    ? null
+    : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -377,6 +418,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
     }
   },
+  COMPANY_EMAIL_DOMAINS: (value) =>
+    typeof value === "string" &&
+    value
+      .split(",")
+      .map((domain) => domain.trim())
+      .every((domain) => domain === "" || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))
+      ? null
+      : "Invalid COMPANY_EMAIL_DOMAINS (expected comma-separated domains, e.g. example.com,example.dev)",
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
@@ -412,6 +461,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ),
   // Where people-facing file links point. Blank keeps the automatic choice.
   ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
+  // Dashboard origin(s), comma-separated; the first is the link base.
+  APP_URL: (value) => {
+    const invalid =
+      "Invalid APP_URL (must be comma-separated http(s) URLs with no query string or fragment, e.g. https://app.example.com)";
+    if (typeof value !== "string") return invalid;
+    const entries = value.split(",").map((entry) => entry.trim());
+    if (value.trim() && entries.some((entry) => !entry)) return invalid;
+    return entries.some((entry) => validateHttpBaseUrl(entry, invalid)) ? invalid : null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -419,6 +477,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
+  ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
@@ -428,7 +487,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
+  // `enforce` is deliberately absent: the follow-up gate only records decisions.
+  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
+  FOLLOW_UP_GATE_SCHEDULE_IDS: (value: unknown) => {
+    const message = "Invalid FOLLOW_UP_GATE_SCHEDULE_IDS (must be comma-separated schedule UUIDs)";
+    if (typeof value !== "string") return message;
+    return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
+  },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
+  ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
+    ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
+  ]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
@@ -507,8 +576,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "AGENTMAIL_DISABLE",
     "ADDITIVE_SLACK",
     "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
+    "SLACK_THREAD_WAKE_ON_ANY_MESSAGE",
+    "SLACK_LEAVE_THREAD_DISABLE",
     "RBAC_ENABLED",
     "SEED_AUTOMATIONS_ENABLED",
+    "SEED_SCRIPTS_ENABLED",
+    "SEED_SKILLS_ENABLED",
+    "SEED_WORKFLOWS_ENABLED",
+    "SEED_SCHEDULES_ENABLED",
     "RBAC_AUDIT_DISABLED",
     "EXTENSION_ALLOW_INLINE_INSTALL",
     "BUDGET_ADMISSION_DISABLED",
@@ -516,14 +591,18 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "OTEL_TRACE_POLL",
     "OTEL_EXPORT_API_LOGS",
     "ANONYMIZED_TELEMETRY",
+    "IMPROVEMENTS_ENABLED",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_QUERY_WORKER_POOL_ENABLED",
     "CLAUDE_TRUST_PRESEED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
     "COMB_ENABLED",
     "AGENT_FS_PROXY",
+    "TASK_AUTO_TITLE_ENABLED",
   ]),
+  TASK_AUTO_TITLE_MODEL: validateTaskAutoTitleModel,
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
@@ -534,6 +613,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_REACTION_STEERED",
     "SLACK_REACTION_COMPLETED",
     "SLACK_REACTION_FAILED",
+    "SLACK_REACTION_SKIPPED",
     "SLACK_STATUS_ICON_COMPLETED",
   ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive
@@ -556,6 +636,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SCRIPT_RUN_CONCURRENCY_CAP",
       "WORKER_API_READY_TIMEOUT_SECONDS",
       "DB_QUERY_HTTP_BUDGET_MS",
+      "EVENT_LOOP_STALL_WARN_MS",
       "DB_QUERY_HTTP_MAX_ROWS",
       "DB_QUERY_MCP_BUDGET_MS",
       "DB_QUERY_MCP_MAX_ROWS",
@@ -563,6 +644,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SLACK_CONCLUSION_SETTLE_SEC",
       "SLACK_CONCLUSION_TIMEOUT_MIN",
       "SLACK_TREE_STALL_MIN",
+      "SLACK_TASK_WATCHER_INTERVAL_MS",
     ],
     1,
   ),

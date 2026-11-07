@@ -9,8 +9,7 @@
  * sheet, Move the tree's move sheet, and Share the share sheet.
  *
  * Rename on a phone (UX review R9): the top bar turns into Cancel, the
- * field, and Save. Enter or Save saves, and a blur cancels. Toasts sit
- * above the composer while this screen shows.
+ * field, and Save. Enter or Save saves, and a blur cancels.
  */
 
 import {
@@ -67,34 +66,6 @@ import { SnoozeSheet } from "./session-sheets";
 
 type Move = (sessions: SessionListItem[], returnFocus: () => void) => void;
 
-/** Toasts sit this far above the composer's top edge (UX review R9). */
-const TOAST_GAP_PX = 8;
-
-/**
- * Lift the phone toasts above the composer while this screen shows: the
- * root Toaster reads `--toast-mobile-bottom` (components/ui/sonner.tsx).
- */
-function useToastsAboveComposer(root: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    // The composer is the screen's last form (the rename bar comes and goes above it).
-    const form = [...(root.current?.querySelectorAll("form") ?? [])].at(-1);
-    const style = document.documentElement.style;
-    if (!form) return;
-    const place = () =>
-      style.setProperty(
-        "--toast-mobile-bottom",
-        `${Math.max(16, window.innerHeight - form.getBoundingClientRect().top + TOAST_GAP_PX)}px`,
-      );
-    place();
-    const observer = new ResizeObserver(place);
-    observer.observe(form);
-    return () => {
-      observer.disconnect();
-      style.removeProperty("--toast-mobile-bottom");
-    };
-  }, [root]);
-}
-
 export function MobileDetailScreen({
   rootTaskId,
   onBack,
@@ -110,11 +81,9 @@ export function MobileDetailScreen({
   useMarkReadOnOpen(detail);
   const [showHandoffs, setShowHandoffs] = useLocalToggle("sessions:show-internal-handoffs", false);
   const noAccess = sessionErrorStatus(error) === 403;
-  const root = useRef<HTMLDivElement>(null);
-  useToastsAboveComposer(root);
   return (
     <SessionPresenceProvider rootTaskId={rootTaskId} enabled={!!detail}>
-      <div ref={root} className="contents">
+      <div className="contents">
         {detail && !noAccess ? (
           <DetailHeader
             detail={detail}

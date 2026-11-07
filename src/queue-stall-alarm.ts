@@ -86,12 +86,15 @@ export async function getQueueStallSnapshot(now = new Date()): Promise<QueueStal
   );
 
   const pickupCutoff = new Date(now.getTime() - QUEUE_STALL_THRESHOLD_MS).toISOString();
+  // Unary + keeps eventType off idx_agent_log_eventType, so the short
+  // createdAt window drives through idx_agent_log_createdAt instead of every
+  // status-change row ever logged.
   const recentPickupCount =
     (
       await getDbClient().get<{ count: number }>(
         `SELECT COUNT(*) AS count
          FROM agent_log
-         WHERE eventType IN ('task_status_change', 'task_claimed')
+         WHERE +eventType IN ('task_status_change', 'task_claimed')
            AND oldValue IN ('pending', 'unassigned')
            AND newValue = 'in_progress'
            AND createdAt >= ?`,

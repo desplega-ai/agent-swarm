@@ -9,6 +9,7 @@ export interface SlackThreadSteeringRequest {
   message: string;
   messageTimestamps?: string[];
   requestedByUserId?: string;
+  slackUserId?: string;
 }
 
 export interface SlackThreadSteeringResult {
@@ -52,6 +53,8 @@ export async function requestSlackThreadSteering(
     source: "slack",
     createdByKind: "user",
     createdByUserId: args.requestedByUserId,
+    messageTimestamps: args.messageTimestamps,
+    slack: { channelId: args.channelId, threadTs: args.threadTs, userId: args.slackUserId },
   });
   for (const messageTs of args.messageTimestamps ?? []) {
     await createLogEntry({
@@ -63,6 +66,11 @@ export async function requestSlackThreadSteering(
   }
 
   return { task, result };
+}
+
+/** Thread acknowledgement for buffered messages added to a task Lead has not started. */
+export function formatSlackFoldAck(count: number): string {
+  return `:speech_balloon: _${count === 1 ? "Your message was" : `${count} messages were`} added to the queued task._`;
 }
 
 /** Build an honest thread acknowledgement for the core service outcome. */

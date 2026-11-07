@@ -284,7 +284,7 @@ export function agentBrief(
     .join("\n");
   return [
     `Set up the ${def?.label ?? adapter} adapter of the Agent Swarm Chat SDK channel.`,
-    "Follow these steps on the platform, then enter the values in the Agent Swarm dashboard under Settings > Integrations > Chat SDK, turn on the adapter and save.",
+    "Follow these steps on the platform, then enter the values in the Agent Swarm dashboard under Connect › Channels, turn on the adapter and save.",
     "",
     ...steps,
     "",

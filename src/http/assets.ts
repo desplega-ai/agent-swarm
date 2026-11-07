@@ -26,8 +26,7 @@ import {
   AssetKeySchema,
   AssetSummarySchema,
 } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
-import { requestPrincipal } from "./request-principal";
+import { requestPrincipal, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import { canReadSession, hasSessionWrite, SESSION_READ_DENIED } from "./session-access";
 import { jsonError } from "./utils";
@@ -120,9 +119,7 @@ const registerMappingRoute = route({
 });
 
 function ensureOperator(req: IncomingMessage, res: ServerResponse): boolean {
-  if (getRequestAuth(req)?.kind === "operator") return true;
-  jsonError(res, "Operator access required", 403);
-  return false;
+  return requireAuthKind(req, res, ["operator"], "Operator access required") !== null;
 }
 
 const moveAssetBodySchema = z.object({ key: AssetKeySchema });

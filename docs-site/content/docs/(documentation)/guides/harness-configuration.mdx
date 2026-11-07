@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, or Grok) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, Grok, or fx) that powers your agents
 agent:
   offer: true
   when: "Someone wants agents to run on a different AI provider or coding CLI"
@@ -25,6 +25,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **Amp** | `amp` | Sourcegraph's Amp CLI in execute mode. Amp selects the model for each mode on its service |
 | **Cursor** | `cursor` | Cursor's local Agent SDK runtime with Cursor-hosted models |
 | **Grok** | `grok` | xAI's Grok CLI, run as an ACP server with a fresh session home |
+| **fx** | `fx` | Vercel Labs' fx agent, run as an ACP server on OpenRouter, OpenAI or Vercel AI Gateway keys |
 
 ## How It Works
 
@@ -46,11 +47,10 @@ HARNESS_PROVIDER=dsh             →  DshAdapter            →  spawns `dsh` in
 HARNESS_PROVIDER=amp             →  AmpAdapter            →  spawns `amp` in execute mode
 HARNESS_PROVIDER=cursor          →  CursorAdapter         →  creates a local Cursor SDK agent
 HARNESS_PROVIDER=grok            →  GrokAdapter           →  starts `grok agent` through ACP
+HARNESS_PROVIDER=fx              →  FxAdapter             →  starts `fx acp` through ACP
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
-
-For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Hook guidance now nudges agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external-MCP calls by default (override with `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY`). Set `CONTEXT_MODE_DISABLED=true` to opt a worker out: the adapters drop the MCP server and disable the installed context-mode plugin for the session, so its hooks stop too.
 
 When the runner refreshes an already-cloned repo for a new task, dirty working trees are auto-stashed instead of forcing a skipped pull. Any resulting `swarm-autostash` refs are appended to the composed prompt so the agent can restore them intentionally with `git stash apply <ref>` or `git stash pop <ref>` when that work matters to the current task.
 
@@ -189,7 +189,7 @@ The following keys are stored in the swarm config store (via `PUT /api/config` o
 
 ### Model Selection
 
-The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+Codex uses `gpt-5.6-terra` as its no-tier fallback only when no worker-wide `MODEL_OVERRIDE`, task-level `model`, task `modelTier`, or task/agent model profile selects a model. A task `modelTier` or task/agent model profile can resolve to a different model even when neither of the first two overrides is set. Set `MODEL_OVERRIDE` to choose a worker-wide baseline model, or set a task-level `model` to choose a concrete model for one task. `MODEL_TIER_CODEX_REGULAR` affects explicit regular-tier resolution only; it does not change the no-tier fallback.
 
 ### Reasoning / Effort
 
@@ -266,7 +266,7 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | m
 
 - **In-process OpenCode 2**: each task runs its own embedded `@opencode/sdk` host inside the worker process. There is no `opencode serve` child. Config is passed as a string, the session database is in memory, and nothing is written into the task's working directory.
 - **Agent-swarm plugin**: `src/providers/opencode-swarm-plugin.ts` is passed to the host as a plugin object. It handles task cancellation, the polling limit, the activity heartbeat, lead concurrent context, and the compaction goal reminder. The adapter runs identity sync, memory auto-indexing, the session summary, and session close from the event stream.
-- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in. context-mode is added as a stdio MCP server unless `CONTEXT_MODE_DISABLED=true`. Before the first prompt the adapter waits up to 30 seconds for the swarm server to connect and register `store-progress`; a refused, unauthorized, or tool-less server fails the task with the reason instead of running without swarm tools.
+- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in. Before the first prompt the adapter waits up to 30 seconds for the swarm server to connect and register `store-progress`; a refused, unauthorized, or tool-less server fails the task with the reason instead of running without swarm tools.
 - **Session summaries do not read `auth.json`**: the end-of-session summary uses the shared internal-ai credentials, not OpenCode's `~/.local/share/opencode/auth.json`. A worker that authenticates OpenCode only through that file runs tasks normally but skips summaries (`session_summary skipped (opencode)`). To keep them, give the worker `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, Codex OAuth (see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth)), or `CLAUDE_CODE_OAUTH_TOKEN`; the first one found wins, in that order.
 
 ---
@@ -355,9 +355,9 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | m
 | NaN | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Known to support tool calls: `nan/deepseek-v4-flash`, `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`, `nan/gemma4`, `nan/mimo-v2.6-flash`. Other `nan/<id>` catalog ids are accepted but untested |
 | Helmcode | `HELMCODE_API_KEY` | `helmcode/deepseek-v4-flash`, `helmcode/glm5.3`, `helmcode/glm5.3-flash`, `helmcode/qwen3.6`, `helmcode/gemma4` |
 
-- **Entering keys**: use the NaN and Helmcode cards on the dashboard Integrations page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
+- **Entering keys**: use the NaN and Helmcode cards on the dashboard Connect → AI providers page, or set the env vars on the worker. A key saved on the dashboard needs no restart.
 - **Alias**: `HELMCODE_API_NAN` is accepted for the NaN key. When both `NAN_API_KEY` and `HELMCODE_API_NAN` are set, `NAN_API_KEY` wins.
-- **Base URL**: `NAN_BASE_URL` and `HELMCODE_BASE_URL` override the default API roots (`https://api.nan.builders/v1`, `https://api.helmcode.com/v1`), for example to go through a proxy. They are not secrets. Set them on the provider's Integrations card (under Advanced) or as env vars; the pi and opencode config blocks and the key check read them per task.
+- **Base URL**: `NAN_BASE_URL` and `HELMCODE_BASE_URL` override the default API roots (`https://api.nan.builders/v1`, `https://api.helmcode.com/v1`), for example to go through a proxy. They are not secrets. Set them on the provider's card on Connect → AI providers (under Advanced) or as env vars; the pi and opencode config blocks and the key check read them per task.
 - **Catalog**: Helmcode is not on models.dev. The swarm builds its catalog section from the five models in the provider registry (see [Adding a provider](#adding-a-provider)). Helmcode's resold Claude, GPT and Gemini models are not in the catalog.
 - **Pricing**: both providers are flat-rate per key. Sessions record $0 marginal cost with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
 - **`latest:` aliases** do not cover these providers. Use concrete model ids.
@@ -412,7 +412,7 @@ NaN and Helmcode are entries in one registry: `packages/model-catalog/src/openai
 
 The new key var is a secret-scrubber rule change: bump `SCRUBBER_RULES_VERSION` in `src/utils/secret-scrubber.ts` and its pin in `src/tests/secret-scrubber.test.ts`, which fails until you do.
 
-Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the Integrations card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
+Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the AI providers card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
 
 ---
 
@@ -486,7 +486,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | `ACP_TARGET` | No | `custom` | `opencode`, `gemini`, `copilot`, `qwen`, `kiro` or `goose` for a curated preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
-| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
+| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array of strings (or comma-separated list for hand-authored config) naming environment/config keys explicitly allowed into a custom target process. JSON arrays containing non-string members fail with an `AcpTargetResolutionError` naming `ACP_TARGET_ENV_KEYS` |
 | `ACP_MODEL_ENV_KEY` | No | — | Custom target environment variable that receives `MODEL_OVERRIDE` when the ACP `model` option is unavailable |
 | `ACP_CONFIG_OPTIONS` | No | `{}` | JSON object of additional string or boolean ACP option values to apply when advertised |
 | `ACP_SYSTEM_PROMPT_PATH` | No | — | Where to write the composed system prompt before spawning, for targets that read their prompt from a file instead of an ACP field. Relative paths resolve against the task `cwd`; absolute paths are used as-is |
@@ -669,6 +669,18 @@ includes swarm MCP, and has no live steering or native resume. See
 [Provider Auth: Grok](/docs/guides/provider-auth/grok) for route and billing
 details.
 
+## fx
+
+Set `HARNESS_PROVIDER=fx` and one of `OPENROUTER_API_KEY` (for
+`openrouter/<vendor>/<id>`), `OPENAI_API_KEY` (for a bare id) or
+`AI_GATEWAY_API_KEY` (for `vercel/<vendor>/<id>`). Tier defaults are
+`openrouter/deepseek/deepseek-v4.1-flash` for `smol` and `regular`,
+`openrouter/deepseek/deepseek-v4-pro-0813` for `smart` and
+`openrouter/anthropic/claude-opus-5.5` for `ultra`. fx includes swarm MCP,
+steers natively and resumes sessions. Cost is a pricing-table estimate. fx
+ships only in `worker-full`. See [Provider Auth: fx](/docs/guides/provider-auth/fx)
+for routing, limits and upgrades.
+
 ## Devin
 
 Set `HARNESS_PROVIDER=devin`, `DEVIN_API_KEY`, and `DEVIN_ORG_ID`. Every tier
@@ -696,7 +708,8 @@ ACU usage.
 model-prefix routing is configured deliberately. **Amp** is a managed-mode
 choice with queue-only steering. **Cursor** suits a Cursor account that needs
 native model effort controls and live steering. **Grok** suits xAI API models
-or OpenRouter models on the Grok CLI. **Devin** runs work remotely in
+or OpenRouter models on the Grok CLI. **fx** suits OpenRouter, OpenAI or AI
+Gateway models with native steering. **Devin** runs work remotely in
 Cognition's cloud and bills in ACUs rather than worker-side tokens.
 
 **Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime. Choose `acp` when you already have (or are building) an ACP-speaking agent and want to run it as a swarm worker without writing a new adapter.
@@ -716,7 +729,7 @@ A running worker sees a changed key when its idle poll returns, within about a m
 Workers repeat the tests every 10 minutes while a key is rejected.
 A key that the provider rejects with HTTP 401 is skipped until it passes or leaves the pool.
 A key that gets HTTP 403 shows a failed check, but workers keep using it: a valid key can lack the scope that the check endpoint needs.
-The Provider keys page and the setup step show these results.
+The provider keys on Connect → AI providers and the setup step show these results.
 Other users of a pooled key also send one member per call: memory embeddings, internal AI calls (memory rating, session summaries, workflow LLM nodes), audio transcription, and the claude-managed integration test.
 When the memory setup step reuses a pooled key, it tests and saves the first member.
 

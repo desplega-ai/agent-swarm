@@ -15,7 +15,8 @@ export type AgentTaskStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "superseded";
+  | "superseded"
+  | "skipped";
 export type AgentTaskSource =
   | "mcp"
   | "slack"
@@ -42,7 +43,45 @@ export type ModelSource =
   | "tier-config"
   | "tier-default"
   | "fallback:cli-unsupported"
-  | "fallback:cli-unsupported:model";
+  | "fallback:cli-unsupported:model"
+  | "profile:task"
+  | "profile:agent-default"
+  | "profile:tier-alias";
+/**
+ * One row of `GET /api/model-profiles`: a named harness, model and effort.
+ * Not the agent's role profile (`useUpdateAgentProfile`).
+ */
+export interface ModelProfile {
+  id: string;
+  name: string;
+  harness: ProviderName;
+  model: string;
+  effort: ReasoningEffortLevel | null;
+  allowCustomModel: boolean;
+  description: string | null;
+  /** `tier:<tier>` (boot seed), `agent-config`, or null. */
+  seededFrom: string | null;
+  /** Pooled-key allowlist: credential var → allowed key suffixes. Null uses the whole pool. */
+  credentials: Record<string, string[]> | null;
+  /** Same-harness profiles a task hops to, in order, on a provider error. Unset on older APIs. */
+  fallbacks?: string[];
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+/** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
+export type ModelProfileCheckState = "pass" | "warn" | "fail" | "unverified";
+export interface ModelProfileCheckRow {
+  check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
+  state: ModelProfileCheckState;
+  detail?: string;
+}
+/** `GET /api/agents/{id}/profile-check`: whether an agent can run a model profile. */
+export interface ModelProfileCheckResult {
+  agentId: string;
+  /** False when the primary profile (`profiles[0]`) has a `fail` row. */
+  ok: boolean;
+  profiles: Array<{ name: string; ok: boolean; checks: ModelProfileCheckRow[] }>;
+}
 /** One row of `GET /api/models-catalog/tiers`: what a tier resolves to for a provider. */
 export interface ModelTierPreview {
   provider: string;
@@ -123,9 +162,8 @@ export interface AgentAcpStatus {
   reportedAt: number;
 }
 
-/** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
- * future avatar types (emoji, image, ...) can be added with no migration —
- * server validates shape only; the UI owns the icon catalog + fallback. */
+/** The lucide branch of `MediaIcon`. Server validates shape only; the UI owns
+ * the icon catalog + fallback. */
 export interface AgentAvatarLucide {
   type: "lucide";
   /** Kebab-case lucide icon name, e.g. "rocket". Must exist in AVATAR_ICON_CATALOG to render. */
@@ -133,7 +171,27 @@ export interface AgentAvatarLucide {
   /** `#RRGGBB`. Omitted = use the deterministic color derivation. */
   color?: string;
 }
-export type AgentAvatar = AgentAvatarLucide;
+/** Mirrors `MediaIconSchema` (backend `src/types.ts`): a lucide glyph, an https
+ * image link, or an image file in agent-fs. With neither `orgId` nor `driveId`,
+ * an agent-fs icon lives on the swarm drive. */
+export type MediaIcon =
+  | AgentAvatarLucide
+  | { type: "url"; url: string }
+  // Both drive IDs or neither (neither = the swarm drive), as the API enforces.
+  | { type: "agent-fs"; path: string; orgId?: never; driveId?: never }
+  | { type: "agent-fs"; path: string; orgId: string; driveId: string };
+
+/** Mirrors `AgentAvatarSchema`: an agent's avatar takes the same shapes as an app icon. */
+export type AgentAvatar = MediaIcon;
+
+/** Mirrors `AppIconSchema`: an app's dashboard icon. */
+export type AppIcon = MediaIcon;
+
+/** Mirrors `AgentSlackIconSchema` (backend `src/types.ts`): the agent's Slack persona icon. */
+export type AgentSlackIcon =
+  | { type: "emoji"; emoji: string }
+  | { type: "url"; url: string }
+  | { type: "app" };
 
 export interface Agent {
   id: string;
@@ -145,6 +203,8 @@ export interface Agent {
   capabilities?: string[];
   /** Custom avatar. Null/missing = fall back to the deterministic hash-derived icon/color. */
   avatar?: AgentAvatar | null;
+  /** Slack persona icon. Null/missing = :crown: for the lead, a hashed emoji for workers. */
+  slackIcon?: AgentSlackIcon | null;
   claudeMd?: string;
   soulMd?: string;
   identityMd?: string;
@@ -180,6 +240,8 @@ export interface Agent {
   lastActivityAt?: string;
   /** Runtime pool this agent is bound to. Absent on APIs without runtime pools. */
   runtimePoolId?: string | null;
+  /** Offline, but its runtime pool starts a runtime when a task is sent. Absent otherwise. */
+  onDemand?: boolean;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -188,7 +250,7 @@ export type RuntimeInstanceStatus = "active" | "offline";
 
 // ── Runtime pools (mirror RuntimePoolSchema / RuntimeControllerSchema in src/types.ts) ──
 
-export type RuntimeProviderKind = "static" | "docker" | "e2b" | "k8s";
+export type RuntimeProviderKind = "static" | "docker" | "e2b" | "boxd" | "k8s";
 export type RuntimeDeliveryMode = "poll" | "push";
 export type RuntimePoolLifecycle = "idle" | "per-task";
 
@@ -374,6 +436,26 @@ export interface AgentLatestModel {
   reasoningEffort?: ReasoningEffortLevel;
 }
 
+/** Why a provider session ended in a way another profile may survive. */
+export type ProviderErrorClass =
+  | "rate_limit"
+  | "model_window"
+  | "seat"
+  | "credits"
+  | "overloaded"
+  | "server_error"
+  | "auth"
+  | "pool_empty";
+
+/** One same-agent fallback hop: the work left `from` on `errorClass` and resumed on `profile`. */
+export interface FallbackHop {
+  from: string;
+  profile: string;
+  errorClass: ProviderErrorClass;
+  at: string;
+  skipped?: { profile: string; reason: string }[];
+}
+
 export interface AgentTask {
   id: string;
   key: string;
@@ -385,6 +467,8 @@ export interface AgentTask {
   source: AgentTaskSource;
   routingReason?: RoutingReason;
   routingSource?: "declared" | "engine_default";
+  /** Set by `defer-task`: the task ended waiting on something else. */
+  deferredAt?: string;
   routingNote?: string;
   taskType?: string;
   tags: string[];
@@ -411,12 +495,20 @@ export interface AgentTask {
   modelSource?: ModelSource;
   /** The `latest:` alias `resolvedModel` came from, when any. */
   modelAlias?: string;
+  /** Model profile the creator asked for. */
+  profile?: string;
+  /** Model profile the server applied at claim (the ask, the agent default, or a tier alias). */
+  resolvedProfile?: string;
+  /** Provider-error fallback hops the work took, oldest first. */
+  fallbackHops?: FallbackHop[];
   /** Effort the task asked for; usually unset, the agent's setting applies. */
   effort?: ReasoningEffortLevel;
   /** Effort the session ran at (task effort, else the agent's setting). */
   resolvedEffort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
+  /** The task whose session dispatched this one (send-task). Unset on older rows. */
+  dispatchedByTaskId?: string;
   dir?: string;
   claudeSessionId?: string;
   workflowRunId?: string;
@@ -474,6 +566,7 @@ export const PROVIDER_NAMES = [
   "amp",
   "cursor",
   "grok",
+  "fx",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export function isProviderName(value: string | null | undefined): value is ProviderName {
@@ -498,7 +591,7 @@ export type SteerMode = "steer" | "queue";
 
 export type SteeringStatus = "pending" | "delivered" | "handled" | "promoted" | "cancelled";
 
-export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api";
+export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
 
 /** What the server actually did with the request (the degradation ladder). */
 export type SteerOutcome = "steered" | "queued" | "promoted";
@@ -603,6 +696,11 @@ export interface WhoamiResponse {
   user: User | null;
   /** The caller's RBAC grants. Absent on APIs older than 2.6.1. */
   grants?: WhoamiGrants;
+  /**
+   * Whether the caller may use the "All users" read scope. On the operator
+   * key it answers for the picked user (`X-Swarm-User-Id`). Absent on older APIs.
+   */
+  sessionReadAll?: boolean;
 }
 
 /** RBAC grants from whoami. `grantsAll` is also true when RBAC is off. */
@@ -680,6 +778,8 @@ export interface ChatSdkAdapterStatus {
   enabled: boolean;
   /** `incomplete`: saved with a missing field or an unresolvable `$config`; `error` names it. */
   health: "ok" | "error" | "disabled" | "incomplete";
+  /** `configured && enabled && health === "ok"`. Absent from APIs before Connect › Channels. */
+  connected?: boolean;
   error?: string;
   webhookUrl: string;
   mode?: string;
@@ -984,7 +1084,7 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path";
+export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
 
 export interface UserFavorite {
   id: string;
@@ -1007,6 +1107,56 @@ export interface FavoriteSetResponse {
   itemType: FavoriteItemType;
   itemId: string;
   row?: UserFavorite | null;
+}
+
+/** Post-onboarding checklist. Mirrors `ChecklistItemSchema` in `src/types.ts`. */
+export type ChecklistScope = "swarm" | "user";
+export type ChecklistKind = "channel" | "tool" | "use_case" | "custom";
+export type ChecklistStatus = "open" | "done" | "removed";
+export type ChecklistAction = "remove" | "restore" | "done" | "reorder";
+
+export interface ChecklistItem {
+  id: string;
+  scope: ChecklistScope;
+  userId: string | null;
+  kind: ChecklistKind;
+  label: string;
+  href: string | null;
+  meta: Record<string, unknown> | null;
+  sortOrder: number;
+  status: ChecklistStatus;
+  statusChangedAt: string | null;
+  statusChangedBy: string | null;
+  statusChangedByName: string | null;
+  statusReason: string | null;
+  nudgedAt: string | null;
+  nudgedTaskId: string | null;
+  /** Null for custom items: they have no signal. */
+  signal: boolean | null;
+  /** `status === "done"` or the signal is true. */
+  done: boolean;
+  editable: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface ChecklistResponse {
+  items: ChecklistItem[];
+  canEditSwarm: boolean;
+}
+
+export interface ChecklistAddRequest {
+  kind: ChecklistKind;
+  label: string;
+  scope: ChecklistScope;
+  href?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface ChecklistUpdateRequest {
+  action: ChecklistAction;
+  reason?: string;
+  sortOrder?: number;
 }
 
 /**
@@ -2413,6 +2563,8 @@ export interface OAuthPreset {
   requiresRefreshTokenRotation?: boolean;
   extraParams?: Record<string, string>;
   setupHints: string[];
+  /** Left out of the "add" pickers (Linear, Jira: use their integration page). */
+  hiddenInCatalog?: boolean;
 }
 
 export interface UpsertOAuthAppResult {
@@ -2711,7 +2863,11 @@ export type ApprovalRequestSummary = Omit<
   | "approvals"
   | "resolutionReason"
   | "notificationChannels"
-> & { questionCount: number };
+> & {
+  questionCount: number;
+  /** Pending rows only: the viewer may answer (server rule of the respond route). */
+  viewerCanRespond?: boolean;
+};
 
 export interface ApprovalRequestSummariesResponse {
   approvalRequests: ApprovalRequestSummary[];
@@ -2913,6 +3069,8 @@ export interface McpServer {
   version: number;
   createdAt: string;
   lastUpdatedAt: string;
+  /** Agents with an active install. Set by the list route only. */
+  installCount?: number;
 }
 
 export type McpOAuthStatus = "connected" | "expired" | "error" | "revoked";
@@ -3368,6 +3526,8 @@ export interface StatusIdentity {
   hide_cloud_promo: boolean;
   /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
   org_id: string | null;
+  /** The swarm's public dashboard URL (`APP_URL`, else `DASHBOARD_URL`). Null when unset, absent on older APIs. */
+  dashboard_url?: string | null;
 }
 
 /** Effective telemetry opt-out state (`ANONYMIZED_TELEMETRY`) as reported by the API. */
@@ -3416,6 +3576,42 @@ export interface FeedbackInput {
 export type SlackConnectMoment = "task_failed" | "first_workflow" | "default";
 
 /** Body of `POST /api/used-by`. */
+export type ImprovementStatus = "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+
+/** A product improvement for desplega. Agents draft; only a person approves and sends. */
+export interface Improvement {
+  id: string;
+  text: string;
+  email: string | null;
+  status: ImprovementStatus;
+  source: "mcp" | "api" | "ui";
+  requestedByAgentId: string | null;
+  /** A user id or `operator`, from the approver's credential. */
+  approvedBy: string | null;
+  approvedAt: string | null;
+  sentAt: string | null;
+  proxyStatus: number | null;
+  proxyId: string | null;
+  proxyError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Install-specific substrings to warn the approver about (pending and failed rows). */
+  leakHints?: string[];
+}
+
+export interface ImprovementsResponse {
+  enabled: boolean;
+  improvements: Improvement[];
+}
+
+export interface SubmitImprovementInput {
+  text: string;
+  /** Required with `sendNow` (the API answers 400 without it). */
+  email?: string;
+  sendNow?: boolean;
+  source?: "ui" | "api";
+}
+
 export interface UsedByConsentInput {
   granted: boolean;
   /** Required when `granted` is true (the API answers 400 without it). */
@@ -3438,9 +3634,11 @@ export interface StatusActivity {
 
 /** Comb, the agent-fs review space in the dashboard (`/file`). */
 export interface StatusComb {
-  /** `COMB_ENABLED` is on and `AGENT_FS_API_URL` is set. */
+  /** Files is on: `AGENT_FS_API_URL` is set and `COMB_ENABLED` is not `false`. */
   enabled: boolean;
-  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else `AGENT_FS_API_URL`). */
+  /** What is missing while Files is off. Null when on. Absent on older APIs. */
+  reason?: string | null;
+  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else the API's `/agentfs` proxy). */
   api_url: string | null;
   /** agent-fs live UI host, for "Open in agent-fs" links. */
   live_url: string;
@@ -3452,6 +3650,31 @@ export interface StatusComb {
    * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
    */
   service_user_id?: string | null;
+}
+
+/**
+ * `GET /api/fs/me`: the current swarm user's agent-fs account. The dashboard
+ * takes the identity of a minted key from here, because a minted key is
+ * scoped to the shared org.
+ */
+export interface FsMeResponse {
+  status: "ready" | "pending" | "off" | "unsupported";
+  agentFsUserId?: string;
+  email?: string;
+  displayName?: string;
+  orgId?: string;
+  driveId?: string;
+  reason?: string;
+}
+
+/** `POST /api/fs/keys`: a named agent-fs key for this browser, returned once. */
+export interface MintedFsKey {
+  apiKey: string;
+  keyId: string;
+  label: string;
+  agentFsUserId: string;
+  orgId: string;
+  driveId: string;
 }
 
 /** Why "Send to swarm" left a comment out (`POST /api/comb/review-batches`). */
@@ -3542,6 +3765,8 @@ export interface StatusResponse {
   runtime_pools?: { enabled: boolean };
   /** Absent on servers that predate it. */
   instance?: StatusInstance;
+  /** The GitHub web base (`GITHUB_URL`). Absent on servers that predate it; treat absence as github.com. */
+  github?: { web_url: string; enterprise: boolean };
 }
 
 export interface TestConnectionResponse {
@@ -3875,6 +4100,14 @@ export interface AppPageDef {
   /** Display title (breadcrumb / header); defaults to the page name. */
   title?: string;
   params?: Record<string, AppPageParamDef>;
+  /** Sidebar layout: a catalog icon name shown next to the page in the sidebar. */
+  icon?: string;
+  /** Sidebar layout: one line under the title in the sticky page header. */
+  description?: string;
+  /** Sidebar layout: element key rendered in the sticky header's actions slot. */
+  headerActions?: string;
+  /** Sidebar layout: `false` leaves the page out of the sidebar. */
+  nav?: boolean;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -3949,6 +4182,10 @@ export interface AppDefinition {
    * reserved `$theme` user-config value overrides it per-user.
    */
   theme?: string;
+  /** Icon on the dashboard Apps page. Missing or unrecognized falls back to a generic icon. */
+  icon?: AppIcon;
+  /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
+  layout?: "sidebar";
 }
 
 /**
@@ -3970,6 +4207,8 @@ export interface AppListItem {
   id: string;
   name: string;
   description?: string | null;
+  /** Projected from `definition.icon`. Missing or unrecognized falls back to a generic icon. */
+  icon?: AppIcon | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4276,4 +4515,196 @@ export interface FleetBenchmarkResponse {
   minFinishedTasks: number;
   generatedAt: string | null;
   comparisons: FleetComparison[];
+}
+
+// ─── Automation savings (GET /api/savings/jobs) ─────────────────────────────
+
+export type SavingsTier = "smol" | "regular" | "smart" | "ultra";
+
+/** An 80% range: p10 and p90 around the p50 point estimate. */
+export interface SavingsBand {
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
+/** One workflow or one script (by name; scripts of one name share a row across scopes). */
+export type SavingsTarget = { workflowId: string } | { scriptName: string };
+
+export interface SavingsJobRow {
+  /**
+   * `script-scheduled`: a schedule targets the script, priced as a standalone
+   * agent task. `script-agent-invoked`: priced as the extra turns it adds to
+   * the calling agent's session.
+   */
+  kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+  /** Set on workflow rows. */
+  workflowId?: string;
+  /** Set on script rows. */
+  scriptName?: string;
+  name: string;
+  basis: "modelled";
+  /** True when only the runs with a downstream effect count (an event router). */
+  enabledOnlyRule: boolean;
+  runs: number;
+  substitutedRuns: number;
+  effectRuns: number;
+  enabledOnlyRuns: number;
+  capApplied: boolean;
+  opsPerRun: number;
+  /** Measured spend of every run in the window. */
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured; 0 when recorded. */
+  estimatedLlmUsd: number;
+  /**
+   * Scaled estimate: `(measuredUsd + estimatedLlmUsd) * substitutedRuns / runs`,
+   * the cost the saving subtracts.
+   */
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  /** Scaled estimate like `actualUsd`. */
+  actualHours: number;
+  agentOnlyHours: SavingsBand;
+  hoursSaved: SavingsBand;
+  agentOnlyUsdPerRun: number;
+}
+
+export interface SavingsTotals {
+  runs: number;
+  substitutedRuns: number;
+  enabledOnlyRuns: number;
+  measuredUsd: number;
+  /** LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  actualHours: number;
+  hoursSaved: SavingsBand;
+}
+
+export interface SavingsJobsResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  /** Newest rollup time of the window; null before the first rollup. */
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  rows: SavingsJobRow[];
+  total: SavingsTotals | null;
+  /** With `components=true`: what the workflow's runs caused, each priced as on its own row. */
+  components?: SavingsComponent[];
+  /** With `components=true`: own runs plus every component. Never part of a list or fleet total. */
+  withComponents?: SavingsTotals | null;
+}
+
+/** A child workflow, nested script or unowned tasks below a workflow's runs. */
+export interface SavingsComponent {
+  kind: "workflow" | "script" | "task";
+  workflowId?: string;
+  scriptName?: string;
+  name: string;
+  linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+  /** 1 for a direct child. */
+  depth: number;
+  /** Runs (tasks for a task component) in this tree; fractional below the first level. */
+  runs: number;
+  actualUsd: number;
+  agentOnlyUsd: SavingsBand;
+  savingUsd: SavingsBand;
+  hoursSaved: SavingsBand;
+  /** Unowned tasks: their spend is already in the workflow's own row. */
+  inOwnRow: boolean;
+}
+
+/** A schedule's row: the schedule's workflow or script target (runs carry no schedule link), or its measured spend. */
+export interface SavingsScheduleRef {
+  scheduleId: string;
+  scheduleName: string;
+  scheduleEnabled: boolean;
+}
+
+/** The target job's whole row, shared with any other schedule of the same target. */
+export type SavingsTargetRow = SavingsJobRow & SavingsScheduleRef & { scope: "target-job" };
+
+/** An agent-task schedule: what its tasks cost, with no saving to model. */
+export interface SavingsMeasuredRow extends SavingsScheduleRef {
+  kind: "agent-task-schedule";
+  name: string;
+  basis: "measured";
+  /** Agent tasks the schedule created in the window. */
+  runs: number;
+  /** Recorded cost of those tasks; a floor, as their reviews and follow-ups are not linked to the schedule. */
+  actualUsd: number;
+  actualHours: number;
+  savingUsd: null;
+}
+
+export type SavingsScheduleRow = SavingsTargetRow | SavingsMeasuredRow;
+
+export interface SavingsScheduleResponse extends Omit<SavingsJobsResponse, "rows" | "reason"> {
+  /** `target-missing`: the schedule's workflow or script no longer exists. */
+  reason: SavingsJobsResponse["reason"] | "target-missing";
+  rows: SavingsScheduleRow[];
+}
+
+/** GET /api/savings/daily: the p50 saving per UTC day; the points sum to the jobs row's p50. */
+export interface SavingsDailyPoint {
+  day: string;
+  savingUsd: number;
+  /** Scaled estimate: the day's measured and estimated spend times the substituted share. */
+  actualUsd: number;
+  /** The day's measured spend. */
+  measuredUsd: number;
+  /** The day's LLM spend estimated from tokens and output size, not measured. */
+  estimatedLlmUsd: number;
+}
+
+export interface SavingsDailyResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  points: SavingsDailyPoint[];
+}
+
+/** One kind of job in the fleet savings summary; p50 values. */
+export interface SavingsKindTotals {
+  jobs: number;
+  runs: number;
+  substitutedRuns: number;
+  savingUsd: number;
+  hoursSaved: number;
+}
+
+/** GET /api/savings/summary: every workflow and script, with the fleet band. */
+export interface SavingsSummaryResponse {
+  window: { start: string; end: string; days: number };
+  tier: SavingsTier;
+  calibrationModel: string;
+  calibratedAt: string;
+  calibrationSource: "shipped" | "deployment";
+  computedAt: string | null;
+  valid: boolean;
+  reason: "not-computed" | "no-runs" | null;
+  total: SavingsTotals | null;
+  byKind: {
+    workflows: SavingsKindTotals;
+    scheduledScripts: SavingsKindTotals;
+    agentInvokedScripts: SavingsKindTotals;
+  } | null;
+  /** Measured session spend of the whole swarm in the window. */
+  fleetLlmUsd: number;
+  /** `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`; null without spend or a valid total. */
+  selfOptimizationRatio: number | null;
+  excluded: { enabledOnlyRuns: number } | null;
+  assumptions: string[];
 }

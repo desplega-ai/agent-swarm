@@ -44,6 +44,12 @@ export type SeederRunOptions = {
 export interface Seeder<TItem extends SeedItem = SeedItem> {
   /** Kind discriminator — namespaces this seeder's rows in `seed_state`. */
   readonly kind: string;
+  /**
+   * Apply source changes over a user-modified upstream copy instead of
+   * preserving it. Built-in seeders leave this unset; file imports set it for
+   * `onConflict: overwrite` sources.
+   */
+  readonly overwriteUserModified?: boolean;
   /** The version-controlled source-of-truth records for this kind. */
   items(): TItem[] | Promise<TItem[]>;
   /**

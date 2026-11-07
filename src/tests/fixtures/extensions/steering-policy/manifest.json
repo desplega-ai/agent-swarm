@@ -1,0 +1,7 @@
+{
+  "name": "steering-policy",
+  "description": "Records, rewrites, or blocks steering messages",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

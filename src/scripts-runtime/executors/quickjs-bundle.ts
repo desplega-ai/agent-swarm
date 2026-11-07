@@ -23,6 +23,7 @@ export const fetchJson = s.fetchJson;
 export const glob = s.glob;
 export const grep = s.grep;
 export const table = s.table;
+export const retry = s.retry;
 export const Redacted = s.Redacted;
 `;
 

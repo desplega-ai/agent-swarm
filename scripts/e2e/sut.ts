@@ -3,6 +3,35 @@ import { createServer } from "node:net";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
+/**
+ * Every capability the API knows. Mirrors ALL_CAPABILITIES in src/server.ts (the
+ * black-box runner cannot import it). An unknown name is harmless: it never matches,
+ * and the register response filters it out.
+ */
+export const ALL_CAPABILITIES = [
+  "core",
+  "task-pool",
+  "scripts",
+  "config",
+  "prompt-templates",
+  "mcp",
+  "profiles",
+  "scheduling",
+  "memory",
+  "workflows",
+  "pages",
+  "metrics",
+  "kv",
+  "slack",
+  "tracker",
+  "skills",
+  "messaging",
+  "repo",
+  "agentmail",
+  "kapso",
+  "swarm-x",
+] as const;
+
 export type Sut = {
   port: number;
   baseUrl: string;
@@ -123,17 +152,27 @@ export async function startSut(
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
+  // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
+  // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
+  const codexDevicePort = await freePort();
+  const chatSdkPort = await freePort();
+  // Chat SDK Slack posts to a mock bound here by the scenario (slack-http.ts).
+  const chatSdkSlackPort = await freePort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
+  // The SUT writes home-relative files (skill filesystem sync into ~/.claude/skills
+  // and friends). A per-run HOME keeps those off the developer's real home.
+  const homeDir = `/tmp/e2e-home-${stamp}`;
   const secretsPath = `${secretsDir}/key`;
-  await Bun.$`mkdir -p ${fsDir} ${secretsDir}`.quiet();
+  await Bun.$`mkdir -p ${fsDir} ${secretsDir} ${homeDir}`.quiet();
   await Bun.write(secretsPath, randomBytes(32).toString("base64"));
 
   const env = {
     ...minimalEnv(),
+    HOME: homeDir,
     PORT: String(port),
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,
@@ -148,10 +187,23 @@ export async function startSut(
     SLACK_THREAD_STEERING: "off",
     // Background boot triage at T+90s must not steal a scenario's next poll.
     HEARTBEAT_CHECKLIST_DISABLE: "true",
+    // Every tool group registers, so the MCP coverage denominator is the whole surface.
+    CAPABILITIES: ALL_CAPABILITIES.join(","),
+    CHAT_SDK_ENABLED: "true",
+    // Short buffer: a chat mention becomes a task in half a second, not ten.
+    CHAT_SDK_BUFFER_MS: "500",
+    CHAT_SDK_ADAPTERS: "{}",
+    CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
+      telegram: `http://127.0.0.1:${chatSdkPort}`,
+      slack: `http://127.0.0.1:${chatSdkSlackPort}/api/`,
+    }),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,
     OAUTH_KEEPALIVE_DISABLE: "true",
+    // MCP OAuth discovery refuses private hosts by default; scenarios run a loopback authorization server.
+    MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
+    CODEX_OAUTH_DEVICE_BASE_URL: `http://127.0.0.1:${codexDevicePort}`,
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",
     LINEAR_DISABLE: "true",
@@ -169,7 +221,7 @@ export async function startSut(
     dbPath,
     logPath,
     logPaths: [logPath],
-    tempPaths: [fsDir, secretsDir],
+    tempPaths: [fsDir, secretsDir, homeDir],
     process: spawned.child,
     flushLog: spawned.flushLog,
     drains: spawned.drains,

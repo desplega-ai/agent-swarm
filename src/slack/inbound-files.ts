@@ -21,12 +21,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
 import { getTaskAttachments, getTaskById, promoteDraftTask, refreshDraftTaskLease } from "../be/db";
+import { createSlackTaskCarryingMessages } from "../be/db/tasks/slack-fold";
 import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import type { TaskCreateEvent } from "../extensions/contract";
 import { providerPath } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { resolveTemplate } from "../prompts/resolver";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import {
+  createTaskWithSiblingAwareness,
+  prepareTaskWithSiblingAwareness,
+} from "../tasks/sibling-awareness";
 import type { AgentTask, CreateTaskOptions, TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentFetchCommand } from "../utils/task-attachment-links";
@@ -315,43 +319,58 @@ async function downloadSlackFile(
  * has settled — success or not — so a worker can't start before its
  * attachments exist. `unattached` lists every file of the message that the
  * task ended up without: the ones that couldn't be downloaded plus the ones
- * that couldn't be stored.
+ * that couldn't be stored. `carriedMessageTs` names the messages besides the
+ * trigger that the task carries (a buffered burst); they commit with the task.
  */
 export async function createSlackTaskWithFiles(
   description: string,
   options: CreateTaskOptions,
   inbound: InboundSlackFiles,
   slack?: TaskCreateEvent["slack"],
+  carriedMessageTs: readonly string[] = [],
 ): Promise<{ task: AgentTask; unattached: SlackFileFailure[] }> {
   noteSlackInboundSideEffect("task_created");
   const context = { origin: "slack" as const, slack };
+  const create = async (createOptions: CreateTaskOptions) =>
+    carriedMessageTs.length === 0 || !createOptions.slackChannelId
+      ? await createTaskWithSiblingAwareness(description, createOptions, context)
+      : await createSlackTaskCarryingMessages(
+          await prepareTaskWithSiblingAwareness(description, createOptions, context),
+          { slackChannelId: createOptions.slackChannelId, messageTs: carriedMessageTs },
+        );
   if (inbound.fetched.length === 0) {
-    const task = await createTaskWithSiblingAwareness(description, options, context);
+    const task = await create(options);
     return { task, unattached: inbound.failed };
   }
 
-  const task = await createTaskWithSiblingAwareness(
-    description,
-    { ...options, status: "draft" },
-    context,
-  );
-  const unattached = [...inbound.failed];
+  const task = await create({ ...options, status: "draft" });
+  const unattached = [...inbound.failed, ...(await attachSlackFilesToDraft(task.id, inbound))];
+  return { task, unattached };
+}
+
+/**
+ * Attach a user's fetched Slack files to a task held in `draft`, then promote
+ * it, whatever the uploads did. Returns the files that could not be stored.
+ */
+export async function attachSlackFilesToDraft(
+  taskId: string,
+  inbound: InboundSlackFiles,
+): Promise<SlackFileFailure[]> {
   // Uploads run one after another and can outlast the abandoned-draft sweep's
   // window; renewing the lease keeps the sweep from promoting a live batch.
   const lease = setInterval(() => {
-    void refreshDraftTaskLease(task.id).catch((error) =>
+    void refreshDraftTaskLease(taskId).catch((error) =>
       console.warn(
-        `[Slack] could not renew the draft lease of task ${task.id}: ${errorText(error)}`,
+        `[Slack] could not renew the draft lease of task ${taskId}: ${errorText(error)}`,
       ),
     );
   }, draftLeaseRefreshMs);
   try {
-    unattached.push(...(await attachSlackFilesToTask(task.id, inbound.fetched, null)).unattached);
+    return (await attachSlackFilesToTask(taskId, inbound.fetched, null)).unattached;
   } finally {
     clearInterval(lease);
-    await promoteDraftTask(task.id);
+    await promoteDraftTask(taskId);
   }
-  return { task, unattached };
 }
 
 /** Tests shorten the draft lease renewal to observe it; returns the previous interval. */

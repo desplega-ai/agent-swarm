@@ -134,6 +134,19 @@ const WORKFLOW_RUN_STEP_SLIM_COLUMNS =
  * `GET /api/workflow-runs/{id}?fields=slim`: the large column is neither read
  * nor parsed.
  */
+/**
+ * The agent a run's creator-less `swarm-script` nodes act as: the agent the
+ * server stamped when the run started (migration 247), or null for a run with
+ * no starting agent (webhook, event, a run from before the migration).
+ */
+export async function getWorkflowRunTriggeredByAgentId(runId: string): Promise<string | null> {
+  const row = await getDbClient().get<{ triggeredByAgentId: string | null }>(
+    "SELECT triggeredByAgentId FROM workflow_runs WHERE id = ?",
+    [runId],
+  );
+  return row?.triggeredByAgentId ?? null;
+}
+
 export async function getWorkflowRunSummary(id: string): Promise<WorkflowRunSummary | null> {
   const row = await getDbClient().get<WorkflowRunRow>(
     `SELECT ${WORKFLOW_RUN_SUMMARY_COLUMNS} FROM workflow_runs WHERE id = ?`,

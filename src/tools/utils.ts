@@ -18,12 +18,15 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
+import { upsertKv } from "../be/db";
+import { bindLoopPath } from "../be/event-loop-lag";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
+import { COLOR_LITERAL_THRESHOLD } from "../pages/color-literals";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
+import { DEFAULT_MODEL_TIER_MAP, type ModelTier, type ProviderName } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -297,14 +300,30 @@ const storeProgressBlockedWaitingNudge = (r: SwarmToolResult): string | undefine
   return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — keep working if you can, and if the wait is genuinely long, defer-task is one way to resume later instead of polling.`;
 };
 
+/** One steer per noise-floor rule (src/be/memory/task-learning.ts), each naming the fix. */
+const LEARNING_NOISE_FLOOR_NUDGES: Record<string, string> = {
+  "too-short":
+    'That learning was too short to hold a lesson; resend it as a title line, then the rule as "When X, do Y", or drop it if it is only status.',
+  "repeats-progress":
+    'That learning restates this call\'s progress or output; resend only the rule the next agent should follow ("When X, do Y"), or drop it.',
+};
+
 const storeProgressNudge = (r: SwarmToolResult): string | undefined => {
-  const learning = (r.data as { learning?: { status?: unknown; memoryId?: unknown } } | undefined)
-    ?.learning;
-  // nudgeMiddleware permits exactly one steer: the duplicate-learning steer
-  // names a concrete next call, so it wins over the blocked-waiting reminder.
+  const learning = (
+    r.data as
+      | { learning?: { status?: unknown; memoryId?: unknown; noiseFloor?: unknown } }
+      | undefined
+  )?.learning;
+  // nudgeMiddleware permits exactly one steer: the learning steers name a
+  // concrete fix, so they win over the blocked-waiting reminder, duplicate first.
   if (r.ok && learning?.status === "duplicate" && typeof learning.memoryId === "string") {
     return `That learning repeats memory ${learning.memoryId}; if your text adds something, memory-edit that memory instead of storing a new one.`;
   }
+  const noiseSteer =
+    r.ok && learning?.status === "failed" && typeof learning.noiseFloor === "string"
+      ? LEARNING_NOISE_FLOOR_NUDGES[learning.noiseFloor]
+      : undefined;
+  if (noiseSteer) return noiseSteer;
   return storeProgressBlockedWaitingNudge(r);
 };
 
@@ -312,6 +331,72 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
   if (!r.ok) return undefined;
   const hint = (r.data as { longScriptTimeoutHint?: unknown } | undefined)?.longScriptTimeoutHint;
   return hint ? WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE : undefined;
+};
+
+/** Result extra for a tool that received `modelTier` (runbooks/model-tiers.md § Model profiles). */
+export type ModelTierDeprecated = { tier: ModelTier; suggestedProfile: string | null };
+
+export const modelTierDeprecatedOutputSchema = z.looseObject({
+  tier: z.string().optional(),
+  suggestedProfile: z.string().nullable().optional(),
+});
+
+/**
+ * `modelTier` is an alias for the seeded `<harness>-<tier>` profile. The
+ * suggestion is null when the harness is unknown (a pool task) or has no seed
+ * for the tier (acp).
+ */
+export function modelTierDeprecation(
+  tier: ModelTier | null | undefined,
+  harness: ProviderName | null | undefined,
+): ModelTierDeprecated | undefined {
+  if (!tier) return undefined;
+  const seeded = harness ? Boolean(DEFAULT_MODEL_TIER_MAP[harness]?.[tier]) : false;
+  return { tier, suggestedProfile: seeded ? `${harness}-${tier}` : null };
+}
+
+const modelTierDeprecatedNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const note = (
+    r.data as { modelTierDeprecated?: { tier?: unknown; suggestedProfile?: unknown } } | undefined
+  )?.modelTierDeprecated;
+  if (!note) return undefined;
+  const profile =
+    typeof note.suggestedProfile === "string"
+      ? note.suggestedProfile
+      : `<harness>-${String(note.tier)}`;
+  return `modelTier is deprecated: pass profile "${profile}" (same model).`;
+};
+
+/**
+ * One call can fall into more than one create_page trap, and a result carries
+ * one nudge, so this entry joins one sentence per trap that applies: a
+ * design version 1 page that uses the design system, theme tokens that set
+ * light colors only, and hardcoded colors. The tool computes the flags.
+ */
+const createPageNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const data = r.data as
+    | {
+        designVersion?: unknown;
+        usesDesignSystem?: unknown;
+        lightOnlyColors?: unknown;
+        colorLiteralCount?: unknown;
+      }
+    | undefined;
+  const count = data?.colorLiteralCount;
+  const sentences = [
+    data?.designVersion === 1 && data.usesDesignSystem === true
+      ? "This page is on designVersion 1 (the original look), so design system classes, tokens and themes have no effect. Pass designVersion: 2."
+      : undefined,
+    data?.lightOnlyColors === true
+      ? "Your themeTokens set colors for light mode only. Dark mode keeps the preset's dark colors; add a dark map (or a .dark block) to restyle it too."
+      : undefined,
+    typeof count === "number" && count >= COLOR_LITERAL_THRESHOLD
+      ? `This page hardcodes ${count} color values. Use theme tokens (var(--color-primary), bg-primary, text-muted-foreground) so theme and dark-mode switches restyle it. Until then the page stays light in a dark dashboard.`
+      : undefined,
+  ].filter((sentence) => sentence !== undefined);
+  return sentences.length > 0 ? sentences.join(" ") : undefined;
 };
 
 /**
@@ -332,7 +417,13 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "patch-workflow": workflowLongScriptTimeoutNudge,
   "patch-workflow-node": workflowLongScriptTimeoutNudge,
   "slack-download-file": slackDownloadFileNudge,
+  "send-task": modelTierDeprecatedNudge,
+  "task-action": modelTierDeprecatedNudge,
+  "create-schedule": modelTierDeprecatedNudge,
+  "update-schedule": modelTierDeprecatedNudge,
+  "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
+  create_page: createPageNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
     // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },
@@ -815,9 +906,8 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
 
     // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
     // column and this direct server-side helper have no declared size limit.
-    // Sweep the whole per-agent namespace family so expired rows from inactive
-    // agents do not wait for their owner to spill again.
-    await sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
+    // Expired values are deleted by the 10-minute sweep in
+    // src/be/mcp-overflow-sweep.ts, off this request path.
     await upsertKv({
       namespace,
       key,
@@ -1049,7 +1139,7 @@ export const createToolRegistrar = (server: McpServer) => {
     // When inputSchema is undefined, the MCP SDK calls handler(extra) with a single arg.
     // When inputSchema is defined, it calls handler(args, extra) with two args.
     if (config.inputSchema === undefined) {
-      return server.registerTool(name, toolConfig, (async (meta: Meta) => {
+      const handler = async (meta: Meta) => {
         const requestInfo = getRequestInfo(meta);
         return withSpan(
           "mcp.tool",
@@ -1077,13 +1167,16 @@ export const createToolRegistrar = (server: McpServer) => {
           },
           toolRequestAttributes(name, requestInfo),
         );
-      }) as Parameters<typeof server.registerTool>[2]);
+      };
+      // Name the entry point for the event-loop stall line.
+      return server.registerTool(
+        name,
+        toolConfig,
+        bindLoopPath(`mcp.tool ${name}`, handler) as Parameters<typeof server.registerTool>[2],
+      );
     }
 
-    return server.registerTool(name, toolConfig, (async (
-      args: InferInput<InputArgs>,
-      meta: Meta,
-    ) => {
+    const handler = async (args: InferInput<InputArgs>, meta: Meta) => {
       const requestInfo = getRequestInfo(meta);
       return withSpan(
         // Span name carries the tool: a static `mcp.tool` is unreadable in a
@@ -1122,6 +1215,11 @@ export const createToolRegistrar = (server: McpServer) => {
         },
         toolRequestAttributes(name, requestInfo, args),
       );
-    }) as Parameters<typeof server.registerTool>[2]);
+    };
+    return server.registerTool(
+      name,
+      toolConfig,
+      bindLoopPath(`mcp.tool ${name}`, handler) as Parameters<typeof server.registerTool>[2],
+    );
   };
 };

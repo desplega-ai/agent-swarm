@@ -21,7 +21,7 @@ export const registerSlackUpdateTool = (server: McpServer) => {
     {
       title: "Edit a Slack message",
       description:
-        "Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.",
+        "Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Editing keeps the icon the message was posted with. Requires lead privileges.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({

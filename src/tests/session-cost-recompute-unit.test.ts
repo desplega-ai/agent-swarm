@@ -261,3 +261,42 @@ describe("nan and helmcode sessions price at $0 from the seeded table", () => {
     }
   });
 });
+
+describe("pi on the ChatGPT subscription prices like codex on the same pool", () => {
+  const cache = loadModelsDevCache();
+  const rows = cache ? buildModelsDevSeedRows(cache) : [];
+  const book: RateBook = Object.fromEntries(
+    rows.map((row) => [`${row.provider}:${row.model}:${row.tokenClass}`, row.pricePerMillionUsd]),
+  );
+
+  test("openai-codex/<id> on pi records the codex <id> pricing-table cost", async () => {
+    // One request: 69,308 input tokens, 55,680 of them cached, 376 output.
+    // codex reports input including cache reads; pi-ai reports them disjoint.
+    const codex = await recomputeSessionCost(
+      {
+        ...BASE,
+        provider: "codex",
+        model: "gpt-5.6-luna",
+        inputTokens: 69_308,
+        cacheReadTokens: 55_680,
+        outputTokens: 376,
+      },
+      lookupFrom(book),
+    );
+    const pi = await recomputeSessionCost(
+      {
+        ...BASE,
+        provider: "pi",
+        model: "openai-codex/gpt-5.6-luna",
+        inputTokens: 69_308 - 55_680,
+        cacheReadTokens: 55_680,
+        outputTokens: 376,
+      },
+      lookupFrom(book),
+    );
+    expect(codex.costSource).toBe("pricing-table");
+    expect(pi.costSource).toBe("pricing-table");
+    expect(pi.totalCostUsd).toBeCloseTo(codex.totalCostUsd, 12);
+    expect(pi.totalCostUsd).toBeGreaterThan(0);
+  });
+});

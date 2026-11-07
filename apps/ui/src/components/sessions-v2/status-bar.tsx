@@ -6,28 +6,22 @@
  * it). On the right, the tab and pane count, and Keys (`?`), which opens the
  * keys step of the guide.
  *
- * The counts add Inbox, Later, and Done, so a count matches the list its
- * toggle shows. Only the Running ring turns, and only while a session runs.
+ * The counts add No group, every group, Later, and Done, so a count matches
+ * the list its toggle shows. The Inbox leaves out grouped sessions, so it
+ * cannot stand in for them. Only the Running ring turns, and only while a
+ * session runs.
  */
 
 import { AppWindow, Hourglass, Keyboard } from "lucide-react";
 import type { ReactNode } from "react";
 import { useSessionTree } from "@/api/hooks/use-session-tree";
-import type { SessionSectionCounts, SessionTreeResponse } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type QuickFilter, quickFilterOn, toggleQuickFilter } from "@/lib/session-search";
-import { plural } from "@/lib/sessions-v2";
+import { plural, treeCount } from "@/lib/sessions-v2";
 import { ReadMark, TipKey } from "./sidebar/tree-row";
-
-type Count = Exclude<keyof SessionSectionCounts, "total">;
-
-function countOf(tree: SessionTreeResponse | undefined, key: Count): number {
-  if (!tree) return 0;
-  return tree.inbox[key] + tree.later[key] + tree.done[key];
-}
 
 function QuickToggle({
   icon,
@@ -88,8 +82,8 @@ export function StatusBar({
   onKeys: () => void;
 }) {
   const { data: tree } = useSessionTree();
-  const running = countOf(tree, "running");
-  const needs = countOf(tree, "needsYou");
+  const running = treeCount(tree, "running");
+  const needs = treeCount(tree, "needsYou");
   const toggle = (filter: QuickFilter) => () => onQueryChange(toggleQuickFilter(query, filter));
   return (
     <section
@@ -121,7 +115,7 @@ export function StatusBar({
       />
       <QuickToggle
         icon={<ReadMark unread />}
-        count={countOf(tree, "unread")}
+        count={treeCount(tree, "unread")}
         label="unread"
         tip="Show only unread sessions."
         pressed={quickFilterOn(query, "unread")}

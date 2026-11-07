@@ -10,15 +10,15 @@ import {
   getTasksByAgentId,
   isExtensionAgent,
 } from "../be/db";
+import { SteeringBlockedError } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
-import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
-import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
+import { enrichSlackUserEmail, resolveSlackUserId } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
@@ -37,7 +37,7 @@ import {
 import {
   broadcastMatches,
   extractTaskFromMessage,
-  hasOtherUserMention,
+  isAddressedToOtherUser,
   routeMessage,
 } from "./router";
 import type { AgentMatch } from "./types";
@@ -51,10 +51,18 @@ import {
   leaveExternalChannel,
   shouldBlockChannel,
 } from "./external-channel";
-import { extractSlackMessageText } from "./message-text";
+import {
+  isSlackLeaveThreadCommand,
+  isSlackLeaveThreadDisabled,
+  leaveSlackThread,
+  SLACK_LEFT_THREAD_CONFIRMATION,
+  shouldSkipLeftSlackThread,
+} from "./left-threads";
+import { collectSlackMessageFiles, slackInboundMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
+import { buildSlackThreadSnapshot, type SlackThreadSnapshot } from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
 
 /** Runtime check for `pre.slack.route` modifications (mirrors `SlackRouteModify`). */
@@ -175,6 +183,9 @@ interface MessageEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  /** The sender's Slack team; differs from ours for a Slack Connect guest. */
+  user_team?: string;
+  channel_type?: string;
   files?: SlackFile[];
   assistant_thread?: Record<string, unknown>;
 }
@@ -203,16 +214,6 @@ export function isBotMessage(
   if (event.bot_id) return true;
   if (botUserId && event.user === botUserId) return true;
   return false;
-}
-
-interface ThreadMessage {
-  user?: string;
-  bot_id?: string;
-  subtype?: string;
-  text?: string;
-  ts: string;
-  attachments?: Array<{ fallback?: string; text?: string; title?: string; pretext?: string }>;
-  blocks?: unknown[];
 }
 
 // Cache for bot's own user ID (avoids redundant auth.test calls)
@@ -312,61 +313,22 @@ async function hasSwarmThreadActivity(
 }
 
 /**
- * Fetch thread history and format as context for the task.
- * Returns empty string if not in a thread or no previous messages.
+ * Thread context and participants for a task triggered by `msg`. A top-level
+ * message has no context; its author is the only participant.
  */
-async function getThreadContext(
+function getThreadContext(
   client: WebClient,
-  channel: string,
-  threadTs: string | undefined,
-  currentTs: string,
+  msg: MessageEvent & { user: string },
   botUserId: string,
-): Promise<string> {
-  // Not in a thread - no context needed
-  if (!threadTs) return "";
-
-  try {
-    const result = await client.conversations.replies({
-      channel,
-      ts: threadTs,
-      limit: 20, // Last 20 messages max
-    });
-
-    const messages = (result.messages || []) as ThreadMessage[];
-    // Filter out the current message; include any message with extractable text
-    const previousMessages = messages.filter((m) => {
-      if (m.ts === currentTs) return false;
-      return extractSlackMessageText(m) !== "";
-    });
-
-    if (previousMessages.length === 0) return "";
-
-    // Format messages with user names or [Agent] for bot messages. Author
-    // identity is rendered via the identity primitive (resolved name or the
-    // UNKNOWN sentinel) — never a raw Slack API display name, and no
-    // `users.info` call.
-    const formattedMessages: string[] = [];
-    for (const m of previousMessages) {
-      // Check if this is a bot/agent message (multiple ways to identify)
-      const isBotMessage =
-        m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
-
-      const text = extractSlackMessageText(m);
-      if (isBotMessage) {
-        // Bot/agent message - truncate if too long
-        const truncatedText = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-        formattedMessages.push(`[Agent]: ${truncatedText}`);
-      } else {
-        const authorTag = m.user ? `<@${m.user}>` : "Unknown";
-        formattedMessages.push(`${authorTag}: ${text}`);
-      }
-    }
-
-    return await rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
-  } catch (error) {
-    console.error("[Slack] Failed to fetch thread context:", error);
-    return "";
-  }
+): Promise<SlackThreadSnapshot> {
+  return buildSlackThreadSnapshot(client, {
+    channelId: msg.channel,
+    threadTs: msg.thread_ts,
+    excludeTs: new Set([msg.ts]),
+    botUserId,
+    senders: [{ userId: msg.user, text: msg.text ?? "", userTeam: msg.user_team }],
+    sampleEventType: "thread_participant",
+  });
 }
 
 // Message deduplication (prevents duplicate event processing)
@@ -445,8 +407,13 @@ export function registerMessageHandler(app: App): void {
     if (isBotMessage(msg, cachedBotUserId)) {
       return ignoreSlackInbound("bot_message");
     }
-    const hasText = !!msg.text?.trim();
-    const hasFiles = !!(msg.files && msg.files.length > 0);
+    // Task text: `msg.text`, plus any table block it leaves out. Mention and
+    // routing checks below keep reading `msg.text`.
+    const messageText = slackInboundMessageText(msg);
+    // Top-level files plus those of a shared/forwarded message.
+    const messageFiles = collectSlackMessageFiles<SlackFile>(msg);
+    const hasText = !!messageText.trim();
+    const hasFiles = messageFiles.length > 0;
 
     // Require either text or files, and always require a user
     if ((!hasText && !hasFiles) || !msg.user) return ignoreSlackInbound("empty_message");
@@ -477,6 +444,46 @@ export function registerMessageHandler(app: App): void {
       return ignoreSlackInbound("unauthorized_user");
     }
 
+    // Check if bot was mentioned (in original text only)
+    const botMentioned = !!cachedBotUserId && !!msg.text?.includes(`<@${cachedBotUserId}>`);
+
+    // `!leave` in a thread the swarm is in: a human makes the swarm leave it,
+    // in code, with no workflow event, buffering, task, or model call.
+    // Any task bound to the thread counts, assigned or not, as does a thread
+    // the swarm started. Checked before the left-thread gate so `@bot !leave`
+    // leaves rather than rejoining. The confirmation is ephemeral, to the
+    // sender only.
+    if (
+      msg.thread_ts &&
+      !isSlackLeaveThreadDisabled() &&
+      isSlackLeaveThreadCommand(msg.text, cachedBotUserId) &&
+      ((await getMostRecentTaskInThread(msg.channel, msg.thread_ts)) !== null ||
+        (await wasThreadStartedBySwarm(client, msg.channel, msg.thread_ts)))
+    ) {
+      noteSlackInboundSideEffect("thread_leave");
+      await leaveSlackThread(msg.channel, msg.thread_ts, { slackUserId: msg.user });
+      console.log(`[Slack] Left thread ${msg.channel}/${msg.thread_ts}: !leave from ${msg.user}`);
+      try {
+        await client.chat.postEphemeral({
+          channel: msg.channel,
+          user: msg.user,
+          thread_ts: msg.thread_ts,
+          text: SLACK_LEFT_THREAD_CONFIRMATION,
+        });
+      } catch (error) {
+        console.error("[Slack] Failed to confirm !leave:", error);
+      }
+      return;
+    }
+
+    // A thread the swarm left (slack-leave-thread or `!leave`) stays silent until someone
+    // @mentions the bot. Checked before the workflow event, buffering, routing,
+    // or any AI call.
+    if (await shouldSkipLeftSlackThread(msg.channel, msg.thread_ts, botMentioned)) {
+      console.log(`[Slack] Skipping message in left thread ${msg.channel}/${msg.thread_ts}`);
+      return ignoreSlackInbound("thread_left");
+    }
+
     // Resolve canonical user identity via the three-step cascade:
     //   fast-path alias lookup → enrich+auto-link by email → unmapped tracker.
     // Returns undefined when no email is recoverable; task creation proceeds
@@ -484,6 +491,7 @@ export function registerMessageHandler(app: App): void {
     const requestedByUserId = await resolveSlackUserId(client, msg.user, {
       sampleEventType: "message",
       sampleContext: msg.text ?? "",
+      userTeam: msg.user_team,
     });
 
     // Keep channel/user for legacy consumers and channelId/userId for the extension contract.
@@ -499,7 +507,7 @@ export function registerMessageHandler(app: App): void {
     });
 
     // Build effective text that includes attachment metadata
-    const effectiveText = buildEffectiveText(msg.text, msg.files);
+    const effectiveText = buildEffectiveText(msg.text, messageFiles);
 
     // Bot user ID (already cached from the bot message check above)
     if (!cachedBotUserId) {
@@ -510,19 +518,22 @@ export function registerMessageHandler(app: App): void {
     }
     const botUserId = cachedBotUserId;
 
-    // Check if bot was mentioned (in original text only)
-    const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
-
     // Detect assistant thread context. Bolt's Assistant middleware claims DM thread
     // messages with no subtype or `file_share` (`isAssistantMessage` in @slack/bolt), so
     // those — file uploads included — are handled in assistant.ts. An assistant-thread
     // message that still lands here is treated as an implicit mention so it routes to
     // the lead agent rather than being silently dropped.
+    // A top-level message in a 1:1 DM with the bot is addressed to the bot too: it has no
+    // `thread_ts`, so the Assistant middleware lets it through to this handler. Group DMs
+    // (`mpim`) and DM thread replies keep their existing rules.
     // Guard: suppress implicit mention when the message @-mentions someone else but NOT us —
     // those messages are addressed to a different agent/user (e.g. Devin) and must not spawn.
     const isAssistantThread = !!msg.assistant_thread;
+    const isTopLevelDirectMessage = msg.channel_type === "im" && !msg.thread_ts;
     const isImplicitMention =
-      isAssistantThread && !botMentioned && !hasOtherUserMention(effectiveText, botUserId);
+      (isAssistantThread || isTopLevelDirectMessage) &&
+      !botMentioned &&
+      !isAddressedToOtherUser(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
@@ -536,7 +547,14 @@ export function registerMessageHandler(app: App): void {
         stripped.startsWith("!now") &&
         (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
       ) {
-        const nowMessage = stripped.replace(/^!now\s*/, "").trim();
+        // Detection reads `msg.text`; the buffered text is `messageText`, which
+        // keeps any table rows `msg.text` leaves out. Strip only the mentions
+        // before `!now` (the bot and any routing mentions); later mentions,
+        // including the bot's in a table cell, stay for rewriteSlackMentions.
+        const nowMessage = messageText
+          .trim()
+          .replace(/^(?:<@[A-Z0-9]+>\s*)*!now\s*/, "")
+          .trim();
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
 
         console.log(
@@ -544,15 +562,16 @@ export function registerMessageHandler(app: App): void {
         );
 
         noteSlackInboundSideEffect("thread_flush");
-        if (nowMessage || msg.files?.length) {
+        if (nowMessage || hasFiles) {
           bufferThreadMessage(
             msg.channel,
             msg.thread_ts,
             nowMessage,
             msg.user,
             msg.ts,
-            msg.files,
+            messageFiles,
             botUserId,
+            msg.user_team,
           );
         }
 
@@ -568,9 +587,10 @@ export function registerMessageHandler(app: App): void {
     // ADDITIVE_SLACK: Buffer non-mention thread messages.
     // Skip if the message @-mentions someone other than our bot (e.g. "@Devin wdyt?"):
     // that message is directed at a different bot/user and must not be fed to
-    // the swarm as an implicit follow-up.
+    // the swarm as an implicit follow-up. SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true
+    // turns this skip off.
     if (additiveSlack && !botMentioned && msg.thread_ts && !requireMentionForThreadFollowup) {
-      if (hasOtherUserMention(effectiveText, botUserId)) {
+      if (isAddressedToOtherUser(effectiveText, botUserId)) {
         console.log(
           `[Slack] Skipping ADDITIVE buffer in ${msg.channel}/${msg.thread_ts}: message mentions another user`,
         );
@@ -590,11 +610,12 @@ export function registerMessageHandler(app: App): void {
         bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
-          msg.text ?? "",
+          messageText,
           msg.user,
           msg.ts,
-          msg.files,
+          messageFiles,
           botUserId,
+          msg.user_team,
         );
 
         // Slack feedback: react with the accepted reaction on first buffer, buffered on appends
@@ -687,7 +708,7 @@ export function registerMessageHandler(app: App): void {
     if (matches.length === 0) {
       if (!botMentioned && !isImplicitMention) return ignoreSlackInbound("not_addressed");
 
-      // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
+      // Bot was mentioned (or implicitly addressed) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
         if (!isSlackRenderV2Enabled()) {
           await say({
@@ -698,8 +719,13 @@ export function registerMessageHandler(app: App): void {
         return ignoreSlackInbound("rate_limited");
       }
 
-      await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
-      const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes);
+      await using inbound = await fetchSlackFiles(client, messageFiles, { transcribe: true });
+      const taskText = buildEffectiveText(
+        messageText,
+        inbound.files,
+        inbound.failed,
+        inbound.notes,
+      );
       const taskDescription = isImplicitMention
         ? taskText
         : extractTaskFromMessage(taskText, botUserId);
@@ -714,22 +740,14 @@ export function registerMessageHandler(app: App): void {
       }
 
       const threadTs = msg.thread_ts || msg.ts;
-      const threadContext = await getThreadContext(
+      const { threadContext, participants: slackParticipants } = await getThreadContext(
         client,
-        msg.channel,
-        msg.thread_ts,
-        msg.ts,
+        { ...msg, user: msg.user },
         botUserId,
       );
-      let fullTaskDescription: string;
-      if (threadContext) {
-        const ctxResult = resolveTemplate("slack.message.thread_context", {
-          thread_messages: threadContext,
-        });
-        fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
-      } else {
-        fullTaskDescription = taskDescription;
-      }
+      const fullTaskDescription = threadContext
+        ? `${threadContext}\n\n${taskDescription}`
+        : taskDescription;
 
       const lead = await getLeadAgent();
       const { task, unattached } = await createSlackTaskWithFiles(
@@ -743,6 +761,7 @@ export function registerMessageHandler(app: App): void {
           slackThreadTs: threadTs,
           slackTriggerMessageTs: msg.ts,
           slackUserId: msg.user,
+          slackParticipants,
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         },
@@ -775,9 +794,9 @@ export function registerMessageHandler(app: App): void {
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
-    await using inbound = await fetchSlackFiles(client, msg.files, { transcribe: true });
+    await using inbound = await fetchSlackFiles(client, messageFiles, { transcribe: true });
     const taskDescription = extractTaskFromMessage(
-      buildEffectiveText(msg.text, inbound.files, inbound.failed, inbound.notes),
+      buildEffectiveText(messageText, inbound.files, inbound.failed, inbound.notes),
       botUserId,
     );
     if (!taskDescription) {
@@ -794,22 +813,14 @@ export function registerMessageHandler(app: App): void {
     const threadTs = msg.thread_ts || msg.ts;
 
     // Fetch thread context if in a thread
-    const threadContext = await getThreadContext(
+    const { threadContext, participants: slackParticipants } = await getThreadContext(
       client,
-      msg.channel,
-      msg.thread_ts,
-      msg.ts,
+      { ...msg, user: msg.user },
       botUserId,
     );
-    let fullTaskDescription: string;
-    if (threadContext) {
-      const ctxResult = resolveTemplate("slack.message.thread_context", {
-        thread_messages: threadContext,
-      });
-      fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
-    } else {
-      fullTaskDescription = taskDescription;
-    }
+    const fullTaskDescription = threadContext
+      ? `${threadContext}\n\n${taskDescription}`
+      : taskDescription;
     const results: {
       assigned: Array<{ agentName: string; taskId: string }>;
       queued: Array<{ agentName: string; taskId: string }>;
@@ -840,6 +851,7 @@ export function registerMessageHandler(app: App): void {
                   message: taskDescription,
                   messageTimestamps: [msg.ts],
                   requestedByUserId,
+                  slackUserId: msg.user,
                 })
               : null;
           if (steering) {
@@ -862,10 +874,14 @@ export function registerMessageHandler(app: App): void {
               slackThreadTs: threadTs,
               slackTriggerMessageTs: msg.ts,
               slackUserId: msg.user,
+              slackParticipants,
               parentTaskId: latestTask?.id,
               // A human message in the thread: never answer it in the latest
               // thread task's structured-output contract.
               inheritParentOutputSchema: false,
+              // The sender owns this task; an unregistered one never inherits
+              // the parent's requester.
+              inheritParentRequester: false,
               requestedByUserId,
               contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
             },
@@ -891,6 +907,7 @@ export function registerMessageHandler(app: App): void {
             slackThreadTs: threadTs,
             slackTriggerMessageTs: msg.ts,
             slackUserId: msg.user,
+            slackParticipants,
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           },
@@ -915,12 +932,14 @@ export function registerMessageHandler(app: App): void {
       } catch (error) {
         // A policy block is an answered outcome; anything else is a failure the
         // user sees as "could not assign" and the dispatcher must not call success.
-        if (!(error instanceof TaskCreationBlockedError)) {
+        const blocked =
+          error instanceof TaskCreationBlockedError || error instanceof SteeringBlockedError;
+        if (!blocked) {
           reportSlackInboundFailure("task_creation_error");
         }
         results.failed.push({
           agentName: agent.name,
-          reason: error instanceof TaskCreationBlockedError ? error.reason : "error",
+          reason: blocked ? error.reason : "error",
         });
       }
     }

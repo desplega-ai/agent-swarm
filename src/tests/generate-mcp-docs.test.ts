@@ -20,6 +20,11 @@ test(
         "MCP docs generation",
       );
       const markdown = await Bun.file(path.join(temp, "MCP.md")).text();
+      expect(markdown).not.toContain("${");
+      const chatThread = markdown.split("### chat-read-thread\n")[1]?.split(/\n#{2,3} /)[0];
+      expect(chatThread).toContain(
+        "| `limit` | `number` | No | - | Number of messages to return (default 30). |",
+      );
       expect(result.stderr).not.toContain('No info found for tool "app-row"');
       expect(markdown).not.toContain("### app-row\n");
       expect(markdown).not.toContain("[app-row](#app-row)");
@@ -91,6 +96,63 @@ for (const name of ["chat-reply", "chat-post", "model-catalog-overlay-upsert"]) 
           const provider = section?.split("\n").find((line) => line.startsWith("| `provider` |"));
           expect(provider).toContain("opencode-go, nan, helmcode");
           expect(provider).not.toContain("${");
+        }
+      } finally {
+        await rm(temp, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+}
+
+for (const unresolved of [false, true]) {
+  test(
+    `MCP docs ${unresolved ? "reject unresolved" : "resolve literal"} interpolations`,
+    async () => {
+      const root = path.resolve(import.meta.dir, "../..");
+      const temp = await mkdtemp(path.join(tmpdir(), "mcp-docs-literals-"));
+      try {
+        await mkdir(path.join(temp, "scripts"));
+        await mkdir(path.join(temp, "src/tools"), { recursive: true });
+        await symlink(path.join(root, "node_modules"), path.join(temp, "node_modules"));
+        const script = path.join(temp, "scripts/generate-mcp-docs.ts");
+        await Bun.write(script, Bun.file(path.join(root, "scripts/generate-mcp-docs.ts")));
+        await Bun.write(
+          path.join(temp, "src/server.ts"),
+          `
+          import { registerFixtureTool } from "./tools/fixture";
+          const DEFAULT_CAPABILITIES = ["fixture"].join(",");
+          if (hasCapability("fixture")) { registerFixtureTool(server); }
+        `,
+        );
+        await Bun.write(path.join(temp, "src/constants.ts"), 'export const LABEL = "hello";');
+        await Bun.write(path.join(temp, "src/relative.ts"), "export const COUNT = 5;");
+        await Bun.write(
+          path.join(temp, "src/tools/fixture.ts"),
+          [
+            'import { LABEL as TEXT } from "@/constants";',
+            'import { COUNT } from "../relative.ts";',
+            "const LOCAL = 30;",
+            "function nested() { const MISSING = 99; }",
+            'createToolRegistrar(server)("fixture", {',
+            'title: "Fixture", description: "Fixture tool",',
+            `inputSchema: z.object({ limit: z.number().describe(\`Values: \${LOCAL}, \${TEXT}, \${COUNT}` +
+              (unresolved ? `, \${MISSING}` : "") +
+              "`) }) });",
+          ].join("\n"),
+        );
+        const result = await runChild([process.execPath, script]);
+        if (unresolved) {
+          expect(result.exitCode).not.toBe(0);
+          expect(result.stderr).toContain(
+            `Tool "fixture": cannot resolve description interpolation \${MISSING}`,
+          );
+          expect(await Bun.file(path.join(temp, "MCP.md")).exists()).toBe(false);
+        } else {
+          expectChildOk(result, "literal interpolation");
+          const markdown = await Bun.file(path.join(temp, "MCP.md")).text();
+          expect(markdown).toContain("Values: 30, hello, 5");
+          expect(markdown).not.toContain("${");
         }
       } finally {
         await rm(temp, { recursive: true, force: true });

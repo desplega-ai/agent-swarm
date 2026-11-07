@@ -136,7 +136,8 @@ export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
     const askedHeaders = Array.isArray(reqHeaders) ? reqHeaders.join(", ") : reqHeaders;
     res.setHeader(
       "Access-Control-Allow-Headers",
-      askedHeaders ?? "Authorization, Content-Type, X-Agent-ID, X-Requested-With, X-Swarm-User-Id",
+      askedHeaders ??
+        "Authorization, Content-Type, X-Agent-ID, X-Requested-With, X-Swarm-User-Id, X-Swarm-Session-Scope",
     );
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Expose-Headers", "Content-Type, Content-Length, ETag, Location");
@@ -271,6 +272,24 @@ export function redactShareTokenInPath(pathname: string): string {
     return segments.join("/");
   }
   return pathname;
+}
+
+/**
+ * Event-loop path label for an HTTP request: method plus the first three path
+ * segments. Segments past the third are ids, so they are left out to bound
+ * the label cardinality. Invite codes and share tokens are credentials, so
+ * the label is redacted before it can reach a log line.
+ */
+export function loopPathForRequest(
+  method: string | undefined,
+  segments: readonly string[],
+): string {
+  const redacted = redactShareTokenInPath(`/${segments.join("/")}`)
+    .split("/")
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("/");
+  return scrubSecrets(`http ${method} ${redacted}`);
 }
 
 export function safeRequestUrlForLog(rawUrl: string | undefined): string {

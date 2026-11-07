@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAllAgents } from "@/be/db";
+import { isAgentOnDemand } from "@/be/runtime-pools/reachability";
 import { createToolRegistrar, swarmToolOutputSchema, toolOk } from "@/tools/utils";
 import { AgentStatusSchema, ProviderNameSchema } from "@/types";
 
@@ -11,6 +12,12 @@ const agentOutputShape = z.looseObject({
   name: z.string().optional(),
   isLead: z.boolean().optional(),
   status: AgentStatusSchema.optional(),
+  onDemand: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when the agent is offline but its runtime pool will start a runtime for it (multi-runtime on, pool capacity left, maxTasks fits one runtime). send-task to it starts a runtime.",
+    ),
   description: z.string().optional(),
   role: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
@@ -28,6 +35,7 @@ const agentOutputShape = z.looseObject({
   credentialMissing: z.array(z.string()).nullable().optional(),
   credStatus: z.looseObject({}).nullable().optional(),
   avatar: z.looseObject({}).nullable().optional(),
+  slackIcon: z.looseObject({}).nullable().optional(),
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
 });
@@ -56,12 +64,21 @@ export const registerGetSwarmTool = (server: McpServer) => {
       }),
     },
     async ({ includeFull }, requestInfo, _meta) => {
-      const agents = await getAllAgents({ slim: !includeFull });
+      // A pool agent without a live runtime reports "offline", but a task sent
+      // to it starts a runtime. Mark it, so a Lead does not read it as unavailable.
+      const agents = await Promise.all(
+        (await getAllAgents({ slim: !includeFull })).map(async (a) =>
+          (await isAgentOnDemand(a)) ? { ...a, onDemand: true } : a,
+        ),
+      );
 
       // Include the ID — send-task targets agents by ID, and text-only
       // harnesses never see the structured data to look it up.
       const agentList = agents
-        .map((a) => `- ${a.name} (${a.status}${a.isLead ? ", lead" : ""}) — id: ${a.id}`)
+        .map((a) => {
+          const onDemand = "onDemand" in a ? ", on demand: send-task starts it" : "";
+          return `- ${a.name} (${a.status}${onDemand}${a.isLead ? ", lead" : ""}) — id: ${a.id}`;
+        })
         .join("\n");
 
       return toolOk(

@@ -1,4 +1,5 @@
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { githubApiUrl, resolveGitHubHost } from "../utils/github-host";
 
 let initialized = false;
 let webhookSecret: string | null = null;
@@ -38,6 +39,14 @@ export function initGitHub(): boolean {
     console.log("[GitHub] Disabled via GITHUB_DISABLE");
     return false;
   }
+
+  const host = resolveGitHubHost();
+  if (!host.ok) {
+    console.error(`[GitHub] ${host.error}; GitHub integration disabled`);
+    return false;
+  }
+  if (host.warning) console.warn(`[GitHub] ${host.warning}`);
+  console.log(`[GitHub] Host: web ${host.config.webUrl}, API ${host.config.apiUrl}`);
 
   webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? null;
 
@@ -202,7 +211,7 @@ export async function getInstallationToken(installationId: number): Promise<stri
 
   try {
     const response = await fetch(
-      `https://api.github.com/app/installations/${installationId}/access_tokens`,
+      githubApiUrl(`/app/installations/${installationId}/access_tokens`),
       {
         method: "POST",
         headers: {

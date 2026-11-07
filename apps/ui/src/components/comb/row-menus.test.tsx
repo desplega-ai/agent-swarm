@@ -13,6 +13,7 @@ mock.module("@radix-ui/react-use-layout-effect", () => ({ useLayoutEffect }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/agent-fs/client", () => require("../../lib/agent-fs/client"));
 mock.module("@/lib/approval-shortcuts", () => require("../../lib/approval-shortcuts"));
+mock.module("@/lib/comb/copy-contents", () => require("../../lib/comb/copy-contents"));
 mock.module("@/lib/comb/file-icons", () => require("../../lib/comb/file-icons"));
 mock.module("@/lib/comb/folder-filter", () => require("../../lib/comb/folder-filter"));
 mock.module("@/lib/comb/links", () => require("../../lib/comb/links"));
@@ -53,6 +54,7 @@ mock.module("@/components/comb/filter-input", () => require("./filter-input"));
 mock.module("@/components/comb/use-url-draft", () => require("./use-url-draft"));
 mock.module("@/components/comb/presence-avatars", () => ({ PresenceDots: () => null }));
 mock.module("@/components/comb/file-actions", () => ({ downloadDriveFile: async () => {} }));
+mock.module("@/components/comb/copy-file-button", () => ({ copyContentsFromMenu: async () => {} }));
 mock.module("@/components/comb/share-dialog", () => ({ ShareDialog: () => null }));
 mock.module("@/components/comb/file-dialogs", () => ({
   DeleteDialog: () => null,
@@ -86,6 +88,7 @@ let searchState: Record<string, unknown> = { data: undefined, error: null, isFet
 const refetch = mock(async () => ({}));
 mock.module("@/api/hooks/use-agent-fs", () => ({
   useAgentFsAccess: () => ({ client: {} }),
+  useLoadTextToCopy: () => async () => "",
   agentFsLsQuery: (_access: unknown, target: { path: string }) => ({
     queryKey: ["ls", target.path],
     queryFn: async () => ({ entries: LISTINGS[target.path] ?? [] }),

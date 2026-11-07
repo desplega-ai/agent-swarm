@@ -481,8 +481,12 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     const fans: string[] = [];
     for (let i = 0; i < 9; i++) fans.push(await task(`fan ${i}`, { parentTaskId: wide }));
     const fanChild = await task("below a fan", { parentTaskId: fans[4] });
+    // Sibling order out of the `parentTaskId` index follows the random task ids, so
+    // which child a batch reaches first is not fixed. The handoff sits deeper
+    // than the first batch can reach in any sibling order (root, its two
+    // children, one grandchild), so that batch always changes `batchSize` flags.
     const handedOff = await task("explicitly attributed", {
-      parentTaskId: wide,
+      parentTaskId: fanChild,
       requestedByUserId: owner.id,
     });
     const belowHandedOff = await task("below the handoff", { parentTaskId: handedOff });
@@ -625,6 +629,9 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     const third = await task("cycle third", { parentTaskId: second });
     // Nothing in the product writes a cycle, but the rule (a UNION over ids)
     // is defined on one, so the reclassification must stay total on it.
+    // Product code never rewrites parentTaskId, and migration 253 guards it;
+    // this cycle fixture needs the guard off.
+    await getDbClient().run("DROP TRIGGER IF EXISTS session_task_parent_immutable");
     await getDbClient().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [third, first]);
     await getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
       JSON.stringify(["heartbeat"]),
@@ -642,6 +649,9 @@ describe("human-free flag stays correct when a classifying input changes", () =>
   test("a parent cycle longer than one batch stops re-queuing itself", async () => {
     const ring: string[] = [await task("ring 0")];
     for (let i = 1; i < 6; i++) ring.push(await task(`ring ${i}`, { parentTaskId: ring[i - 1] }));
+    // Product code never rewrites parentTaskId, and migration 253 guards it;
+    // this cycle fixture needs the guard off.
+    await getDbClient().run("DROP TRIGGER IF EXISTS session_task_parent_immutable");
     await getDbClient().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [
       ring[5],
       ring[0],

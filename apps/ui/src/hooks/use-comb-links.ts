@@ -11,8 +11,9 @@ export function useCombLinks(): (href: string | null | undefined) => string | nu
   const agentFs = useOptionalAgentFs();
   const state = agentFs?.state ?? "disabled";
   const liveUrl = agentFs?.liveUrl ?? null;
+  const autoConnect = agentFs?.autoConnect ?? null;
   return useCallback(
-    (href) => combLinkFor(state, liveUrl, window.location.origin, href),
-    [state, liveUrl],
+    (href) => combLinkFor(state, liveUrl, window.location.origin, href, autoConnect),
+    [state, liveUrl, autoConnect],
   );
 }

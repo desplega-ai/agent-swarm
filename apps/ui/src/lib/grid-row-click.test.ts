@@ -14,6 +14,10 @@ describe("isRowNavigationSuppressed", () => {
     expect(isRowNavigationSuppressed(targetInside('[col-id="favorite"]') as never)).toBe(true);
   });
 
+  test("a click in the selection column never opens a row, even off the checkbox", () => {
+    expect(isRowNavigationSuppressed(targetInside('[col-id="__select"]') as never)).toBe(true);
+  });
+
   test("buttons, links and switches do not navigate", () => {
     for (const match of ["button", "a", '[data-slot="switch"]']) {
       expect(isRowNavigationSuppressed(targetInside(match) as never)).toBe(true);

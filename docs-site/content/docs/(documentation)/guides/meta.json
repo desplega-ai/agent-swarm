@@ -1,13 +1,18 @@
 {
   "title": "Guides",
   "pages": [
+    "choosing-an-ai-operating-model",
+    "small-tech-team-operating-model",
     "deployment",
+    "one-click-deploy",
     "kubernetes",
+    "worker-recovery-decision",
     "podman-rootless",
     "published-artifacts",
     "asset-namespaces",
     "agent-fs-co-deployment",
     "self-hosted-sso",
+    "ai-operations-governance",
     "e2b-provider-smoke-tests",
     "evals-harness",
     "personalization",
@@ -22,6 +27,7 @@
     "performance-resource-sizing",
     "cost-and-context-computation",
     "extensions",
+    "file-import",
     "scripts-runtime",
     "agent-capabilities",
     "scripts-only-mode",
@@ -30,11 +36,14 @@
     "scripts-external-apis",
     "scripts-credential-broker",
     "script-workflow-runs",
+    "dreaming",
     "claude-bridge-experimental",
+    "claude-artifacts-read",
     "worker-credential-recovery",
     "provider-auth",
     "x402-payments",
     "multi-runtime-agents",
-    "runtime-pools"
+    "runtime-pools",
+    "boxd-runtime-provider"
   ]
 }

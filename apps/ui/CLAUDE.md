@@ -29,6 +29,26 @@ Dev server proxies `/api/*` and `/health` to `http://localhost:3013`.
 
 </important>
 
+<important if="someone reviews the running dashboard with in-page notes, asks you to take or process their UI comments, or you start the dev server for a UI review">
+
+## Dev notes (in-page review comments)
+
+`DEV_NOTES=1 bun run dev` adds a review overlay to the dev server only (`dev-notes/vite-plugin.ts`, `apply: "serve"`). Production builds never contain it. The reviewer clicks `+` on the right edge, clicks an element, and types a note. Notes show as numbered pins.
+
+Each note records the path, viewport, theme, element text, a selector, and the React owner chain (for example `StatusBadge < StatusCell < … < TasksPage`). Search the code for those component names to find the source. Notes live in `apps/ui/.dev-notes/notes.json` (gitignored; `DEV_NOTES_FILE` overrides it).
+
+From `apps/ui`:
+
+| Command | What it does |
+|---|---|
+| `bun dev-notes/cli.ts list` | Open notes (`--all` includes done ones) |
+| `bun dev-notes/cli.ts done <n> "<what you changed>"` | Mark note `#n` done with a reply that shows in the panel |
+| `bun dev-notes/cli.ts reply <n> "<question>"` | Answer and keep the note open |
+
+Open tabs update at once. Mark a note done only after the change is in and verified in the browser.
+
+</important>
+
 <important if="you are creating a new file in ui/src/ and need to decide where it lives">
 
 ## Project structure
@@ -112,7 +132,7 @@ Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design
 - **Status colors come from named semantic tokens** — `bg-status-success`, `text-status-error`, `bg-status-active`, etc. — defined in `src/styles/globals.css` (light + dark). Action-type colors (workflow nodes) come from `bg-action-*` tokens. **Do not** use raw Tailwind palette literals (`bg-emerald-500`, `text-amber-400`, `border-red-500/30`, etc.) in app code. Translucent fills use the standard Tailwind opacity syntax: `bg-status-success/10`, `border-action-script/50`.
 - **Color literal lint gate.** `bun run check:tokens` (also runs in CI via `merge-gate.yml`'s `ui-lint` job) fails the build on any raw Tailwind color palette literal, `dark:` palette variant, arbitrary color literal (e.g. `bg-[#0d1117]`), or hardcoded hex in `src/`. To use a new color, add a token to `src/styles/globals.css`. Monaco editor themes are exempt and live in `src/lib/monaco-themes.ts`.
 - CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
-- **Theme presets** live in `src/lib/themes.ts` (+ `src/lib/theme-classics.ts` for the classic editor themes): named bundles of token overrides emitted as `[data-theme="<id>"]` rules (light + dark), applied on `<html>` (Settings → Appearance, localStorage) or scoped to one swarm-app canvas (`definition.theme` + the viewer's reserved `$theme` user-config override). Emitted blocks are SELF-CONTAINED (the builder spreads the stock base under each preset's overrides), so a scoped preset fully resets its canvas instead of blending with the dashboard preset; `hive` scoped = explicit reset to stock, NO attribute = inherit the dashboard. Action/destructive tokens are never themed; status tokens are themed ONLY by the classic presets (hue semantics fixed). The preset id list is duplicated in two agent-facing texts — `templates/skills/apps/content.md` and the `app-upsert` tool description — update them when the catalog changes.
+- **Theme presets** live in the repo-root `src/themes/presets.ts` (+ `src/themes/classics.ts` for the classic editor themes; `src/lib/themes.ts` re-exports them and injects the CSS; HTML pages with designVersion 2 resolve the same registry through `src/themes/page-theme.ts`): named bundles of token overrides emitted as `[data-theme="<id>"]` rules (light + dark), applied on `<html>` (Settings → Appearance, localStorage) or scoped to one swarm-app canvas (`definition.theme` + the viewer's reserved `$theme` user-config override). Emitted blocks are SELF-CONTAINED (the builder spreads the stock base under each preset's overrides), so a scoped preset fully resets its canvas instead of blending with the dashboard preset; `hive` scoped = explicit reset to stock, NO attribute = inherit the dashboard. Action/destructive tokens are never themed; status tokens are themed ONLY by the classic presets (hue semantics fixed). The preset id list is duplicated in two agent-facing texts — `templates/skills/apps/content.md` and the `app-upsert` tool description — update them when the catalog changes.
 - **Clickable = pointer** is enforced globally in `globals.css` (`button:not(:disabled)`, `[role="button"]`, `summary`, …) — never add per-component `cursor-pointer` again; disabled controls keep the default cursor. Exception: buttons inside the global sidebar (`[data-slot="sidebar-container"]`) keep the default arrow (Taras's call — nav-rail feel); its nav anchors stay pointer natively.
 - **Colorless borders are themed.** A base rule defaults `border-color` to `var(--color-border)` (Tailwind v4 otherwise leaves bare `border`/`border-r` utilities on `currentColor` — near-black in light, and blind to theme presets). Explicit `border-<color>` utilities still win; anything needing a text-colored border must say `border-current`. Dark overrides in `globals.css` MUST stay on `.dark` alone (never `.dark *`) or scoped wrappers break; portalled content inside an app canvas re-stamps `data-theme` via `useJsonRenderThemeAttr()` from `src/lib/json-render/theme-scope.tsx`.
 - Use `cn()` from `@/lib/utils` for conditional class merging.
@@ -121,7 +141,7 @@ Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design
 
 Status tokens (cover the 18 statuses in `status-badge.tsx`'s `statusConfig` map plus a few extras used by integrations and workflow runs).
 
-`-strong` variants exist for text emphasis on neutral surfaces (darker in light mode for contrast). Use `bg-status-X` for fills, `text-status-X-strong` for emphasis text on cards/pages. In dark mode `-strong` collapses to the canonical value. **2026-08-06: the palette migrated to the PALE set** (same hues, ~40% less chroma, lifted lightness; fills take dark `-foreground` text in both modes) — the `*-500`/`*-400` source columns below describe the original derivation only; current values live in `src/styles/globals.css`. Classic-theme presets (`src/lib/theme-classics.ts`) carry their own status palettes — the only sanctioned status theming; hue semantics never change.
+`-strong` variants exist for text emphasis on neutral surfaces (darker in light mode for contrast). Use `bg-status-X` for fills, `text-status-X-strong` for emphasis text on cards/pages. In dark mode `-strong` collapses to the canonical value. **2026-08-06: the palette migrated to the PALE set** (same hues, ~40% less chroma, lifted lightness; fills take dark `-foreground` text in both modes) — the `*-500`/`*-400` source columns below describe the original derivation only; current values live in `src/styles/globals.css`. Classic-theme presets (repo-root `src/themes/classics.ts`) carry their own status palettes — the only sanctioned status theming; hue semantics never change.
 
 | Token | Usage | Light source | Dark source |
 |---|---|---|---|
@@ -266,7 +286,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `AgentLink` | linked agent name with avatar | `<AgentLink agentId={id} agentName={name} />` |
 | `CollapsibleDescription` | truncated text with show-more toggle | `<CollapsibleDescription text={long} />` |
 | `CollapsibleSection` | folding section header | `<CollapsibleSection title="Details">...</CollapsibleSection>` |
-| `CommandMenu` | global ⌘K palette | mounted at root |
+| `CommandMenu` | global ⌘K palette. A new route needs a `handle` in `app/routes.tsx`: `nav({...})` lists it in "Go to", `unlisted(reason)` opts out; an entity list (`/x` + `/x/:id`) also names `search` providers (`components/command-palette/providers.tsx`) or a `searchOptOut`. `app/routes.test.tsx` fails otherwise. Page-specific commands: `useCommandMenuGroup` | mounted at root |
 | `DataGrid` | AG Grid wrapper — REQUIRED for all data lists | `<DataGrid rowData={rows} columnDefs={cols} />` |
 | `EmptyState` | icon + title + description + optional action. First-run page empties add `entity` (renders an "Ask the swarm" CTA that seeds a new session) + `fullPage` (vertical centering) | `<EmptyState icon={Inbox} title="No tasks yet" description="..." entity="task" fullPage />` |
 | `ErrorBoundary` | top-level error fallback | wrap routes |

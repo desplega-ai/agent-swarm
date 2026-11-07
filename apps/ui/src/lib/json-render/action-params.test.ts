@@ -24,6 +24,38 @@ describe("$chain sentinel", () => {
     ).toEqual({ $chain: "newTaskId" });
   });
 
+  test("keeps the sentinel for an inherited property name missing on scope.chain", () => {
+    expect(resolveScopedValue({ $chain: "toString" }, { chain: { leafTaskId: null } })).toEqual({
+      $chain: "toString",
+    });
+  });
+
+  test("resolves a key published as null to undefined (explicit absence)", () => {
+    expect(
+      resolveScopedValue(
+        { $chain: "leafTaskId" },
+        { chain: { leafTaskId: null, newTaskId: null } },
+      ),
+    ).toBeUndefined();
+  });
+
+  test("drops a parentTaskId whose chain key is present and null", () => {
+    const params = resolveScopedParams(
+      { name: "ask", input: { $form: "" }, parentTaskId: { $chain: "leafTaskId" } },
+      { form: { message: "hi" }, chain: { leafTaskId: null, newTaskId: null } },
+    );
+    expect(params).toEqual({ name: "ask", input: { message: "hi" } });
+    expect(Object.hasOwn(params, "parentTaskId")).toBe(false);
+  });
+
+  test("keeps the parentTaskId sentinel when the key is missing from a present chain", () => {
+    const params = resolveScopedParams(
+      { name: "ask", parentTaskId: { $chain: "leafTaskid" } },
+      { chain: { leafTaskId: null, newTaskId: null } },
+    );
+    expect(params).toEqual({ name: "ask", parentTaskId: { $chain: "leafTaskid" } });
+  });
+
   test("Table dispatch resolves $row but leaves an unbound parentTaskId visible", () => {
     const params = resolveScopedParams(
       { name: "ask", input: { $row: "" }, parentTaskId: { $chain: "leafTaskId" } },
@@ -62,5 +94,19 @@ describe("$chain sentinel", () => {
       { chain: { leafTaskId: "task-1" } },
     );
     expect(params).toEqual({ input: { parentTaskId: "task-1" } });
+  });
+});
+
+describe("$value sentinel", () => {
+  test("resolves to the committed value, not the state snapshot", () => {
+    const params = resolveScopedParams(
+      { values: { doc: { $value: true } } },
+      { value: { v: 2 }, state: { ui: { f: { value: { v: 1 } } } } },
+    );
+    expect(params).toEqual({ values: { doc: { v: 2 } } });
+  });
+
+  test("is undefined when the scope carries no value", () => {
+    expect(resolveScopedValue({ $value: true }, {})).toBeUndefined();
   });
 });

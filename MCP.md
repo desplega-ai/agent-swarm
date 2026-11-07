@@ -29,10 +29,12 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-metrics](#get-metrics)
   - [send-task](#send-task)
   - [list-model-profiles](#list-model-profiles)
+  - [check-model-profile](#check-model-profile)
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
+  - [submit-improvement](#submit-improvement)
   - [resolve-user](#resolve-user)
   - [manage-user](#manage-user)
   - [db-query](#db-query)
@@ -184,6 +186,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [slack-download-file](#slack-download-file)
   - [slack-delete](#slack-delete)
   - [slack-update](#slack-update)
+  - [slack-leave-thread](#slack-leave-thread)
 - [Prompt Templates Tools](#prompt-templates-tools)
   - [list-prompt-templates](#list-prompt-templates)
   - [get-prompt-template](#get-prompt-template)
@@ -263,14 +266,14 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
+| `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded \| skipped` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
 | `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
 | `readyOnly` | `boolean` | No | - | Only return tasks whose dependencies are met. |
 | `taskType` | `string` | No | - | Filter by task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Filter by any matching tag. |
-| `search` | `string` | No | - | Search in task description. |
+| `search` | `string` | No | - | Search task text and title by word or phrase, with a prefix match on the last word, or a task id by prefix. Not a substring match: '2443' does not find '12443', and '%' and '_' are not wildcards. |
 | `scheduleId` | `string` | No | - | Filter by schedule ID to find tasks created by a specific schedule. |
 | `workflowRunId` | `string` | No | - | Filter by workflow run ID to find the tasks of a single run. |
 | `key` | `unknown` | No | - | Filter by exact logical namespace. |
@@ -310,29 +313,41 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
-| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
+| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
-| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
+| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. Does not bypass the follow-up re-delegation guard; see allowRedelegation. |
+| `allowRedelegation` | `boolean` | No | false | Only matters when you call send-task from a follow-up task in a Slack thread. Such a dispatch is blocked when it repeats a task already completed in that thread (same-work rule, unless a task there was cancelled or failed after that completion), or when you already dispatched 10 tasks into the thread in the last 6 hours (loop-cap rule). Set true to dispatch anyway; the override is logged. Use it only for deliberate re-runs or long chains, never to retry a block you have not read. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 | `overrideSlackContext` | `boolean` | No | false | Explicitly route this task's Slack updates to a different channel/thread than its parent/contextKey. Requires slackChannelId AND slackThreadTs. Use only for deliberate cross-channel dispatch (e.g. escalation to another human's DM); logged for audit. Without this flag, a slackChannelId/slackThreadTs that disagrees with the parent task or inherited contextKey is rejected — omit the three Slack fields to inherit them from the parent as a unit instead. |
 | `requestedByUserId` | `string` | No | - | Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
-| `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. |
+| `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. When omitted, the child inherits the schema of its parent task (your current task by default). An empty object {} means no schema: the child stores none and inherits none. |
 
 ### list-model-profiles
 
 **List Model Profiles**
 
-List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. Filter by `harness` to see what an agent on that harness can run.
+List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. `fallbacks` are the same-harness profiles a task hops to, in order, when a provider error (rate limit, seat, overload, auth, empty key pool) ends it. Filter by `harness` to see what an agent on that harness can run.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+| `harness` | `claude \| codex \| pi \| devin \| claude-managed \| opencode \| acp \| dsh \| amp \| cursor \| grok \| fx` | No | - | Only profiles for this harness (claude, codex, pi, ...). |
+
+### check-model-profile
+
+**Check Model Profile**
+
+Check whether an agent can run a model profile before you pass it as `profile` or set it as the agent's default. Judges the harness, the model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; only a fail blocks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agentId` | `string` | Yes | - | The agent that would run the profile. |
+| `profile` | `string` | Yes | - | Model profile name (see list-model-profiles). |
 
 ### get-task-details
 
@@ -348,19 +363,20 @@ Returns detailed information about a specific task, including output, failure re
 
 **Store task progress**
 
-Stores the progress of a specific task. Can also mark task as completed or failed, which will set the agent back to idle.
+Stores the progress of a specific task. Can also mark task as completed, failed, or skipped, which will set the agent back to idle. Use skipped only when the work is not yours to handle, such as a Slack thread message addressed to someone else; never skip an explicit @mention of you or work assigned to you. When a live child task you created continues the work, complete with chainedTaskId so the lead is not woken for this step.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | No | - | Full task UUID. Defaults to the caller-owned task in X-Source-Task-Id; required outside task context. |
 | `progress` | `string` | No | - | The progress update to store. |
-| `status` | `completed \| failed \| in_progress \| pending` | No | - | Set to 'completed' or 'failed' to finish the task. 'in_progress' and 'pending' store progress only and do not change task status. |
+| `status` | `completed \| failed \| skipped \| in_progress \| pending` | No | - | Set to 'completed' or 'failed' to finish the task. Set 'skipped' to end a task that is not yours to handle (a Slack thread message addressed to someone else, or one you have nothing to add to); it posts nothing to the thread, creates no follow-up, and needs a one-line reason in failureReason. Never skip an explicit @mention of you or work assigned to you. 'in_progress' and 'pending' store progress only and do not change task status. |
 | `output` | `string` | No | - | The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card. Keep free-text output under 120 words by default. Name the result and every artifact link, plus any IDs the human needs. Link documents instead of inlining them; omit process narration, transcripts, and restatements of the brief. Exceed the target only when requested depth, enumerated results, essential evidence, caveats, or instructions require it, or when the task's outputSchema requires longer output. When the task carries an outputSchema, output must be JSON matching it. |
-| `failureReason` | `string` | No | - | The reason for failure (used when failing). |
+| `failureReason` | `string` | No | - | The reason for failure (used when failing), or the one-line reason for a skip (required with status 'skipped'). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `citations` | `array` | No | - | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity. |
-| `learning` | `unknown` | No | - | A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Not a progress line. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. The first line of text is the title. At most ~500 tokens and 5 kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update. |
+| `learning` | `unknown` | No | - | A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under 80 characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. Expires after 30 days. At most ~500 tokens and 5 kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update. |
 | `persistMemory` | `boolean` | No | - | Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true. |
+| `chainedTaskId` | `uuid` | No | - | With status 'completed' only: the id of a live child task you created (send-task with parentTaskId set to this task) that carries this result forward. The engine then creates no lead follow-up for this completion and logs the handoff on this task. The child must exist, have this task as parentTaskId, be created by you, and be pending, offered, reviewing, in_progress or paused. If any check fails, the normal follow-up is created and names the reason; the completion itself never fails. Ignored for every other status: a failure always wakes the lead. |
 | `force` | `boolean` | No | - | On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure. |
 
 ### my-agent-info
@@ -381,6 +397,16 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
+
+### submit-improvement
+
+**Draft a product improvement**
+
+Draft a short product improvement for the agent-swarm team at desplega. It is stored as a pending draft and is never sent by this tool: a person must approve it from the Improvements button in the dashboard header. Only the text you write, the install id and the approver's email are sent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | `string` | Yes | - | The product improvement for desplega, in plain words. Do not include names, repos, hosts, customer details or secrets. |
 
 ### resolve-user
 
@@ -458,7 +484,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex and cursor; claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex, cursor and fx (fx supports steer only); claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -492,7 +518,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `reason` | `string` | No | - | Reason for rejection (optional for 'reject'). |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the seeded <harness>-<tier> profile of its harness. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
 | `profile` | `string` | No | - | Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action. |
@@ -1006,7 +1032,8 @@ Updates an agent's profile information (name, description, role, capabilities). 
 | `setupScript` | `string` | No | - | Setup script content (bash). Runs at container start as the worker user after privilege drop. Persists across sessions. Also written to /workspace/start-up.sh. |
 | `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Synced to /workspace/TOOLS.md. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory. |
 | `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
-| `avatar` | `unknown` | No | - | Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color. |
+| `avatar` | `unknown` | No | - | Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/agents/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). An image that cannot load falls back to the default glyph. Pass null to reset to the default deterministic icon/color. |
+| `slackIcon` | `unknown` | No | - | Slack icon for this agent's messages: { type: 'emoji', emoji: ':owl:' } or { type: 'url', url: 'https://…' }, or { type: 'app' } for the Slack app's own icon. A link Slack cannot load falls back to the Slack app's icon. Pass null to reset to the default. |
 
 ### context-history
 
@@ -1061,7 +1088,7 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `clonePath` | `string` | No | - | New clone path. |
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
-| `hooks` | `unknown` | No | - | Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable. |
+| `hooks` | `unknown` | No | - | Repository hook install config. Best-effort worker hook installation is enabled by default for new repos. Disable it with { enabled: false } (or null), or turn it back on with { enabled: true }. |
 | `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear. |
 
 ## Scheduling Tools
@@ -1096,7 +1123,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/schedule:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key, so the planning session, the schedule and its runs share one key. |
 | `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
 | `targetType` | `agent-task \| workflow \| script` | No | "agent-task" | Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; use 'script' + scriptName/scriptArgs when it only runs a catalog script; use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script. |
@@ -1115,8 +1142,9 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time. |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of each assignee's harness. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### defer-task
@@ -1130,7 +1158,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
-| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
+| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output. |
 | `output` | `string` | No | - | Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
@@ -1163,7 +1191,8 @@ Update an existing scheduled task. Any registered agent can update schedules.
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### patch-schedule
@@ -1193,7 +1222,8 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### delete-schedule
@@ -1284,7 +1314,7 @@ Edit a single memory in place while preserving its ID, usefulness posterior, and
 | `newString` | `string` | No | - | Replacement for oldString. Required for 'exact' mode. Can be empty to delete. |
 | `intent` | `string` | Yes | - | Why you are editing this memory. |
 | `expectedVersion` | `number` | No | - | - |
-| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
+| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A move into /learnings starts a 30-day expiry; a move out of /learnings takes the source's own expiry (none for manual). A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
 
 ### memory-delete
 
@@ -1394,7 +1424,7 @@ Capability: `workflows` (enabled by default)
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). Inline script nodes also accept config.env, an interpolated string-to-string map of environment variables that can be used alongside args. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1534,7 +1564,7 @@ Get details of a workflow run by ID, including all steps and their statuses.
 
 **Retry Workflow Run**
 
-Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually.
+Resume the same failed workflow run from its failed step(s); completed steps are not re-run. Retrying re-creates the failed node's side effects (e.g. an agent task), so check the target state first if that work was already done manually. Retries on the definition the run started with; to use an edited workflow, trigger a new run.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1936,7 +1966,7 @@ Refresh an app's declared sources: pull each selected (model x source) pair and 
 
 **Create or update an app**
 
-Stores a schema-backed app definition with models, queries/actions, pages, reusable elements, optional userConfig fields, and an optional top-level theme (a dashboard preset slug for the app's canvas — hive (stock; omit to inherit the viewer's theme), meadow, iris, rose, cobalt, ember, carbon, plus the classic presets github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin; viewers can override it per-user; unknown slugs degrade to the viewer's dashboard theme), then returns its dashboard URL. userConfig is versioned schema only; each user's values are stored separately, survive rollback, and schema changes are always compatible. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. Zero-model pure-UI apps are valid. Pass appId to update; breaking a referenced export is blocked by the compatibility gate unless forceElementBreak explicitly names it.
+Stores a schema-backed app definition with models, queries/actions, pages, reusable elements, optional userConfig fields, an optional top-level theme (a dashboard preset slug for the app's canvas: hive (stock; omit to inherit the viewer's theme), meadow, iris, rose, cobalt, ember, carbon, paper (the warm editorial paper look), plus the classic presets github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin; viewers can override it per-user; unknown slugs degrade to the viewer's dashboard theme), and an optional top-level icon shown on the dashboard Apps page, one of { type: "lucide", icon: "<kebab-case lucide icon name>", color?: "#RRGGBB" } (an unrecognized name shows a generic default), { type: "url", url: "https://..." } (https only, no credentials), or { type: "agent-fs", path: "/apps/<appId>/icon.png" } (swarm drive; add orgId and driveId for another drive); the dashboard shows a glyph when an image cannot load, and a patch replaces icon whole, then returns its dashboard URL. userConfig is versioned schema only; each user's values are stored separately, survive rollback, and schema changes are always compatible. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. Zero-model pure-UI apps are valid. Pass appId to update; breaking a referenced export is blocked by the compatibility gate unless forceElementBreak explicitly names it.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1951,11 +1981,11 @@ Stores a schema-backed app definition with models, queries/actions, pages, reusa
 
 **Create or update a page**
 
-Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted and the row is updated. Use this for static reports, dashboards, or JSON action specs that don't need a long-lived process.
+Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted and the row is updated. Use this for static reports, dashboards, or JSON action specs that don't need a long-lived process. HTML pages use the swarm design system (designVersion 2): theme tokens such as var(--color-primary), the swarm-* primitives, and Tailwind v4 utilities such as bg-card and text-muted-foreground. Set `theme` to a preset id or pass `themeTokens` (a token map, or a CSS variable block with format "css") to restyle the whole page. Do not hardcode colors: inside the dashboard the page follows the viewer's theme and dark mode. Pages created before designVersion 2 keep the old look; pass designVersion: 2 when you rewrite one.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/page:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key. |
 | `title` | `string` | Yes | - | Human-readable title shown in listings. |
 | `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
 | `body` | `string` | Yes | - | Full page body (HTML document, SVG image, or JSON-render spec, per contentType). |
@@ -1964,6 +1994,9 @@ Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are u
 | `password` | `string` | No | - | Plaintext password, hashed before storage. Only meaningful for authMode='password'. |
 | `description` | `string` | No | - | Optional short description, used in listings + OG-tag unfurl. |
 | `needsCredentials` | `array` | No | - | Declared credential needs for JSON pages (renderer ignores for v1 — reserved for follow-up). |
+| `theme` | `string` | No | - | Theme preset id that restyles the whole page, for example paper, github or hive. An unknown id returns an error that lists every preset. Omit to follow the viewer's theme (on update, to keep the stored one). Pass null to clear it. |
+| `themeTokens` | `unknown` | No | - | Per-page token overrides, applied on top of the preset. Send { light, dark } maps of token name to CSS value (for example { light: { "--color-primary": "oklch(0.55 0.2 260)" } }), or { format: "css", css } with a CSS variable block (:root, .dark, @theme) as shadcn, tweakcn and Tailwind v4 export it. Stored normalized. Names outside the token contract, and values that reference a variable outside it, are ignored and reported in the result. Replaces the stored overrides. Omit to keep them on update. Pass null to clear them. |
+| `designVersion` | `number` | No | - | Design system version. 2 is the swarm design system and the default for new pages. 1 is the original look that older pages keep. Omit on update to keep the stored value. |
 
 ### delete-page
 
@@ -2121,14 +2154,15 @@ Capability: `slack` (enabled by default)
 
 **Reply to Slack thread**
 
-Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for. For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
-| `message` | `string` | Yes | - | The message to send to the Slack thread. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message to send to the Slack thread. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 
 ### slack-read
 
@@ -2149,13 +2183,14 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 
 **Post message to Slack channel**
 
-Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.
+Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user. |
-| `message` | `string` | Yes | - | The message content to post. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message content to post. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -2259,13 +2294,25 @@ Deletes a Slack message that THIS bot authored (e.g. a message previously posted
 
 **Edit a Slack message**
 
-Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
+Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Editing keeps the icon the message was posted with. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
 | `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
 | `message` | `string` | Yes | - | The new message content. |
+
+### slack-leave-thread
+
+**Leave a Slack thread**
+
+Stop following a Slack thread until someone @mentions the bot there again. Messages in the thread that do not @mention the bot are then ignored, with no task and no reply. Posts nothing to Slack. Pass taskId for the thread of your Slack-originated task, or (lead only) channelId and threadTs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | No | - | A task whose Slack thread to leave. |
+| `channelId` | `string` | No | - | The Slack channel ID of the thread. |
+| `threadTs` | `string` | No | - | Timestamp of the thread root (dotted, 'p' deep-link, or full permalink URL). |
 
 ## Prompt Templates Tools
 
@@ -2416,25 +2463,27 @@ Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` 
 
 **Reply in the chat thread of this task**
 
-Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | `string` | Yes | - | Markdown text to post to the thread. |
+| `text` | `string` | No | - | Markdown text to post to the thread. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-post
 
 **Post to a chat thread or channel**
 
-Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
 | `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
 | `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
-| `text` | `string` | Yes | - | Markdown text to post. |
+| `text` | `string` | No | - | Markdown text to post. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-open-dm
@@ -2457,7 +2506,7 @@ Read the most recent messages of a Chat SDK thread, oldest first. Every agent ca
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `threadId` | `string` | Yes | - | Full SDK thread id with the adapter prefix, such as telegram:12345. |
-| `limit` | `number` | No | - | Number of messages to return (default ${DEFAULT_LIMIT}). |
+| `limit` | `number` | No | - | Number of messages to return (default 30). |
 
 ### register-chat-channel
 

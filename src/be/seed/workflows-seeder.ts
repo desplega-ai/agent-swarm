@@ -28,6 +28,12 @@ import docsSiteReleasesConfig from "../../../templates/workflows/docs-site-relea
 import docsSiteReleasesContent from "../../../templates/workflows/docs-site-releases/content.md" with {
   type: "text",
 };
+import dreamingConfig from "../../../templates/workflows/dreaming/config.json" with {
+  type: "text",
+};
+import dreamingContent from "../../../templates/workflows/dreaming/content.md" with {
+  type: "text",
+};
 import gscTopicMinerConfig from "../../../templates/workflows/gsc-topic-miner/config.json" with {
   type: "text",
 };
@@ -65,10 +71,18 @@ import type {
   TriggerConfig,
   Workflow,
   WorkflowDefinition,
+  WorkflowSnapshot,
 } from "../../types";
 import { validateDefinition } from "../../workflows/definition";
-import { computeContentHash, createWorkflow, listWorkflows, updateWorkflow } from "../db";
+import {
+  computeContentHash,
+  createWorkflow,
+  getWorkflowVersions,
+  listWorkflows,
+  updateWorkflow,
+} from "../db";
 import { resolveSeededEnabled } from "./automation-toggle";
+import { getSeedState } from "./state-db";
 import type { Seeder, SeedItem } from "./types";
 
 type AutomationTemplateConfig = {
@@ -119,6 +133,7 @@ const BUILT_IN_WORKFLOW_SOURCES: readonly WorkflowTemplateSource[] = [
   },
   { config: asText(competitorRadarConfig), content: asText(competitorRadarContent) },
   { config: asText(docsSiteReleasesConfig), content: asText(docsSiteReleasesContent) },
+  { config: asText(dreamingConfig), content: asText(dreamingContent) },
   { config: asText(gscTopicMinerConfig), content: asText(gscTopicMinerContent) },
   { config: asText(linearDrainLoopConfig), content: asText(linearDrainLoopContent) },
   { config: asText(llmSafeReleaseContextConfig), content: asText(llmSafeReleaseContextContent) },
@@ -189,10 +204,6 @@ export function loadSeedWorkflows(
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function workflowSeedHash(workflow: SeedWorkflow): string {
-  return computeContentHash(canonicalJson(workflow));
-}
-
 async function findWorkflowByName(name: string): Promise<Workflow | null> {
   return (await listWorkflows()).find((workflow) => workflow.name === name) ?? null;
 }
@@ -213,6 +224,90 @@ function workflowFromRow(workflow: Workflow): SeedWorkflow {
   };
 }
 
+function workflowFromSnapshot(snapshot: WorkflowSnapshot): SeedWorkflow {
+  return {
+    name: snapshot.name,
+    description: snapshot.description ?? "",
+    enabled: snapshot.enabled,
+    definition: snapshot.definition,
+    triggers: snapshot.triggers,
+    cooldown: snapshot.cooldown,
+    input: snapshot.input,
+    triggerSchema: snapshot.triggerSchema,
+    params: snapshot.params ?? {},
+    requiredParams: snapshot.requiredParams ?? [],
+    requires: snapshot.requires ?? [],
+  };
+}
+
+/**
+ * What a run executes, without the settings an operator is told to change:
+ * inputs (plain data, resolved the same for every caller), on/off, cooldown,
+ * description and event triggers.
+ */
+function executableSurface(workflow: SeedWorkflow): string {
+  const {
+    input: _input,
+    enabled: _enabled,
+    cooldown: _cooldown,
+    description: _description,
+    triggers: _triggers,
+    ...surface
+  } = workflow;
+  return canonicalJson(surface);
+}
+
+/**
+ * The seed hash covers the executable surface only, so an operator setting
+ * (an `input` value, on/off, cooldown, description, event triggers) neither
+ * reads as a user edit nor blocks a later template update.
+ */
+function workflowSeedHash(workflow: SeedWorkflow): string {
+  return computeContentHash(executableSurface(workflow));
+}
+
+/**
+ * The hash older releases recorded in `seed_state`: the whole workflow,
+ * operator settings included. Only used to recognise those rows; the next
+ * update or in-sync check rewrites them with {@link workflowSeedHash}.
+ */
+function legacyWorkflowSeedHash(workflow: SeedWorkflow): string {
+  return computeContentHash(canonicalJson(workflow));
+}
+
+/**
+ * Whether the live workflow still executes what the seeder last wrote, whose
+ * hash is `seededHash`. A legacy whole-workflow hash matches the live row
+ * itself, or the version snapshot taken before the first edit when that
+ * snapshot has the same executable surface as the live row. A legacy edit
+ * with no such snapshot counts as edited.
+ */
+async function executesSeededSurface(workflow: Workflow, seededHash: string): Promise<boolean> {
+  const live = workflowFromRow(workflow);
+  if (workflowSeedHash(live) === seededHash) return true;
+  if (legacyWorkflowSeedHash(live) === seededHash) return true;
+  for (const version of await getWorkflowVersions(workflow.id)) {
+    const seeded = workflowFromSnapshot(version.snapshot);
+    if (legacyWorkflowSeedHash(seeded) !== seededHash) continue;
+    return executableSurface(seeded) === executableSurface(live);
+  }
+  return false;
+}
+
+/**
+ * Whether a live workflow still runs seed source: `pristine` while what it
+ * executes matches what the seeder last wrote for its name, `edited` once
+ * anyone changed that, `unseeded` for a workflow the seeder never wrote.
+ * Operator settings (see `executableSurface`) keep it `pristine`.
+ */
+export async function seededWorkflowState(
+  workflow: Workflow,
+): Promise<"pristine" | "edited" | "unseeded"> {
+  const state = await getSeedState("workflow", workflow.name);
+  if (!state) return "unseeded";
+  return (await executesSeededSurface(workflow, state.seededHash)) ? "pristine" : "edited";
+}
+
 export function createWorkflowsSeeder(
   sources: readonly WorkflowTemplateSource[] = BUILT_IN_WORKFLOW_SOURCES,
 ): Seeder<WorkflowSeedItem> {
@@ -230,7 +325,17 @@ export function createWorkflowsSeeder(
 
     async upstreamHash(item): Promise<string | null> {
       const existing = await findWorkflowByName(item.key);
-      return existing ? workflowSeedHash(workflowFromRow(existing)) : null;
+      if (!existing) return null;
+      const liveHash = workflowSeedHash(workflowFromRow(existing));
+      if (liveHash === item.contentHash) return liveHash;
+      // The runner calls a workflow pristine when this equals the recorded
+      // hash. A legacy row records a whole-workflow hash, so report the
+      // recorded hash itself while the workflow still executes that seed.
+      const state = await getSeedState("workflow", item.key);
+      if (state && (await executesSeededSurface(existing, state.seededHash))) {
+        return state.seededHash;
+      }
+      return liveHash;
     },
 
     async apply(item): Promise<void> {
@@ -240,12 +345,8 @@ export function createWorkflowsSeeder(
         throw new Error(`Invalid workflow definition: ${validation.errors.join("; ")}`);
       }
 
-      const data = {
-        description: workflow.description,
+      const executable = {
         definition: workflow.definition,
-        triggers: workflow.triggers,
-        cooldown: workflow.cooldown,
-        input: workflow.input,
         triggerSchema: workflow.triggerSchema,
         params: workflow.params,
         requiredParams: workflow.requiredParams,
@@ -253,12 +354,26 @@ export function createWorkflowsSeeder(
       };
       const existing = await findWorkflowByName(workflow.name);
       if (!existing) {
-        const created = await createWorkflow({ name: workflow.name, ...data });
+        const created = await createWorkflow({
+          name: workflow.name,
+          ...executable,
+          description: workflow.description,
+          triggers: workflow.triggers,
+          cooldown: workflow.cooldown,
+          input: workflow.input,
+        });
         if (!workflow.enabled) await updateWorkflow(created.id, { enabled: false });
         return;
       }
 
-      await updateWorkflow(existing.id, { ...data, enabled: workflow.enabled });
+      // The seed hash leaves operator settings out, so an update must not
+      // overwrite them: the live description, on/off, cooldown and event
+      // triggers stay as they are, and so do live input values. Input keys the
+      // template added are filled from the template, so new nodes that read
+      // them still resolve.
+      const input =
+        workflow.input || existing.input ? { ...workflow.input, ...existing.input } : undefined;
+      await updateWorkflow(existing.id, { ...executable, input });
     },
   };
 }

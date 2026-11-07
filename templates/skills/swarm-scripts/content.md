@@ -8,8 +8,8 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 |---|---|
 | 1 to 9 SDK calls, result fits in context | Direct tool calls. |
 | 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
-| Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
-| One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| Fetch, parse, and transform heavy data | Script. |
+| One large web fetch | Script with `ctx.stdlib.fetch`. Return only the part you need. |
 | A schedule, workflow, or API script that reads or writes drive files | Script with `ctx.fs` and `ctx.sh`. |
 | Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
 | Work that repeats on a clock | Schedule. See `scheduling`. |
@@ -17,6 +17,8 @@ A swarm script is TypeScript that runs out of process with a typed Swarm SDK. On
 Named script only when the logic will run two or more times, by you, another agent, a schedule, or a workflow. A one-off goes inline, so the catalog does not fill with scratch saves.
 
 Reference point: a workflow triage that took about 26 tool calls returns as one result of about 4k tokens in about 13 seconds.
+
+Pick the run mode before you author. A short inline `script-run` is for small lookups only. A job that scans a whole population or may run past the inline cap of about 30 s starts as a durable `launch-script-run` from the start. A single `ctx.step.swarmScript` step has the same cap, so collect in bounded steps: each step takes a cursor, collects one slice in well under 30 s, and returns its rows plus the next cursor. Label each step with its slice (`collect-${page}`) so the journal checkpoints it, then compute from the collected slices in a final step. Restarting a long inline run throws away the work it already did.
 
 ## Loading the tools
 
@@ -61,12 +63,25 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `args` can be `undefined` when a caller passes none. Guard with `argsSchema.safeParse(args ?? {})` or optional chaining.
 - Export a Zod `argsSchema` from every named script. `script-upsert` converts it to JSON Schema, so callers, schedules, and workflows see the input contract.
 - Both `zod` and `zod/mini` imports work. Use `import * as z from "zod/mini"` for smaller QuickJS bundles. Mini uses functional forms: `z.optional(z.string())`, `z._default(z.number(), 10)`, and `z.string().check(z.minLength(1))`; its schemas still have `.parse()` and `.safeParse()`.
-- Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works.
+- Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works. A worker's `script-upsert` saves at agent scope; a global-scope upsert is rejected unless you are the lead. To share a script, send the lead its name and `contentHash` to promote.
 - SDK methods return `Promise<unknown>`. Responses are usually wrapped: read `res?.data ?? res`. Exception: `app_query` with a literal `appId` and `query` returns rows typed from the app's columns.
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
-- A script invoked from a workflow node may run under a workflow identity.
+- A script invoked from a workflow node may run under a workflow identity. The node may also supply arguments the script needs: when you run that script directly, pass the same arguments the node maps. A script without a strict `argsSchema` then fails deeper in, often as a not-found or resource error instead of a validation error.
 - Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
-- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script. A `targetType: "script"` schedule gets 60 s; a manual `script-run` gets 30 s, so a candidate that finishes well under 30 s by hand has margin on the schedule. A nested `ctx.swarm.script_run` gets its own 30 s but runs inside its caller's remaining time: run slow children as sibling calls from the outer script, not deeper in the chain.
+- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script. A `targetType: "script"` schedule gets 60 s; a manual `script-run` gets 30 s, so a candidate that finishes well under 30 s by hand has margin on the schedule. A nested `ctx.swarm.script_run` gets its own 30 s but runs inside its caller's remaining time: run slow children as sibling calls from the outer script, not deeper in the chain. The run ends when your default export resolves. A call you did not await gets about 2 s more and is then stopped (`quickjs` aborts it at once), so await every write that must land. That makes a `Promise.race` deadline bound the run; a nested `script_run` that lost the race keeps running on the server under its own 30 s.
+
+### Upserting a large source
+
+A large source pasted inline into a `script-upsert` tool call overflows the call. Write the source to a local file, then send it from bash through the same route, `POST $MCP_BASE_URL/api/scripts/upsert`. The body is JSON (`name`, `source`, optional `description`, `intent`, `scope`), so wrap the file instead of sending it raw:
+
+```bash
+jq -n --arg name my-script --rawfile source ./my-script.ts '{name: $name, source: $source}' \
+  | curl -sS -X POST "$MCP_BASE_URL/api/scripts/upsert" \
+      -H "Authorization: Bearer $API_KEY" -H "X-Agent-ID: $AGENT_ID" \
+      -H "Content-Type: application/json" --data-binary @-
+```
+
+The route runs the same typecheck and scope rules as the tool.
 
 ### What `ctx` holds
 
@@ -75,7 +90,8 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
-- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
+- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
+- Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
 
 ### Files and shell
@@ -170,7 +186,7 @@ function rowsToObjects(res: any): any[] {
 - `kv_get` returns the entry at `data`: read `res.data.value`. The MCP tool shape `entry.value` reads `undefined` in a script.
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
 - An `argsSchema` validation error fires before the body runs and repeats on every retry. Fix the args instead of retrying.
-- The skill methods disagree on the id field: `skill_get({ id })`, but `skill_update({ skillId, content })`. `skill_update({ id, content })` returns outer `success: true` with inner `data.success: false` ("skillId is required.") and writes nothing. Gate a write on `res.data.success`, then re-read: the version must increase and the content must match the draft.
+- The skill methods disagree on the id field: `skill_get({ id })`, but `skill_update({ skillId, content })`. `skill_update({ id, content })` returns `success: false` with `data.message` "skillId is required." and writes nothing. Gate a write on `res.success`, then re-read: the version must increase and the content must match the draft.
 - Write a dedup or idempotency marker only after the step succeeds. A marker written after a failure blocks the next real attempt.
 - `kv_set` returns `success: false` instead of throwing when a key has a character outside `[a-zA-Z0-9._:/-]` (for example `#` or `|` from a git ref). Check `success` after every write.
 - `script_run` without `scope` runs an agent-scoped row of the same name before the global one, so a stale private copy silently wins. Pass `scope: "global"` for a shared script.

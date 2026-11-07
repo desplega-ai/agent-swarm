@@ -36,11 +36,15 @@ jobs:
       ui: ${{ steps.check.outputs.ui }}
       ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
+      e2e: ${{ steps.check.outputs.e2e }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Blobless: the diff below reads commits and trees only, so full
+          # history without blobs is enough and clones much faster.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Determine base for diff
         id: base
@@ -59,7 +63,12 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          CHANGED=$(git diff --name-only ${{ steps.base.outputs.ref }}...HEAD)
+          # --no-renames: with rename detection on (git's default), a move
+          # lists only its destination, so moving a file out of a domain
+          # (src/x.ts -> docs/x.ts) would hide the removal from that domain's
+          # flag. Listing both sides keeps every flag honest.
+          # src/tests/merge-gate-detect-changes.test.ts runs this step.
+          CHANGED=$(git diff --no-renames --name-only ${{ steps.base.outputs.ref }}...HEAD)
           echo "Changed files:"
           echo "$CHANGED"
           echo "---"
@@ -112,9 +121,10 @@ jobs:
           #   skill-fs-writer.ts      the FS reconcile the tests cover
           SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|plugin/pi-skills/|plugin/commands/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills|build-docs-index)\.ts$|docs-site/content/docs/|apps/ui/src/lib/integrations-catalog\.ts$)')
 
-          # script SDK types freshness: source constants + generator + outputs +
-          # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
-          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/|src/extensions/|scripts/bundle-(script|extension)-types\.ts$|src/server\.ts$)')
+          # Extension declarations follow transitive TypeScript imports. Provider-only
+          # changes can reorder emitted unions without changing the contract source.
+          # Include source and dependency inputs, generators, and checked-in outputs.
+          SCRIPT_TYPES=$(match '^(src/|packages/|package\.json$|bun\.lock$|bunfig\.toml$|tsconfig\.json$|scripts/(bundle-(script|extension)-types\.ts|check-script-types-freshness\.sh)$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
@@ -136,7 +146,16 @@ jobs:
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS; do
+          # E2E contract suite: everything the SUT (`bun run src/http.ts`) and the
+          # runner load. src/ is the server; it statically imports packages/ and
+          # templates/ (skills, schedules, workflows) and slack-manifest.json, and
+          # reads vendored-openapi/ at runtime. scripts/e2e/ is the runner, and
+          # its tsconfig extends the root one. The manifests and lockfile feed the
+          # frozen install. Docs, runbooks, apps/ui sources, docs-site and other
+          # workflows skip it.
+          E2E=$(match '^(src/|packages/|templates/|vendored-openapi/|slack-manifest\.json$|scripts/e2e/|scripts/check-e2e-boundary\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+
+          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS E2E; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -208,11 +227,13 @@ jobs:
         run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
+        # Also templates/import/*.schema.json, generated from src/be/import/schema.ts.
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
         # ExtensionManifestSchema is published as templates/extensions/manifest.schema.json.
         run: |
           bun run check:extension-catalog
           bun run check:extension-schema
+          bun run check:import-schema
 
       # scripts/vendor/gitleaks/gitleaks.toml is converted to src/utils/secret-rules.generated.ts;
       # the check also verifies the vendored body against its pinned sha256.
@@ -595,10 +616,13 @@ jobs:
   e2e-contract:
     name: E2E Contract
     needs: detect-changes
+    # PRs skip the suite when they touch nothing it loads. merge_group (and any
+    # other event) always runs it.
+    if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -618,8 +642,8 @@ jobs:
       - name: Type check E2E runner
         run: bun run e2e:tsc
 
-      - name: Run E2E contract suite
-        run: bun run e2e --json e2e-results.json --summary-md e2e-summary.md
+      - name: Run E2E contract suite (strict coverage gate)
+        run: bun run e2e --strict --json e2e-results.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -1336,7 +1360,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The checker compares the candidate tree with the event's base commit.
+          # It reads commits and trees only, so blobs can stay on the server.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Check migration numbering and immutability
         env:
@@ -1355,8 +1381,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The scan range needs the base branch history.
+          # The scan range needs the base branch history. Blobless: gitleaks
+          # fetches the few blobs the scanned range touches on demand.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Self-test the scanner
         run: bash scripts/gitleaks-selftest.sh
@@ -1389,8 +1417,9 @@ jobs:
     needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
-    # No checkout, no API calls; the job only inspects `needs` results.
-    permissions: {}
+    # No checkout. checks: read lets the last step read the PR Body check.
+    permissions:
+      checks: read
 
     steps:
       - name: Check results
@@ -1402,3 +1431,9 @@ jobs:
             exit 1
           fi
           echo "All jobs passed or were skipped."
+
+      # Merge Gate is the only required check, so a red PR Body (pr-body.yml)
+      # blocks the merge here. A description edit re-runs this job from
+      # pr-body.yml's sync-gate job. Skips on merge_group.
+      - name: Require a green PR Body
+        uses: desplega-ai/.github/actions/require-pr-body@aa9436df8f0ef570f033e78dc68d1ef052add22c

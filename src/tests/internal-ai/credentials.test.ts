@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL,
   type ResolveCredentialOptions,
   resolveCredential,
+  resolveCredentials,
 } from "../../utils/internal-ai/credentials.js";
 
 /**
@@ -329,5 +330,66 @@ describe("resolveCredential", () => {
     if (cred?.kind === "claude-cli") {
       expect(cred.modelDefault).toBe("haiku");
     }
+  });
+});
+
+describe("resolveCredentials", () => {
+  test("returns every credential in precedence order", async () => {
+    const creds = await resolveCredentials(
+      makeOpts({
+        env: {
+          OPENROUTER_API_KEY: "example-or",
+          ANTHROPIC_API_KEY: "example-ant",
+          OPENAI_API_KEY: "example-oai",
+          CLAUDE_CODE_OAUTH_TOKEN: "example-claude",
+        },
+      }),
+    );
+    expect(creds.map((cred) => cred.kind)).toEqual([
+      "openrouter",
+      "anthropic",
+      "openai",
+      "claude-cli",
+    ]);
+  });
+
+  test("`kinds` restricts the lookup and `limit` stops early", async () => {
+    const env = { OPENROUTER_API_KEY: "example-or", OPENAI_API_KEY: "example-oai" };
+    const onlyOpenai = await resolveCredentials({ ...makeOpts({ env }), kinds: ["openai"] });
+    expect(onlyOpenai.map((cred) => cred.kind)).toEqual(["openai"]);
+
+    const first = await resolveCredentials({ ...makeOpts({ env }), limit: 1 });
+    expect(first.map((cred) => cred.kind)).toEqual(["openrouter"]);
+
+    const none = await resolveCredentials({ ...makeOpts({ env }), kinds: ["anthropic"] });
+    expect(none).toEqual([]);
+  });
+
+  test("the codex probe runs only when its kind is requested", async () => {
+    let probed = 0;
+    const base = {
+      env: { OPENROUTER_API_KEY: "example-or" },
+      apiUrl: "http://localhost:3013",
+      apiKey: "k",
+      _getValidCodexOAuth: async () => {
+        probed++;
+        return { access: "a", refresh: "r", expires: Date.now() + 60_000, accountId: "acct" };
+      },
+      _getOAuthApiKey: async () => ({ apiKey: "codex-access" }),
+    };
+    const envOnly = await resolveCredentials({
+      ...makeOpts(base),
+      kinds: ["openrouter", "openai"],
+    });
+    expect(envOnly.map((cred) => cred.kind)).toEqual(["openrouter"]);
+    expect(probed).toBe(0);
+
+    const codex = await resolveCredentials({ ...makeOpts(base), kinds: ["openai-codex"] });
+    expect(codex.map((cred) => cred.kind)).toEqual(["openai-codex"]);
+    expect(probed).toBe(1);
+
+    const all = await resolveCredentials(makeOpts(base));
+    expect(all.map((cred) => cred.kind)).toEqual(["openrouter", "openai-codex"]);
+    expect(probed).toBe(2);
   });
 });

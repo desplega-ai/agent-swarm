@@ -50,10 +50,15 @@ export function sessionsQueryOptions(userId: string | null, options?: UseSession
   };
 }
 
-export function useSessions(options?: UseSessionsOptions) {
+/** `refetchInterval` replaces the app-wide 10 s poll for this reader. */
+export function useSessions(options?: UseSessionsOptions, poll?: { refetchInterval?: number }) {
   const { userId } = useCurrentUser();
   useSessionsFilter();
-  return useQuery(sessionsQueryOptions(userId ?? null, options));
+  return useQuery({
+    ...sessionsQueryOptions(userId ?? null, options),
+    // An explicit `undefined` would turn the app-wide poll off.
+    ...(poll?.refetchInterval !== undefined && { refetchInterval: poll.refetchInterval }),
+  });
 }
 
 /** The HTTP status a failed session fetch carried (403: no access). */

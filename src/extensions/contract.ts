@@ -2,7 +2,13 @@
 import type { SwarmSdk } from "swarm-sdk";
 import type { z } from "zod";
 import type { RequestInfo } from "../tools/utils";
-import type { ActiveSession, AgentTask, CreateTaskOptions } from "../types";
+import type {
+  ActiveSession,
+  AgentTask,
+  CreateTaskOptions,
+  SteeringSource,
+  SteerMode,
+} from "../types";
 
 export type Runtime = "api" | "worker";
 
@@ -191,6 +197,21 @@ export interface TaskFollowUpEvent {
   workerAgentId: string;
   leadAgentId: string;
   summary: string;
+}
+
+export interface TaskSteerEvent {
+  task: AgentTask;
+  message: string;
+  mode: SteerMode;
+  source: SteeringSource;
+  sender: { kind: "user" | "agent" | "system"; userId?: string; agentId?: string };
+  messageTimestamps?: string[];
+  /** Slack ingress metadata; not persisted or writable through modify. */
+  slack?: { channelId: string; threadTs: string; userId?: string };
+}
+
+export interface TaskSteerModify {
+  message: string;
 }
 
 export type TaskFollowUpModify = Partial<
@@ -421,6 +442,11 @@ export interface SwarmEventMap {
     event: TaskFollowUpEvent;
     modify: TaskFollowUpModify;
     result: PreResult<TaskFollowUpModify>;
+  };
+  "pre.task.steer": {
+    event: TaskSteerEvent;
+    modify: TaskSteerModify;
+    result: PreResult<TaskSteerModify>;
   };
   "pre.slack.route": {
     event: SlackRouteEvent;

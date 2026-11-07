@@ -32,7 +32,7 @@ import {
   createServer as createHttpServer,
   type IncomingMessage,
   type Server,
-  type ServerResponse,
+  ServerResponse,
 } from "node:http";
 import {
   closeDb,
@@ -46,7 +46,17 @@ import { type IdentityActor, mintToken } from "../be/users";
 import { resetFileStorageProviderForTests } from "../fs/registry";
 import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
+import {
+  agentFirstPrincipal,
+  authUser,
+  authUserId,
+  isOperatorAuth,
+  requestPrincipal,
+  requireAuthKind,
+  resolveRequestPrincipal,
+} from "../http/request-principal";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-charact-http.sqlite";
@@ -265,5 +275,49 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     });
     expect(res.status).toBe(204);
     expect(await getTaskAttachments(taskId)).toEqual([]);
+  });
+});
+
+describe("centralized request principal helpers", () => {
+  const fakeReq = () => ({ headers: {} }) as unknown as IncomingMessage;
+
+  test("operator-first vs agent-first precedence and fallback options", async () => {
+    const opReq = fakeReq();
+    setRequestAuth(opReq, { kind: "operator", fingerprint: "fp" });
+
+    expect(await requestPrincipal(opReq, assigneeId)).toEqual({ kind: "operator" });
+    expect(await agentFirstPrincipal(opReq, assigneeId)).toEqual({
+      kind: "agent",
+      agentId: assigneeId,
+      isLead: false,
+    });
+
+    const unauthReq = fakeReq();
+    expect(await requestPrincipal(unauthReq, undefined)).toBeNull();
+    expect(
+      await requestPrincipal(unauthReq, undefined, { unauthenticatedFallback: "operator" }),
+    ).toEqual({ kind: "operator" });
+    expect(
+      await resolveRequestPrincipal(unauthReq, undefined, {
+        unauthenticatedFallback: "anonymous-agent",
+      }),
+    ).toEqual({ kind: "agent", agentId: "", isLead: false });
+  });
+
+  test("requireAuthKind narrows allowed kinds and writes 403 otherwise", () => {
+    const req = fakeReq();
+    setRequestAuth(req, { kind: "guest" });
+    const res = new ServerResponse(req);
+    expect(requireAuthKind(req, res, ["operator", "user"])).toBeNull();
+    expect(res.statusCode).toBe(403);
+
+    const opReq = fakeReq();
+    setRequestAuth(opReq, { kind: "operator", fingerprint: "fp" });
+    const opRes = new ServerResponse(opReq);
+    const narrowed = requireAuthKind(opReq, opRes, ["operator", "user"]);
+    expect(narrowed).toEqual({ kind: "operator", fingerprint: "fp" });
+    expect(isOperatorAuth(narrowed)).toBe(true);
+    expect(authUserId(narrowed)).toBeUndefined();
+    expect(authUser(narrowed)).toBeUndefined();
   });
 });

@@ -1111,6 +1111,64 @@ describe("Approval Requests", () => {
       // No approval-type questions means default is "approved"
       expect(data.approvalRequest.status).toBe("approved");
     });
+
+    test("production route defaults required to true and validates answered optional questions", async () => {
+      const productionServer = createProductionApprovalServer();
+      const port = await listenOnFreePort(productionServer);
+      const origin = `http://127.0.0.1:${port}`;
+      const post = (path: string, body: unknown) =>
+        fetch(`${origin}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const create = async (questions: unknown[]) => {
+        const res = await post("/api/approval-requests", {
+          title: "Defaults",
+          questions,
+          approvers: { policy: "any" },
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { approvalRequest: { id: string; questions: unknown[] } })
+          .approvalRequest;
+      };
+      try {
+        // A question that does not set `required` is stored as required: an empty answer is refused.
+        const lax = await create([{ id: "go", type: "approval", label: "Go?" }]);
+        expect(lax.questions).toEqual([
+          { id: "go", type: "approval", label: "Go?", required: true },
+        ]);
+        const empty = await post(`/api/approval-requests/${lax.id}/respond`, { responses: {} });
+        expect(empty.status).toBe(400);
+        expect((await getApprovalRequestById(lax.id))?.status).toBe("pending");
+
+        // An answered optional question is validated; an unanswered one is allowed.
+        const optional = await create([
+          { id: "go", type: "approval", label: "Go?" },
+          {
+            id: "color",
+            type: "single-select",
+            label: "Color",
+            required: false,
+            options: [{ value: "red", label: "Red" }],
+          },
+        ]);
+        const outOfOptions = await post(`/api/approval-requests/${optional.id}/respond`, {
+          responses: { go: { approved: true }, color: "green" },
+        });
+        expect(outOfOptions.status).toBe(400);
+        expect(((await outOfOptions.json()) as { error: string }).error).toContain("color");
+        expect((await getApprovalRequestById(optional.id))?.status).toBe("pending");
+        const unanswered = await post(`/api/approval-requests/${optional.id}/respond`, {
+          responses: { go: { approved: true }, color: "" },
+        });
+        expect(unanswered.status).toBe(200);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          productionServer.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
   });
 
   // ─── HITL Executor ──────────────────────────────────────────

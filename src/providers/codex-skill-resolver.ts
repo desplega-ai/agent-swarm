@@ -30,7 +30,12 @@ import type { ProviderEvent } from "./types";
  */
 const SLASH_COMMAND_REGEX = /^\/([a-z0-9:_-]+)(?:\s+(.*))?$/;
 
-const MAX_SKILL_CHARS = Number(process.env.MAX_SKILL_CHARS) || 100_000;
+const DEFAULT_MAX_SKILL_CHARS = 100_000;
+
+export function getMaxSkillChars(): number {
+  const parsed = Number(process.env.MAX_SKILL_CHARS);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_SKILL_CHARS;
+}
 
 /**
  * Resolve the default skills directory for Codex.
@@ -128,12 +133,13 @@ export async function resolveSlashSkillPrompt(
     return prompt;
   }
 
-  if (skillContent.length > MAX_SKILL_CHARS) {
+  const maxSkillChars = getMaxSkillChars();
+  if (skillContent.length > maxSkillChars) {
     opts.emit?.({
       type: "raw_stderr",
-      content: `[${opts.providerLabel}] skill resolver: SKILL.md for /${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
+      content: `[${opts.providerLabel}] skill resolver: SKILL.md for /${commandName} exceeds ${maxSkillChars} chars (${skillContent.length}), truncating\n`,
     });
-    skillContent = skillContent.slice(0, MAX_SKILL_CHARS);
+    skillContent = skillContent.slice(0, maxSkillChars);
   }
 
   if (opts.stripFrontmatter) {

@@ -13,7 +13,9 @@ import {
   hasNonTerminalRerouteDecisionChild,
   isAgentEligibleForTask,
 } from "../be/db";
+import { getModelProfileByName } from "../be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { checkProfileForAgent } from "../be/model-profile-check";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { carryUnhandledSteering } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
@@ -27,6 +29,8 @@ import {
   type AgentTask,
   type CreateTaskOptions,
   CreateTaskOptionsSchema,
+  type FallbackHop,
+  type ProviderErrorClass,
   type ResumeReason,
   type RoutingAffinity,
   type TaskAttachment,
@@ -34,6 +38,7 @@ import {
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { chatThreadOfContextKey } from "./context-key";
+import { scheduleFollowUpGateShadow } from "./follow-up-gate";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -200,6 +205,109 @@ export function inheritedModelSelection(
   };
 }
 
+/** Result of `nextFallback`. */
+export type FallbackPick =
+  | { kind: "picked"; profile: string; hop: FallbackHop }
+  /** `message` is null when no fallback was ever configured: the task fails as before. */
+  | { kind: "none"; message: string | null };
+
+/**
+ * The next profile a task that hit a provider error should resume on, on the
+ * same agent (runbooks/model-tiers.md § Fallbacks on provider errors).
+ *
+ * The chain starts at the profile claim applied (`resolvedProfile`). It walks
+ * the fallback lists of the profiles this work already ran on, the current
+ * one first and then back toward the first, so a fallback's own fallbacks
+ * come before its siblings'. A profile the work already ran on is never
+ * picked again. A candidate that fails `checkProfileForAgent` on the agent
+ * is skipped and recorded on the hop. There is no hop cap: every hop adds a
+ * profile to the visited set and the saved fallback graph is acyclic, so the
+ * walk ends once every reachable profile has run.
+ *
+ * The pick is judged against this agent only, so the resume is always pinned
+ * to it (`createResumeFollowUp`). Lead-only work on an agent that cannot hold
+ * a lead-only pin would be rerouted to another agent, so it never hops.
+ */
+export async function nextFallback(
+  parent: Pick<
+    AgentTask,
+    | "agentId"
+    | "resolvedProfile"
+    | "fallbackHops"
+    | "vcsRepo"
+    | "routingAffinity"
+    | "routingAffinityInvalid"
+  >,
+  errorClass: ProviderErrorClass,
+  options: { includeRepoSecrets?: boolean } = {},
+): Promise<FallbackPick> {
+  const current = parent.resolvedProfile;
+  if (!current || !parent.agentId) return { kind: "none", message: null };
+  const hops = parent.fallbackHops ?? [];
+  const path = hops.length > 0 ? [hops[0]!.from, ...hops.map((hop) => hop.profile)] : [current];
+  if (path[path.length - 1] !== current) path.push(current);
+  const visited = new Set(path);
+  const skipped: { profile: string; reason: string }[] = [];
+  const judged = new Set<string>();
+  let configured = hops.length > 0;
+
+  if (parent.routingAffinity?.leadOnly) {
+    const agent = await getAgentById(parent.agentId);
+    if (!agent?.isLead || !isAgentEligibleForTask(agent, parent)) {
+      const listsFallbacks = (await getModelProfileByName(current))?.fallbacks.length ?? 0;
+      if (!configured && listsFallbacks === 0) return { kind: "none", message: null };
+      return {
+        kind: "none",
+        message: `${errorClass} on ${current}; no fallback: lead-only work cannot resume on agent ${parent.agentId}`,
+      };
+    }
+  }
+
+  for (let i = path.length - 1; i >= 0; i--) {
+    const profile = await getModelProfileByName(path[i]!);
+    for (const name of profile?.fallbacks ?? []) {
+      configured = true;
+      if (visited.has(name) || judged.has(name)) continue;
+      judged.add(name);
+      const result = await checkProfileForAgent(parent.agentId, name, {
+        vcsRepo: parent.vcsRepo,
+        includeRepoSecrets: options.includeRepoSecrets,
+        fallbacks: false,
+      });
+      if (result?.ok) {
+        return {
+          kind: "picked",
+          profile: name,
+          hop: {
+            from: current,
+            profile: name,
+            errorClass,
+            at: new Date().toISOString(),
+            ...(skipped.length > 0 ? { skipped } : {}),
+          },
+        };
+      }
+      skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
+    }
+  }
+  if (!configured) return { kind: "none", message: null };
+  const skippedText =
+    skipped.length > 0
+      ? `; skipped: ${skipped.map((s) => `${s.profile} (${s.reason})`).join(", ")}`
+      : "";
+  return {
+    kind: "none",
+    message: `${errorClass} on ${current}; no fallback left (tried: ${path.join(" → ")})${skippedText}`,
+  };
+}
+
+/** "check: detail" of the primary's first failing row. */
+function firstFailingRow(result: NonNullable<Awaited<ReturnType<typeof checkProfileForAgent>>>) {
+  const row = result.profiles[0]?.checks.find((check) => check.state === "fail");
+  if (!row) return "failed the profile check";
+  return row.detail ? `${row.check}: ${row.detail}` : row.check;
+}
+
 function attachmentPointer(a: TaskAttachment): string {
   return taskAttachmentDisplayUrl(a);
 }
@@ -252,18 +360,32 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
 /**
  * Create the lead follow-up for a finished worker task.
  *
+ * Deferred worker completions are skipped, including explicit onCompleted
+ * instructions; their wake-up carries those instructions to the real completion.
+ *
  * Skipped when this settlement woke a deferred waiter (`defer-task` with
  * `wakeOn`) assigned to the same agent the follow-up targets: that wake-up
  * task already reviews the result, so a follow-up would duplicate it. An
  * `all` wait with siblings still pending wakes nobody, so the follow-up stays.
  * A `followUpConfig.onCompleted` / `onFailed` instruction for this status also
- * keeps the follow-up, because the wake-up task does not carry that text.
+ * keeps the follow-up, because the wake-up task does not carry that text. A
+ * rejected `chainedTaskId` keeps it for the same reason.
+ *
+ * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
+ * verifier's would-skip decision after commit; the follow-up is never skipped.
  */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
+  /**
+   * `store-progress` `chainedTaskId`: a live child task the completing agent
+   * created to carry this result forward. Honoured only on `completed`.
+   */
+  chainedTaskId?: string;
+  /** Agent that made the completing call; defaults to the task's assignee. */
+  completingAgentId?: string;
 }): Promise<AgentTask | null> {
   const { task, status, output, failureReason } = args;
 
@@ -275,6 +397,49 @@ export async function createWorkerTaskFollowUp(args: {
 
   const leadAgent = await getLeadAgent();
   if (!leadAgent) return null;
+
+  if (status === "completed" && task.deferredAt) {
+    try {
+      await createLogEntry({
+        eventType: "task_follow_up_suppressed",
+        taskId: task.id,
+        agentId: leadAgent.id,
+        metadata: { reason: "worker_deferred", status },
+      });
+    } catch {}
+    return null;
+  }
+
+  // Failures always wake the Lead, so only a completion can hand off to a child.
+  let chainRejection: (ChainedTaskCheck & { ok: false }) | null = null;
+  if (status === "completed" && args.chainedTaskId) {
+    const chain = await checkChainedTask(
+      task,
+      args.chainedTaskId,
+      args.completingAgentId ?? task.agentId ?? "",
+    );
+    if (chain.ok) {
+      try {
+        await createLogEntry({
+          eventType: "task_follow_up_suppressed",
+          taskId: task.id,
+          agentId: leadAgent.id,
+          metadata: {
+            reason: "chained_task_live",
+            status,
+            chainedTaskId: chain.child.id,
+            chainedTaskStatus: chain.child.status,
+            ...(task.followUpConfig?.onCompleted ? { droppedOnCompleted: true } : {}),
+          },
+        });
+      } catch {}
+      console.log(
+        `[worker-follow-up] Skipped follow-up for completed task ${task.id.slice(0, 8)}: work continues in chained task ${chain.child.id.slice(0, 8)} (${chain.child.status})`,
+      );
+      return null;
+    }
+    chainRejection = chain;
+  }
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
   const taskDesc = task.task.slice(0, 200);
@@ -304,6 +469,12 @@ export async function createWorkerTaskFollowUp(args: {
       task_id: task.id,
     });
     followUpDescription = completedResult.text;
+    if (chainRejection) {
+      followUpDescription += resolveTemplate("task.worker.chain_rejected", {
+        chained_task_id: chainRejection.chainedTaskId,
+        reason: chainRejection.reason,
+      }).text;
+    }
   } else {
     const reason = failureReason || "(no reason given)";
     const failedResult = resolveTemplate("task.worker.failed", {
@@ -355,8 +526,12 @@ export async function createWorkerTaskFollowUp(args: {
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
   const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
 
+  // Like `instructions`, a rejected chainedTaskId keeps the follow-up: the
+  // wake-up task does not carry the rejected id or the reason.
   const wake =
-    followUpAgentId && !instructions ? await findDeferredWakeFor(task.id, followUpAgentId) : null;
+    followUpAgentId && !instructions && !chainRejection
+      ? await findDeferredWakeFor(task.id, followUpAgentId)
+      : null;
   if (wake) {
     try {
       await createLogEntry({
@@ -377,7 +552,7 @@ export async function createWorkerTaskFollowUp(args: {
     );
     return null;
   }
-  return await createTaskWithSiblingAwareness(
+  const followUp = await createTaskWithSiblingAwareness(
     changes.description ?? followUpDescription,
     {
       agentId: followUpAgentId,
@@ -398,6 +573,73 @@ export async function createWorkerTaskFollowUp(args: {
     },
     { origin: "followUp" },
   );
+  if (followUp) {
+    try {
+      scheduleFollowUpGateShadow({
+        task,
+        status,
+        followUpTaskId: followUp.id,
+        leadAgentId: leadAgent.id,
+      });
+    } catch (err) {
+      console.warn(
+        `[worker-follow-up] Follow-up gate shadow failed for task ${task.id.slice(0, 8)}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  return followUp;
+}
+
+/**
+ * Child statuses that mean the chained work is still going to run. `reviewing`
+ * is the accept/reject step of an offer, and a `paused` task keeps its agent
+ * and resumes when that worker restarts.
+ */
+const LIVE_CHAINED_TASK_STATUSES: ReadonlySet<AgentTask["status"]> = new Set([
+  "offered",
+  "reviewing",
+  "pending",
+  "in_progress",
+  "paused",
+]);
+
+type ChainedTaskCheck =
+  | { ok: true; child: AgentTask }
+  | { ok: false; chainedTaskId: string; reason: string };
+
+/**
+ * Whether `chainedTaskId` may stand in for the Lead follow-up of `task`: it
+ * must be a live direct child of `task`, created by the completing agent.
+ */
+async function checkChainedTask(
+  task: AgentTask,
+  chainedTaskId: string,
+  completingAgentId: string,
+): Promise<ChainedTaskCheck> {
+  const reject = (reason: string): ChainedTaskCheck => ({ ok: false, chainedTaskId, reason });
+  let child: AgentTask | null;
+  try {
+    child = await getTaskById(chainedTaskId);
+  } catch (err) {
+    // Fail open: a broken lookup must never drop the follow-up.
+    return reject(`lookup failed (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (!child) return reject("no task has this id");
+  if (child.parentTaskId !== task.id) {
+    return reject(
+      child.parentTaskId
+        ? `its parentTaskId is ${child.parentTaskId}, not this task`
+        : "it has no parentTaskId",
+    );
+  }
+  if (!completingAgentId || child.creatorAgentId !== completingAgentId) {
+    return reject("it was not created by the agent that completed this task");
+  }
+  if (!LIVE_CHAINED_TASK_STATUSES.has(child.status)) {
+    return reject(`it is ${child.status}, not live`);
+  }
+  return { ok: true, child };
 }
 
 /** Hop cap for `deferredWorkChatContextKey`; a defer/resume chain is short. */
@@ -470,6 +712,11 @@ export type CreateResumeFollowUpResult =
 export async function createResumeFollowUp(args: {
   parentId: string;
   reason: ResumeReason;
+  /**
+   * With `provider_fallback`: the profile the resume runs and the hop that
+   * records why (`nextFallback`).
+   */
+  fallback?: { profile: string; hop: FallbackHop };
 }): Promise<CreateResumeFollowUpResult> {
   const parent = await getTaskById(args.parentId);
   if (!parent) return { kind: "skipped", reason: "parent_not_found" };
@@ -492,7 +739,19 @@ export async function createResumeFollowUp(args: {
     | "escalated_unassigned"
     | undefined;
   const leadOnly = parent.routingAffinity?.leadOnly === true;
-  if (parent.agentId) {
+  // A fallback profile was judged against this agent alone (`nextFallback`,
+  // which also refuses lead-only work a non-Lead holds), so its resume never
+  // leaves it: not for a full slot (another claim can take the parent's freed
+  // one first), and not for a stale status, since the agent that asked for
+  // the fallback is alive. The pending pin waits for a free slot.
+  const fallbackPin =
+    args.reason === "provider_fallback" && args.fallback !== undefined && parent.agentId
+      ? parent.agentId
+      : undefined;
+  if (fallbackPin) {
+    preferredAgentId = fallbackPin;
+    if (leadOnly) authorizationDecision = "source_lead_pin";
+  } else if (parent.agentId) {
     const candidate = await getPinCandidateAgent(parent.agentId);
     if (candidate) {
       const lastActivity = candidate.lastActivityAt ? Date.parse(candidate.lastActivityAt) : 0;
@@ -527,7 +786,7 @@ export async function createResumeFollowUp(args: {
   // Apply the same Lead-only recovery decision used by reboot recovery. A
   // non-Lead source can never win the earlier pin attempt, so this chooses a
   // Lead reroute or an authorization-gated unassigned fallback.
-  if (leadOnly) {
+  if (leadOnly && !fallbackPin) {
     const source = preferredAgentId ? await getAgentById(preferredAgentId) : null;
     const resolution = await resolveLeadOnlyRecoveryAssignment(parent, source);
     preferredAgentId = resolution.agentId;
@@ -612,7 +871,7 @@ export async function createResumeFollowUp(args: {
     // fire when this resume finishes.
     inheritParentFollowUpConfig: true,
     routingAffinity,
-    ...inheritedModelSelection(parent),
+    ...resumeModelSelection(parent, args.fallback),
   });
   // The resume continues the work, so it takes over unaccepted steering.
   await carryUnhandledSteering(parent.id, created.id);
@@ -648,6 +907,21 @@ export async function createResumeFollowUp(args: {
   }
 
   return { kind: "created", task: created };
+}
+
+/**
+ * The resume's model fields: the parent's own selection, or with a fallback
+ * the picked profile alone (a profile wins over `model` and `modelTier` at
+ * claim, and the hop replaces whatever the parent ran). The hop list carries
+ * over either way, so a later hop never picks a profile the work already ran.
+ */
+function resumeModelSelection(
+  parent: AgentTask,
+  fallback: { profile: string; hop: FallbackHop } | undefined,
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "fallbackHops"> {
+  const hops = [...(parent.fallbackHops ?? []), ...(fallback ? [fallback.hop] : [])];
+  const selection = fallback ? { profile: fallback.profile } : inheritedModelSelection(parent);
+  return { ...selection, ...(hops.length > 0 ? { fallbackHops: hops } : {}) };
 }
 
 /** Result of `createRerouteDecisionTask`. */

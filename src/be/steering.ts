@@ -1,3 +1,5 @@
+import { z } from "zod";
+import type { TaskSteerEvent } from "../extensions/contract";
 import {
   type Agent,
   type AgentTask,
@@ -37,6 +39,20 @@ export class SteeringRequestError extends Error {
   }
 }
 
+export class SteeringBlockedError extends SteeringRequestError {
+  constructor(
+    public readonly reason: string,
+    public readonly extension: { id: string; name: string },
+  ) {
+    super(`Steering blocked by extension ${extension.name}: ${reason}`, 403);
+    this.name = "SteeringBlockedError";
+  }
+}
+
+const steeringModifySchema = z.strictObject({
+  message: z.string().refine((message) => message.trim().length > 0, "Message must not be empty"),
+});
+
 /** Server-side entry point for the global steering kill switch. */
 export function isSteeringEnabled(): boolean {
   return readSteeringEnabled();
@@ -51,11 +67,26 @@ export interface RequestSteeringArgs {
   createdByKind?: SteeringMessage["createdByKind"];
   createdByUserId?: string;
   createdByAgentId?: string;
+  messageTimestamps?: string[];
+  slack?: TaskSteerEvent["slack"];
+}
+
+/**
+ * The harness a steer is delivered through. An agent or task with no provider
+ * set runs the default `claude` harness. `requestSteering` and the advertised
+ * `supportedSteerModes` both read this, so the composer's label always matches
+ * what a send does.
+ */
+function resolveSteerProvider(
+  task: Pick<AgentTask, "provider">,
+  agent: Pick<Agent, "provider" | "harnessProvider"> | null,
+): ProviderName {
+  return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
 }
 
 async function providerForTask(task: AgentTask): Promise<ProviderName> {
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
-  return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
+  return resolveSteerProvider(task, agent);
 }
 
 export interface TaskSteeringFields {
@@ -65,11 +96,16 @@ export interface TaskSteeringFields {
 
 type SteeringAgent = Pick<Agent, "isLead" | "provider" | "harnessProvider">;
 
+function supportedModesForTask(task: AgentTask, provider: ProviderName): SteerMode[] {
+  return provider === "claude" && task.providerMeta?.transport === "sdk"
+    ? ["steer", "queue"]
+    : PROVIDER_STEER_CAPABILITIES[provider];
+}
+
 function steeringFieldsFor(task: AgentTask, agent: SteeringAgent | null): TaskSteeringFields {
-  const provider = agent?.harnessProvider ?? agent?.provider ?? task.provider;
   return {
     isLeadTask: agent?.isLead ?? false,
-    supportedSteerModes: provider ? PROVIDER_STEER_CAPABILITIES[provider] : [],
+    supportedSteerModes: supportedModesForTask(task, resolveSteerProvider(task, agent)),
   };
 }
 
@@ -120,6 +156,17 @@ export async function getTaskSteeringFieldsForTasks(
 }
 
 /**
+ * The task source of a promoted steer. `AgentTaskSource` has no `script` or
+ * `app-page`: a script steer becomes an `api` task and an app-page steer (a
+ * person on a json-render page) a `ui` task.
+ */
+function promotedTaskSource(source: SteeringSource): AgentTask["source"] {
+  if (source === "script") return "api";
+  if (source === "app-page") return "ui";
+  return source;
+}
+
+/**
  * Convert an undeliverable steering message into a normal follow-up task.
  * Step 2 reuses this seam for pending rows discovered during terminal sweeps.
  */
@@ -132,7 +179,7 @@ export async function promoteSteeringToTask(
     routingReason: task.agentId ? "continuity" : undefined,
     routingSource: task.agentId ? "engine_default" : undefined,
     creatorAgentId: message.createdByAgentId,
-    source: message.source === "script" ? "api" : message.source,
+    source: promotedTaskSource(message.source),
     taskType: "follow-up",
     parentTaskId: task.id,
     requestedByUserId: message.createdByUserId,
@@ -291,8 +338,37 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
 
   const requestedMode = args.mode ?? "queue";
   const onUnsupported = args.onUnsupported ?? "degrade";
-  const provider = await providerForTask(task);
-  const supportedModes = PROVIDER_STEER_CAPABILITIES[provider];
+  // The dispatcher loads task/workflow assets; keep it off the HTTP boot import cycle.
+  const { dispatchPre, extensionIdForAgent } = await import("../extensions/dispatcher");
+  const preSteer = await dispatchPre(
+    "pre.task.steer",
+    {
+      task,
+      message: args.message,
+      mode: requestedMode,
+      source: args.source ?? "api",
+      sender: {
+        kind: args.createdByKind ?? "system",
+        userId: args.createdByUserId,
+        agentId: args.createdByAgentId,
+      },
+      messageTimestamps: args.messageTimestamps,
+      slack: args.slack,
+    },
+    {
+      skipExtensionId: extensionIdForAgent(args.createdByAgentId),
+      validateModify: (data) => steeringModifySchema.safeParse(data),
+    },
+  );
+  if (preSteer.action === "block") {
+    throw new SteeringBlockedError(preSteer.reason, preSteer.extension);
+  }
+
+  // A hook can outlive the running session. Decide delivery from the current task.
+  const currentTask = await getTaskById(args.taskId);
+  if (!currentTask) throw new SteeringRequestError("Task not found", 404);
+  const provider = await providerForTask(currentTask);
+  const supportedModes = supportedModesForTask(currentTask, provider);
 
   if (onUnsupported === "fail" && !supportedModes.includes(requestedMode)) {
     const supported = supportedModes.length > 0 ? supportedModes.join(", ") : "none";
@@ -302,12 +378,12 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
     );
   }
 
-  const activeTask = task.status === "paused" ? await resumeTask(task.id) : task;
+  const activeTask = currentTask.status === "paused" ? await resumeTask(task.id) : currentTask;
   if (!activeTask) {
     throw new SteeringRequestError("Failed to resume paused task", 500);
   }
 
-  const body = scrubSecrets(args.message);
+  const body = scrubSecrets(preSteer.action === "modify" ? preSteer.data.message : args.message);
   // A task whose session hasn't started yet can still accept queued steering:
   // the row stays `pending` and the worker delivers it once the session is
   // live (the dispatch poll covers every active task). Interrupting a session

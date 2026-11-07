@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 
@@ -83,6 +83,15 @@ async function mount() {
   };
 }
 
+/** The prompt opens this long after the step turns done. */
+const OPEN_DELAY_MS = 2_000;
+
+async function elapse(ms = OPEN_DELAY_MS) {
+  await act(async () => {
+    jest.advanceTimersByTime(ms);
+  });
+}
+
 beforeEach(() => {
   firstTask = "todo";
   isAdmin = true;
@@ -93,6 +102,11 @@ beforeEach(() => {
   localStorage.clear();
   document.body.innerHTML = "";
   resetFirstTaskInviteWatchForTests();
+  jest.useFakeTimers();
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 describe("FirstTaskInvitePrompt", () => {
@@ -102,6 +116,7 @@ describe("FirstTaskInvitePrompt", () => {
 
     firstTask = "done";
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(true);
     expect(localStorage.getItem(firstTaskInviteKey(API_URL, USER_ID))).toBe("1");
     await view.unmount();
@@ -111,6 +126,7 @@ describe("FirstTaskInvitePrompt", () => {
     const again = await mount();
     firstTask = "done";
     await again.rerender();
+    await elapse();
     expect(again.opened()).toBe(false);
   });
 
@@ -127,6 +143,7 @@ describe("FirstTaskInvitePrompt", () => {
     firstTask = "done";
     fetchedAt = () => Date.now() + 60_000;
     await shell.rerender();
+    await elapse();
     expect(shell.opened()).toBe(true);
   });
 
@@ -134,6 +151,7 @@ describe("FirstTaskInvitePrompt", () => {
     firstTask = "done";
     const view = await mount();
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(false);
   });
 
@@ -143,6 +161,7 @@ describe("FirstTaskInvitePrompt", () => {
     firstTask = "done";
     fetchedAt = () => Date.now() + 60_000;
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(false);
   });
 
@@ -151,6 +170,7 @@ describe("FirstTaskInvitePrompt", () => {
     const view = await mount();
     firstTask = "done";
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(false);
   });
 
@@ -159,6 +179,7 @@ describe("FirstTaskInvitePrompt", () => {
     const view = await mount();
     firstTask = "done";
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(false);
   });
 
@@ -167,6 +188,7 @@ describe("FirstTaskInvitePrompt", () => {
     const view = await mount();
     firstTask = "done";
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(true);
     expect(view.text()).toContain("Do you work with someone?");
   });
@@ -176,6 +198,7 @@ describe("FirstTaskInvitePrompt", () => {
     const team = await mount();
     firstTask = "done";
     await team.rerender();
+    await elapse();
     expect(team.text()).toContain("Bring your team in");
     await team.unmount();
 
@@ -186,6 +209,7 @@ describe("FirstTaskInvitePrompt", () => {
     const unsized = await mount();
     firstTask = "done";
     await unsized.rerender();
+    await elapse();
     expect(unsized.text()).toContain("Invite a teammate");
   });
 
@@ -194,10 +218,54 @@ describe("FirstTaskInvitePrompt", () => {
     const view = await mount();
     firstTask = "done";
     await view.rerender();
+    await elapse();
     expect(view.opened()).toBe(false);
 
     userId = USER_ID;
     await view.rerender();
+    await elapse();
+    expect(view.opened()).toBe(true);
+  });
+
+  test("opens 2 s after the first task is done, so the answer renders first", async () => {
+    const view = await mount();
+    firstTask = "done";
+    await view.rerender();
+    await elapse(OPEN_DELAY_MS - 1);
+    expect(view.opened()).toBe(false);
+    expect(localStorage.getItem(firstTaskInviteKey(API_URL, USER_ID))).toBeNull();
+
+    await elapse(1);
+    expect(view.opened()).toBe(true);
+    expect(localStorage.getItem(firstTaskInviteKey(API_URL, USER_ID))).toBe("1");
+  });
+
+  test("an unmount during the delay cancels the offer", async () => {
+    const view = await mount();
+    firstTask = "done";
+    await view.rerender();
+    await elapse(OPEN_DELAY_MS / 2);
+    await view.unmount();
+    await elapse();
+    expect(localStorage.getItem(firstTaskInviteKey(API_URL, USER_ID))).toBeNull();
+  });
+
+  test("the delay starts again when a condition stops holding", async () => {
+    const view = await mount();
+    firstTask = "done";
+    await view.rerender();
+    await elapse(OPEN_DELAY_MS / 2);
+    userId = null;
+    await view.rerender();
+    await elapse();
+    expect(view.opened()).toBe(false);
+    expect(localStorage.getItem(firstTaskInviteKey(API_URL, USER_ID))).toBeNull();
+
+    userId = USER_ID;
+    await view.rerender();
+    await elapse(OPEN_DELAY_MS - 1);
+    expect(view.opened()).toBe(false);
+    await elapse(1);
     expect(view.opened()).toBe(true);
   });
 });

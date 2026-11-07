@@ -79,7 +79,7 @@ runtime-globals shim:
 
 The `fetch` available in the runtime IS the one Bun provides — same shape as
 Node 18+'s undici fetch. Prefer `ctx.stdlib.fetch` / `ctx.stdlib.fetchJson` for
-built-in retries; bare `fetch` works too.
+built-in retries; bare `fetch` works too. See [Retries](#retries).
 
 For external APIs that need secrets, prefer
 [script connections](/docs/guides/script-connections) for typed `ctx.api` /
@@ -87,6 +87,19 @@ For external APIs that need secrets, prefer
 [scripts credential broker](/docs/guides/scripts-credential-broker) when you
 truly need a hand-written `fetch()`. In both cases, avoid putting raw tokens in
 source or args.
+
+### When a run ends
+
+A run ends when the script's default export resolves. On `native`, a call
+the script started but did not await (a `fetch`, a `ctx.swarm.kv_set`, a nested
+`ctx.swarm.script_run`) gets 2 s more to settle. Anything still pending then is
+stopped, and `stderr` says so. A run with nothing pending ends at once. On
+`quickjs` the executor aborts open host calls as soon as the run ends (see
+[Executors](#executors)). Await every call whose effect must land.
+
+This lets a `Promise.race` deadline bound a run. A nested `script_run` that
+lost the race is not cancelled: it keeps running on the server under its own
+wall-clock limit and records its own run.
 
 ### Console + logger
 
@@ -105,10 +118,58 @@ Bun's Node compatibility layer makes these available:
   `LANG`, `LC_ALL`, `PATH`, `TMPDIR`, `SWARM_SCRIPT_*` (internal).
 - `process.platform`, `process.arch`, `process.version`, `process.cwd()`, `process.hrtime()`
 
+### Retries
+
+Three layers retry transient failures: status 429, 502, 503 or 504, or a
+network error.
+
+- **`ctx.swarm`** retries on its own. A 429 retries on every call, honouring
+  `Retry-After`. A 502, 503, 504 or network error retries only on a read
+  (GET routes and read tools such as `db_query`, `kv_get`, `get_*`, `list_*`)
+  or on a write whose route dedupes by its `Idempotency-Key` header, such as
+  `workflow_trigger` with `idempotencyKey`. Any other write is not repeated:
+  it may have landed. Retries of a read stop after about 5 seconds, including
+  a retry that hangs: the call then returns the earlier failure. A write's
+  retry, keyed or not, is never cut off: it may be the write's first real run,
+  and cutting it off would report a failure for work that went ahead.
+- **`ctx.stdlib.fetch` / `fetchJson`** retry by method. A 429 retries on every
+  method. A 502, 503, 504 or network error retries on GET, HEAD, OPTIONS, PUT
+  and DELETE, and on a POST or PATCH only when it carries an `Idempotency-Key`
+  header. `retry: { idempotencyKey: true }` sends one generated UUID on every
+  attempt (pass a string to choose it). The key prevents a duplicate only when
+  the server dedupes by it. A stream body or a consumed `Request` gets one
+  attempt. `retry: false` makes one attempt; an object takes the `retry()`
+  options below. `retries: n` (total attempts) still works but is deprecated.
+- **`retry(fn, options?)`** wraps any function, sync or async. It calls
+  `fn(attempt)` (1-based) and returns a Promise of its result. By default it
+  retries any throw, plus a returned failed `Response`, `ctx.api` raw result or
+  `ctx.swarm` envelope (`{ success: false, status }`) with a transient status.
+  Options: `retries` (default 3), `minDelayMs` (200, doubled per retry with
+  jitter), `maxDelayMs` (5000, also caps a `Retry-After` wait), `budgetMs`
+  (30000 in total), `retryOn(errorOrResult, attempt)` to replace the
+  default rule, and `signal`: once it aborts, `retry` stops waiting and rejects
+  with its reason (`ctx.stdlib.fetch` passes its own `signal`). When attempts or
+  budget run out it rethrows the last error or returns the last result. `retry.wrap(fn, options?)` returns a reusable
+  function with `fn`'s arguments.
+
+```ts
+const rows = await ctx.stdlib.retry(async () => {
+  const res = await ctx.swarm.db_query({ sql: "SELECT 1" });
+  if (!res.success) throw new Error(`db_query failed: ${res.status}`);
+  return res.data;
+});
+
+await ctx.stdlib.fetch("https://api.example.com/orders", {
+  method: "POST",
+  body: JSON.stringify(order),
+  retry: { idempotencyKey: true },
+});
+```
+
 ### Swarm-specific imports
 
 ```ts
-import { fetch, fetchJson, grep, glob, table, Redacted } from "stdlib";
+import { fetch, fetchJson, grep, glob, table, retry, Redacted } from "stdlib";
 // stdlib also flows through ctx.stdlib at runtime
 ```
 
@@ -140,12 +201,16 @@ The `ScriptContext` passed to your `default` export carries:
   drive at `/afs`, memory everywhere else) and a bash interpreter over it. See
   [Files and shell](#files-and-shell).
 - `ctx.stdlib` — the runtime helpers (`fetch`, `fetchJson`, `grep`, `glob`,
-  `table`, `Redacted`).
+  `table`, `retry`, `Redacted`). See [Retries](#retries).
 - `ctx.logger` — Console-compatible logger; same destination as the global
   `console`.
 
-Most SDK results are wrapper objects; read `response.data ?? response` before
-narrowing the payload. Prefer registered connections for authenticated calls:
+Most SDK results are wrapper objects `{ success, status, data }`; read
+`response.data ?? response` before narrowing the payload. `success` is false
+when the HTTP call failed, and also when a tool reached through the generic MCP
+bridge refused the call (HTTP 200 with `data.success === false`); a refusal
+also copies `data.message` to `message`. Failures
+resolve; they do not throw, except for `script_search` and `script_run`. Prefer registered connections for authenticated calls:
 credentials are attached server-side and do not enter script source or args.
 
 Stored scripts are not automatically re-typechecked when an app definition or
@@ -382,12 +447,19 @@ access except the host calls below. These are the differences from `native`:
 
 - **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`,
   `ctx.stdlib.fetch`,
-  `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
+  `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.retry`, `ctx.stdlib.Redacted`,
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
   `clearTimeout`, `setInterval`, `clearInterval`, `URL`, `URLSearchParams`,
   `TextEncoder`, `TextDecoder` (UTF-8 only), `atob`, `btoa`, `crypto.randomUUID`,
-  `crypto.getRandomValues`, and the `zod`, `zod/mini`, `stdlib`, and
-  `swarm-sdk` imports.
+  `crypto.getRandomValues`, `structuredClone`, and the `zod`, `zod/mini`,
+  `stdlib`, and `swarm-sdk` imports.
+- **`structuredClone`:** clones primitives, objects and class instances (as plain
+  objects), sparse arrays, boxed primitives, dates, regular expressions, maps,
+  sets, built-in errors, `ArrayBuffer`, typed arrays and `DataView`. Cycles and
+  shared references are preserved. Error subtypes and messages are retained;
+  custom error properties, including `cause`, are not. Non-empty transfer lists
+  and shared or resizable buffers throw `DataCloneError`; proxy objects are
+  outside the shim's supported surface. Cloning runs entirely inside the sandbox.
 - **`fetch` bodies:** a request body can be a string, a `Uint8Array` or other
   typed array, an `ArrayBuffer`, or `URLSearchParams`. A binary body is
   capped at 16 MiB, and the binary bodies one run has in flight or queued at
@@ -396,8 +468,8 @@ access except the host calls below. These are the differences from `native`:
   `FormData`, `arrayBuffer()`, and `AbortSignal` are not supported.
 - **Not available:** `ctx.stdlib.glob`, `ctx.stdlib.grep`, `process`, `Bun`,
   `Buffer`, `crypto.subtle`, `Intl` (so `toLocaleString(locale, options)`
-  ignores its arguments), `AbortController`, `AbortSignal`, and
-  `structuredClone`. The typecheck accepts some of them, so `script-upsert`,
+  ignores its arguments), `AbortController`, and `AbortSignal`.
+  The typecheck accepts some of them, so `script-upsert`,
   script API creation, and app writes return a `warnings` list when the source
   uses one. The same list flags a literal `fetch`, `ctx.stdlib.fetch`, or
   `fetchJson` URL whose host is single-label or private: whether quickjs

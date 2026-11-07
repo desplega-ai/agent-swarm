@@ -38,7 +38,7 @@ Plug your alerting ([Datadog](https://www.datadoghq.com/) / [New Relic](https://
 Three independent flows:
 
 1. **Reactive** — alert webhooks fire, the lead triages signal vs. noise (some alerts are expected — e.g. customer-test failures shouldn't go to [Sentry](https://sentry.io/)), and routes real bugs to a code-capable agent.
-2. **Scheduled audits** — daily infra triage, daily workflow-health audit, weekly code-health scans, weekly dependency-upgrade bundling.
+2. **Scheduled audits** — daily infra triage, daily status report (workflow and schedule health), weekly code-health scans, weekly dependency-upgrade bundling.
 3. **Proposal mode** — for slow-burn issues, the agent opens a PR with a *proposed* fix and a writeup, not a silent merge.
 
 ## Agents
@@ -70,7 +70,7 @@ Three independent flows:
 ## Workflows / Schedules
 
 - **`daily-infra-morning-triage`** — daily. [SigNoz](https://signoz.io/)-driven checklist (alert fires + resolutions, host peaks, collector uptime, container counts, metric volume). Posts a tight digest. **Observation-only.**
-- **`daily-workflow-health-audit`** — daily. Surfaces hard failures, halted runs, silent empty-output completions, cron-stuck schedules, consecutive-error schedules. One digest.
+- **`daily-status-report`** — daily. Surfaces hard failures, halted runs, silent empty-output completions, cron-stuck schedules and consecutive-error schedules, alongside agent capacity and classified task failures. One digest.
 - **`daily-blocker-digest`** — daily. Verifies every PR/issue reference in the operational runbook is still open; flags merged-but-still-listed items.
 - **`weekly-dependabot-triage`** — weekly. Closes out-of-scope dependabot PRs, bundles in-scope upgrades into one unified PR per path.
 - **`weekly-harness-upgrade-check`** — weekly. Checks worker-image harness versions vs. upstream, opens ONE bundled PR.

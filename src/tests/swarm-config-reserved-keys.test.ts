@@ -155,6 +155,9 @@ describe("swarm-config reserved keys guard", () => {
     "EXTENSION_ALLOW_LEAD_ACTIVATION",
     "extension_allow_lead_activation",
     "CHAT_SDK_API_URL_OVERRIDES",
+    "CODEX_OAUTH_DEVICE_BASE_URL",
+    "DESPLEGA_TELEMETRY_ENDPOINT",
+    "CLOUDFLARE_API_BASE_URL",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };
@@ -191,6 +194,12 @@ describe("swarm-config reserved keys guard", () => {
       expect(isReservedConfigKey("Api_Key")).toBe(true);
       expect(isReservedConfigKey("secrets_encryption_key")).toBe(true);
       expect(isReservedConfigKey("Secrets_Encryption_Key")).toBe(true);
+    });
+
+    test("recognizes the GitHub host keys (they redirect GitHub tokens)", () => {
+      expect(isReservedConfigKey("GITHUB_URL")).toBe(true);
+      expect(isReservedConfigKey("GITHUB_API_URL")).toBe(true);
+      expect(isReservedConfigKey("GITHUB_TOKEN")).toBe(false);
     });
 
     test("does not match unrelated keys", () => {
@@ -468,6 +477,17 @@ describe("swarm-config reserved keys guard", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe(EXPECTED_MESSAGE("API_KEY"));
+    });
+
+    test("returns 400 for reserved key GITHUB_URL", async () => {
+      const res = await fetch(`${baseUrl}/api/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "global", key: "GITHUB_URL", value: "https://evil.test" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe(EXPECTED_MESSAGE("GITHUB_URL"));
     });
 
     test("returns 400 for case variant 'Api_Key'", async () => {

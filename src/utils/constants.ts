@@ -2,7 +2,8 @@
  * Shared constants used across worker- and server-side code.
  */
 
-import { isEnvFlagEnabled } from "./env-flag";
+import { isEnvFlagEnabled, parseEnvFlag } from "./env-flag";
+import { isDevOrTestNodeEnv } from "./node-env";
 
 /** Maximum profile-file length in JavaScript characters (not UTF-8 bytes). */
 export const MAX_PROFILE_FILE_LENGTH = 256 * 1024;
@@ -43,6 +44,24 @@ export function getConfiguredAppUrls(): string[] {
  */
 export function getAppUrl(fallback = DEFAULT_APP_URL): string {
   return (getConfiguredAppUrls()[0] || fallback).replace(/\/+$/, "");
+}
+
+/**
+ * Local dashboard origins (Vite ports and portless `*.localhost`) that may
+ * iframe pages without being listed in `APP_URL`. Returned only when NODE_ENV
+ * is explicitly development or test: deployed images leave NODE_ENV unset, and
+ * an unset value must not let a localhost origin frame production pages.
+ */
+export function getLocalDevAppOrigins(): string[] {
+  if (!isDevOrTestNodeEnv()) return [];
+  return [
+    "http://localhost:5274",
+    "http://localhost:5175",
+    "http://127.0.0.1:5274",
+    "http://127.0.0.1:5175",
+    "https://*.localhost",
+    "http://*.localhost",
+  ];
 }
 
 /**
@@ -93,30 +112,44 @@ export function getAgentFsLiveUrl(): string {
 export type AgentFsLinkTarget = "dashboard" | "live";
 
 /**
- * The operator's `AGENT_FS_LINK_TARGET` choice (trimmed, lowercased). Null when
- * unset, blank, or invalid: every surface then keeps its automatic behavior.
+ * Where people-facing file links point. An explicit `AGENT_FS_LINK_TARGET`
+ * (trimmed, lowercased) wins. Unset, blank, or invalid: `dashboard` when an
+ * `APP_URL` / `DASHBOARD_URL` is configured (not the hosted fallback) and
+ * Comb is not explicitly off (`COMB_ENABLED=false`), else `live`.
  */
-export function readAgentFsLinkTarget(): AgentFsLinkTarget | null {
+export function readAgentFsLinkTarget(): AgentFsLinkTarget {
   const raw = process.env.AGENT_FS_LINK_TARGET?.trim().toLowerCase();
-  return raw === "dashboard" || raw === "live" ? raw : null;
+  if (raw === "dashboard" || raw === "live") return raw;
+  return getConfiguredAppUrls().length > 0 && !isCombExplicitlyOff() ? "dashboard" : "live";
 }
 
 /**
  * The base URL (no trailing slash) that a people-facing file link starts with,
  * per {@link readAgentFsLinkTarget}. `dashboard` uses `APP_URL` when one is
- * configured (and, for attachments, Comb is on), else the live app. Null when
- * no target is set: the caller keeps its current code path.
+ * configured and Comb is on, else the live app.
  *
- * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`,
- * and an explicit `dashboard` is the operator's choice.
+ * The prompt surface checks only an explicit `COMB_ENABLED=false`: a worker
+ * sees `COMB_ENABLED` only from a swarm_config row (RELOADABLE_ENV_KEYS in
+ * runner.ts) and may lack the API's agent-fs settings, so `isCombEnabled()`
+ * does not hold there.
  */
-export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string | null {
-  const target = readAgentFsLinkTarget();
-  if (target === null) return null;
-  if (target === "dashboard" && getConfiguredAppUrls().length > 0) {
-    if (surface === "prompt" || isCombEnabled()) return getAppUrl();
+export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string {
+  if (readAgentFsLinkTarget() === "dashboard" && getConfiguredAppUrls().length > 0) {
+    if (surface === "prompt" ? !isCombExplicitlyOff() : isCombEnabled()) return getAppUrl();
   }
   return getAgentFsLiveUrl();
+}
+
+/**
+ * The query string for a file link that starts with `base`. A live-app link
+ * gets `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set, so a browser with
+ * no agent-fs key knows which agent-fs to sign in to (the agent-fs invite link
+ * convention). Empty for a dashboard link or with no public agent-fs URL.
+ */
+export function agentFsFileLinkQuery(base: string): string {
+  if (base !== getAgentFsLiveUrl()) return "";
+  const publicUrl = process.env.AGENT_FS_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  return publicUrl ? `?apiUrl=${encodeURIComponent(publicUrl)}` : "";
 }
 
 /**
@@ -180,41 +213,73 @@ export function agentFsFileRoute(opts: AgentFsFileRef): string | null {
  * when that route is null; callers fall back to the raw `agent-fs:<path>`
  * display instead.
  *
- * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
+ * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>[?apiUrl=<AGENT_FS_PUBLIC_URL>]
  */
 export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
   const route = agentFsFileRoute(opts);
-  return route ? `${getAgentFsLiveUrl()}/file/~/${route}` : null;
+  const live = getAgentFsLiveUrl();
+  return route ? `${live}/file/~/${route}${agentFsFileLinkQuery(live)}` : null;
+}
+
+export interface CombState {
+  enabled: boolean;
+  /** An explicit `COMB_ENABLED` decided it; otherwise the unset default did. */
+  explicit: boolean;
+  /** What is missing, for `/status` `agent_fs.comb.reason`. Null when Comb is on. */
+  reason: string | null;
 }
 
 /**
- * Comb (the agent-fs review space in the dashboard) is on: `COMB_ENABLED` plus
- * an agent-fs API URL. `getCombConfig()` (`src/comb/config.ts`) reports it.
+ * Comb (the agent-fs review space in the dashboard). It always needs
+ * `AGENT_FS_API_URL`, and an explicit `COMB_ENABLED=false` turns it off. An
+ * explicit `COMB_ENABLED=true` turns it on. Unset, it is on only when the
+ * browser has an agent-fs address: `AGENT_FS_PUBLIC_URL`, or the API's
+ * `/agentfs` proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`).
+ * Reads `process.env` per call, so a config reload applies without a restart.
+ */
+export function getCombState(): CombState {
+  const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
+  const explicit = isCombFlagExplicit();
+  if (isCombExplicitlyOff()) {
+    return { enabled: false, explicit, reason: "COMB_ENABLED is false." };
+  }
+  if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
+  if (!explicit && !process.env.AGENT_FS_PUBLIC_URL?.trim() && !isAgentFsProxyEnabled()) {
+    return {
+      enabled: false,
+      explicit,
+      reason:
+        "AGENT_FS_PROXY is false and AGENT_FS_PUBLIC_URL is not set, so a browser has no agent-fs address.",
+    };
+  }
+  return { enabled: true, explicit, reason: null };
+}
+
+/** `COMB_ENABLED` holds a recognized flag literal (the two parses agree only then). */
+function isCombFlagExplicit(): boolean {
+  const raw = process.env.COMB_ENABLED;
+  return parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
+}
+
+/** `COMB_ENABLED` is an explicit false. Also readable on a worker, unlike {@link isCombEnabled}. */
+export function isCombExplicitlyOff(): boolean {
+  return isCombFlagExplicit() && !isEnvFlagEnabled("COMB_ENABLED", false);
+}
+
+/**
+ * Comb is on: see {@link getCombState}. `getCombConfig()` (`src/comb/config.ts`)
+ * reports it.
  */
 export function isCombEnabled(): boolean {
-  const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
-  return isEnvFlagEnabled("COMB_ENABLED", false) && Boolean(apiUrl);
+  return getCombState().enabled;
 }
 
 /**
  * `AGENT_FS_PROXY`: the API serves agent-fs at `/agentfs/*` (plus the public
  * `/share/*` and `/site/*` pages), and Comb uses `<public API URL>/agentfs`.
- * Read per request, so a config upsert applies without a restart. Off by default.
+ * Read per request, so a config upsert applies without a restart.
+ * Defaults on when `AGENT_FS_API_URL` is nonblank. An explicit flag wins.
  */
 export function isAgentFsProxyEnabled(): boolean {
-  return isEnvFlagEnabled("AGENT_FS_PROXY", false);
-}
-
-/**
- * The dashboard (Comb) URL for an agent-fs file, same id and encoding rules as
- * {@link buildAgentFsLiveUrl}. Null unless Comb is on AND an explicit
- * `APP_URL` / `DASHBOARD_URL` is set: the hosted default dashboard cannot open
- * a self-hosted swarm's files.
- *
- * Shape:  ${appUrl}/file/~/<orgId>/<driveId>/<normalized-path>
- */
-export function buildCombFileUrl(opts: AgentFsFileRef): string | null {
-  if (!isCombEnabled() || getConfiguredAppUrls().length === 0) return null;
-  const route = agentFsFileRoute(opts);
-  return route ? `${getAppUrl()}/file/~/${route}` : null;
+  return isEnvFlagEnabled("AGENT_FS_PROXY", Boolean(process.env.AGENT_FS_API_URL?.trim()));
 }

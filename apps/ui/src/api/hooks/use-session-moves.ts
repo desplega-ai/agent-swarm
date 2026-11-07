@@ -1,6 +1,5 @@
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SESSIONS_TOAST_POSITION } from "@/lib/sessions-v2";
 import { api } from "../client";
 import type { SessionMoveResult, SessionPrefixMoveResult } from "../types";
 import { SESSION_TREE_KEY } from "./use-session-tree";
@@ -8,11 +7,15 @@ import { SESSION_TREE_KEY } from "./use-session-tree";
 /** The server moves at most 200 sessions per call. */
 const MOVE_BATCH = 200;
 
-/** A move changes keys in the tree, the lists, and each moved session's detail. */
-function invalidateAfterMove(queryClient: QueryClient) {
+/**
+ * A move changes keys in the tree, the lists, and each moved session's detail.
+ * A group rename also moves the stars on the group (`["favorites", "key"]`).
+ */
+export function invalidateAfterMove(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["session"] });
+  void queryClient.invalidateQueries({ queryKey: ["favorites", "key"] });
 }
 
 /**
@@ -33,10 +36,7 @@ export function useMoveSessions() {
       }
       return result;
     },
-    onError: (error) =>
-      toast.error(error.message || "Couldn't move the sessions", {
-        position: SESSIONS_TOAST_POSITION,
-      }),
+    onError: (error) => toast.error(error.message || "Couldn't move the sessions"),
     onSettled: () => invalidateAfterMove(queryClient),
   });
 }
@@ -69,10 +69,7 @@ export function useMovePrefix() {
       } while (page.remaining > 0 && page.moved.length > 0);
       return result;
     },
-    onError: (error) =>
-      toast.error(error.message || "Couldn't move the group", {
-        position: SESSIONS_TOAST_POSITION,
-      }),
+    onError: (error) => toast.error(error.message || "Couldn't move the group"),
     onSettled: () => invalidateAfterMove(queryClient),
   });
 }

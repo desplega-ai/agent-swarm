@@ -13,6 +13,7 @@ import {
 } from "@/be/db";
 import { rememberSessionLabel } from "@/be/db/session-labels";
 import { resolveIdentity } from "@/be/identity";
+import { SteeringBlockedError } from "@/be/steering";
 import { recordUnmappedIdentity } from "@/be/unmapped-identities";
 import { dispatchPre } from "@/extensions/dispatcher";
 import { resolveTemplate } from "@/prompts/resolver";
@@ -34,6 +35,7 @@ import {
 import { getChatThreadResetAt } from "./commands";
 import { type ChatAddressedReason, formatChatHeaderFacts, readChatMessageFacts } from "./facts";
 import { errorMessage } from "./logger";
+import { chatMessageText } from "./message-text";
 import { emitChatMessageSent, postChatMessage } from "./outbound";
 import {
   chatAdapterReacts,
@@ -122,7 +124,7 @@ export async function handleChatInbound(
     messageId: message.id,
   });
 
-  let text = stripBotMention(message.text ?? "", thread.adapter);
+  let text = stripBotMention(chatMessageText(message), thread.adapter);
   const immediate = /^!now\b/i.test(text);
   if (immediate) text = text.replace(/^!now\s*/i, "").trim();
   const attachments = message.attachments ?? [];
@@ -154,11 +156,20 @@ export async function handleChatInbound(
   // A thread with messages already waiting keeps its order: append, do not steer past them.
   // Another sender's message takes the buffer, so it gets its own header and requester.
   if (!immediate && attachments.length === 0 && text && !isChatThreadBuffered(thread.id)) {
-    const steering = await requestChatThreadSteering({
-      contextKey: chatSdkContextKey(thread.id),
-      message: text,
-      resolveSender: () => resolveChatSender(adapter, message.author.userId),
-    });
+    let steering: Awaited<ReturnType<typeof requestChatThreadSteering>>;
+    try {
+      steering = await requestChatThreadSteering({
+        contextKey: chatSdkContextKey(thread.id),
+        message: text,
+        resolveSender: () => resolveChatSender(adapter, message.author.userId),
+      });
+    } catch (error) {
+      if (!(error instanceof SteeringBlockedError)) throw error;
+      console.info(`[chat-sdk] ${thread.id}: steering blocked: ${error.reason}`);
+      stopTypingKeepalive(thread.id);
+      await setChatMessageReaction(adapter, thread.id, message.id, "failed");
+      return;
+    }
     if (steering) {
       console.log(
         `[chat-sdk] ${adapter} message steered task ${steering.task.id} (${steering.result.outcome})`,
@@ -304,18 +315,19 @@ async function getChatThreadContext(
     for (const m of thread.recentMessages) byId.set(m.id, m);
     return [...byId.values()]
       .sort((a, b) => a.metadata.dateSent.getTime() - b.metadata.dateSent.getTime())
-      .filter((m) => !exclude.has(m.id) && m.text.trim() !== "")
-      .filter((m) => since === null || m.metadata.dateSent.getTime() > since.getTime())
+      .map((m) => ({ m, text: chatMessageText(m) }))
+      .filter(({ m, text }) => !exclude.has(m.id) && text.trim() !== "")
+      .filter(({ m }) => since === null || m.metadata.dateSent.getTime() > since.getTime())
       .slice(-THREAD_CONTEXT_LIMIT)
-      .map((m) => {
+      .map(({ m, text }) => {
         if (m.author.isMe || m.author.isBot === true) {
           const truncated =
-            m.text.length > AGENT_MESSAGE_TRUNCATE
-              ? `${m.text.slice(0, AGENT_MESSAGE_TRUNCATE)}...`
-              : m.text;
+            text.length > AGENT_MESSAGE_TRUNCATE
+              ? `${text.slice(0, AGENT_MESSAGE_TRUNCATE)}...`
+              : text;
           return `[Agent]: ${truncated}`;
         }
-        return `${m.author.userName || m.author.fullName || m.author.userId}: ${m.text}`;
+        return `${m.author.userName || m.author.fullName || m.author.userId}: ${text}`;
       })
       .join("\n");
   } catch (error) {

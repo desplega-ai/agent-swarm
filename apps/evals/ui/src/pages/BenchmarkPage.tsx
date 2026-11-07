@@ -76,8 +76,16 @@ function fmtDay(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? iso : d.toISOString().slice(0, 10);
 }
 
-function readVersionParam(): string | null {
-  return new URLSearchParams(window.location.search).get("v");
+/** The snapshot the page shows; `snapshot` null = the newest of that suite version. */
+interface Selection {
+  version: string;
+  snapshot: string | null;
+}
+
+function readSelectionParam(): Selection | null {
+  const params = new URLSearchParams(window.location.search);
+  const version = params.get("v");
+  return version ? { version, snapshot: params.get("d") } : null;
 }
 
 function DotTip({ dot, axis }: { dot: FrontierDot; axis: FrontierAxis }): ReactNode {
@@ -369,10 +377,17 @@ function DisclosureSection({ snapshot }: { snapshot: BenchmarkSnapshot }): React
 
 function PublicHeader(props: {
   index: BenchmarkIndex | null;
-  version: string | null;
-  onVersion: (v: string) => void;
+  selected: Selection | null;
+  onSelect: (s: Selection) => void;
 }): ReactNode {
   const versions = props.index?.versions ?? [];
+  // No `d` in the URL = the newest snapshot of that suite version.
+  const current =
+    versions.find(
+      (v) =>
+        v.suiteVersion === props.selected?.version &&
+        (props.selected.snapshot === null || v.snapshot === props.selected.snapshot),
+    ) ?? null;
   // Logged in = the evals app has a stored key; anonymous visitors see no link.
   const [loggedIn] = useState(() => getStoredApiKey() !== null);
   return (
@@ -393,11 +408,19 @@ function PublicHeader(props: {
       {versions.length > 0 ? (
         <label className="bm-version">
           <span className="dim">version</span>
-          <select value={props.version ?? ""} onChange={(e) => props.onVersion(e.target.value)}>
+          <select
+            value={current ? `${current.suiteVersion}/${current.snapshot}` : ""}
+            onChange={(e) => {
+              const [version = "", snapshot = null] = e.target.value.split("/");
+              props.onSelect({ version, snapshot });
+            }}
+          >
             {versions.map((v) => (
-              <option key={v.suiteVersion} value={v.suiteVersion}>
-                v{v.suiteVersion}
-                {v.publishedAt ? ` · ${fmtDay(v.publishedAt)}` : ""}
+              <option
+                key={`${v.suiteVersion}/${v.snapshot}`}
+                value={`${v.suiteVersion}/${v.snapshot}`}
+              >
+                v{v.suiteVersion} · {v.snapshot}
               </option>
             ))}
           </select>
@@ -418,7 +441,7 @@ const METHODOLOGY_URL =
 
 export default function BenchmarkPage(): ReactNode {
   const [index, setIndex] = useState<BenchmarkIndex | null>(null);
-  const [version, setVersion] = useState<string | null>(readVersionParam);
+  const [selected, setSelected] = useState<Selection | null>(readSelectionParam);
   const [snapshot, setSnapshot] = useState<BenchmarkSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -426,25 +449,27 @@ export default function BenchmarkPage(): ReactNode {
     getBenchmarkIndex()
       .then((idx) => {
         setIndex(idx);
-        setVersion((v) => v ?? idx.latest);
+        setSelected((s) => s ?? (idx.latest ? { version: idx.latest, snapshot: null } : null));
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   useEffect(() => {
-    if (!version) return;
+    if (!selected) return;
     setSnapshot(null);
-    getBenchmarkSnapshot(version)
+    getBenchmarkSnapshot(selected.version, selected.snapshot)
       .then(setSnapshot)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-  }, [version]);
+  }, [selected]);
 
-  const pickVersion = (v: string) => {
+  const pickSnapshot = (s: Selection) => {
     const url = new URL(window.location.href);
-    url.searchParams.set("v", v);
+    url.searchParams.set("v", s.version);
+    if (s.snapshot) url.searchParams.set("d", s.snapshot);
+    else url.searchParams.delete("d");
     window.history.replaceState(null, "", url);
     setError(null);
-    setVersion(v);
+    setSelected(s);
   };
 
   let body: ReactNode;
@@ -509,7 +534,7 @@ export default function BenchmarkPage(): ReactNode {
 
   return (
     <>
-      <PublicHeader index={index} version={version} onVersion={pickVersion} />
+      <PublicHeader index={index} selected={selected} onSelect={pickSnapshot} />
       <main className="app-main bm-main">{body}</main>
     </>
   );

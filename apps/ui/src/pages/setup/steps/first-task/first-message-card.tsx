@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { preloadSessionsPage } from "@/app/sessions-route";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { ComposerDock } from "@/components/sessions/composer-dock";
@@ -35,6 +36,12 @@ type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
 /** The composer placeholder while it waits. */
 const WAITING_PLACEHOLDER = "Waiting for the lead to come online…";
 
+function prepareSessionsPage() {
+  return preloadSessionsPage().catch(() => {
+    // The route loader handles chunk failures and shows the reload prompt.
+  });
+}
+
 export function FirstTaskComposer({
   onboarding,
   act,
@@ -49,6 +56,9 @@ export function FirstTaskComposer({
   const { state: userState, userId, locked } = useCurrentUser();
   // Users and sessions both ship in 1.76.0.
   const { supported: usersSupported } = useFeatureGate("1.76.0");
+  useEffect(() => {
+    if (usersSupported) void prepareSessionsPage();
+  }, [usersSupported]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +88,7 @@ export function FirstTaskComposer({
     if (!task || sending || !live) return;
     setSending(true);
     setError(null);
+    const sessionReady = usersSupported ? prepareSessionsPage() : undefined;
     try {
       const created = await api.createTask({
         task,
@@ -95,6 +106,8 @@ export function FirstTaskComposer({
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      // A quick send can beat the preload. Keep setup visible until it finishes.
+      await sessionReady;
       void navigate(taskPath(created.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send the task.");

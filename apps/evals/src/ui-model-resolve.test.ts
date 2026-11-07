@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { providerForModel } from "@desplega/model-catalog";
 import { configs } from "../configs/index.ts";
 import { buildModelResolver, modelIdCandidates } from "../ui/src/lib/model-resolve.ts";
 import type { ModelJson } from "../ui/src/types.ts";
@@ -72,8 +73,11 @@ describe("seeded configs against the real /api/models sources", () => {
       harnessModels: await listHarnessModels(),
       aliases: await getClaudeAliasMap(),
     });
+    // Registry-routed models (helmcode/…) have no models.dev price card; the UI shows the raw id.
     const misses = configs
-      .filter((c) => c.model !== undefined && resolve(c.model) === null)
+      .filter(
+        (c) => c.model !== undefined && !providerForModel(c.model) && resolve(c.model) === null,
+      )
       .map((c) => `${c.id} (${c.model})`);
     expect(misses).toEqual([]);
   });

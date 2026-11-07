@@ -4,7 +4,6 @@ import {
   createMcpServer,
   deleteMcpServer,
   emitMcpServerConnectedTelemetry,
-  getAgentById,
   getAgentMcpServers,
   getMcpServerById,
   getResolvedConfig,
@@ -13,6 +12,7 @@ import {
   uninstallMcpServer,
   type updateMcpServer,
 } from "../be/db";
+import { countMcpServerInstalls } from "../be/db-queries/mcp-servers";
 import { updateMcpServerChecked } from "../be/mcp-server-checked-update";
 import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
@@ -29,6 +29,7 @@ import {
 } from "../rbac";
 import { AgentMcpServerSchema, McpServerSchema, McpServerWithInstallInfoSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -64,7 +65,15 @@ const listMcpServersRoute = route({
   responses: {
     200: {
       description: "MCP server list",
-      schema: z.object({ servers: z.array(McpServerSchema), total: z.number() }),
+      schema: z.object({
+        servers: z.array(
+          McpServerSchema.extend({
+            /** Agents with an active install of this server. */
+            installCount: z.number().optional(),
+          }),
+        ),
+        total: z.number(),
+      }),
     },
   },
 });
@@ -106,6 +115,10 @@ const createMcpServerRoute = route({
   responses: {
     201: { description: "MCP server created", schema: z.object({ server: McpServerSchema }) },
     400: { description: "Validation error" },
+    409: {
+      description:
+        "A server with this name already exists in the same scope and owner (mcp_server_name_taken)",
+    },
   },
   rbac: { permission: "mcp-server.create.swarm" },
 });
@@ -210,12 +223,12 @@ const getAgentMcpServersRoute = route({
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 async function canResolveMcpSecretsForHttpUser(req: IncomingMessage): Promise<boolean> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind !== "user") return true;
+  const userId = authUserId(getRequestAuth(req));
+  if (!userId) return true;
   if (!isRbacEnabled()) return true;
 
   const verb: PermissionVerb = "mcp-server.read.secrets";
-  const grant = await getUserGrant(auth.userId);
+  const grant = await getUserGrant(userId);
   const decision =
     grant.grantsAll || grant.verbs.has(verb)
       ? ({ allow: true, verb } as const)
@@ -225,7 +238,7 @@ async function canResolveMcpSecretsForHttpUser(req: IncomingMessage): Promise<bo
           verb,
         } as const);
   enqueueAdmissionRow({
-    userId: auth.userId,
+    userId,
     decision,
     method: req.method,
     route: getAgentMcpServersRoute.def.path,
@@ -244,17 +257,9 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
  * cannot use that key to bypass the route's declared RBAC permission.
  */
 async function mcpServerPrincipal(req: IncomingMessage): Promise<RbacPrincipal> {
-  const agentId = singleHeader(req, "x-agent-id");
-  if (agentId) {
-    const agent = await getAgentById(agentId);
-    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
-  }
-
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return { kind: "operator" };
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  return { kind: "agent", agentId: "", isLead: false };
+  return agentFirstPrincipal(req, singleHeader(req, "x-agent-id"), {
+    unauthenticatedFallback: "anonymous-agent",
+  });
 }
 
 type McpServerVerb = Extract<
@@ -469,7 +474,11 @@ export async function handleMcpServers(
       search: parsed.query.search,
     });
 
-    listMcpServersRoute.respond(res, 200, { servers, total: servers.length });
+    const installs = await countMcpServerInstalls();
+    listMcpServersRoute.respond(res, 200, {
+      servers: servers.map((server) => ({ ...server, installCount: installs.get(server.id) ?? 0 })),
+      total: servers.length,
+    });
     return true;
   }
 
@@ -526,6 +535,10 @@ export async function handleMcpServers(
       await emitMcpServerConnectedTelemetry();
       createMcpServerRoute.respond(res, 201, { server });
     } catch (err) {
+      if (err instanceof Error && err.message.includes("UNIQUE constraint")) {
+        jsonError(res, "mcp_server_name_taken", 409);
+        return true;
+      }
       jsonError(res, err instanceof Error ? err.message : "Create failed", 400);
     }
     return true;

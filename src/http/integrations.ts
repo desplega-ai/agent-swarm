@@ -7,6 +7,7 @@ import {
   getChatSdkStatus,
   registerTelegramWebhook,
 } from "../integrations/chat-sdk/status";
+import { getSlackAppIconUrl } from "../slack/app-icon";
 import { buildSlackManifest } from "../slack/manifest";
 import { selectCredential } from "../utils/credentials";
 import { ensureHttpPermission } from "./config";
@@ -117,6 +118,20 @@ const slackManifestRoute = route({
   },
 });
 
+const slackAppIconRoute = route({
+  method: "get",
+  path: "/api/integrations/slack/app-icon",
+  pattern: ["api", "integrations", "slack", "app-icon"],
+  summary: "The Slack app's own avatar, shown on posts with no icon override",
+  tags: ["Integrations"],
+  responses: {
+    200: {
+      description: "`imageUrl` is null when Slack is off or the lookup fails.",
+      schema: z.object({ imageUrl: z.string().nullable() }),
+    },
+  },
+});
+
 const chatSdkStatusRoute = route({
   method: "get",
   path: "/api/integrations/chat/status",
@@ -173,6 +188,11 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
       const parsed = await slackManifestRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       slackManifestRoute.respond(res, 200, buildSlackManifest(parsed.query.name));
+      return true;
+    }
+
+    if (slackAppIconRoute.match(req.method, pathSegments)) {
+      slackAppIconRoute.respond(res, 200, { imageUrl: await getSlackAppIconUrl() });
       return true;
     }
 

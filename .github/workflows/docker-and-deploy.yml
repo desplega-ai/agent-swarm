@@ -9,14 +9,17 @@ on:
       - "Dockerfile"
       - "Dockerfile.worker"
       - "Dockerfile.ui"
-      - "apps/ui/nginx.conf"
       - "docker-entrypoint.sh"
       - "api-entrypoint.sh"
       - "package.json"
       - "bun.lock*"
       - "bunfig.toml"
       - ".dockerignore"
-      - "apps/ui/package.json"
+      - "apps/ui/**"
+      - "packages/model-catalog/**"
+      - "packages/model-routing/**"
+      - "slack-manifest.json"
+      - "vendored-openapi/**"
       - "apps/templates-ui/package.json"
       - "apps/evals/package.json"
       - "tsconfig.json"
@@ -99,7 +102,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -143,7 +146,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -184,7 +187,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -237,7 +240,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -282,7 +285,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -324,7 +327,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -380,7 +383,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -428,7 +431,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -472,7 +475,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -525,7 +528,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -573,7 +576,7 @@ jobs:
       packages: read
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -645,7 +648,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -654,25 +657,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # Skip only when a newer main commit touches on.push.paths, so it starts its
+      # own run and deploy. A newer docs-only commit starts no run; skipping for it
+      # would leave prod on an older deploy. is_tip=true means "this run deploys".
+      # Logic and regression test: scripts/deploy-guard.sh, src/tests/deploy-guard.test.ts.
       - name: Check running commit is main tip
         id: guard
         shell: bash
-        run: |
-          set -euo pipefail
-
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          main_tip="$(git rev-parse origin/main)"
-
-          echo "Running commit: ${GITHUB_SHA}"
-          echo "Current origin/main: ${main_tip}"
-
-          if [ "${GITHUB_SHA}" = "${main_tip}" ]; then
-            echo "is_tip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Running commit is still the main tip; proceeding with tag promotion and deploy"
-          else
-            echo "is_tip=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping tag promotion and deploy because a newer main commit is available: ${main_tip}"
-          fi
+        run: bash scripts/deploy-guard.sh
 
       # Read before promotion: the commit :latest points at now is the previous
       # deploy, which bounds the change list in the Slack notification.
@@ -1135,6 +1127,7 @@ jobs:
         run: |
           TAG="v${VERSION}"
           VERSION_SLUG="${VERSION//./-}"
+          AGENT_FS_NOTES=$(bun scripts/agent-fs-release-notes.ts "$TAG")
           cat > /tmp/release-notes.md <<EOF
           ## Install & Run
 
@@ -1172,6 +1165,8 @@ jobs:
           agent-swarm-worker-${VERSION_SLUG}
           agent-swarm-worker-latest
           \`\`\`
+
+          ${AGENT_FS_NOTES}
 
           ---
           EOF

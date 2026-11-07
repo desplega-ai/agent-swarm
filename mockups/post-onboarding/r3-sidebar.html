@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar · Round 3 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<link rel="stylesheet" href="./r3-kit.css">
+<style>
+/* a sidebar-only frame: the window canvas with the inset panels on it */
+.spec { position: relative; display: flex; gap: var(--gap); padding: var(--gap); height: var(--h, 700px); background: var(--shell); border: 1px solid var(--color-border); border-radius: calc(var(--panel-r) + var(--gap)); box-shadow: var(--frame-shadow); }
+.spec > nav.side { flex: none; width: 248px; border: 1px solid var(--color-border); border-radius: var(--panel-r); overflow: hidden; }
+.spec > nav.side.rail { width: 50px; }
+.spec .rest { flex: 1; min-width: 0; background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--panel-r); box-shadow: var(--shadow-xs); overflow: hidden; }
+.spec .rest .topbar { padding: 0 16px; }
+.spec.w-side { width: 266px; }
+.spec.w-rail { width: 68px; }
+.spec.w-exp { width: 540px; }
+.spec.w-rx { width: 340px; }
+.fly { width: 232px; }
+.fly.build { width: 200px; }
+
+.legend { margin: 12px 0 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.5; color: var(--color-muted-foreground); max-width: 340px; }
+.legend li + li { margin-top: 4px; }
+.legend b { color: var(--color-foreground); font-weight: 500; }
+.pair { display: flex; gap: 16px; align-items: stretch; }
+.spec.fit { height: auto; }
+
+/* flat vs inset */
+.cmp { flex-wrap: nowrap; }
+.cmp > .x-col { flex: 1 1 0; min-width: 0; }
+.app.mini { min-width: 0; }
+.app.mini .search { width: 168px; }
+.mini .body { display: flex; flex-direction: column; gap: 16px; }
+.nyi { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface); border: 1px solid var(--color-border-subtle); }
+.nyi .ic { width: 14px; height: 14px; color: var(--color-foreground); }
+.w-h .pill { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; display: grid; place-items: center; font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 700; background: var(--color-primary); color: var(--color-primary-foreground); }
+
+/* variants: a short comparison beside the frames */
+.vs { flex: 1 1 320px; max-width: 460px; }
+.vs h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--color-muted-foreground); }
+.vs dl { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); overflow: hidden; font-size: 13px; }
+.vs dl > * { margin: 0; padding: 9px 12px; border-top: 1px solid var(--color-border-subtle); }
+.vs dl > :nth-child(-n+3) { border-top: 0; font-size: 12px; font-weight: 500; color: var(--color-muted-foreground); background: color-mix(in oklch, var(--color-muted) 50%, transparent); }
+.vs dd { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.vs .lean { margin: 14px 0 0; font-size: 13px; line-height: 1.55; color: var(--color-muted-foreground); text-wrap: pretty; }
+.vs .lean b { color: var(--color-foreground); font-weight: 500; }
+.vlab { display: inline-flex; align-items: center; gap: 8px; }
+.vlab .num { width: 20px; height: 20px; display: inline-grid; place-items: center; border-radius: 6px; border: 1px solid var(--color-border); font-family: var(--font-mono); font-size: 11px; color: var(--color-foreground); }
+
+/* the gutter demo: a guide at the right edge of the rows */
+.gut { gap: 16px; }
+.gut .sep-col { width: 32px; }
+.guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed color-mix(in oklch, var(--color-primary) 70%, transparent); pointer-events: none; z-index: 2; }
+.meas { margin: 10px 0 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--color-muted-foreground); }
+.meas b { font-family: var(--font-mono); font-weight: 700; color: var(--color-foreground); font-variant-numeric: tabular-nums; }
+.meas .ok { color: var(--color-status-success-strong); }
+.meas .bad { color: var(--color-status-error-strong); }
+.nogutter .side-body { scrollbar-gutter: auto; padding-right: 8px; }
+.gut-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.gut-h h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.gut-h span { font-size: 12px; color: var(--color-muted-foreground); }
+
+/* phone: the sheet is an inset panel too */
+.phone.p760 { height: 760px; }
+.phone .sheet { top: 44px; bottom: 24px; left: 0; width: 300px; padding: 8px; background: transparent; border: 0; }
+.phone .sheet nav.side { width: 100%; flex: 1; border: 1px solid var(--color-border); border-radius: var(--panel-r); overflow: hidden; box-shadow: 0 16px 40px -16px oklch(0 0 0 / .4); }
+.home-mini { display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 760px) { .cmp { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<header class="x-top" data-page="sidebar"></header>
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Sidebar: inset panels, two ways to group</h1>
+    <p>The sidebar and the page are now two panels on the window canvas. Each panel has 12px corners and a hairline border, 8px from the window edge and from each other. The groups change in two places: Templates leaves Build, and Schedules and Workflows move out of Build.</p>
+    <ul>
+      <li><b>Inset.</b> In code: shadcn <span class="mono">variant="floating"</span> on the Sidebar, plus <span class="mono">m-2 ml-0 rounded-xl border</span> on SidebarInset. The canvas is one new token.</li>
+      <li><b>Two variants.</b> Variant 1 puts Schedules and Workflows in Work. Variant 2 gives them a group named Automate. Build holds Agents, Tasks, Skills, Memory and Scripts, and is collapsed on a first visit.</li>
+      <li><b>No width jump.</b> Every scroll container keeps an 8px gutter (<span class="mono">scrollbar-gutter: stable</span>). The sidebar uses that gutter as its right padding, so a row is the same width with or without a scrollbar.</li>
+      <li><b>Settings flyout.</b> Eight entries, then Advanced: Secrets, Templates, Connection playground and Raw fetch credentials.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone sheet follows.</p>
+
+  <section class="x-state x-desk">
+    <h2>Inset, next to the round-2 flat sidebar</h2>
+    <p class="x-cap">Same content, same width. On the left, the sidebar runs to the window edge and a rule separates it from the page. On the right, both panels float on the canvas.</p>
+    <div class="x-row cmp">
+      <div class="x-col">
+        <h3>Round 2: flat</h3>
+        <div class="app mini" style="--h: 600px"><nav class="side" data-active="home" aria-label="Main navigation, flat"></nav><div class="main" data-mini></div></div>
+      </div>
+      <div class="x-col">
+        <h3>Round 3: inset</h3>
+        <div class="app mini inset" style="--h: 600px"><nav class="side" data-active="home" aria-label="Main navigation, inset"></nav><div class="main" data-mini></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>Two ways to group</h2>
+    <p class="x-cap">Both variants with Build collapsed, expanded and as the icon rail. Same 15 destinations, same order inside each group.</p>
+    <div class="x-row">
+      <div class="x-col">
+        <h3><span class="vlab"><span class="num">1</span>Schedules and Workflows in Work</span></h3>
+        <div class="pair">
+          <div class="spec w-side fit"><nav class="side" data-variant="1" data-active="home" aria-label="Variant 1, expanded"></nav></div>
+          <div class="spec w-rail fit"><nav class="side" data-variant="1" data-rail data-active="home" aria-label="Variant 1, icon rail"></nav></div>
+        </div>
+        <ul class="legend"><li><b>Work</b> is everything you use in a normal week, including the jobs that run on their own.</li></ul>
+      </div>
+      <div class="x-col">
+        <h3><span class="vlab"><span class="num">2</span>Automate as its own group</span></h3>
+        <div class="pair">
+          <div class="spec w-side fit"><nav class="side" data-variant="2" data-active="home" aria-label="Variant 2, expanded"></nav></div>
+          <div class="spec w-rail fit"><nav class="side" data-variant="2" data-rail data-active="home" aria-label="Variant 2, icon rail"></nav></div>
+        </div>
+        <ul class="legend"><li><b>Automate</b> names the jobs that run without you. The rail gets a third rule.</li></ul>
+      </div>
+      <div class="vs">
+        <h3>Side by side</h3>
+        <dl>
+          <dt>&nbsp;</dt><dt>Variant 1</dt><dt>Variant 2</dt>
+          <dt>Rows on a first visit</dt><dd>11</dd><dd>11</dd>
+          <dt>Group labels</dt><dd>3</dd><dd>4</dd>
+          <dt>Rules in the icon rail</dt><dd>2</dd><dd>3</dd>
+          <dt>Rows in Work</dt><dd>7</dd><dd>5</dd>
+          <dt>Smallest group</dt><dd>3</dd><dd>2</dd>
+        </dl>
+        <p class="lean"><b>Lean: Variant 1.</b> Automate holds only two rows, close to the one-row Connect group that round 1 rejected. Seven rows in Work still scan in one look. Pick Variant 2 if Automate will grow (triggers, webhooks).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2>No width jump when a scrollbar appears</h2>
+    <p class="x-cap">The dashed line marks the right edge of the Home row in the collapsed frame of each pair. With the gutter kept, Build can open and the rows stay on the line. Without it, the scrollbar takes 8px from every row.</p>
+    <div class="x-row gut">
+      <div class="x-col"><div class="gut-h"><h3>Gutter kept, Build open</h3></div>
+        <div class="spec w-side" style="--h: 660px" data-guide="a"><nav class="side" data-active="home" data-build-open aria-label="Gutter kept, Build open"></nav></div><p class="meas" data-meas></p></div>
+      <div class="x-col"><div class="gut-h"><h3>Gutter kept, Build closed</h3></div>
+        <div class="spec w-side" style="--h: 660px" data-guide="a" data-ref><nav class="side" data-active="home" aria-label="Gutter kept, Build closed"></nav></div><p class="meas" data-meas></p></div>
+      <div class="sep-col" aria-hidden="true"></div>
+      <div class="x-col nogutter"><div class="gut-h"><h3>Round 2, Build open</h3><span>no gutter</span></div>
+        <div class="spec w-side" style="--h: 660px" data-guide="b"><nav class="side" data-active="home" data-build-open aria-label="No gutter, Build open"></nav></div><p class="meas" data-meas></p></div>
+      <div class="x-col nogutter"><div class="gut-h"><h3>Round 2, Build closed</h3><span>no gutter</span></div>
+        <div class="spec w-side" style="--h: 660px" data-guide="b" data-ref><nav class="side" data-active="home" aria-label="No gutter, Build closed"></nav></div><p class="meas" data-meas></p></div>
+    </div>
+  </section>
+
+  <section class="x-state">
+    <h2>Expanded, icon rail and phone</h2>
+    <p class="x-cap">Variant 1 in all three. The pointer rests on Settings in the first frame and on Build in the second. The phone sheet is an inset panel over a scrim.</p>
+    <div class="x-row">
+      <div class="x-col x-desk">
+        <h3>Expanded, Settings flyout</h3>
+        <div class="spec w-exp" style="--h: 760px">
+          <nav class="side" data-active="sessions" data-hover="settings" aria-label="Main navigation, expanded"></nav>
+          <div class="rest"><div class="topbar"><div class="crumbs"><b>Sessions</b></div></div></div>
+          <div class="fly" role="menu" aria-label="Settings" data-fly="settings" data-hl="people" data-anchor="settings"></div>
+        </div>
+        <ul class="legend">
+          <li><b>3</b> on Home: sessions that need you (approvals, questions, blocked credentials).</li>
+          <li><b>Dot</b> on AI providers: one key is rate limited. It clears when the key is healthy.</li>
+        </ul>
+      </div>
+      <div class="x-col x-desk">
+        <h3>Icon rail, Build flyout</h3>
+        <div class="spec w-rx" style="--h: 760px">
+          <nav class="side" data-rail data-active="sessions" data-hover="build" aria-label="Main navigation, icon rail"></nav>
+          <div class="rest"></div>
+          <div class="fly build" role="menu" aria-label="Build" data-fly="build" data-hl="tasks" data-anchor="build"></div>
+        </div>
+        <ul class="legend">
+          <li>Home shows a dot, not a number, at this width. The rail hides its scrollbar, so the gutter is zero there.</li>
+        </ul>
+      </div>
+      <div class="x-col">
+        <h3>Phone, menu open</h3>
+        <div class="phone p760">
+          <div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+          <div class="ptop"><span class="ic i-menu" aria-hidden="true"></span><span class="crumbs"><b>Good morning, Taras</b></span></div>
+          <div class="pbody">
+            <div class="home-mini">
+              <div class="w"><div class="w-h"><span class="ic i-circle-alert" aria-hidden="true"></span><h3 class="w-t">Needs you</h3><span class="pill">3</span></div>
+                <div class="li"><span class="nyi"><span class="ic i-clipboard-check" aria-hidden="true"></span></span><div class="tx"><div class="t1">Post the competitor digest</div><div class="t2">Approval · competitor-research</div></div></div>
+                <div class="li"><span class="nyi"><span class="ic i-message-circle" aria-hidden="true"></span></span><div class="tx"><div class="t1">Track Plane's self-hosted pricing?</div><div class="t2">Question · competitor-research</div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet"><nav class="side" data-active="home" aria-label="Main navigation, phone"></nav></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="./r3-kit.js"></script>
+<script>
+(function () {
+  var I = R3.icon;
+  /* the small page behind the flat/inset comparison */
+  var rows = [
+    ["i-clipboard-check", "Post the competitor digest to #market-intel", "Approval · Researcher", "2h"],
+    ["i-message-circle", "Should the scan also track Plane's self-hosted pricing?", "Question · Lead", "40m"],
+    ["i-key", "The pricing-scraper key expires in 3 days", "Script connection", "1d"],
+  ];
+  var prog = [["Competitor scan · manual run", "Researcher", "4m"], ["Draft the v2.6 changelog", "Writer", "12m"], ["Fix flaky e2e in ui-e2e", "Coder", "27m"]];
+  document.querySelectorAll("[data-mini]").forEach(function (m) {
+    m.innerHTML = '<div class="topbar"><div class="crumbs"><b>Good morning, Taras</b></div><span class="sp"></span><span class="search">' + I("i-search") + 'Search<kbd>⌘K</kbd></span></div>' +
+      '<div class="body"><section class="w" aria-label="Needs you"><div class="w-h">' + I("i-circle-alert") + '<h3 class="w-t">Needs you</h3><span class="pill">3</span><a class="w-a" href="#">All sessions</a></div>' +
+      rows.map(function (r) {
+        return '<div class="li"><span class="nyi">' + I(r[0]) + '</span><div class="tx"><div class="t1">' + r[1] + '</div><div class="t2">' + r[2] + '</div></div><span class="tm">' + r[3] + "</span></div>";
+      }).join("") + '</section><section class="w" aria-label="In progress"><div class="w-h">' + I("i-activity") + '<h3 class="w-t">In progress</h3><span class="w-n">3 running</span></div>' +
+      prog.map(function (p) {
+        return '<div class="li"><span class="st runn sm" title="Running"></span><div class="tx"><div class="t1">' + p[0] + '</div><div class="t2">' + p[1] + '</div></div><span class="tm">' + p[2] + "</span></div>";
+      }).join("") + "</section></div>";
+  });
+
+  /* flyouts sit next to the row that opened them */
+  function place() {
+    document.querySelectorAll(".fly[data-anchor]").forEach(function (f) {
+      var frame = f.parentElement, a = frame.querySelector(".ni.hov");
+      if (!a) return;
+      var fr = frame.getBoundingClientRect(), ar = a.getBoundingClientRect(), side = frame.querySelector("nav.side").getBoundingClientRect();
+      f.style.left = (side.right - fr.left + 6) + "px";
+      if (f.getAttribute("data-anchor") === "settings") { f.style.top = "auto"; f.style.bottom = (fr.bottom - ar.bottom - 4) + "px"; }
+      else { f.style.top = (ar.top - fr.top - 32) + "px"; }
+    });
+  }
+
+  /* measure the rows and draw the guide */
+  function measure() {
+    ["a", "b"].forEach(function (g) {
+      var frames = document.querySelectorAll('[data-guide="' + g + '"]');
+      var ref = document.querySelector('[data-guide="' + g + '"][data-ref]');
+      if (!ref) return;
+      var refRow = ref.querySelector(".ni.on"), rr = refRow.getBoundingClientRect(), fr0 = ref.getBoundingClientRect();
+      var x = rr.right - fr0.left - 1, refW = Math.round(rr.width);
+      frames.forEach(function (f) {
+        var line = f.querySelector(".guide") || f.appendChild(document.createElement("span"));
+        line.className = "guide"; line.style.left = x + "px";
+        var row = f.querySelector(".ni.on"), w = Math.round(row.getBoundingClientRect().width);
+        var body = f.querySelector(".side-body"), bar = body.scrollHeight > body.clientHeight;
+        var out = f.parentElement.querySelector("[data-meas]");
+        out.innerHTML = '<span>Row width <b>' + w + 'px</b></span><span>Scrollbar: ' + (bar ? "yes" : "no") + "</span>" +
+          (f.hasAttribute("data-ref") ? "<span>Reference row</span>" : (w === refW ? '<span class="ok">Same width as Build closed</span>' : '<span class="bad">' + (refW - w) + "px narrower than Build closed</span>"));
+      });
+    });
+  }
+  function run() { place(); measure(); }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(run); else run();
+  window.addEventListener("resize", run);
+})();
+</script>
+</body>
+</html>

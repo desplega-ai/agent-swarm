@@ -48,12 +48,15 @@ jobs:
         run: bun install --frozen-lockfile
 
       # ubuntu-latest ships without ffmpeg. Without it the renderer skips the step GIFs and
-      # the comment reads "no ffmpeg on the runner". Signed Ubuntu packages, about 40 seconds.
+      # the comment reads "no ffmpeg on the runner". Bound this optional install so apt failures
+      # or hangs do not prevent the Slack E2E steps from running.
       - name: Install ffmpeg for the step GIFs
+        timeout-minutes: 5
+        continue-on-error: true
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 install -y -qq --no-install-recommends ffmpeg
           ffmpeg -version | head -n 1
 
       # Scenario selection is by declared group (see each scenario file's `groups` field and

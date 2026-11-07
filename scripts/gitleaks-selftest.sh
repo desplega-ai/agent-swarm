@@ -5,7 +5,7 @@
 #      the output names the rule but never contains the key (proves --redact).
 #   2. A commit that adds a clean file passes (exit 0).
 #
-# The fake key is built at runtime from random characters, so this file holds
+# The fake key is built at runtime from shuffled characters, so this file holds
 # no secret-shaped literal for gitleaks or GitHub push protection to flag.
 #
 # Usage: bash scripts/gitleaks-selftest.sh
@@ -49,9 +49,30 @@ make_repo() {
   git_in "$dir" commit -q -m add
 }
 
+# Body of the fake AWS key id: 16 distinct characters, shuffled, from the
+# rule's [A-Z2-7] set minus the prefix letters A, K and I. gitleaks drops an
+# aws-access-token match whose Shannon entropy is <= 3, and a uniformly random
+# body falls there about once in 5,000 runs. Distinct characters pin the full
+# 20-character id at 4.22 bits on every run. With no A and no repeated letter,
+# the id also cannot hit the rule's `EXAMPLE$` allowlist or the global
+# `false` / `null$` allowlist.
+aws_key_id_body() {
+  local pool=BCDEFGHJLMNOPQRSTUVWXYZ234567 out="" i j c
+  local -a chars=()
+  for ((i = 0; i < ${#pool}; i++)); do chars+=("${pool:i:1}"); done
+  for ((i = 0; i < 16; i++)); do
+    j=$((i + RANDOM % (${#chars[@]} - i)))
+    c=${chars[i]}
+    chars[i]=${chars[j]}
+    chars[j]=$c
+    out+=${chars[i]}
+  done
+  printf '%s' "$out"
+}
+
 # 1. Leaky commit: must exit 1 and must not print the key. A download or
 # checksum failure exits 2, so it cannot pass as a finding.
-key_id="AKIA$(random_chars 'A-Z2-7' 16)"
+key_id="AKIA$(aws_key_id_body)"
 key_secret="$(random_chars 'A-Za-z0-9' 40)"
 leaky="$work/leaky"
 base=$(make_repo "$leaky" "aws_access_key_id = $key_id

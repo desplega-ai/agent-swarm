@@ -18,7 +18,7 @@ Every agent has a searchable memory backed by embeddings and stored in SQLite. T
 
 ### Embedding endpoints
 
-Set the endpoint in the `/setup` memory step or in **Settings → Integrations → Memory (embeddings)**. Both offer presets for OpenAI, OpenRouter, Vercel AI Gateway, Azure / Microsoft Foundry, and a custom URL. They send one test embedding and save the settings only when it works.
+Set the endpoint in the `/setup` memory step or in **Connect → AI providers → Memory (embeddings)**. Both offer presets for OpenAI, OpenRouter, Vercel AI Gateway, Azure / Microsoft Foundry, and a custom URL. They send one test embedding and save the settings only when it works.
 
 **Azure / Microsoft Foundry.** Azure serves its OpenAI-compatible v1 API under `/openai/v1`, and the model is the name of your embedding deployment:
 
@@ -32,7 +32,14 @@ The Azure preset takes the resource name or URL and appends `/openai/v1`. The de
 
 ### Local embeddings with TEI
 
-Swarm memory runs on a local [Hugging Face Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server, with no paid key. With `nomic-ai/nomic-embed-text-v1.5`, start TEI with a larger request cap and a lower token budget:
+The one-command installer already includes TEI for new installations.
+For manual Compose deployments, add [docker-compose.tei.yml](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.tei.yml) to the base example.
+Follow the [operator procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/embeddings.md) for CPU architecture, configuration, and verification.
+Swarm memory and agent-fs file search use separate embedding configuration.
+
+Swarm memory can use a local [Hugging Face Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server without a paid embedding key.
+This standalone example assumes the API runs on the host. For a containerized API, use the Compose overlay above.
+With `nomic-ai/nomic-embed-text-v1.5`, start TEI with a larger request cap and a lower token budget:
 
 ```bash
 docker run -d --name tei -p 8091:80 -v tei-data:/data \
@@ -44,7 +51,7 @@ docker run -d --name tei -p 8091:80 -v tei-data:/data \
 Then point the swarm at it:
 
 ```bash
-EMBEDDING_API_BASE_URL=http://tei:80/v1
+EMBEDDING_API_BASE_URL=http://localhost:8091/v1
 EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
 EMBEDDING_API_KEY=local-tei
 EMBEDDING_QUERY_PREFIX="search_query: "
@@ -52,14 +59,14 @@ EMBEDDING_DOCUMENT_PREFIX="search_document: "
 ```
 
 - `EMBEDDING_API_KEY` must be non-empty. TEI ignores it, but the swarm turns memory embeddings off without a key.
-- nomic-embed models need a task prefix on every input. The two prefix variables are used verbatim, so keep the trailing space. Unset means no prefix. Changing a prefix on an install with stored memories needs a re-embed.
+- nomic-embed models need a task prefix on every input. The two prefix variables are used verbatim, so keep the trailing space. Unset means no prefix. A new query prefix applies from the next search. A new document prefix re-embeds stored vectors (see the last item).
 - TEI's default `--max-client-batch-size` is 32. The swarm falls back to one request per input when a server rejects a request for its batch size (HTTP 413, or 422 with "batch size" in the message), but `256` avoids the extra requests.
 - With default flags TEI can use enough memory to be killed on an 8 GB box. `--max-batch-tokens 2048` keeps its peak near 1 GiB.
 - The API does not wait for TEI. While TEI is down (first boot, a restart), new memories are saved with no vector and search finds them by keyword. When an embedding call works again after a failed one, the API embeds those memories in the background.
 - Keep the default 512 dimensions. TEI truncates nomic's Matryoshka output to 512 correctly. The `memory_vec` table keeps the size it had at first boot, so do not change `EMBEDDING_DIMENSIONS` on an existing install.
 - The `/setup` memory probe accepts a private URL (such as `http://tei:80/v1`) only for the **existing** preset, which tests the server's own `EMBEDDING_API_BASE_URL`. A URL typed into the custom preset must still be public.
-- When the deployment environment sets a local endpoint, `/setup` and Settings, Integrations, Memory show a **Local** provider beside the hosted presets. A hosted preset that passes its test stores its URL, model and key. When its model is not the deployment's model, it also stores empty prefixes, because the nomic prefixes apply to nomic only. A pick of Local tests the deployment's own setup, then deletes the stored embeddings rows (`POST /api/onboarding/memory` with `{"preset":"existing","restoreDefault":true}`). A failed test changes no config.
-- A switch of model does not embed stored memories again. Their vectors stay from the old model, so search by meaning matches them poorly after the switch.
+- When the deployment environment sets a local endpoint, `/setup` and Connect, AI providers, Memory show a **Local** provider beside the hosted presets. A hosted preset that passes its test stores its URL, model and key. When its model is not the deployment's model, it also stores empty prefixes, because the nomic prefixes apply to nomic only. A pick of Local tests the deployment's own setup, then deletes the stored embeddings rows (`POST /api/onboarding/memory` with `{"preset":"existing","restoreDefault":true}`). A failed test changes no config.
+- A switch of endpoint, model, dimensions or document prefix re-embeds every stored memory and script in the background, in batches. Each row keeps its old vector until its new one lands, so search keeps working, with mixed ranking until the run ends. A restart or an outage pauses the run, and it resumes where it stopped. A new API key re-embeds nothing. The first boot of a version with this check records the current setup and re-embeds nothing.
 
 ### Memory Sources
 
@@ -75,7 +82,7 @@ Memories are automatically created from:
 
 | Scope | Path | Visibility |
 |-------|------|-----------|
-| Agent (private) | `memory-store` with `scope: "agent"` (default), or `/workspace/personal/memory/` | Only the owning agent |
+| Agent | `memory-store` with `scope: "agent"` (default), or `/workspace/personal/memory/` | The owning agent; also searchable by the lead agent |
 | Swarm (shared) | `memory-store` with `scope: "swarm"`, `inject-learning`, or `/workspace/shared/memory/<agentId>/` | All agents in the swarm |
 
 ### Automatic Scope Promotion
@@ -84,7 +91,7 @@ The `inject-learning` tool creates swarm-scoped memories by default, so learning
 
 ## TTL & Expiry
 
-Memories have a time-to-live (TTL) based on their source type. Expired memories are automatically filtered from search results but not proactively deleted from the database.
+Memories have a time-to-live (TTL) based on their source type. Expired memories are filtered from search results at once, and the periodic memory GC deletes them.
 
 | Source | TTL | Rationale |
 |--------|-----|-----------|
@@ -93,7 +100,11 @@ Memories have a time-to-live (TTL) based on their source type. Expired memories 
 | `file_index` | 30 days | File contents may change |
 | `manual` | Never expires | Explicitly stored knowledge is permanent |
 
-Expired memories can still be retrieved by ID via `memory-get` — only search results are filtered. The `memory-delete` tool provides explicit cleanup when needed.
+The key overrides the source in two cases. A memory under `/longterm/` never expires, whatever its source. A store-progress learning under `/learnings/` expires 30 days after it is written: one worth keeping is moved under `/longterm/`, which clears the expiry, and the rest ages out. A move into `/learnings/` starts the 30-day clock, and a move out of it takes the source's own TTL (none for `manual`). An in-place edit, or a move that crosses neither boundary, keeps the expiry.
+
+A store-progress learning that repeats a swarm memory under `/learnings/` or `/longterm/` (raw cosine 0.80 or higher) is not stored; the existing memory gets a positive rating instead. The check scores the newest 10,000 rows under each prefix: it is exact while a prefix holds at most 10,000 rows, and past that an older twin is missed and the API logs `capped=true`. It runs with or without the sqlite-vec extension.
+
+Before the periodic GC runs, expired memories can still be retrieved by ID via `memory-get`; once GC deletes them, they are no longer available. The `memory-delete` tool provides explicit cleanup when needed.
 
 ## Memory Retrieval & Reranking
 
@@ -160,7 +171,7 @@ Agents can search and manage memories using MCP tools:
 - **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating. Pass `keyPrefix` (for example `/longterm/facts/`) to search one logical path only. The filter runs inside each retrieval arm and the graph expansion, before the result cut. Reranking multiplies the score by a path weight: `/longterm/company-story` 1.4, `/longterm/entities` 1.3, `/longterm/facts` 1.2, `/longterm/decisions` 1.1, `/longterm/timeline` 0.8, a `/longterm/decisions` doc tagged `superseded` 0.3. A memory with any key outside `/longterm` (every legacy memory) is inbox material and keeps its score.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count). Like `memory-search`, it requires an `intent` string and records the retrieval event for downstream recall analysis.
 - **`memory-edit`** — Edit an existing memory in place without changing its ID. Agents may edit their own memories; editing another agent's memory by ID requires a lead, even when that memory is swarm-visible. Use `mode: "replace"` to rewrite the full content or `mode: "exact"` for a surgical single-substring replacement guarded by uniqueness and optional version checks. Pass `newKey` alone to move a memory to another logical path on every chunk without changing its ID, rating posterior, access count or author. Moving into `/longterm` also clears the expiry on every chunk; moving out does not bring it back.
-- **`memory-delete`** — Delete a memory. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories, even ones a worker wrote. `DELETE /api/memory/{id}` (used by the script SDK's `memory_delete`) enforces the same rule, and `POST /api/memory/list` returns an agent caller only its own memories plus swarm-scoped ones.
+- **`memory-delete`** — Delete a memory. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories, even ones a worker wrote. `DELETE /api/memory/{id}` (used by the script SDK's `memory_delete`) enforces the same rule, and `POST /api/memory/list` returns a non-lead agent caller only its own memories plus swarm-scoped ones.
 - **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 
 ### Recall Edges & Memory Links

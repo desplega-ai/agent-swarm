@@ -26,16 +26,24 @@ export interface FeatureGateResult {
   error: Error | null;
 }
 
-export function useFeatureGate(minVersion: string): FeatureGateResult {
-  const { data: currentVersion, isError, error } = useApiVersion();
+/**
+ * `useFeatureGate(minVersion).supported` for any number of versions: one
+ * hook call, then a check per version (the Cmd+K palette gates every route).
+ */
+export function useVersionGate(): (minVersion: string) => boolean {
+  const { data: currentVersion, isError } = useApiVersion();
   const stats = useStats();
-
-  const supported =
+  const devMode = !stats.isError && stats.data?.devMode === true;
+  return (minVersion) =>
     typeof currentVersion === "string" &&
     currentVersion.length > 0 &&
     !isError &&
-    ((!stats.isError && stats.data?.devMode === true) ||
-      compareSemver(currentVersion, minVersion) >= 0);
+    (devMode || compareSemver(currentVersion, minVersion) >= 0);
+}
+
+export function useFeatureGate(minVersion: string): FeatureGateResult {
+  const { data: currentVersion, isError, error } = useApiVersion();
+  const supported = useVersionGate()(minVersion);
 
   return {
     supported,

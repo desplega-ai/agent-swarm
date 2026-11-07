@@ -8,7 +8,7 @@ argument-hint: [base-branch]
 Create a PR (GitHub) or MR (GitLab) from the current branch with an auto-generated title and description.
 
 **Provider detection:** Check the remote URL:
-- If `github.com` → use `gh` CLI
+- If the remote is GitHub (`github.com` or the `$GITHUB_URL` host) → use `gh` CLI
 - If `gitlab.com` or `gitlab.` → use `glab` CLI
 
 ## Arguments

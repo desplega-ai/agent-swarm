@@ -1,0 +1,318 @@
+{
+  "definition": {
+    "pages": {
+      "main": {
+        "elements": {
+          "prTable": {
+            "type": "Table",
+            "props": {
+              "data": {
+                "$state": "/queries/allPrs/data"
+              },
+              "loading": {
+                "$state": "/queries/allPrs/loading"
+              },
+              "error": {
+                "$state": "/queries/allPrs/error"
+              },
+              "search": {
+                "$state": "/ui/prSearch/value"
+              },
+              "density": "compact",
+              "emptyState": {
+                "icon": "git-pull-request",
+                "title": "No open PRs",
+                "body": "Nothing open in the configured repos, or the first sync is still running."
+              },
+              "columns": [
+                {
+                  "key": "number",
+                  "label": "PR",
+                  "format": "{{repo}}#{{number}}",
+                  "width": 190,
+                  "pinned": "left",
+                  "filter": "text"
+                },
+                {
+                  "key": "title",
+                  "label": "Title",
+                  "tooltip": "title",
+                  "width": 320
+                },
+                {
+                  "key": "author",
+                  "label": "Author",
+                  "width": 136,
+                  "filter": "values"
+                },
+                {
+                  "key": "draft",
+                  "label": "Draft",
+                  "kind": "badge",
+                  "tones": {
+                    "draft": "paused",
+                    "ready": "neutral"
+                  },
+                  "width": 112
+                },
+                {
+                  "key": "ci",
+                  "label": "CI on head",
+                  "kind": "badge",
+                  "tones": {
+                    "green": "success",
+                    "red": "error",
+                    "pending": "pending",
+                    "none": "neutral"
+                  },
+                  "width": 136,
+                  "muted": [
+                    "none"
+                  ]
+                },
+                {
+                  "key": "mergeState",
+                  "label": "Mergeable",
+                  "kind": "badge",
+                  "tooltip": "mergeReason",
+                  "tones": {
+                    "clean": "success",
+                    "behind-only": "info",
+                    "blocked": "warning",
+                    "unstable": "warning",
+                    "computing": "pending",
+                    "real-conflict": "error",
+                    "stack-needs-rebase": "error",
+                    "draft": "paused"
+                  },
+                  "width": 168
+                },
+                {
+                  "key": "queue",
+                  "label": "Merge queue",
+                  "kind": "badge",
+                  "tones": {
+                    "no": "neutral",
+                    "no MQ": "paused"
+                  },
+                  "width": 146,
+                  "muted": [
+                    "no"
+                  ]
+                },
+                {
+                  "key": "jev",
+                  "label": "Jev review",
+                  "kind": "badge",
+                  "tones": {
+                    "done": "success",
+                    "running": "active",
+                    "failed": "error",
+                    "none": "neutral"
+                  },
+                  "width": 138,
+                  "muted": [
+                    "none"
+                  ]
+                },
+                {
+                  "key": "jevFindings",
+                  "label": "Findings",
+                  "kind": "number",
+                  "width": 104
+                },
+                {
+                  "key": "lead",
+                  "label": "Lead verdict",
+                  "kind": "badge",
+                  "tones": {
+                    "approved on head": "success",
+                    "approved, head moved": "warning",
+                    "changes requested": "error",
+                    "changes requested, head moved": "warning",
+                    "none": "neutral"
+                  },
+                  "width": 200,
+                  "muted": [
+                    "none"
+                  ]
+                },
+                {
+                  "key": "work",
+                  "label": "Swarm work",
+                  "tooltip": "work",
+                  "width": 200
+                },
+                {
+                  "key": "headSha",
+                  "label": "Head",
+                  "kind": "copy",
+                  "width": 100
+                },
+                {
+                  "key": "url",
+                  "label": "PR link",
+                  "kind": "link",
+                  "truncate": "middle",
+                  "width": 160
+                },
+                {
+                  "key": "leadUrl",
+                  "label": "Verdict link",
+                  "kind": "link",
+                  "truncate": "middle",
+                  "width": 160
+                },
+                {
+                  "key": "jevUrl",
+                  "label": "Jev report",
+                  "kind": "link",
+                  "truncate": "middle",
+                  "width": 160
+                },
+                {
+                  "key": "workUrl",
+                  "label": "Task link",
+                  "kind": "link",
+                  "truncate": "middle",
+                  "width": 160
+                },
+                {
+                  "key": "prUpdatedAt",
+                  "label": "PR updated",
+                  "kind": "relative",
+                  "width": 110
+                },
+                {
+                  "key": "fetchedAt",
+                  "label": "Fetched",
+                  "kind": "relative",
+                  "width": 100
+                }
+              ],
+              "rowActions": [
+                {
+                  "label": "Add to MQ",
+                  "icon": "git-pull-request",
+                  "placement": "menu",
+                  "confirm": {
+                    "title": "Add this PR to the merge queue?",
+                    "description": "Refused if draft, CI not green, conflicting, already queued, or the repo has no queue.",
+                    "confirmLabel": "Add to MQ"
+                  },
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "enqueue",
+                        "input": {
+                          "prs": [
+                            {
+                              "$row": "prKey"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.refresh"
+                    }
+                  ]
+                },
+                {
+                  "label": "Ask Lead review",
+                  "icon": "bot",
+                  "placement": "menu",
+                  "confirm": {
+                    "title": "Ask Lead for a review?",
+                    "description": "Skipped if the current head already has a Lead verdict or a review is in flight.",
+                    "confirmLabel": "Ask Lead"
+                  },
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "askReview",
+                        "input": {
+                          "prs": [
+                            {
+                              "$row": "prKey"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.refresh"
+                    }
+                  ]
+                }
+              ],
+              "id": "prTable",
+              "rowId": "prKey",
+              "selectable": true,
+              "mobile": "list",
+              "bulkActions": [
+                {
+                  "label": "Add to MQ",
+                  "icon": "git-pull-request",
+                  "confirm": {
+                    "title": "Add the selected PRs to the merge queue?",
+                    "description": "Refused per PR if draft, CI not green, conflicting, already queued, or the repo has no queue.",
+                    "confirmLabel": "Add to MQ"
+                  },
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "enqueue",
+                        "input": {
+                          "prs": {
+                            "$state": "/ui/prTable/selected"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.refresh"
+                    }
+                  ]
+                },
+                {
+                  "label": "Ask Lead review",
+                  "icon": "bot",
+                  "confirm": {
+                    "title": "Ask Lead to review the selected PRs?",
+                    "description": "Skipped per PR if the current head already has a Lead verdict or a review is in flight.",
+                    "confirmLabel": "Ask Lead"
+                  },
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "askReview",
+                        "input": {
+                          "prs": {
+                            "$state": "/ui/prTable/selected"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "action": "app.refresh"
+                    }
+                  ],
+                  "variant": "secondary"
+                }
+              ],
+              "filterable": true,
+              "clearState": [
+                "/ui/prSearch/value"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

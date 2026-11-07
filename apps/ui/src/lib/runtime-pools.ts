@@ -24,6 +24,7 @@ export const RUNTIME_PROVIDER_KINDS: readonly RuntimeProviderKind[] = [
   "static",
   "docker",
   "e2b",
+  "boxd",
   "k8s",
 ];
 
@@ -34,6 +35,7 @@ export const RUNTIME_KIND_LABEL: Record<RuntimeProviderKind, string> = {
   static: "Static",
   docker: "Docker",
   e2b: "E2B",
+  boxd: "boxd",
   k8s: "Kubernetes",
 };
 
@@ -41,6 +43,7 @@ export const RUNTIME_KIND_DESCRIPTION: Record<RuntimeProviderKind, string> = {
   static: "Operator-managed workers. The swarm never starts or stops them.",
   docker: "Containers on a Docker host.",
   e2b: "E2B cloud sandboxes.",
+  boxd: "boxd microVMs that run the worker image.",
   k8s: "Coming soon.",
 };
 

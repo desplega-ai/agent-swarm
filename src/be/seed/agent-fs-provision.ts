@@ -38,6 +38,7 @@ type InviteTarget = {
 };
 
 type OrgMember = {
+  userId?: string;
   email?: string | null;
   role?: string | null;
   user?: { email?: string | null } | null;
@@ -45,10 +46,11 @@ type OrgMember = {
 
 type FetchLike = typeof fetch;
 
-class AgentFsRequestError extends Error {
+export class AgentFsRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: string,
   ) {
     super(message);
   }
@@ -151,6 +153,17 @@ async function storeProvisionHash(value: string): Promise<void> {
   });
 }
 
+/** The API-owned bootstrap key: stored config, then env, then the legacy shared key. Empty when none. */
+async function resolveSharedApiKey(): Promise<string> {
+  return (
+    (await getConfigValue(API_KEY_CONFIG)) ||
+    process.env.API_AGENT_FS_API_KEY ||
+    process.env.AGENT_FS_API_KEY ||
+    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG)) ||
+    ""
+  );
+}
+
 export async function ensureAgentFsSharedProvisioning(options?: {
   apiUrl?: string;
   registerEmail?: string;
@@ -165,12 +178,7 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   if (!apiUrl) throw new Error("AGENT_FS_API_URL is not configured");
 
   const registerEmail = options?.registerEmail ?? (await resolveRegisterEmail());
-  let apiKey =
-    (await getConfigValue(API_KEY_CONFIG)) ||
-    process.env.API_AGENT_FS_API_KEY ||
-    process.env.AGENT_FS_API_KEY ||
-    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG)) ||
-    "";
+  let apiKey = await resolveSharedApiKey();
 
   if (!apiKey) {
     const registered = await agentFsRequest<{
@@ -233,7 +241,72 @@ export type SharedOrgInviteResult = {
   inviteId?: string;
   expiresAt?: string;
   acceptUrl?: string;
+  token?: string;
 };
+
+/** Use complete shared credentials without writes. Provision missing credentials otherwise. */
+export async function resolveAgentFsSharedContext(): Promise<{
+  apiUrl: string;
+  orgId: string;
+  driveId: string;
+  authHeaders: Record<string, string>;
+} | null> {
+  const apiUrl = await resolveApiUrl();
+  if (!apiUrl) return null;
+  const apiKey = await resolveSharedApiKey();
+  const orgId =
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) ||
+    process.env.AGENT_FS_DEFAULT_ORG_ID ||
+    (await getConfigValue("AGENT_FS_SHARED_ORG_ID")) ||
+    process.env.AGENT_FS_SHARED_ORG_ID;
+  const driveId =
+    (await getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID")) || process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+  if (apiKey && orgId && driveId) {
+    return { apiUrl, orgId, driveId, authHeaders: { authorization: `Bearer ${apiKey}` } };
+  }
+  return ensureAgentFsSharedProvisioning({ apiUrl });
+}
+
+/**
+ * Tell agent-fs which swarm the shared org trusts, so the live app can offer
+ * "Continue with <swarm>" (`PATCH /orgs/{orgId}` with `{ swarmUrl }`). Runs
+ * once per boot, after the seeders, with the explicit `APP_URL`. No URL (the
+ * hosted fallback is not this swarm) or an unprovisioned shared org is
+ * "skipped": it never provisions. The org is read first, and the swarm writes
+ * only when its `swarmUrl` is empty: an org admin can set it in the agent-fs
+ * app, and the swarm never overwrites that. A matching value is "unchanged",
+ * a different one is "kept", and neither writes. An agent-fs without the
+ * route (404 or 405, for example 0.18.17) is "unsupported", not an error.
+ */
+export async function syncAgentFsOrgSwarmUrl(
+  swarmUrl: string | undefined,
+): Promise<"set" | "unchanged" | "kept" | "unsupported" | "skipped"> {
+  if (!swarmUrl) return "skipped";
+  const apiUrl = await resolveApiUrl();
+  const apiKey =
+    (await getConfigValue(API_KEY_CONFIG)) ||
+    process.env.API_AGENT_FS_API_KEY ||
+    process.env.AGENT_FS_API_KEY;
+  const orgId =
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) || process.env.AGENT_FS_DEFAULT_ORG_ID;
+  if (!apiUrl || !apiKey || !orgId) return "skipped";
+  const orgPath = `/orgs/${encodeURIComponent(orgId)}`;
+  const headers = { authorization: `Bearer ${apiKey}` };
+  try {
+    const org = await agentFsRequest<{ swarmUrl?: unknown }>(apiUrl, orgPath, { headers });
+    const current = typeof org?.swarmUrl === "string" ? org.swarmUrl.trim() : "";
+    // agent-fs drops the trailing slash when it stores the value.
+    if (current === swarmUrl.replace(/\/+$/, "")) return "unchanged";
+    if (current) return "kept";
+    await agentFsRequest(apiUrl, orgPath, { method: "PATCH", headers, body: { swarmUrl } });
+    return "set";
+  } catch (error) {
+    if (error instanceof AgentFsRequestError && (error.status === 404 || error.status === 405)) {
+      return "unsupported";
+    }
+    throw error;
+  }
+}
 
 /**
  * Invite an external (non-agent) member into the shared org using the
@@ -242,16 +315,19 @@ export type SharedOrgInviteResult = {
  * Connect-to-Drive flow) never need the bootstrap key itself — it is
  * API-only and never served over HTTP.
  *
- * agent-fs (>= 0.18.9) adds an email that has an account directly
- * (`status: "added"`) and answers an email without one with a pending invite
- * (`status: "pending"`, plus `acceptUrl` when its app URL is configured).
- * agent-fs sends no email, so the accept link is passed back to the caller.
+ * agent-fs (>= 0.18.19) adds an email that is already in the org directly
+ * (`status: "added"`) and answers any other email, with or without an account,
+ * with a pending invite (`status: "pending"`, the accept `token`, plus
+ * `acceptUrl` when its app URL is configured). agent-fs sends no email, so the
+ * token and link are passed back to the caller. Only the invited account can
+ * accept, with its own key (`POST /invites/{token}/accept`).
  */
 export async function inviteEmailToSharedOrg(
   email: string,
   role: Role,
 ): Promise<SharedOrgInviteResult> {
-  const shared = await ensureAgentFsSharedProvisioning();
+  const shared = await resolveAgentFsSharedContext();
+  if (!shared) throw new Error("AGENT_FS_API_URL is not configured");
   const currentRoles = await getCurrentOrgMemberRoles(
     shared.apiUrl,
     shared.authHeaders,
@@ -266,6 +342,7 @@ export async function inviteEmailToSharedOrg(
     inviteId?: unknown;
     expiresAt?: unknown;
     acceptUrl?: unknown;
+    token?: unknown;
   }>(shared.apiUrl, `/orgs/${encodeURIComponent(shared.orgId)}/members/invite`, {
     method: "POST",
     headers: shared.authHeaders,
@@ -283,6 +360,7 @@ export async function inviteEmailToSharedOrg(
     ...(typeof response.inviteId === "string" ? { inviteId: response.inviteId } : {}),
     ...(typeof response.expiresAt === "string" ? { expiresAt: response.expiresAt } : {}),
     ...(typeof response.acceptUrl === "string" ? { acceptUrl: response.acceptUrl } : {}),
+    ...(typeof response.token === "string" ? { token: response.token } : {}),
   };
 }
 
@@ -347,7 +425,13 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   const currentRoles = await getCurrentOrgMemberRoles(apiUrl, shared.authHeaders, shared.orgId);
   const currentRole = currentRoles.get(email.toLowerCase());
   if (!currentRole || roleRank(currentRole) < roleRank("editor")) {
-    await inviteToSharedOrg(apiUrl, shared.authHeaders, shared.orgId, { email, role: "editor" });
+    await inviteToSharedOrg(
+      apiUrl,
+      shared.authHeaders,
+      shared.orgId,
+      { email, role: "editor" },
+      { acceptWithApiKey: apiKey },
+    );
   }
 
   await upsertSwarmConfig({
@@ -449,14 +533,40 @@ async function inviteToSharedOrg(
   headers: Record<string, string>,
   orgId: string,
   invite: InviteTarget,
+  options: { acceptWithApiKey?: string } = {},
 ): Promise<"invited" | "no-account" | "transient-failure"> {
   try {
-    await agentFsRequest(apiUrl, `/orgs/${encodeURIComponent(orgId)}/members/invite`, {
-      method: "POST",
-      headers,
-      body: invite,
-      allowConflict: true,
-    });
+    const response = await agentFsRequest<{ status?: unknown; token?: unknown }>(
+      apiUrl,
+      `/orgs/${encodeURIComponent(orgId)}/members/invite`,
+      {
+        method: "POST",
+        headers,
+        body: invite,
+        allowConflict: true,
+      },
+    );
+    // agent-fs >= 0.18.19 answers an account that is not yet in the org with a
+    // pending invite, even when the account exists. An agent account is ours,
+    // so accept it with the agent's own key; without that the agent never joins.
+    if (
+      options.acceptWithApiKey &&
+      response?.status === "pending" &&
+      typeof response.token === "string"
+    ) {
+      try {
+        await agentFsRequest(apiUrl, `/invites/${encodeURIComponent(response.token)}/accept`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${options.acceptWithApiKey}` },
+          allowConflict: true,
+        });
+      } catch (error) {
+        // The request path carries the invite token: rethrow without it.
+        throw new Error(
+          `agent-fs invite accept failed${error instanceof AgentFsRequestError ? `: HTTP ${error.status}` : ""}`,
+        );
+      }
+    }
     return "invited";
   } catch (error) {
     console.warn(
@@ -480,20 +590,29 @@ async function getCurrentOrgMemberRoles(
   headers: Record<string, string>,
   orgId: string,
 ): Promise<Map<string, Role>> {
+  const roles = new Map<string, Role>();
+  for (const member of await getCurrentOrgMembers(apiUrl, headers, orgId)) {
+    roles.set(member.email, member.role);
+  }
+
+  return roles;
+}
+
+export async function getCurrentOrgMembers(
+  apiUrl: string,
+  headers: Record<string, string>,
+  orgId: string,
+): Promise<Array<{ userId?: string; email: string; role: Role }>> {
   const response = await agentFsRequest<{ members?: OrgMember[] }>(
     apiUrl,
     `/orgs/${encodeURIComponent(orgId)}/members`,
     { headers },
   );
-  const roles = new Map<string, Role>();
-
-  for (const member of response.members ?? []) {
+  return (response.members ?? []).flatMap((member) => {
     const email = (member.email ?? member.user?.email ?? "").trim().toLowerCase();
     const role = normalizeRole(member.role);
-    if (email && role) roles.set(email, role);
-  }
-
-  return roles;
+    return email && role ? [{ userId: member.userId, email, role }] : [];
+  });
 }
 
 function normalizeRole(role: string | null | undefined): Role | null {
@@ -501,11 +620,11 @@ function normalizeRole(role: string | null | undefined): Role | null {
   return null;
 }
 
-function roleRank(role: Role): number {
+export function roleRank(role: Role): number {
   return { viewer: 0, editor: 1, admin: 2 }[role];
 }
 
-async function agentFsRequest<T = unknown>(
+export async function agentFsRequest<T = unknown>(
   apiUrl: string,
   path: string,
   options: {
@@ -528,15 +647,18 @@ async function agentFsRequest<T = unknown>(
   if (!response.ok && !(options.allowConflict && response.status === 409)) {
     const text = await response.text().catch(() => "");
     throw new AgentFsRequestError(
-      `agent-fs ${options.method ?? "GET"} ${path} failed: HTTP ${response.status}${text ? ` ${text}` : ""}`,
+      scrubSecrets(
+        `agent-fs ${options.method ?? "GET"} ${path} failed: HTTP ${response.status}${text ? ` ${text}` : ""}`,
+      ),
       response.status,
+      text,
     );
   }
 
   return (await response.json().catch(() => ({}))) as T;
 }
 
-async function resolveApiUrl(): Promise<string> {
+export async function resolveApiUrl(): Promise<string> {
   const raw = process.env.AGENT_FS_API_URL || (await getConfigValue("AGENT_FS_API_URL")) || "";
   return raw.trim().replace(/\/+$/, "");
 }

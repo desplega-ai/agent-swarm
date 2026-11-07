@@ -73,8 +73,8 @@ async function workflowReferencedAgentScriptKeys(): Promise<Set<string>> {
  * Script names an enabled `swarm-script` node could resolve at agent scope for a
  * workflow with no static owner (`createdByAgentId` null — no `X-Agent-ID` at
  * creation time, or a pre-migration legacy row). `SwarmScriptExecutor` falls back to
- * `trigger.agentId` at run time for these (src/workflows/executors/swarm-script.ts
- * `agentIdFromContext`), so the resolving agent isn't knowable statically — this
+ * the run's server-stamped `triggeredByAgentId` at run time for these
+ * (src/workflows/executors/swarm-script.ts), so the resolving agent isn't knowable statically — this
  * excludes by NAME alone across every agent scope, which is over-broad (it also
  * protects a same-named scratch script some *other*, unrelated agent owns) but is
  * the only sound static signal available; `scope: "global"` nodes are skipped for

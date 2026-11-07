@@ -121,7 +121,7 @@ Set two variables per agent, the same way as the Claude Code gateway route:
 
 A `CODEX_GATEWAY_BASE_URL` on any host except `api.openai.com` selects the gateway route, and it wins over Codex OAuth, `OPENAI_API_KEY`, and `~/.codex/auth.json`. On that route the worker:
 
-- Adds a provider block to the Codex session config, equivalent to this `~/.codex/config.toml`. Codex sends `POST <base URL>/responses`, so the gateway must serve the OpenAI Responses API. Codex no longer supports chat completions.
+- Adds a provider block to the Codex session config and to the `codex app-server` launch, equivalent to this `~/.codex/config.toml`. Codex sends `POST <base URL>/responses`, so the gateway must serve the OpenAI Responses API. Codex no longer supports chat completions.
 
   ```toml
   model_provider = "swarm-gateway"
@@ -258,7 +258,7 @@ Set the variable on both API and worker processes if every OpenRouter call must 
 - **API server** — the debounced global-config reload re-injects the row over the server process environment, so model refreshes and internal summarizers pick it up within seconds.
 - **Workers** — each worker fetches `GET /api/config/resolved` before it starts a task and passes the merged environment into the harness adapter, so the next task on that worker uses the new gateway.
 
-A task already running keeps the gateway it started with. The gateway credential itself stays out of this page: put `OPENROUTER_API_KEY` on the Secrets/Integrations pages or in the worker environment.
+A task already running keeps the gateway it started with. The gateway credential itself stays out of this page: put `OPENROUTER_API_KEY` on the Secrets page, on Connect → AI providers, or in the worker environment.
 
 ### OpenCode through a gateway
 
@@ -385,6 +385,8 @@ MODEL_OVERRIDE:  openrouter/anthropic/claude-opus-4.7
 Do not strip a gateway ID's own provider prefix to avoid the doubled-looking path — the gateway receives only the part after `openrouter/`, so removing it sends an ID the gateway does not know.
 
 Ramp model IDs are key-specific. Discover them with Ramp's configuration flow instead of reusing an OpenRouter slug.
+
+If the `openrouter/` ID is valid but not in OpenCode's bundled models.dev snapshot (a new or niche model the snapshot hasn't caught up with yet), the swarm synthesizes a minimal catalog entry for it so OpenCode resolves the model instead of silently falling back to its own default. The synthesized entry assumes the model supports tool calls; an ID that's already in the snapshot keeps its real capability flags.
 
 ## Related
 

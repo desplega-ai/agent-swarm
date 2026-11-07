@@ -4,6 +4,8 @@ import {
   BOOT_SCRUB_TARGETS,
   bootScrubCursorKey,
   bootScrubDoneKey,
+  bootScrubSkippedKey,
+  nextRestRatio,
   runBootScrubSweep,
 } from "../be/boot-scrub-sweep";
 import { closeDb, getDb, getDbClient, initDb, isSqliteVecAvailable } from "../be/db";
@@ -14,8 +16,11 @@ import {
   refreshSecretScrubberCache,
   registerVolatileSecret,
   SCRUBBER_RULES_VERSION,
+  scrubberRulesFingerprint,
+  scrubSecrets,
   unregisterVolatileSecret,
 } from "../utils/secret-scrubber";
+import { buildNegatives, buildPositives } from "./fixtures/secret-corpus";
 import { randomToken, type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-boot-scrub-sweep.sqlite";
@@ -86,10 +91,10 @@ describe("boot retro-sweep", () => {
     const db = getDbClient();
     // Every UPDATE on a swept table lands here: proves untouched rows saw no write.
     await db.run("CREATE TABLE scrub_write_audit (tbl TEXT NOT NULL, id TEXT NOT NULL)");
-    for (const { table } of BOOT_SCRUB_TARGETS) {
+    for (const { table, idColumn } of BOOT_SCRUB_TARGETS) {
       await db.run(
         `CREATE TRIGGER audit_${table} AFTER UPDATE ON ${table}
-         BEGIN INSERT INTO scrub_write_audit (tbl, id) VALUES ('${table}', NEW.id); END`,
+         BEGIN INSERT INTO scrub_write_audit (tbl, id) VALUES ('${table}', NEW.${idColumn ?? "id"}); END`,
       );
     }
 
@@ -428,12 +433,179 @@ describe("boot retro-sweep upgrade from v8", () => {
       ).toBe(`credential echo: [REDACTED:${name}]`);
       expect(
         await db.get("SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
-          bootScrubDoneKey(9),
+          bootScrubDoneKey(SCRUBBER_RULES_VERSION),
         ]),
       ).not.toBeNull();
       expect(await runBootScrubSweep({ reembed: false })).toBeNull();
     } finally {
       unregisterVolatileSecret(name);
     }
+  });
+});
+
+describe("boot retro-sweep equivalence", () => {
+  beforeAll(() => initDb(":memory:"));
+  afterAll(() => closeDb());
+
+  test("the default (selective) sweep leaves every corpus row as a full `scrubSecrets` does", async () => {
+    const db = getDbClient();
+    const texts = [
+      ...buildPositives().map((p) => p.text),
+      ...buildNegatives(),
+      "ran 12 tests in 3.4s, all passed",
+      "",
+    ];
+    const rows = texts.map((content, i) => ({ id: crypto.randomUUID(), content, line: i }));
+    for (const r of rows) {
+      await db.run(
+        `INSERT INTO session_logs (id, sessionId, iteration, content, lineNumber, createdAt)
+         VALUES (?, 'equivalence', 1, ?, ?, datetime('now'))`,
+        [r.id, r.content, r.line],
+      );
+    }
+
+    const stats = await runBootScrubSweep({ version: 7001, reembed: false });
+    expect(stats?.find((s) => s.table === "session_logs")?.scanned).toBe(rows.length);
+
+    let redacted = 0;
+    for (const r of rows) {
+      const after = (
+        await db.get<{ content: string }>("SELECT content FROM session_logs WHERE id = ?", [r.id])
+      )?.content;
+      expect(after, r.content.slice(0, 60)).toBe(scrubSecrets(r.content));
+      if (after !== r.content) redacted++;
+    }
+    // Positive control: the corpus does hold secrets, so the comparison is not vacuous.
+    expect(redacted).toBeGreaterThan(buildPositives().length / 2);
+  });
+});
+
+describe("boot retro-sweep forward-only mode", () => {
+  const savedMode = process.env.BOOT_SCRUB_MODE;
+  let secret: string;
+  const rowIds: string[] = [];
+
+  beforeAll(() => initDb(":memory:"));
+  afterAll(() => {
+    if (savedMode === undefined) delete process.env.BOOT_SCRUB_MODE;
+    else process.env.BOOT_SCRUB_MODE = savedMode;
+    closeDb();
+  });
+
+  async function content(id: string): Promise<string | undefined> {
+    return (
+      await getDbClient().get<{ content: string }>(
+        "SELECT content FROM session_logs WHERE id = ?",
+        [id],
+      )
+    )?.content;
+  }
+
+  async function seedState(key: string) {
+    return getDbClient().get<{ seededHash: string }>(
+      "SELECT seededHash FROM seed_state WHERE kind = 'maintenance' AND key = ?",
+      [key],
+    );
+  }
+
+  test("touches no historical row, records the skipped version, and a later backfill sweeps it", async () => {
+    const db = getDbClient();
+    secret = `AKIA${randomToken(16)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "A")
+      .padEnd(16, "A")
+      .slice(0, 16)}`;
+    for (let i = 0; i < 3; i++) {
+      const id = crypto.randomUUID();
+      rowIds.push(id);
+      await db.run(
+        `INSERT INTO session_logs (id, sessionId, iteration, content, lineNumber, createdAt)
+         VALUES (?, 'fwd', 1, ?, ?, datetime('now'))`,
+        [id, `row ${i} key ${secret} end`, i],
+      );
+    }
+    await db.run("CREATE TABLE fwd_audit (id TEXT NOT NULL)");
+    await db.run(
+      "CREATE TRIGGER fwd_audit_logs AFTER UPDATE ON session_logs BEGIN INSERT INTO fwd_audit VALUES (NEW.id); END",
+    );
+
+    process.env.BOOT_SCRUB_MODE = "forward-only";
+    expect(await runBootScrubSweep({ version: 7101, reembed: false })).toBeNull();
+    expect(await runBootScrubSweep({ version: 7102, reembed: false })).toBeNull();
+
+    // Nothing read or written: rows intact, no cursor, no done marker.
+    for (const id of rowIds) expect(await content(id)).toContain(secret);
+    expect(await db.query("SELECT id FROM fwd_audit")).toEqual([]);
+    expect(await seedState(bootScrubCursorKey(7102, "session_logs"))).toBeNull();
+    expect(await seedState(bootScrubDoneKey(7102))).toBeNull();
+    // Both versions recorded, with the fingerprint of the rule tables.
+    const fingerprint = scrubberRulesFingerprint();
+    expect(fingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect((await seedState(bootScrubSkippedKey(7101)))?.seededHash).toBe(fingerprint);
+    expect((await seedState(bootScrubSkippedKey(7102)))?.seededHash).toBe(fingerprint);
+
+    // Back on backfill: the current version sweeps every row and clears the records it covers.
+    process.env.BOOT_SCRUB_MODE = "backfill";
+    const stats = await runBootScrubSweep({ version: 7102, reembed: false });
+    expect(stats?.find((t) => t.table === "session_logs")?.changed).toBe(3);
+    for (const id of rowIds) {
+      expect(await content(id)).not.toContain(secret);
+      expect(await content(id)).toContain("[REDACTED:");
+    }
+    expect(await seedState(bootScrubDoneKey(7102))).not.toBeNull();
+    expect(await seedState(bootScrubSkippedKey(7101))).toBeNull();
+    expect(await seedState(bootScrubSkippedKey(7102))).toBeNull();
+  });
+
+  test("a skipped record newer than the swept version stays", async () => {
+    process.env.BOOT_SCRUB_MODE = "forward-only";
+    await runBootScrubSweep({ version: 7203, reembed: false });
+    process.env.BOOT_SCRUB_MODE = "backfill";
+    await runBootScrubSweep({ version: 7202, reembed: false });
+    expect(await seedState(bootScrubSkippedKey(7203))).not.toBeNull();
+  });
+
+  test("switching to forward-only halts a running sweep, and backfill resumes from its cursor", async () => {
+    const db = getDbClient();
+    const version = 7301;
+    const batches: string[][] = [];
+    process.env.BOOT_SCRUB_MODE = "backfill";
+    const first = await runBootScrubSweep({
+      version,
+      batchSize: 1,
+      reembed: false,
+      afterBatch: ({ table, ids }) => {
+        if (table !== "session_logs") return;
+        batches.push(ids);
+        if (batches.length === 1) process.env.BOOT_SCRUB_MODE = "forward-only";
+      },
+    });
+    // One batch ran, then the sweep stopped without marking the version done.
+    expect(first?.find((t) => t.table === "session_logs")?.scanned).toBe(1);
+    expect(first?.length).toBe(1);
+    expect(await seedState(bootScrubDoneKey(version))).toBeNull();
+    expect(await seedState(bootScrubSkippedKey(version))).not.toBeNull();
+    expect(await seedState(bootScrubCursorKey(version, "session_logs"))).not.toBeNull();
+
+    process.env.BOOT_SCRUB_MODE = "backfill";
+    const resumed = await runBootScrubSweep({ version, batchSize: 1, reembed: false });
+    // Rows 2.. only: the first batch is not scanned again.
+    expect(resumed?.find((t) => t.table === "session_logs")?.scanned).toBe(
+      (await db.get<{ n: number }>("SELECT count(*) AS n FROM session_logs"))!.n - 1,
+    );
+    expect(await seedState(bootScrubDoneKey(version))).not.toBeNull();
+    expect(await seedState(bootScrubSkippedKey(version))).toBeNull();
+  });
+});
+
+describe("boot retro-sweep pacing", () => {
+  test("rests longer while the loop lags, shorter while it idles, and holds in between", () => {
+    expect(nextRestRatio(1, 20)).toBe(2);
+    expect(nextRestRatio(2, 20)).toBe(4);
+    expect(nextRestRatio(12, 20)).toBe(16);
+    expect(nextRestRatio(16, 500)).toBe(16);
+    expect(nextRestRatio(1, 0)).toBeLessThan(1);
+    expect(nextRestRatio(0.25, 0)).toBe(0.25);
+    expect(nextRestRatio(3, 5)).toBe(3);
   });
 });

@@ -25,13 +25,10 @@ export function noteEmbeddingSuccess(): void {
       (err as Error).message,
     );
   };
-  backfill = Promise.all([
-    import("./boot-reembed").then(({ runBootReembed }) => runBootReembed()).catch(report("Memory")),
-    import("../scripts/boot-reembed")
-      .then(({ runBootReembedScripts }) => runBootReembedScripts())
-      .catch(report("Script")),
-  ])
-    .then(() => undefined)
+  // Also resumes a space re-embed the outage paused.
+  backfill = import("./embedding-space")
+    .then(({ runEmbeddingMaintenance }) => runEmbeddingMaintenance({ backfill: true }))
+    .catch(report("Embedding"))
     .finally(() => {
       backfill = null;
     });

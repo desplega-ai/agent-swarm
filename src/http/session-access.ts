@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getSteeringMessageById } from "../be/db";
 import { getActiveSessionById } from "../be/db/active-sessions";
-import { getUserGrant } from "../be/rbac-roles";
+import { getUserGrant, userHoldsExplicitVerb } from "../be/rbac-roles";
 import {
   getSessionRoot,
   hasSessionAccess,
@@ -12,7 +12,7 @@ import {
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal } from "../rbac";
 import type { AgentTask } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 import { dashboardUserIdHeader } from "./favorite-owner";
 import { type RouteDef, routePathParams } from "./route-def";
 import { jsonError } from "./utils";
@@ -28,19 +28,65 @@ import { jsonError } from "./utils";
  *   active user in `X-Swarm-User-Id`. On the shared key that identity is
  *   honor-system, the same trust the dashboard already gives favorites.
  *   `userId: null` is a guest page session, which has no user at all.
+ *   `readAll` is the all-users read scope: the request opted in and the user
+ *   may read every session (see `canReadAllSessions`). It lifts reads only;
+ *   write and steer checks still need the user's own access.
  */
-export type SessionActor = { kind: "bypass" } | { kind: "user"; userId: string | null };
+export type SessionActor =
+  | { kind: "bypass" }
+  | { kind: "user"; userId: string | null; readAll?: boolean };
 
 const BYPASS: SessionActor = { kind: "bypass" };
 
+/**
+ * Request header that opts a dashboard tab into the all-users read scope, so
+ * every list and detail read of that tab carries it. `GET /api/tasks` and
+ * `GET /api/sessions` also take it as `scope=all`.
+ */
+export const SESSION_SCOPE_HEADER = "x-swarm-session-scope";
+
+function requestsAllUsersScope(req: IncomingMessage): boolean {
+  const raw = req.headers[SESSION_SCOPE_HEADER];
+  return (Array.isArray(raw) ? raw[0] : raw)?.trim().toLowerCase() === "all";
+}
+
+/**
+ * Whether `userId` may opt in to read every user's sessions: one of its roles
+ * lists `session.read.all` explicitly. The grant-all `admin` role is not
+ * enough, because every new user gets it (`trg_users_default_role`). The
+ * stored grant decides with RBAC on or off: RBAC off opens the admission
+ * gate, not other users' private sessions.
+ */
+export async function canReadAllSessions(userId: string): Promise<boolean> {
+  return userHoldsExplicitVerb(userId, "session.read.all");
+}
+
+/**
+ * The session actor of a request. The all-users scope (`allUsers`, or the
+ * `X-Swarm-Session-Scope: all` header) sets `readAll` only for a user who may
+ * read every session; for anyone else it is ignored and the usual filter
+ * applies. A bypass actor already reads everything.
+ */
 export async function resolveSessionActor(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  opts: { allUsers?: boolean } = {},
+): Promise<SessionActor> {
+  const actor = await resolveBaseSessionActor(req, myAgentId);
+  if (actor.kind !== "user" || !actor.userId) return actor;
+  if (!opts.allUsers && !requestsAllUsersScope(req)) return actor;
+  return (await canReadAllSessions(actor.userId)) ? { ...actor, readAll: true } : actor;
+}
+
+async function resolveBaseSessionActor(
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): Promise<SessionActor> {
   const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  const userId = authUserId(auth);
+  if (userId) return { kind: "user", userId };
   if (auth?.kind === "guest") return { kind: "user", userId: null };
-  if (auth?.kind === "operator" && !myAgentId && !auth.page) {
+  if (isOperatorAuth(auth) && !myAgentId && !auth.page) {
     const picked = dashboardUserIdHeader(req);
     if (!picked) return BYPASS;
     const user = await findUserById(picked);
@@ -49,12 +95,18 @@ export async function resolveSessionActor(
   return BYPASS;
 }
 
+/** `access`, raised to at least `read` for an actor with the all-users read scope. */
+export function withReadAll(actor: SessionActor, access: SessionAccess): SessionAccess {
+  return actor.kind === "user" && actor.readAll && access === "none" ? "read" : access;
+}
+
 /** The actor's access to the session holding `taskId`; `owner` for a bypass actor. */
 export async function sessionAccessFor(
   actor: SessionActor,
   taskId: string,
 ): Promise<SessionAccess> {
-  return actor.kind === "bypass" ? "owner" : sessionAccess(actor.userId, taskId);
+  if (actor.kind === "bypass") return "owner";
+  return withReadAll(actor, await sessionAccess(actor.userId, taskId));
 }
 
 export const SESSION_READ_DENIED =
@@ -70,9 +122,12 @@ export async function canReadSession(
   return hasSessionAccess(access, "read");
 }
 
-/** The SQL list filter (`readableSessionCondition`) for an actor; none for a bypass actor. */
+/**
+ * The SQL list filter (`readableSessionCondition`) for an actor; none for a
+ * bypass actor or the all-users read scope.
+ */
 export function readableByFor(actor: SessionActor): { userId: string | null } | undefined {
-  return actor.kind === "user" ? { userId: actor.userId } : undefined;
+  return actor.kind === "user" && !actor.readAll ? { userId: actor.userId } : undefined;
 }
 
 export const SESSION_WRITE_DENIED =
@@ -161,7 +216,8 @@ async function denialFor(
   if (actor.kind === "bypass") return null;
   const root = await getSessionRoot(taskId);
   if (!root) return null;
-  if (hasSessionAccess(await sessionAccessForRoot(actor.userId, root), needed)) return null;
+  const access = withReadAll(actor, await sessionAccessForRoot(actor.userId, root));
+  if (hasSessionAccess(access, needed)) return null;
   return needed === "read" ? SESSION_READ_DENIED : SESSION_WRITE_DENIED;
 }
 
@@ -243,9 +299,10 @@ export async function userAgentIdentityDenial(
   if (auth?.kind !== "user" && auth?.kind !== "guest") return null;
   if (pathSegments.length === 1 && pathSegments[0] === "mcp") return USER_AGENT_HEADER_DENIED;
   if (req.headers["x-agent-id"] === undefined) return null;
-  if (auth.kind === "user" && def?.auth?.userNamesAgent) {
+  const userId = authUserId(auth);
+  if (userId && def?.auth?.userNamesAgent) {
     if (!isRbacEnabled()) return null;
-    const grant = await getUserGrant(auth.userId);
+    const grant = await getUserGrant(userId);
     if (grant.grantsAll || grant.verbs.has("agent.act.any")) return null;
   }
   return USER_AGENT_HEADER_DENIED;

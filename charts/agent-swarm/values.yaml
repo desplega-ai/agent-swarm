@@ -96,8 +96,15 @@ config:
   githubEmail: ""
   # -- Git author name used by agents for commits.
   githubName: ""
-  # -- Public dashboard URL referenced in Slack message links. Leave blank
-  # to omit dashboard links from Slack notifications.
+  # -- GitHub Enterprise Server web base, e.g. https://ghe.example.com. Blank = github.com.
+  # Shared by the API and every agent so both target the same host.
+  githubUrl: ""
+  # -- GitHub REST base override. Blank = derived from githubUrl (<githubUrl>/api/v3).
+  githubApiUrl: ""
+  # -- Public dashboard URL (`APP_URL` on the API and every pool). Used in
+  # Slack message links, and agents link files to Files in the dashboard by
+  # default when it is set. Leave blank to omit dashboard links from Slack
+  # notifications and keep file links on the agent-fs live app.
   appUrl: ""
   # -- Public, browser/externally-reachable API origin for OAuth redirect URIs + registered webhooks.
   # Leave blank to derive from ingress.host when ingress is enabled, otherwise
@@ -118,6 +125,22 @@ config:
   # running out of the box, not just present. Set false to restore the old
   # "inventory everything, enable nothing automatically" behavior.
   seedAutomationsEnabled: true
+  # -- Create the bundled script catalog at boot and via the seed CLI. Set
+  # false for installs whose scripts are managed entirely by an external
+  # pipeline. Does not retire scripts already seeded.
+  seedScriptsEnabled: true
+  # -- Create the bundled skill catalog at boot and via the seed CLI. Set
+  # false for installs whose skills are managed entirely by an external
+  # pipeline. Does not retire skills already seeded.
+  seedSkillsEnabled: true
+  # -- Create the bundled workflow catalog at boot and via the seed CLI. Set
+  # false for installs whose workflows are managed entirely by an external
+  # pipeline. Does not retire workflows already seeded.
+  seedWorkflowsEnabled: true
+  # -- Create the bundled schedule catalog at boot and via the seed CLI. Set
+  # false for installs whose schedules are managed entirely by an external
+  # pipeline. Does not retire schedules already seeded.
+  seedSchedulesEnabled: true
 
 # API — single-replica StatefulSet running the SQLite-backed control plane.
 # replicas is fixed at 1 (SQLite single-writer); the chart fails to render
@@ -193,8 +216,6 @@ poolDefaults:
   # `pools.<name>.harnessProvider`. One of: claude, codex, opencode, pi,
   # claude-managed, devin.
   harnessProvider: claude
-  # -- Continue on errors inside the harness. Maps to YOLO env var.
-  yolo: true
   terminationGracePeriodSeconds: 120
   # -- Pod replacement strategy during rolling updates. Pool pods are
   # interchangeable (any worker can pick up a paused task on resume) so
@@ -305,7 +326,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.18.9
+    tag: 0.18.22
   port: 7433
   # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
   # the bucket configured below. `local` stores objects on the agent-fs PVC
@@ -318,6 +339,17 @@ agentFs:
   apiKey: ""
   # -- Public app URL used by agent-fs when it emits browser-facing file links.
   appUrl: ""
+  # -- Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL` on the API). Files
+  # (Comb) in the dashboard is on by default, but only when a browser can reach
+  # agent-fs, and the in-cluster service URL cannot be reached. Blank derives
+  # it from `agentFs.ingress.host` when that ingress is enabled; with neither
+  # this nor `agentFs.proxy`, Files stays off.
+  publicUrl: ""
+  # -- Serve agent-fs through the API at `/agentfs` (`AGENT_FS_PROXY=true`), so
+  # the browser reaches agent-fs with no agent-fs ingress. Needs
+  # `PUBLIC_MCP_BASE_URL` (derived from `ingress.host`). Also exposes agent-fs's
+  # public `/share/*` and `/site/*` pages on the API origin. On by default.
+  proxy: true
   # -- Bucket name for agent-fs's object storage backend (storageProvider=s3).
   bucket: ""
   resources: {}

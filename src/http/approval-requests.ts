@@ -20,7 +20,6 @@ import {
   type ApprovalRequest,
   type ApprovalVote,
   createApprovalRequest,
-  getAgentById,
   getApprovalRequestById,
   getDbClient,
   getPendingApprovalVoteState,
@@ -44,6 +43,8 @@ import {
 } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ensureConfigAdmin, runConfigWriteSideEffects } from "./config";
+import { type ApprovalResponder, approvalResponder, responderKey } from "./person-responder";
+import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -74,8 +75,14 @@ const QuestionSchema = z.object({
   ),
 });
 
-/** Create input: `label` may be omitted on a config question (it defaults to the key). */
-const QuestionInputSchema = QuestionSchema.extend({ label: z.string().optional() });
+/**
+ * Create input: `label` may be omitted on a config question (it defaults to the key), and
+ * `required` defaults to true like the request-human-input tool and the workflow node.
+ */
+const QuestionInputSchema = QuestionSchema.extend({
+  label: z.string().optional(),
+  required: z.boolean().default(true),
+});
 
 export type ApprovalQuestion = z.infer<typeof QuestionSchema>;
 
@@ -173,7 +180,15 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
   resolutionReason: true,
   notificationChannels: true,
   configState: true,
-}).extend({ questionCount: z.number().int() });
+}).extend({
+  questionCount: z.number().int(),
+  viewerCanRespond: z
+    .boolean()
+    .optional()
+    .describe(
+      "Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed).",
+    ),
+});
 
 /**
  * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
@@ -202,9 +217,13 @@ async function toApprovalRequestResponse(
   };
 }
 
-/** Slim rows plus `approvalProgress` for the pending ones (one extra read). */
+/**
+ * Slim rows plus `approvalProgress` and `viewerCanRespond` for the pending ones
+ * (one extra read). `viewer` is null when the caller cannot answer any request.
+ */
 async function withApprovalProgress(
   rows: Awaited<ReturnType<typeof listApprovalRequestSummaries>>,
+  viewer: ApprovalResponder | null,
 ): Promise<z.infer<typeof ApprovalRequestSummarySchema>[]> {
   const pendingIds = rows.filter((row) => row.status === "pending").map((row) => row.id);
   const state = new Map(
@@ -218,6 +237,10 @@ async function withApprovalProgress(
         approvalProgress: entry
           ? await approvalProgress(entry.approvers as ApproversShape, entry.approvals ?? [])
           : null,
+        ...(entry && {
+          viewerCanRespond:
+            viewer !== null && isListedApprover(entry.approvers as ApproversShape, viewer),
+        }),
       };
     }),
   );
@@ -310,14 +333,32 @@ function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boo
   }
 }
 
+/** No answer given: absent, null, a blank string or an empty list. */
+function isUnanswered(response: unknown): boolean {
+  return (
+    response === undefined ||
+    response === null ||
+    (typeof response === "string" && response.trim() === "") ||
+    (Array.isArray(response) && response.length === 0)
+  );
+}
+
+/**
+ * Questions whose answer blocks the response: a required question without a valid answer,
+ * or an optional one that was answered with an invalid value. An unanswered optional
+ * question passes. Config answers are checked later by `parseConfigAnswer`.
+ */
 export function missingRequiredResponseIds(
   questions: ApprovalQuestion[],
   responses: Record<string, unknown>,
 ): string[] {
   return questions
-    .filter(
-      (question) => question.required && !hasRequiredResponse(question, responses[question.id]),
-    )
+    .filter((question) => {
+      const response = responses[question.id];
+      if (hasRequiredResponse(question, response)) return false;
+      if (question.required) return true;
+      return question.type !== "config" && !isUnanswered(response);
+    })
     .map((question) => question.id);
 }
 
@@ -465,7 +506,7 @@ const listRoute = route({
   pattern: ["api", "approval-requests"],
   summary: "List approval requests with optional filters",
   description:
-    "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
+    "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.",
   tags: ["ApprovalRequests"],
   query: z.object({
     status: z.string().optional(),
@@ -556,7 +597,7 @@ export async function handleApprovalRequests(
     const questions = existing.questions as ApprovalQuestion[];
     const missingRequired = missingRequiredResponseIds(questions, parsed.body.responses);
     if (missingRequired.length > 0) {
-      jsonError(res, `Required responses missing or invalid: ${missingRequired.join(", ")}`, 400);
+      jsonError(res, `Responses missing or invalid: ${missingRequired.join(", ")}`, 400);
       return true;
     }
 
@@ -584,9 +625,9 @@ export async function handleApprovalRequests(
       if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
       // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
       // every user, so check the config write grant here as PUT /api/config would.
-      const auth = getRequestAuth(req);
-      if (auth?.kind === "user" && isRbacEnabled()) {
-        const grant = await getUserGrant(auth.userId);
+      const userId = authUserId(getRequestAuth(req));
+      if (userId && isRbacEnabled()) {
+        const grant = await getUserGrant(userId);
         if (!grant.grantsAll && !grant.verbs.has("config.write.any")) {
           jsonError(res, "Forbidden: setting a config value needs 'config.write.any'", 403);
           return true;
@@ -810,13 +851,12 @@ export async function handleApprovalRequests(
     const id = crypto.randomUUID();
     // Prefer a trusted authenticated user (never client-controlled); else fall
     // back to the ownership-validated sourceTaskId the request body carries.
-    const auth = getRequestAuth(req);
     const rawCallerAgentId = req.headers["x-agent-id"];
     const callerAgentId = Array.isArray(rawCallerAgentId) ? rawCallerAgentId[0] : rawCallerAgentId;
     const createdBy =
-      auth?.kind === "user"
-        ? auth.userId
-        : ((await resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId)) ?? undefined);
+      authUserId(getRequestAuth(req)) ??
+      (await resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId)) ??
+      undefined;
     const request = await createApprovalRequest({
       id,
       title: parsed.body.title,
@@ -866,8 +906,12 @@ export async function handleApprovalRequests(
     };
     // Opt-in: API, MCP and script callers that don't ask keep the full rows.
     if (parsed.query.fields === "slim") {
+      const viewer = await approvalResponder(req);
       listRoute.respond(res, 200, {
-        approvalRequests: await withApprovalProgress(await listApprovalRequestSummaries(filters)),
+        approvalRequests: await withApprovalProgress(
+          await listApprovalRequestSummaries(filters),
+          viewer.ok ? viewer.responder : null,
+        ),
       });
       return true;
     }
@@ -894,69 +938,18 @@ const SLACK_NOTIFICATION_REFUSED =
 async function approvalCallerPrincipal(
   req: IncomingMessage,
 ): Promise<{ principal: RbacPrincipal; resolvedBy: string | null }> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") {
-    return { principal: { kind: "user", userId: auth.userId }, resolvedBy: auth.userId };
-  }
-  const rawAgentId = req.headers["x-agent-id"];
-  const agentId =
-    auth?.kind === "agent" ? auth.agentId : Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
-  if (auth?.kind === "guest") return { principal: { kind: "guest" }, resolvedBy: null };
-  if (agentId) {
-    const agent = await getAgentById(agentId);
-    return {
-      principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
-      resolvedBy: agentId,
-    };
-  }
-  return { principal: { kind: "operator" }, resolvedBy: "operator" };
-}
-
-type ApprovalResponder = { kind: "user"; user: User } | { kind: "operator" };
-
-const AGENT_RESPONSE_REFUSED =
-  "Agents cannot answer approval requests. A person must respond with a user token or the dashboard.";
-
-/**
- * The person answering an approval request, taken from the credential and
- * never from the request body. Every agent identity is refused: an `aseph_`
- * session token, the shared key with an `X-Agent-ID`, and a page session with
- * no signed-in user (page code is agent-authored, so it cannot vouch for a
- * person). The shared key alone is the operator.
- */
-async function approvalResponder(
-  req: IncomingMessage,
-): Promise<{ ok: true; responder: ApprovalResponder } | { ok: false; message: string }> {
-  const auth = getRequestAuth(req);
   const rawAgentId = req.headers["x-agent-id"];
   const headerAgentId = Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
-
-  let principal: RbacPrincipal;
-  let responder: ApprovalResponder | null = null;
-  if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    responder = { kind: "user", user: auth.user };
-  } else if (auth?.kind === "agent" || headerAgentId) {
-    const agentId = auth?.kind === "agent" ? auth.agentId : (headerAgentId ?? "");
-    const agent = agentId ? await getAgentById(agentId) : null;
-    principal = { kind: "agent", agentId, isLead: agent?.isLead ?? false };
-  } else if (auth?.page) {
-    return {
-      ok: false,
-      message: "A page session without a signed-in user cannot answer approval requests.",
-    };
-  } else {
-    principal = { kind: "operator" };
-    responder = { kind: "operator" };
-  }
-
-  const decision = can({ principal, verb: "approval.respond", source: "http" });
-  if (!decision.allow || !responder) return { ok: false, message: AGENT_RESPONSE_REFUSED };
-  return { ok: true, responder };
-}
-
-function responderKey(responder: ApprovalResponder): string {
-  return responder.kind === "user" ? responder.user.id : "operator";
+  const principal = await agentFirstPrincipal(req, headerAgentId);
+  const resolvedBy =
+    principal.kind === "user"
+      ? principal.userId
+      : principal.kind === "agent"
+        ? principal.agentId
+        : principal.kind === "operator"
+          ? "operator"
+          : null;
+  return { principal, resolvedBy };
 }
 
 function userMatchesListed(user: Pick<User, "id" | "email">, listed: string): boolean {

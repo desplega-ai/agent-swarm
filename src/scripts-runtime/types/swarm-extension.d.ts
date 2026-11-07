@@ -5,6 +5,7 @@ declare module "swarm-extension" {
     agentId?: string | null | undefined;
     creatorAgentId?: string | undefined;
     source?:
+      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -20,7 +21,6 @@ declare module "swarm-extension" {
       | "ui"
       | "system"
       | "comb"
-      | "chat"
       | undefined;
     routingReason?:
       | "skill"
@@ -41,6 +41,19 @@ declare module "swarm-extension" {
     slackThreadTs?: string | undefined;
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
+    slackParticipants?:
+      | {
+          people: {
+            slackUserId: string;
+            trust: "external" | "unknown" | "internal";
+            userId?: string | undefined;
+            starter?: boolean | undefined;
+            newest?: boolean | undefined;
+            asked?: boolean | undefined;
+          }[];
+          more: number;
+        }
+      | undefined;
     overrideSlackContext?: boolean | undefined;
     vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
     vcsRepo?: string | undefined;
@@ -60,12 +73,30 @@ declare module "swarm-extension" {
     parentTaskId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
+    fallbackHops?:
+      | {
+          from: string;
+          profile: string;
+          errorClass:
+            | "rate_limit"
+            | "model_window"
+            | "seat"
+            | "credits"
+            | "overloaded"
+            | "server_error"
+            | "auth"
+            | "pool_empty";
+          at: string;
+          skipped?: { profile: string; reason: string }[] | undefined;
+        }[]
+      | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | undefined;
     workflowRunStepId?: string | undefined;
     sourceTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     outputSchema?: Record<string, unknown> | undefined;
     inheritParentOutputSchema?: boolean | undefined;
     inheritParentRequester?: boolean | undefined;
@@ -87,17 +118,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
-            | "claude"
-            | "codex"
             | "pi"
-            | "devin"
+            | "claude"
             | "claude-managed"
-            | "opencode"
-            | "acp"
-            | "dsh"
-            | "amp"
-            | "cursor"
+            | "codex"
             | "grok"
+            | "fx"
+            | "opencode"
+            | "dsh"
+            | "cursor"
+            | "amp"
+            | "devin"
+            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -110,6 +142,7 @@ declare module "swarm-extension" {
     agentId: string | null;
     task: string;
     status:
+      | "skipped"
       | "draft"
       | "backlog"
       | "unassigned"
@@ -123,6 +156,7 @@ declare module "swarm-extension" {
       | "cancelled"
       | "superseded";
     source:
+      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -137,8 +171,7 @@ declare module "swarm-extension" {
       | "api"
       | "ui"
       | "system"
-      | "comb"
-      | "chat";
+      | "comb";
     tags: string[];
     priority: number;
     dependsOn: string[];
@@ -172,6 +205,19 @@ declare module "swarm-extension" {
     slackThreadTs?: string | undefined;
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
+    slackParticipants?:
+      | {
+          people: {
+            slackUserId: string;
+            trust: "external" | "unknown" | "internal";
+            userId?: string | undefined;
+            starter?: boolean | undefined;
+            newest?: boolean | undefined;
+            asked?: boolean | undefined;
+          }[];
+          more: number;
+        }
+      | undefined;
     slackProgressMessageTs?: string | undefined;
     slackTreeRootMessageTs?: string | undefined;
     vcsProvider?: "github" | "gitlab" | "azure-devops" | "bitbucket" | undefined;
@@ -190,16 +236,34 @@ declare module "swarm-extension" {
     mentionChannelId?: string | undefined;
     dir?: string | undefined;
     parentTaskId?: string | undefined;
+    dispatchedByTaskId?: string | undefined;
     claudeSessionId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     resolvedModel?: string | undefined;
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
-    resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+    resolvedEffort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
     resolvedProfile?: string | undefined;
+    fallbackHops?:
+      | {
+          from: string;
+          profile: string;
+          errorClass:
+            | "rate_limit"
+            | "model_window"
+            | "seat"
+            | "credits"
+            | "overloaded"
+            | "server_error"
+            | "auth"
+            | "pool_empty";
+          at: string;
+          skipped?: { profile: string; reason: string }[] | undefined;
+        }[]
+      | undefined;
     scheduleId?: string | undefined;
     workflowRunId?: string | null | undefined;
     workflowRunStepId?: string | null | undefined;
@@ -222,17 +286,18 @@ declare module "swarm-extension" {
     requestedByUserId?: string | undefined;
     swarmVersion?: string | undefined;
     provider?:
-      | "claude"
-      | "codex"
       | "pi"
-      | "devin"
+      | "claude"
       | "claude-managed"
-      | "opencode"
-      | "acp"
-      | "dsh"
-      | "amp"
-      | "cursor"
+      | "codex"
       | "grok"
+      | "fx"
+      | "opencode"
+      | "dsh"
+      | "cursor"
+      | "amp"
+      | "devin"
+      | "acp"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -244,17 +309,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
-            | "claude"
-            | "codex"
             | "pi"
-            | "devin"
+            | "claude"
             | "claude-managed"
-            | "opencode"
-            | "acp"
-            | "dsh"
-            | "amp"
-            | "cursor"
+            | "codex"
             | "grok"
+            | "fx"
+            | "opencode"
+            | "dsh"
+            | "cursor"
+            | "amp"
+            | "devin"
+            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -275,6 +341,10 @@ declare module "swarm-extension" {
     lastHeartbeatAt: string;
     runtimeInstanceId?: string | null | undefined;
   };
+
+  export type SteerMode = "steer" | "queue";
+
+  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;
@@ -485,6 +555,27 @@ declare module "swarm-extension" {
     workerAgentId: string;
     leadAgentId: string;
     summary: string;
+  }
+  export interface TaskSteerEvent {
+    task: AgentTask;
+    message: string;
+    mode: SteerMode;
+    source: SteeringSource;
+    sender: {
+      kind: "user" | "agent" | "system";
+      userId?: string;
+      agentId?: string;
+    };
+    messageTimestamps?: string[];
+    /** Slack ingress metadata; not persisted or writable through modify. */
+    slack?: {
+      channelId: string;
+      threadTs: string;
+      userId?: string;
+    };
+  }
+  export interface TaskSteerModify {
+    message: string;
   }
   export type TaskFollowUpModify = Partial<
     Pick<CreateTaskOptions, "agentId" | "priority" | "followUpConfig">
@@ -717,6 +808,11 @@ declare module "swarm-extension" {
       event: TaskFollowUpEvent;
       modify: TaskFollowUpModify;
       result: PreResult<TaskFollowUpModify>;
+    };
+    "pre.task.steer": {
+      event: TaskSteerEvent;
+      modify: TaskSteerModify;
+      result: PreResult<TaskSteerModify>;
     };
     "pre.slack.route": {
       event: SlackRouteEvent;

@@ -73,11 +73,11 @@ describe("reasoningCapability — cache-sourced levels", () => {
     expect(cap.levels).not.toContain("xhigh");
   });
 
-  test("pi openrouter/google/gemini-3-flash-preview: minimal dropped, off/xhigh absent from cache", () => {
+  test("pi openrouter/google/gemini-3-flash-preview: minimal dropped, none maps to off, xhigh absent", () => {
     const cap = reasoningCapability("pi", "openrouter/google/gemini-3-flash-preview");
     expect(cap.supported).toBe(true);
-    // Cache lists [minimal, low, medium, high]; "minimal" is dropped (out of scope).
-    expect(cap.levels).toEqual(["low", "medium", "high"]);
+    // Cache lists [none, minimal, low, medium, high]; "minimal" is dropped (out of scope).
+    expect(cap.levels).toEqual(["off", "low", "medium", "high"]);
   });
 });
 
@@ -300,7 +300,7 @@ describe("harness × model → effort matrix", () => {
     {
       harness: "pi",
       model: "openrouter/deepseek/deepseek-v4.1-flash",
-      levels: ["low", "high", "max"],
+      levels: ["off", "low", "high", "max"],
     },
     {
       harness: "pi",
@@ -310,8 +310,8 @@ describe("harness × model → effort matrix", () => {
     {
       harness: "opencode",
       model: "openrouter/deepseek/deepseek-v4.1-flash",
-      // The facts declare max, and opencode passes it through.
-      levels: ["low", "high", "max"],
+      // The facts declare none and max, and opencode passes max through.
+      levels: ["off", "low", "high", "max"],
     },
     { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },
     { harness: "claude", model: "totally-custom-model-xyz", levels: [] },

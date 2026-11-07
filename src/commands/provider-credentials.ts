@@ -20,6 +20,7 @@
 
 import {
   openAICompatibleKeyVars,
+  openAICompatibleProvider,
   openAICompatibleProviders,
   providerBaseUrl,
   providerKeyFromEnv,
@@ -34,6 +35,7 @@ import { hasCodexOAuthPoolSlots } from "../providers/codex-oauth/env-keys";
 import { checkCursorCredentials } from "../providers/cursor-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkDshCredentials } from "../providers/dsh-adapter";
+import { checkFxCredentials } from "../providers/fx-adapter";
 import { checkGrokCredentials } from "../providers/grok-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
@@ -85,7 +87,8 @@ export type SupportedProvider =
   | "dsh"
   | "cursor"
   | "amp"
-  | "grok";
+  | "grok"
+  | "fx";
 
 /**
  * True when the pi harness authenticates against Bedrock rather than a provider
@@ -158,6 +161,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   amp: ["AMP_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
   grok: ["XAI_API_KEY", "OPENROUTER_API_KEY"],
+  fx: ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "AI_GATEWAY_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -171,6 +175,7 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
   amp: (env) => checkAmpCredentials(env),
   cursor: (env) => checkCursorCredentials(env),
   grok: (env) => checkGrokCredentials(env),
+  fx: (env) => checkFxCredentials(env),
   claude: (env) => checkClaudeCredentials(env),
   "claude-managed": (env) => checkClaudeManagedCredentials(env),
   codex: (env, opts) => checkCodexCredentials(env, opts),
@@ -383,6 +388,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
  * | `dsh`            | `DEEPSEEK_API_KEY` → `OPENROUTER_API_KEY`                               | DeepSeek `/models`, or OpenRouter `/key` |
  * | `amp`            | `AMP_API_KEY`                                                           | `amp usage` (credit balance, no inference; 5s timeout) |
+ * | `fx`             | `OPENROUTER_API_KEY` → `OPENAI_API_KEY` → `AI_GATEWAY_API_KEY`          | OpenRouter `/key`, OpenAI `/v1/models`, or AI Gateway `/v1/models` |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
  * otherwise. Errors are scrubbed via `scrubSecrets` before being returned.
@@ -639,12 +645,33 @@ export async function validateProviderCredentials(
           latency_ms: Date.now() - startedAt,
         };
       }
+      case "fx": {
+        // Same keys as `checkFxCredentials`, probed in route-table order.
+        const openRouterKey = env.OPENROUTER_API_KEY?.trim();
+        if (openRouterKey) {
+          return checkEachKey("OPENROUTER_API_KEY", openRouterKey, checkOpenRouter);
+        }
+        const openAiKey = env.OPENAI_API_KEY?.trim();
+        if (openAiKey) return checkEachKey("OPENAI_API_KEY", openAiKey, checkOpenAiApiKey);
+        const gatewayKey = env.AI_GATEWAY_API_KEY?.trim();
+        const gateway = openAICompatibleProvider("vercel");
+        if (gatewayKey && gateway) {
+          return checkEachKey("AI_GATEWAY_API_KEY", gatewayKey, (member) =>
+            checkOpenAICompatibleProvider(gateway, member),
+          );
+        }
+        return {
+          ok: false,
+          error: "Set OPENROUTER_API_KEY, OPENAI_API_KEY or AI_GATEWAY_API_KEY for fx.",
+          latency_ms: Date.now() - startedAt,
+        };
+      }
       case "acp":
         return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, cursor, amp, grok.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, cursor, amp, grok, fx.`,
           latency_ms: Date.now() - startedAt,
         };
     }

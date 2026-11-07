@@ -42,10 +42,12 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import { useSessionsFilter } from "@/lib/sessions-show";
-import { SESSIONS_TOAST_POSITION, type SessionSection, userName } from "@/lib/sessions-v2";
+import { type SessionSection, userName } from "@/lib/sessions-v2";
+import { cn } from "@/lib/utils";
 import { MobileBulkBar } from "../mobile/mobile-bulk-bar";
 import { MobileTreeBody } from "../mobile/mobile-tree-body";
 import { useListKeys } from "../use-list-keys";
@@ -78,16 +80,6 @@ import { useTreeCursor } from "./use-tree-cursor";
 import { useTreeFolds } from "./use-tree-folds";
 import { useTreeMoves } from "./use-tree-moves";
 import { useTreeRows } from "./use-tree-rows";
-
-/** The clock rows read their times from. It ticks once a minute, with no animation. */
-export function useMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
-}
 
 /** Registers the Cmd+K commands. Its own component, so palette typing renders only it. */
 function SessionsCommands(props: Parameters<typeof useSessionsCommands>[0]) {
@@ -167,7 +159,14 @@ export function SessionTree({
   /** The group whose name is an input. */
   const [renaming, setRenaming] = useState<string | null>(null);
   const searching = query.trim() !== "";
-  const treeRows = useTreeRows({ me, myGroups, isOpen, expanded, creating, paused: searching });
+  const { rows: treeRows, updating } = useTreeRows({
+    me,
+    myGroups,
+    isOpen,
+    expanded,
+    creating,
+    paused: searching,
+  });
   useEffect(() => {
     if (groups) prune(groups);
   }, [groups, prune]);
@@ -371,7 +370,7 @@ export function SessionTree({
         return;
       }
     }
-    toast("No unread sessions in the open lists.", { position: SESSIONS_TOAST_POSITION });
+    toast("No unread sessions in the open lists.");
   };
   /** What a key acts on: the selection, else the cursor's session. */
   const keyTargets = () => selection.keyTargets(cursorSession);
@@ -762,14 +761,19 @@ export function SessionTree({
           aria-label={searching ? "Search results" : "Sessions"}
           aria-multiselectable
           aria-activedescendant={cursorRow ? domId(cursorRow.key) : undefined}
-          aria-busy={rows.some((row) => row.type === "loading") || undefined}
+          aria-busy={
+            (!search.active && updating) || rows.some((row) => row.type === "loading") || undefined
+          }
           tabIndex={0}
           data-kb={keyboard ? "true" : undefined}
           onKeyDown={onTreeKeyDown}
           onFocus={cursor.onFocus}
           onBlur={cursor.onBlur}
           onPointerDown={onTreePointerDown}
-          className="group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none"
+          className={cn(
+            "group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none transition-opacity",
+            !search.active && updating && "opacity-60",
+          )}
         >
           {segmentsOf(rows).map(({ section, rows: segmentRows }) =>
             section ? (
@@ -870,7 +874,7 @@ export function SessionTree({
         focused={focused}
         canTriage={canTriage}
         triage={actions}
-        groupActions={edits.groupActions}
+        groupActions={{ ...edits.groupActions, open: setView }}
         targets={targets}
         writeBlock={writeBlock}
         moves={moves}

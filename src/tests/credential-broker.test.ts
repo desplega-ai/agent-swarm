@@ -6,7 +6,7 @@ import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import {
   type CredentialBindingStore,
   CredentialBroker,
-  DEFAULT_CREDENTIAL_BINDINGS,
+  defaultCredentialBindings,
   patchFetchWithCredentialBroker,
 } from "../scripts-runtime/credential-broker";
 import { clearVolatileSecretsForTesting, scrubSecrets } from "../utils/secret-scrubber";
@@ -24,7 +24,7 @@ describe("credential broker", () => {
     const broker = new CredentialBroker(
       emptyStore,
       (key) => (key === "GITHUB_TOKEN" ? "ghp_test" : undefined),
-      DEFAULT_CREDENTIAL_BINDINGS,
+      defaultCredentialBindings(),
     );
 
     expect(await broker.resolveBindings({})).toEqual([

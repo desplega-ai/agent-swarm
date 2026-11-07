@@ -229,4 +229,76 @@ describe("Pages versioning (PUT /api/pages/:id)", () => {
       expect(p.app_url).toContain(`/pages/${p.slug}`);
     }
   });
+
+  test("PUT snapshots the design fields as they stood before the update", async () => {
+    const created = await fetch(`${BASE}/api/pages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slug: "design-versions",
+        title: "Design versions",
+        contentType: "text/html",
+        authMode: "public",
+        body: "d0",
+        theme: "paper",
+        designVersion: 1,
+        themeTokens: { light: { "--primary": "oklch(0.55 0.2 260)" } },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    // PUT #1 moves every design field. PUT #2 clears the theme and the tokens.
+    const first = await fetch(`${BASE}/api/pages/${id}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        theme: "github",
+        designVersion: 2,
+        themeTokens: { light: { "--color-ring": "oklch(0.6 0.2 30)" } },
+      }),
+    });
+    expect(first.status).toBe(200);
+    const second = await fetch(`${BASE}/api/pages/${id}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ theme: null, themeTokens: null }),
+    });
+    expect(second.status).toBe(200);
+
+    const versionsRes = await fetch(`${BASE}/api/pages/${id}/versions`, { headers });
+    expect(versionsRes.status).toBe(200);
+    const { versions } = (await versionsRes.json()) as { versions: PageVersion[] };
+    expect(versions.map((v) => v.version)).toEqual([2, 1]);
+
+    // v1 froze the state before PUT #1.
+    expect(versions[1]!.snapshot.theme).toBe("paper");
+    expect(versions[1]!.snapshot.designVersion).toBe(1);
+    expect(versions[1]!.snapshot.themeTokens).toEqual({
+      light: { "--color-primary": "oklch(0.55 0.2 260)" },
+      dark: {},
+    });
+    // v2 froze the state before PUT #2.
+    expect(versions[0]!.snapshot.theme).toBe("github");
+    expect(versions[0]!.snapshot.designVersion).toBe(2);
+    expect(versions[0]!.snapshot.themeTokens).toEqual({
+      light: { "--color-ring": "oklch(0.6 0.2 30)" },
+      dark: {},
+    });
+
+    // The head holds the cleared state.
+    const head = (await (await fetch(`${BASE}/api/pages/${id}`, { headers })).json()) as {
+      theme: string | null;
+      themeTokens: unknown;
+      designVersion: number;
+    };
+    expect(head.theme).toBeNull();
+    expect(head.themeTokens).toBeNull();
+    expect(head.designVersion).toBe(2);
+
+    // The single-version route serves the same snapshot.
+    const single = await fetch(`${BASE}/api/pages/${id}/versions/1`, { headers });
+    expect(single.status).toBe(200);
+    expect(((await single.json()) as PageVersion).snapshot.theme).toBe("paper");
+  });
 });

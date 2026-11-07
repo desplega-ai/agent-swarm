@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   claudeCatalogModelId,
+  fxCatalogRef,
   modelDisplayName,
   nearestReasoningLevel,
   REASONING_EFFORT_LEVELS,
@@ -77,7 +78,7 @@ describe("reasoningLevelsFor", () => {
     for (const harness of ["codex", "cursor", "opencode", "pi"]) {
       expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh", "max"]);
     }
-    for (const harness of ["claude", "amp", "grok"]) {
+    for (const harness of ["claude", "amp", "grok", "fx"]) {
       expect(reasoningLevelsFor(harness, "m", facts)).toEqual(["low", "high", "xhigh"]);
     }
   });
@@ -243,5 +244,29 @@ describe("modelDisplayName", () => {
   test("passes null and undefined through", () => {
     expect(modelDisplayName(undefined)).toBeUndefined();
     expect(modelDisplayName(null)).toBeUndefined();
+  });
+});
+
+describe("fx effort", () => {
+  const catalog = {
+    vercel: { models: { "openai/gpt-5-mini": effort("none", "minimal", "low", "medium", "high") } },
+    openrouter: { models: { "openai/gpt-5-mini": effort("low", "medium", "high") } },
+    openai: { models: { "gpt-5-mini": effort("low", "medium", "high") } },
+  };
+
+  test("only the AI Gateway route has levels, and never off", () => {
+    expect(fxCatalogRef("vercel/openai/gpt-5-mini")).toEqual({
+      providerId: "vercel",
+      modelId: "openai/gpt-5-mini",
+    });
+    expect(fxCatalogRef("openrouter/openai/gpt-5-mini")).toBeNull();
+    expect(fxCatalogRef("gpt-5-mini")).toBeNull();
+    expect(reasoningLevelsForModel("fx", "vercel/openai/gpt-5-mini", catalog)).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(reasoningLevelsForModel("fx", "openrouter/openai/gpt-5-mini", catalog)).toEqual([]);
+    expect(reasoningLevelsForModel("fx", "gpt-5-mini", catalog)).toEqual([]);
   });
 });

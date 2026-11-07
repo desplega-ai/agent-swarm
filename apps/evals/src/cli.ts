@@ -55,7 +55,7 @@ Usage:
   bun src/cli.ts show <runId> [--detail]  # print result matrix (mean±CI; --detail adds best@n/pass@1)
   bun src/cli.ts serve [--port 4801] # API + UI
   bun src/cli.ts registry            # list available scenarios + configs
-  bun src/cli.ts publish --suite 1.0 --run <runId> [--out <dir>]  # freeze a finished matrix run for /benchmark
+  bun src/cli.ts publish --suite 1.0 --run <runId> [--out <dir>]  # freeze a finished matrix run as a dated snapshot for /benchmark
 
 Defaults: scenarios=${DEFAULT_SCENARIO_IDS.join(",")} configs=${DEFAULT_CONFIG_IDS.join(",")}
 Presets (--preset, repeatable; see run --help): ${CONFIG_PRESETS.map((p) => p.id).join(", ")}

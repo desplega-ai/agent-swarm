@@ -21,6 +21,8 @@ services:
       - API_KEY=${API_KEY}
       - INSTALL_METHOD=${INSTALL_METHOD}
       - INSTALL_PRESET=${INSTALL_PRESET:-}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}
       - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
@@ -30,7 +32,7 @@ services:
       - APP_URL=https://app.agent-swarm.dev
 
     ports:
-      - "3013:3013"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3013:3013"
 
     volumes:
       - swarm_data:/app/data
@@ -58,18 +60,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000001
       - AGENT_NAME=Lead
       - AGENT_ROLE=lead
       - TEMPLATE_ID=official/lead
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=2
 
     ports:
-      - "3201:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3201:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -92,18 +95,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000002
       - AGENT_NAME=Coder
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/coder
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3202:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3202:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -126,18 +130,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000003
       - AGENT_NAME=Content Reviewer
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-reviewer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3203:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3203:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -160,18 +165,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000004
       - AGENT_NAME=Content Strategist
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-strategist
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3204:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3204:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -194,18 +200,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000005
       - AGENT_NAME=Content Writer
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/content-writer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3205:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3205:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -228,18 +235,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000006
       - AGENT_NAME=Discoverability Optimizer
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/discoverability-optimizer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3206:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3206:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -262,18 +270,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000007
       - AGENT_NAME=Forward Deployed Engineer
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/forward-deployed-engineer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3207:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3207:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -296,18 +305,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000008
       - AGENT_NAME=Researcher
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/researcher
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3208:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3208:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -330,18 +340,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000009
       - AGENT_NAME=Reviewer
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/reviewer
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3209:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3209:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -364,18 +375,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000010
       - AGENT_NAME=Tester
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/tester
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3210:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3210:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -398,18 +410,19 @@ services:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-}
+      - DESPLEGA_TELEMETRY_ENV=${DESPLEGA_TELEMETRY_ENV:-}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - AGENT_ID=00000000-0000-4000-8000-000000000011
       - AGENT_NAME=UX Principles Agent
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/ux-principles
       - MCP_BASE_URL=http://swarm-api:3013
-      - YOLO=true
       - SWARM_URL=http://swarm-api:3013
       - MAX_CONCURRENT_TASKS=1
 
     ports:
-      - "3211:3000"
+      - "${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}3211:3000"
 
     volumes:
       - swarm_logs:/logs

@@ -43,7 +43,7 @@ JIRA_REDIRECT_URI=http://localhost:3013/api/trackers/jira/callback \
 bun run start:http
 ```
 
-The redirect URI must exactly match one of the callback URLs configured in the Atlassian app. If the browser shows "callback URL is invalid", the server is deriving a callback URL that is not registered. Set `JIRA_REDIRECT_URI` explicitly, restart the API, and retry `/api/trackers/jira/authorize`.
+The redirect URI must exactly match one of the callback URLs configured in the Atlassian app. If the browser shows "callback URL is invalid", the server is deriving a callback URL that is not registered. Set `JIRA_REDIRECT_URI` explicitly, restart the API, and retry the dashboard's Jira **Authorize** button (or `GET /api/trackers/jira/authorize?format=json` with the swarm API key).
 
 After consent, check status without printing tokens:
 

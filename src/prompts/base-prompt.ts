@@ -6,7 +6,7 @@
  *   A-D, F, G  composite session template (role + persona, contract, workspace,
  *              memory, communication, secrets) from session-templates.ts
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
- *   H          deployment-gated notes: slack, steering
+ *   H          deployment-gated notes: slack, use-case channel thread (lead), steering
  *   I          tools and skills (harness tool discovery, skills, MCP server names)
  *   J          agent notes: CLAUDE.md, only when edited
  *
@@ -22,7 +22,7 @@
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName, RequestCompositionPartInput } from "../types";
-import { resolveAgentFsLinkBase } from "../utils/constants";
+import { agentFsFileLinkQuery, getAppUrl, resolveAgentFsLinkBase } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -78,12 +78,15 @@ const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"
 /**
  * Template event for the tool-discovery line. Amp, Codex and OpenCode run MCP
  * tools inside their own code sandbox (`code_exec`, `exec`, `execute`), each
- * with its own call shape, so the generic lines are wrong for them.
+ * with its own call shape, and fx defers them behind `capability_search` under
+ * `mcp_<server>_<tool>` names, so the generic lines are wrong for them.
  */
 function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
   switch (provider) {
     case "amp":
       return "system.agent.tool_discovery.amp";
+    case "fx":
+      return "system.agent.tool_discovery.fx";
     case "codex":
       return "system.agent.tool_discovery.codex";
     case "opencode":
@@ -226,6 +229,8 @@ export const getBasePromptWithParts = async (
     role,
     agentId,
     persona,
+    // Deployment-level, so the lead's use-case link keeps the prompt cache-stable.
+    appUrl: getAppUrl(),
   };
 
   // Composite choice by traits, then role.
@@ -286,11 +291,11 @@ export const getBasePromptWithParts = async (
     const outputsEvent = agentFsConfigured
       ? "system.agent.outputs"
       : "system.agent.outputs.no_agent_fs";
-    const outputsResult = await resolveTemplateAsync(
-      outputsEvent,
-      // Unset AGENT_FS_LINK_TARGET keeps the literal the agent expands in its shell.
-      { fileLinkBase: resolveAgentFsLinkBase("prompt") ?? `\${AGENT_FS_LIVE_URL}` },
-    );
+    const fileLinkBase = resolveAgentFsLinkBase("prompt");
+    const outputsResult = await resolveTemplateAsync(outputsEvent, {
+      fileLinkBase,
+      fileLinkQuery: agentFsFileLinkQuery(fileLinkBase),
+    });
     prompt += outputsResult.text;
     section(outputsEvent, grown());
   }
@@ -302,6 +307,18 @@ export const getBasePromptWithParts = async (
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
     section("system.agent.slack", grown());
+  }
+
+  // Use-case channel thread (lead only: every posting tool is lead-only).
+  if (
+    hasMcp &&
+    role === "lead" &&
+    !scriptsOnlyMode &&
+    (slackPromptToolsEnabled || serverHasCapability("chat-sdk", false))
+  ) {
+    const threadResult = await resolveTemplateAsync("system.agent.lead.channel_thread", {});
+    prompt += threadResult.text;
+    section("system.agent.lead.channel_thread", grown());
   }
 
   if (
@@ -587,8 +604,14 @@ function renderRepositoryVars(
   }
 
   if (ctx.hasLocalEnv && repo.autoStashes && repo.autoStashes.length > 0) {
-    const stashes = repo.autoStashes.map((stash) => `- ${stash.ref}: ${stash.message}`).join("\n");
-    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+    const stashes = repo.autoStashes.slice(0, 5).map((stash) => `- ${stash.ref}: ${stash.message}`);
+    const olderCount = repo.autoStashes.length - stashes.length;
+    if (olderCount > 0) {
+      stashes.push(
+        `- ...and ${olderCount} older swarm-autostash entries (run git stash list to see all)`,
+      );
+    }
+    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes.join("\n")}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
   }
 
   let section = "";

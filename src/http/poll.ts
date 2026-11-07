@@ -6,6 +6,7 @@ import {
   type BudgetRefusalContext,
   emitBudgetRefusalSideEffects,
 } from "../be/budget-refusal-notify";
+import { firstOpenItem, markNudged, userGrantCanEditSwarm } from "../be/checklist";
 import {
   claimMentions,
   claimOfferedTask,
@@ -13,7 +14,6 @@ import {
   getAgentById,
   getAllChannelActivityCursors,
   getDbClient,
-  getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getTaskAttachments,
@@ -26,6 +26,7 @@ import {
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { checkProfileForAgent } from "../be/model-profile-check";
 import {
   parseModelTierOverridesHeader,
   recordClaimModelResolution,
@@ -37,14 +38,28 @@ import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
-import { AgentTaskSchema, BudgetRefusedTriggerSchema, TaskAttachmentSchema } from "../types";
+import {
+  type Agent,
+  type AgentTask,
+  AgentTaskSchema,
+  BudgetRefusedTriggerSchema,
+  ModelProfileCredentialsSchema,
+  TaskAttachmentSchema,
+} from "../types";
 import { ensure } from "../utils/business-use";
 import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { readsRepoSecrets } from "./config";
-import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
+import { resolveAppUrl } from "./config-values";
+import {
+  buildTaskRequestedBy,
+  buildTaskThreadParticipants,
+  TaskRequestedBySchema,
+  TaskThreadParticipantsSchema,
+} from "./requested-by";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -100,6 +115,7 @@ const PollTaskOfferedTriggerSchema = z.object({
   taskId: z.string(),
   task: AgentTaskSchema,
   requestedBy: TaskRequestedBySchema.optional(),
+  threadParticipants: TaskThreadParticipantsSchema.optional(),
 });
 
 const PollTaskAssignedTriggerSchema = z.object({
@@ -110,8 +126,20 @@ const PollTaskAssignedTriggerSchema = z.object({
   triggerSurface: z.string().optional(),
   task: AgentTaskSchema.extend({
     attachments: z.array(PollTriggerAttachmentSchema),
+    // The claimed profile's pooled-key allowlist. Trigger only, not stored on the task.
+    credentialAllowlist: ModelProfileCredentialsSchema.optional(),
   }),
   requestedBy: TaskRequestedBySchema.optional(),
+  checklistNudge: z
+    .object({
+      itemId: z.string(),
+      kind: z.string(),
+      label: z.string(),
+      // Absent without APP_URL: a relative link is dead in Slack or Telegram.
+      href: z.string().optional(),
+    })
+    .optional(),
+  threadParticipants: TaskThreadParticipantsSchema.optional(),
 });
 
 // `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
@@ -200,6 +228,35 @@ async function attachmentsForTrigger(
   }));
 }
 
+async function buildChecklistNudge(task: AgentTask, agent: Agent) {
+  const userId = task.requestedByUserId;
+  if (!agent.isLead || !userId || !["ui", "slack", "chat", "comb"].includes(task.source ?? "")) {
+    return undefined;
+  }
+  try {
+    return await getDbClient().transaction(async () => {
+      // RBAC off: the legacy policy lets the Lead edit swarm items.
+      const canEditSwarm = (await userGrantCanEditSwarm(userId)) ?? true;
+      const item = await firstOpenItem(userId, canEditSwarm);
+      if (!item) return undefined;
+      await markNudged(item.id, task.id, userId);
+      const appUrl = await resolveAppUrl();
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        ...(appUrl && { href: `${appUrl}${item.href ?? "/"}` }),
+      };
+    });
+  } catch (error) {
+    console.warn(
+      "[/api/poll] Checklist nudge failed:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+    return undefined;
+  }
+}
+
 /**
  * Claim-time model resolution (runbooks/model-tiers.md). Never blocks a claim:
  * a resolution failure leaves the worker on its own local resolution.
@@ -226,6 +283,7 @@ async function claimModelFields(
     modelSource: undefined,
     modelAlias: undefined,
     resolvedProfile: undefined,
+    credentialAllowlist: undefined,
   };
   try {
     return {
@@ -394,12 +452,14 @@ export async function handlePoll(
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
             const offeredRequestedBy = await buildTaskRequestedBy(claimedTask);
+            const offeredThread = await buildTaskThreadParticipants(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
                 taskId: claimedTask.id,
                 task: claimedTask,
                 ...(offeredRequestedBy && { requestedBy: offeredRequestedBy }),
+                ...(offeredThread && { threadParticipants: offeredThread }),
               },
             };
           }
@@ -492,6 +552,8 @@ export async function handlePoll(
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTaskRequestedBy).
             const assignedRequestedBy = await buildTaskRequestedBy(pendingTask);
+            const nudge = await buildChecklistNudge(pendingTask, agent);
+            const assignedThread = await buildTaskThreadParticipants(pendingTask);
             // The surface that started the whole chain, so the worker can tag
             // its session events with it (workers cannot read the task tree).
             const assignedTriggerSurface = await resolveTriggerSurface(
@@ -511,6 +573,8 @@ export async function handlePoll(
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
+                ...(nudge && { checklistNudge: nudge }),
+                ...(assignedThread && { threadParticipants: assignedThread }),
               },
             };
           }
@@ -524,12 +588,12 @@ export async function handlePoll(
         // would instruct a missing tool and strand the claimed mentions.
         const claimedChannels = hasCapability("messaging") ? await claimMentions(myAgentId) : [];
         if (claimedChannels.length > 0) {
-          // Recalculate inbox summary now that we've claimed
-          const inbox = await getInboxSummary(myAgentId);
+          // Count what this claim took: the inbox summary no longer sees mentions already
+          // moved to "processing".
           return {
             trigger: {
               type: "unread_mentions",
-              mentionsCount: inbox.mentionsCount,
+              mentionsCount: claimedChannels.reduce((sum, c) => sum + c.mentionsCount, 0),
               claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
             },
           };
@@ -560,9 +624,34 @@ export async function handlePoll(
             // worker (runbooks/model-tiers.md § Harness compatibility). Filter before the
             // budget gate so an incompatible first candidate never drives a refusal.
             const harness = agent.harnessProvider ?? agent.provider ?? null;
+            // A pool task with an explicit `profile` also waits for an agent that passes
+            // the profile check, judged on the task repo's config as the worker loads it.
+            // Memoized per poll: one check per profile name and repo.
+            const profileOk = new Map<string, boolean>();
+            const includeRepoSecrets = readsRepoSecrets(getRequestAuth(req), agent);
+            const passesProfileCheck = async (
+              profile: string,
+              vcsRepo: string | null | undefined,
+            ): Promise<boolean> => {
+              const memoKey = JSON.stringify([profile, vcsRepo ?? null]);
+              const cached = profileOk.get(memoKey);
+              if (cached !== undefined) return cached;
+              const result = await checkProfileForAgent(myAgentId, profile, {
+                vcsRepo,
+                includeRepoSecrets,
+                fallbacks: false,
+              });
+              const ok = result?.ok !== false;
+              profileOk.set(memoKey, ok);
+              return ok;
+            };
             // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
-            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5, (task) =>
-              poolTaskRunsOnHarness(task, harness),
+            const unassignedIds = await getUnassignedTaskIdsForAgent(
+              myAgentId,
+              5,
+              async (task) =>
+                (await poolTaskRunsOnHarness(task, harness)) &&
+                (!task.profile || (await passesProfileCheck(task.profile, task.vcsRepo))),
             );
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
@@ -639,6 +728,7 @@ export async function handlePoll(
                   });
                 });
                 const claimedRequestedBy = await buildTaskRequestedBy(claimed);
+                const claimedThread = await buildTaskThreadParticipants(claimed);
                 const claimedTriggerSurface = await resolveTriggerSurface(
                   claimed.id,
                   claimed.source,
@@ -654,6 +744,7 @@ export async function handlePoll(
                       attachments: await attachmentsForTrigger(claimed.id),
                     },
                     ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
+                    ...(claimedThread && { threadParticipants: claimedThread }),
                   },
                 };
               }

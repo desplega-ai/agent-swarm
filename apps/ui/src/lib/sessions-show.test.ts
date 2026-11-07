@@ -35,17 +35,19 @@ describe("sessions Mine / All view", () => {
 });
 
 describe("sessions shown sources", () => {
-  test("fresh storage shows only ui, so an unseen source is hidden", () => {
-    expect(getSessionsShownSources()).toEqual(["ui"]);
-    expect(sessionsFilterParams("mine", getSessionsShownSources())).toEqual({ showSource: "ui" });
+  test("fresh storage shows the dashboard sources only, so an unseen source is hidden", () => {
+    expect(getSessionsShownSources()).toEqual(["comb", "ui"]);
+    expect(sessionsFilterParams("mine", getSessionsShownSources())).toEqual({
+      showSource: "comb,ui",
+    });
     expect(sessionsFilterActive("mine", getSessionsShownSources())).toBe(false);
     // The server keeps only the listed sources, so github (never ticked) stays out.
-    expect(sessionListParams({ scope: "tree", triage: "inbox" }).showSource).toBe("ui");
-    expect(sessionTreeKey("u1", "mine")).toEqual(["session-tree", "u1", "mine", "ui"]);
+    expect(sessionListParams({ scope: "tree", triage: "inbox" }).showSource).toBe("comb,ui");
+    expect(sessionTreeKey("u1", "mine")).toEqual(["session-tree", "u1", "mine", "comb,ui"]);
   });
   test("an older hidden-sources list does not change the default", () => {
     localStorage.setItem("swarm:v1:sessions-v2:hidden-sources", "slack");
-    expect(getSessionsShownSources()).toEqual(["ui"]);
+    expect(getSessionsShownSources()).toEqual(["comb", "ui"]);
   });
   test("sorted and deduplicated, with a stable array; none shown sends an empty list", () => {
     setSessionsShownSources(["slack", "ui", "slack", ""]);
@@ -59,9 +61,10 @@ describe("sessions shown sources", () => {
     expect(getSessionsShownSources()).toEqual([]);
     expect(sessionsFilterParams("mine", [])).toEqual({ showSource: "" });
     expect(sessionsFilterActive("mine", [])).toBe(true);
-    setSessionsShownSources(["ui"]);
-    expect(sessionsFilterActive("mine", ["ui"])).toBe(false);
-    expect(sessionsFilterActive("all", ["ui"])).toBe(true);
+    expect(sessionsFilterActive("mine", ["ui"])).toBe(true);
+    setSessionsShownSources(["ui", "comb"]);
+    expect(sessionsFilterActive("mine", getSessionsShownSources())).toBe(false);
+    expect(sessionsFilterActive("all", getSessionsShownSources())).toBe(true);
   });
   test("tree lists and the tree key follow the shown sources; other lists do not", () => {
     setSessionsShownSources(["slack", "ui"]);

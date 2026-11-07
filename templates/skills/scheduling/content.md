@@ -16,7 +16,7 @@ Use a schedule when work repeats on a clock, or when it must run once at a later
 
 Choose `agent-task` only when the run needs judgment, open-ended work, or tool orchestration that no workflow or script covers. An `agent-task` whose template says "trigger workflow X" or "run script Y" is wrong: use the direct target instead.
 
-The agent-task fields `targetAgentId`, `model`, `modelTier`, `taskTemplate`, `priority`, and `tags` do not apply to workflow or script targets. Workflow cooldowns still gate workflow targets.
+The agent-task fields `targetAgentId`, `profile`, `model`, `modelTier`, `taskTemplate`, `priority`, and `tags` do not apply to workflow or script targets. Workflow cooldowns still gate workflow targets.
 
 ## Pick the timing
 
@@ -37,9 +37,36 @@ The template is the whole task the agent receives. It must state:
 - where the result goes (a page, agent-fs, a Slack thread, a task output),
 - what done looks like.
 
-`targetAgentId` pins the task to one agent. Omit it to use the pool. `modelTier` (`smol`, `regular`, `smart`, `ultra`) is the portable way to pick a model. `model` is a provider-specific override.
+`targetAgentId` pins the task to one agent. Omit it to use the pool. `profile` is the preferred way to pick a model: a named harness + model + effort (see `list-model-profiles`). With `targetAgentId`, the agent must pass the profile check (`check-model-profile`), or the save is refused. `model` is a provider-specific override. `modelTier` is deprecated: pass `profile: "<harness>-<tier>"` for the same model. `profile` is exclusive with `model` and `modelTier`; on update, setting one clears the other.
 
 Tasks created by a schedule are automatic tasks. Their completed output is not stored as memory unless the agent calls `store-progress` with `persistMemory: true`.
+
+## Use cases: one key for the schedule and its results
+
+A recurring job that a person comes back to is a use case. Its planning session, the schedule, the runs, pages, and result files share one asset key, so the dashboard shows them as one Sessions group.
+
+- The key is `shared/<slug>/`, or `personal/<user>/<slug>/` for private work. Agree the short slug with the requester, for example `shared/competitor-watch/`.
+- `create-schedule` and `create-page` use the key of the calling task when that key is a use-case group. Otherwise pass `key` explicitly. Runs get the schedule's key.
+- The task template tells each run to write its result under the key in the shared drive, for example `shared/competitor-watch/report-<YYYY-MM-DD>.md`, and to compare with the earlier reports in that folder.
+- End the planning reply with the "lives in" line: `This use case lives in Sessions → competitor-watch: <APP_URL>/sessions?view=shared/competitor-watch/`.
+
+### One-time ask or lasting change
+
+In a use-case session, decide what the request changes:
+
+- A request for one time only ("also check Acme today"): a normal task in the key. Do not change the schedule.
+- A request that changes the future runs ("from now on also include pricing"): change the schedule. Read the current template with `list-schedules` (`key` is the use-case key), then call `update-schedule` with the full new `taskTemplate`:
+
+```
+update-schedule { scheduleId: "<id>", taskTemplate: "Research the 5 competitors in shared/competitor-watch/competitors.md. Include their pricing. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report." }
+```
+
+Then show the change as a `diff` block in your reply, and ask the requester to confirm it:
+
+```diff
+- Research the 5 competitors in shared/competitor-watch/competitors.md. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report.
++ Research the 5 competitors in shared/competitor-watch/competitors.md. Include their pricing. Write shared/competitor-watch/report-<YYYY-MM-DD>.md and compare with the previous report.
+```
 
 ## Check back later
 

@@ -51,6 +51,7 @@ export function DownloadButton({
   variant = "outline",
   iconOnly = false,
   bytes,
+  label = "Download",
 }: {
   file: DrivePath;
   /** `default` where Download is the state's one next action (no preview). */
@@ -59,6 +60,8 @@ export function DownloadButton({
   iconOnly?: boolean;
   /** The file size, for the tooltip. */
   bytes?: number;
+  /** The text of a labeled button ("Download instead" where a copy cannot happen). */
+  label?: string;
 }) {
   const { client } = useAgentFsAccess();
   const [pending, setPending] = useState(false);
@@ -105,10 +108,10 @@ export function DownloadButton({
       variant={variant}
       onClick={() => void download()}
       disabled={pending || !client}
-      aria-label="Download"
+      aria-label={label}
     >
       {pending ? <Spinner /> : <Download />}
-      <span className="hidden sm:inline">Download</span>
+      <span className="hidden sm:inline">{label}</span>
     </Button>
   );
 }

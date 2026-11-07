@@ -73,6 +73,9 @@ Signed image/PDF/video previews and downloads default to `https://${AGENT_FS_DOM
 
 ## Start and verify
 
+Choose memory embeddings before starting. Use the [embeddings procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/embeddings.md) for local TEI or a hosted provider.
+The commands below use the base example. With TEI, add `-f docker-compose.tei.yml` after the base file for every command.
+
 ```bash
 docker compose -f docker-compose.example.yml --env-file .env config --quiet
 docker compose -f docker-compose.example.yml --env-file .env pull

@@ -4,6 +4,7 @@ import {
   type LucideIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  PiggyBank,
   Wallet,
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
@@ -26,6 +27,7 @@ const USAGE_NAV: UsageNavItem[] = [
   { title: "Usage", path: "/usage", icon: BarChart3, end: true },
   { title: "Budgets", path: "/usage/budgets", icon: Wallet },
   { title: "Metrics", path: "/usage/metrics", icon: LayoutDashboard },
+  { title: "Savings", path: "/usage/savings", icon: PiggyBank },
 ];
 
 const RAIL_COLLAPSED_KEY = "agent-swarm:usage-rail-collapsed";

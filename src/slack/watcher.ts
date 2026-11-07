@@ -10,15 +10,21 @@ import {
   markSlackRelayDelivered,
   setSlackMessageTracking,
 } from "../be/db";
+import { bindLoopPath } from "../be/event-loop-lag";
 import type { AgentTask } from "../types";
 import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
-import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
+import {
+  isSlackRenderV2Enabled,
+  processSlackRenderV2,
+  startSlackRenderV2Events,
+  stopSlackRenderV2Events,
+} from "./render-v2";
 import {
   getAgentDisplayName,
-  getAgentEmoji,
+  getAgentSlackIcon,
   sendInlineTaskOutput,
   sendProgressUpdate,
   sendTaskResponse,
@@ -32,6 +38,10 @@ import { slackTaskOutput } from "./task-output";
 
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
+// Bumped by stopTaskWatcher(). A start that sees a new epoch after its
+// hydration awaits was abandoned (watchdog restart timeout or shutdown) and
+// must not install a timer.
+let watcherEpoch = 0;
 
 // Track notified completion tasks (taskId -> timestamp)
 const notifiedCompletions = new Map<string, number>();
@@ -230,6 +240,9 @@ export function _getLastRenderedTree(): Map<string, string> {
 }
 export function _getTreeLastUpdateTime(): Map<string, number> {
   return treeLastUpdateTime;
+}
+export function _isTaskWatcherRunning(): boolean {
+  return watcherInterval !== null;
 }
 
 // Expose DM helpers for testing
@@ -491,7 +504,7 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
       unfurl_links: false,
       unfurl_media: false,
       username: getAgentDisplayName(agent),
-      icon_emoji: getAgentEmoji(agent),
+      ...getAgentSlackIcon(agent),
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
@@ -616,22 +629,37 @@ export async function processPendingSlackRelays(now = Date.now()): Promise<void>
   }
 }
 
+export const DEFAULT_SLACK_TASK_WATCHER_INTERVAL_MS = 10_000;
+
+/**
+ * Watcher tick from SLACK_TASK_WATCHER_INTERVAL_MS (milliseconds), else 10 s.
+ * Under render v2 each tick is the full reconcile; task events render their
+ * own thread in between, so the tick is the safety net, not the cadence.
+ */
+export function slackTaskWatcherIntervalMs(): number {
+  const raw = process.env.SLACK_TASK_WATCHER_INTERVAL_MS?.trim();
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SLACK_TASK_WATCHER_INTERVAL_MS;
+}
+
 /**
  * Start watching for Slack task updates and sending responses.
  */
-export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
+export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()): Promise<void> {
   if (watcherInterval) {
     console.log("[Slack] Task watcher already running");
     return;
   }
 
+  const epoch = watcherEpoch;
   let hydratedTrees = 0;
   let hydratedFlat = 0;
   const hydrationTasks = new Map<string, AgentTask>();
-  for (const task of [
-    ...(await getInProgressSlackTasks()),
-    ...(await getPendingSlackRelayTasks()),
-  ]) {
+  const inProgress = await getInProgressSlackTasks();
+  const pendingRelays = await getPendingSlackRelayTasks();
+  // Abandoned while it hydrated (stopped, or overtaken by another start).
+  if (epoch !== watcherEpoch || watcherInterval) return;
+  for (const task of [...inProgress, ...pendingRelays]) {
     hydrationTasks.set(task.id, task);
   }
   for (const task of hydrationTasks.values()) {
@@ -676,7 +704,8 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     );
   }
 
-  watcherInterval = setInterval(async () => {
+  startSlackRenderV2Events();
+  const watcherTick = async () => {
     // Prevent overlapping processing cycles
     if (isProcessing || !getSlackApp()) return;
     isProcessing = true;
@@ -848,16 +877,21 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     } finally {
       isProcessing = false;
     }
-  }, intervalMs);
+  };
+  // Name the entry point for the event-loop stall line.
+  watcherInterval = setInterval(bindLoopPath("slack.watcher.tick", watcherTick), intervalMs);
 
   console.log(`[Slack] Task watcher started (interval: ${intervalMs}ms)`);
 }
 
 export function stopTaskWatcher(): void {
+  // Fence any start still hydrating, even when no timer is installed yet.
+  watcherEpoch += 1;
   if (watcherInterval) {
     clearInterval(watcherInterval);
     watcherInterval = null;
     isProcessing = false;
+    stopSlackRenderV2Events();
     console.log("[Slack] Task watcher stopped");
   }
 }

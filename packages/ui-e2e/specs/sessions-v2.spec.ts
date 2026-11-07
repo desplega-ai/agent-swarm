@@ -165,11 +165,11 @@ test.describe("desktop", () => {
         .getByRole("tabpanel", { name: session.title })
         .getByRole("button", { name: groupName, exact: true }),
     ).toBeVisible();
-    // The Inbox row names its group, and the open group holds a second row.
+    // Filed into a group, the session leaves the Inbox and shows under the group only.
     const tree = page.getByRole("tree", { name: "Sessions" });
-    await expect(sessionRow(tree, `${session.title}. In ${groupName}.`)).toBeVisible();
+    await expect(sessionRow(tree, `${session.title}. In ${groupName}.`)).toBeHidden();
     await expand(tree, groupName);
-    await expect(sessionRow(tree, session.title)).toHaveCount(2);
+    await expect(sessionRow(tree, session.title)).toHaveCount(1);
     await clean.assertClean();
   });
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   claimKv,
@@ -17,6 +17,7 @@ import {
   sweepExpiredKvPrefix,
   upsertKv,
 } from "../be/db";
+import { runMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 
 const TEST_DB_PATH = "./test-kv-storage.sqlite";
 
@@ -105,6 +106,33 @@ describe("kv-storage helpers", () => {
     expect((await getKv(NS, "live-spill"))?.value).toBe("new");
   });
 
+  test("the MCP overflow sweep removes expired spills of every agent", async () => {
+    const now = Date.now();
+    await upsertKv({
+      namespace: "mcp:overflow:agent-c",
+      key: "expired-c",
+      value: "x",
+      valueType: "string",
+      expiresAt: now - 1,
+    });
+    await upsertKv({
+      namespace: "mcp:overflow:agent-d",
+      key: "live-d",
+      value: "x",
+      valueType: "string",
+      expiresAt: now + 10_000,
+    });
+
+    expect(await runMcpOverflowSweep(now)).toBeGreaterThanOrEqual(1);
+    // Raw read: getKv deletes an expired row itself.
+    const expired = await getDbClient().get<{ key: string }>(
+      "SELECT key FROM kv_entries WHERE namespace = ? AND key = ?",
+      ["mcp:overflow:agent-c", "expired-c"],
+    );
+    expect(expired).toBeNull();
+    expect((await getKv("mcp:overflow:agent-d", "live-d"))?.value).toBe("x");
+  });
+
   test("prefix sweep removes expired entries across per-agent overflow namespaces", async () => {
     const now = Date.now();
     for (const [namespace, key, expiresAt] of [
@@ -123,6 +151,97 @@ describe("kv-storage helpers", () => {
       ["mcp:other:agent-a", "unrelated"],
     );
     expect(unrelated?.count).toBe(1);
+  });
+
+  test("batched prefix sweep deletes the same rows as one DELETE and yields between batches", async () => {
+    const now = Date.now();
+    const rows: Array<[string, string, number | null]> = [];
+    for (let i = 0; i < 7; i++) rows.push([`mcp:overflow:agent-${i % 3}`, `exp-${i}`, now - i]);
+    rows.push(["mcp:overflow", "exp-root", now]); // expires_at == now is expired
+    rows.push(["mcp:overflow:agent-0", "live", now + 1]);
+    rows.push(["mcp:overflow:agent-0", "no-ttl", null]);
+    rows.push(["mcp:overflowX", "exp-prefix-lookalike", now - 1]);
+    rows.push(["mcp:overflo_:agent-0", "exp-underscore", now - 1]);
+    rows.push(["mcp:other:agent-0", "exp-other", now - 1]);
+    for (const [namespace, key, expiresAt] of rows) {
+      await upsertKv({ namespace, key, value: key, valueType: "string", expiresAt });
+    }
+
+    const keyOf = (r: { namespace: string; key: string }) => `${r.namespace}/${r.key}`;
+    // The row set the previous single-statement DELETE removed.
+    const expected = (
+      await getDbClient().query<{ namespace: string; key: string }>(
+        `SELECT namespace, key FROM kv_entries
+            WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+              AND expires_at IS NOT NULL
+              AND expires_at <= ?`,
+        ["mcp:overflow", "mcp:overflow:%", now],
+      )
+    )
+      .map(keyOf)
+      .sort();
+    expect(expected).toHaveLength(8);
+    const before = (
+      await getDbClient().query<{ namespace: string; key: string }>(
+        "SELECT namespace, key FROM kv_entries",
+      )
+    ).map(keyOf);
+
+    const immediate = spyOn(globalThis, "setImmediate");
+    let removed: number;
+    let yields: number;
+    try {
+      removed = await sweepExpiredKvPrefix("mcp:overflow", now, 3);
+      yields = immediate.mock.calls.length;
+    } finally {
+      immediate.mockRestore();
+    }
+
+    const after = new Set(
+      (
+        await getDbClient().query<{ namespace: string; key: string }>(
+          "SELECT namespace, key FROM kv_entries",
+        )
+      ).map(keyOf),
+    );
+    const deleted = before.filter((k) => !after.has(k)).sort();
+    expect(removed).toBe(8);
+    expect(deleted).toEqual(expected);
+    // 8 rows in batches of 3: 3 + 3 + 2, a yield between each pair.
+    expect(yields).toBe(2);
+  });
+
+  test.each([
+    [undefined, 50],
+    [500, 50],
+    [-1, 1],
+    [0, 1],
+  ])("prefix sweep bounds each DELETE (requested: %s)", async (batchSize, expectedBatchSize) => {
+    const now = Date.now();
+    for (let i = 0; i < 101; i++) {
+      await upsertKv({
+        namespace: "mcp:overflow:batch-cap",
+        key: `expired-${i}`,
+        value: "expired",
+        valueType: "string",
+        expiresAt: now,
+      });
+    }
+    const client = getDbClient();
+    const originalRun = client.run.bind(client);
+    const run = spyOn(client, "run").mockImplementation(async (sql, params) => {
+      // Fail before SQLite runs an unlimited DELETE or the sweep loops forever.
+      expect(params?.[3]).toBe(expectedBatchSize);
+      return originalRun(sql, params);
+    });
+    let calls: (typeof run.mock.calls)[number][];
+    try {
+      expect(await sweepExpiredKvPrefix("mcp:overflow:batch-cap", now, batchSize)).toBe(101);
+      calls = [...run.mock.calls];
+    } finally {
+      run.mockRestore();
+    }
+    expect(calls).toHaveLength(Math.floor(101 / expectedBatchSize) + 1);
   });
 
   test("integer value type stores as number", async () => {

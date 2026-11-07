@@ -18,6 +18,7 @@ When someone @mentions the bot in a thread, the router checks whether a worker a
 - An agent must have an active task (`in_progress` or `pending`) linked to that thread via `slackChannelId` + `slackThreadTs`
 - The matched agent must not be `offline`
 - If `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true`, non-mention thread messages are silently dropped instead of routing to the working agent. DM assistant threads are unaffected.
+- A message that @mentions another user but not the bot (e.g. `@Devin wdyt?`) is addressed to that user, so it is skipped. This applies to thread follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to turn this skip off. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` still takes precedence: a message without a bot mention is dropped.
 
 **Why this matters:** Without thread follow-up routing, every @mention in a thread goes to the lead, who then has to re-delegate. This shortcut sends the message directly to the worker already handling that conversation.
 
@@ -102,6 +103,7 @@ When the additive buffer flushes normally (not via `!now`), the created task use
 | `ADDITIVE_SLACK` | `false` | Enables non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | `10000` (10s) | Debounce window in milliseconds for the thread buffer |
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | `false` | Requires @mention for thread follow-up routing; non-mention thread messages are silently dropped |
+| `SLACK_THREAD_WAKE_ON_ANY_MESSAGE` | `false` | Thread messages that @mention another user (and not the bot) still count as follow-ups, instead of being skipped |
 | `SLACK_THREAD_STEERING` | `lead` | `off` preserves follow-up tasks; `lead` steers the latest in-progress lead task; `all` targets the latest active task |
 | `SLACK_THREAD_STEERING_MODE` | `queue` | `queue` appends context; `steer` requests immediate steering and degrades to queue when unsupported |
 

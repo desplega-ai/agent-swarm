@@ -1,5 +1,5 @@
 import { telemetry } from "../telemetry";
-import { ProviderNameSchema } from "../types";
+import { ProviderNameSchema, TERMINAL_TASK_STATUSES } from "../types";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { z } from "../utils/zod-openapi";
 import {
@@ -552,11 +552,55 @@ function inferIntegrationMethod(
   return null;
 }
 
-function deriveState(
+/**
+ * How long ago the last task in the first task's tree must have finished.
+ * The API creates the lead follow-up of a worker task only after the
+ * completion commits (`runTaskTerminalEffects`). So for a short time, a tree
+ * with no open task can still get a new task. On that path, each extension
+ * pre-hook can take up to 5 s (`EXTENSION_HANDLER_TIMEOUT_MS`).
+ */
+const FIRST_TASK_SETTLE_MS = 10_000;
+
+/**
+ * True when the tree of `rootId` (all descendants through `parentTaskId`) has
+ * settled: no task in it is open, no deferral in it waits to wake up, and its
+ * last task finished `FIRST_TASK_SETTLE_MS` ago. A failed or cancelled task
+ * is settled. The lead often completes the root task when it delegates, and
+ * gives its answer in a later task of the same tree.
+ */
+async function isTaskTreeSettled(rootId: string): Promise<boolean> {
+  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+  // UNION (not UNION ALL) drops repeated ids, so a parentTaskId cycle ends the walk.
+  const row = await getDbClient().get<{
+    open: number;
+    deferred: number;
+    lastFinishedAt: string | null;
+  }>(
+    `WITH RECURSIVE tree(id) AS (
+       SELECT ?
+       UNION
+       SELECT t.id FROM agent_tasks t JOIN tree ON t.parentTaskId = tree.id
+     )
+     SELECT
+       COALESCE(SUM(t.status NOT IN (${terminal})), 0) AS open,
+       EXISTS (
+         SELECT 1 FROM scheduled_tasks s
+         WHERE s.parentTaskId IN (SELECT id FROM tree)
+           AND s.taskType = 'deferred' AND s.enabled = 1
+       ) AS deferred,
+       MAX(COALESCE(t.finishedAt, t.lastUpdatedAt)) AS lastFinishedAt
+     FROM tree JOIN agent_tasks t ON t.id = tree.id`,
+    [rootId, ...TERMINAL_TASK_STATUSES],
+  );
+  if (!row || row.open > 0 || row.deferred || !row.lastFinishedAt) return false;
+  return Date.now() - Date.parse(row.lastFinishedAt) >= FIRST_TASK_SETTLE_MS;
+}
+
+async function deriveState(
   state: OnboardingState,
   signals: OnboardingSignals,
   funnelEvents: PendingTelemetry[],
-): boolean {
+): Promise<boolean> {
   // Existing installs (R1) still derive, so "Run setup again" shows the true
   // state, but they never feed the funnel.
   const events = state.autoCompleted ? [] : funnelEvents;
@@ -581,7 +625,11 @@ function deriveState(
   if (state.steps.integrations.status !== "done" && integrationMethod) {
     changed = completeStep(state, "integrations", integrationMethod, true, events) || changed;
   }
-  if (state.steps.first_task.status !== "done" && signals.firstTask?.status === "completed") {
+  if (
+    state.steps.first_task.status !== "done" &&
+    signals.firstTask?.status === "completed" &&
+    (await isTaskTreeSettled(signals.firstTask.id))
+  ) {
     changed =
       completeStep(state, "first_task", state.steps.first_task.method, true, events) || changed;
     if (!state.completedAt) state.completedAt = new Date().toISOString();
@@ -673,7 +721,7 @@ async function loadAndDerive(
 }> {
   const loaded = await loadState(events);
   const signals = await loadSignals(loaded.state);
-  const dirty = deriveState(loaded.state, signals, events) || loaded.dirty;
+  const dirty = (await deriveState(loaded.state, signals, events)) || loaded.dirty;
   return { state: loaded.state, signals, dirty };
 }
 
@@ -698,7 +746,7 @@ export async function readOrUpdateOnboarding(
     if (action) {
       dirty = (await applyAction(state, action, events)) || dirty;
       signals = await loadSignals(state);
-      dirty = deriveState(state, signals, events) || dirty;
+      dirty = (await deriveState(state, signals, events)) || dirty;
     }
     if (dirty) await persistState(state);
     queueTelemetry(events);

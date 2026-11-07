@@ -148,7 +148,15 @@ function CompositionRow({
  * What the task's prompt is made of, in tokens: each static part the worker
  * measured, and the harness base the first call shows on top of them.
  */
-export function RequestCompositionSection({ composition }: { composition: RailComposition }) {
+export function RequestCompositionSection({
+  composition,
+  className,
+  titleClassName,
+}: {
+  composition: RailComposition;
+  className?: string;
+  titleClassName?: string;
+}) {
   const { manifest, anchor, sessions } = composition;
   const rows = compositionRows(manifest, anchor);
   const firstCall = anchor?.promptTokens;
@@ -157,9 +165,10 @@ export function RequestCompositionSection({ composition }: { composition: RailCo
       title="Request composition"
       persistKey="tasks:request-composition-open"
       defaultOpen
+      className={className}
       headerClassName={NARROW_TARGET}
       heading="h2"
-      titleClassName="text-meta"
+      titleClassName={titleClassName}
     >
       <div className="space-y-2 pt-1" data-testid="request-composition">
         <p className="flex items-baseline justify-between gap-3 font-mono text-data tabular-nums">

@@ -363,9 +363,23 @@ describe("generateCompose", () => {
 
   test("port allocation starts at 3201 and increments", () => {
     const yaml = generateCompose(devState);
-    expect(yaml).toContain('"3201:3000"');
-    expect(yaml).toContain('"3202:3000"');
-    expect(yaml).toContain('"3203:3000"');
+    expect(yaml).toContain(':}3201:3000"');
+    expect(yaml).toContain(':}3202:3000"');
+    expect(yaml).toContain(':}3203:3000"');
+  });
+
+  test("every published port takes its host address from AGENT_SWARM_BIND_ADDRESS", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+    const prefix = '"${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}';
+    const yaml = generateCompose({ ...devState, bundleAgentFs: true });
+    const published = yaml.match(/^ {6}- "[^"]*:30(?:13|00)"$/gm) ?? [];
+    // swarm-api plus three agents; agent-fs and tei publish nothing.
+    expect(published).toHaveLength(4);
+    for (const line of published) {
+      // Blank or unset keeps Compose's default (every interface) without an unset-variable warning.
+      expect(line).toContain(prefix);
+    }
+    expect(yaml).toContain(`${prefix}3013:3013"`);
   });
 
   // ── API service has healthcheck ──

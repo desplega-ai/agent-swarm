@@ -24,7 +24,7 @@
  * drift from the real implementation.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -142,5 +142,121 @@ describe("resolveCodexOAuthCredentialInfo — issue #1102 bug 1", () => {
     expect(info!.isPoolBacked).toBe(true);
     expect(info!.selection.index).toBe(0);
     expect(info!.selection.total).toBe(1);
+  });
+
+  it("poolOnly (pi subscription) picks a slot without writing ~/.codex/auth.json", async () => {
+    const creds = {
+      access:
+        "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjLXBvb2wifX0=.sig",
+      refresh: "rt_pool",
+      expires: Date.now() + 3_600_000,
+      accountId: "acc-pool",
+    };
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/api/config/resolved")) {
+        return new Response(
+          JSON.stringify({ configs: [{ key: "codex_oauth_1", value: JSON.stringify(creds) }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (href.includes("/api/keys/available")) {
+        return new Response(JSON.stringify({ availableIndices: [1] }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const info = await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, {
+      poolOnly: true,
+    });
+
+    expect(info?.isPoolBacked).toBe(true);
+    expect(info?.selection.index).toBe(1);
+    expect(await Bun.file(join(tmpHome, ".codex", "auth.json")).exists()).toBe(false);
+  });
+
+  it("poolOnly ignores a standalone auth.json: no slot means no subscription", async () => {
+    mockEmptyConfigStore();
+    await writeStandaloneAuthJson();
+
+    expect(
+      await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, { poolOnly: true }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveCodexOAuthCredentialInfo — sparse slot availability (#1555 B1)", () => {
+  it.each([
+    { slots: [1, 2], limited: [1], expected: 2, available: 1 },
+    { slots: [0, 2], limited: [2], expected: 0, available: 1 },
+    { slots: [0, 1, 2], limited: [0, 2], expected: 1, available: 1 },
+    { slots: [1, 2], limited: [], expected: undefined, available: 2 },
+  ])("honors real slot ids for $slots with $limited rate-limited", async ({
+    slots,
+    limited,
+    expected,
+    available,
+  }) => {
+    const requests: URL[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname === "/api/config/resolved") {
+        return Response.json({
+          configs: slots.map((slot) => ({
+            key: `codex_oauth_${slot}`,
+            value: JSON.stringify({
+              access: "example-access-pool",
+              refresh: "example-refresh-pool",
+              expires: Date.now() + 3_600_000,
+              accountId: "acc-pool",
+            }),
+          })),
+        });
+      }
+      if (url.pathname === "/api/keys/available") {
+        requests.push(url);
+        // The index-based API returns dense positions up to totalKeys, including
+        // positions with no configured slot. Rate limits use the real slot id.
+        return Response.json({
+          availableIndices: Array.from(
+            { length: Number(url.searchParams.get("totalKeys")) },
+            (_, i) => i,
+          ).filter((i) => !limited.includes(i)),
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    const random = spyOn(Math, "random");
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      for (const value of [0, 0.999]) {
+        random.mockReturnValue(value);
+        const info = await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, {
+          poolOnly: true,
+        });
+        expect(info?.isPoolBacked).toBe(true);
+        expect(info?.selection.total).toBe(slots.length);
+        expect(slots).toContain(info!.selection.index);
+        expect(limited).not.toContain(info!.selection.index);
+        if (expected !== undefined) expect(info?.selection.index).toBe(expected);
+      }
+      expect(requests).toHaveLength(2);
+      for (const url of requests) {
+        expect(url.searchParams.get("keyType")).toBe("CODEX_OAUTH");
+        expect(url.searchParams.get("totalKeys")).toBe(String(Math.max(...slots) + 1));
+        expect(url.searchParams.has("keySuffixes")).toBe(false);
+      }
+      const availabilityLogs = log.mock.calls.flat().filter((s) => s.includes("slots available"));
+      expect(availabilityLogs).toEqual(
+        limited.length > 0
+          ? Array(2).fill(
+              `[credentials] CODEX_OAUTH: ${available}/${slots.length} slots available (${limited.length} rate-limited)`,
+            )
+          : [],
+      );
+    } finally {
+      random.mockRestore();
+      log.mockRestore();
+    }
   });
 });

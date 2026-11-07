@@ -15,6 +15,7 @@ import {
   RELOADABLE_ENV_KEYS,
 } from "../commands/runner";
 import { contextBoundNoteThreshold } from "../hooks/context-bound-note";
+import { getBasePrompt } from "../prompts/base-prompt";
 import { checkCodexCredentials } from "../providers/codex-adapter";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
@@ -284,7 +285,53 @@ describe("fetchResolvedEnv", () => {
           true,
         ),
       ).toBeNull();
-      expect(requestedNames.every((name) => name === "fixture")).toBe(true);
+      // A name miss falls back to the unfiltered list (no `name`); every filtered call is normalized.
+      expect(
+        requestedNames.filter((name) => name !== null).every((name) => name === "fixture"),
+      ).toBe(true);
+    } finally {
+      api.stop(true);
+    }
+  });
+
+  test("finds a repo registered under a display name by its URL", async () => {
+    // `frontend` is acme/web; `web` is an unrelated repo that wins the name lookup.
+    const frontend = {
+      id: crypto.randomUUID(),
+      url: "https://github.com/acme/web.git",
+      name: "frontend",
+    };
+    const web = {
+      id: crypto.randomUUID(),
+      url: "https://github.com/other/service.git",
+      name: "web",
+    };
+    const gitlab = {
+      id: crypto.randomUUID(),
+      url: "https://gitlab.com/acme/web.git",
+      name: "web-gitlab",
+    };
+    const repos = [frontend, gitlab, web];
+    const api = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const name = new URL(req.url).searchParams.get("name");
+        return Response.json({ repos: repos.filter((r) => name === null || r.name === name) });
+      },
+    });
+    try {
+      for (const exact of [true, false]) {
+        const find = async (vcsRepo: string) =>
+          (await fetchRepoConfig(api.url.toString(), "k", vcsRepo, exact))?.id;
+        // A stored repo URL picks its own host, never the same-named `web` row.
+        expect(await find("https://github.com/acme/web")).toBe(frontend.id);
+        expect(await find("https://gitlab.com/acme/web")).toBe(gitlab.id);
+        // Existing shorthand references keep resolving.
+        expect(await find("other/service")).toBe(web.id);
+      }
+      expect(
+        await fetchRepoConfig(api.url.toString(), "k", "https://example.com/acme/web", true),
+      ).toBeNull();
     } finally {
       api.stop(true);
     }
@@ -869,5 +916,72 @@ describe("deleting a reloadable config row", () => {
     const changed = await reload("row-never-set", []);
     expect(changed).not.toContain("SWARM_ORG_NAME");
     expect(process.env.SWARM_ORG_NAME).toBe("container-org");
+  });
+});
+
+describe("a global APP_URL row reaches the worker prompt", () => {
+  const keys = ["APP_URL", "AGENT_FS_API_URL", "COMB_ENABLED", "AGENT_FS_LIVE_URL"] as const;
+  const saved = new Map(keys.map((key) => [key, process.env[key]]));
+  afterEach(() => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("the reload sets APP_URL and the file links use it", async () => {
+    expect(RELOADABLE_ENV_KEYS.has("APP_URL")).toBe(true);
+    delete process.env.APP_URL;
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    const agentId = "app-url-row";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "APP_URL", value: "https://app.example.test" }] },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId);
+    expect(applyResolvedEnvToProcessEnv(result.env)).toContain("APP_URL");
+    expect(process.env.APP_URL).toBe("https://app.example.test");
+
+    const prompt = await getBasePrompt({
+      role: "worker",
+      agentId: "11111111-2222-3333-4444-555555555555",
+      traits: { hasMcp: true, hasLocalEnvironment: true },
+    });
+    expect(prompt).toContain("`https://app.example.test/file/~/<org>/<drive>/<path>`");
+
+    // Deleting the row restores the container value (unset here).
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+    const cleared = await fetchResolvedEnv(testUrl, "key", agentId);
+    applyResolvedEnvToProcessEnv(cleared.env);
+    expect(process.env.APP_URL).toBeUndefined();
+  });
+
+  test("a COMB_ENABLED=false row keeps the prompt file links on the live app", async () => {
+    expect(RELOADABLE_ENV_KEYS.has("COMB_ENABLED")).toBe(true);
+    delete process.env.APP_URL;
+    delete process.env.COMB_ENABLED;
+    process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
+    process.env.AGENT_FS_LIVE_URL = "https://live.example.test";
+    const agentId = "comb-off-row";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "APP_URL", value: "https://app.example.test" },
+          { key: "COMB_ENABLED", value: "false" },
+        ],
+      },
+    });
+    applyResolvedEnvToProcessEnv((await fetchResolvedEnv(testUrl, "key", agentId)).env);
+    expect(process.env.COMB_ENABLED).toBe("false");
+    const prompt = await getBasePrompt({
+      role: "worker",
+      agentId: "11111111-2222-3333-4444-555555555555",
+      traits: { hasMcp: true, hasLocalEnvironment: true },
+    });
+    expect(prompt).toContain("`https://live.example.test/file/~/<org>/<drive>/<path>`");
+    expect(prompt).not.toContain("https://app.example.test/file/~/");
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+    applyResolvedEnvToProcessEnv((await fetchResolvedEnv(testUrl, "key", agentId)).env);
   });
 });

@@ -10,7 +10,7 @@ export const registerListModelProfilesTool = (server: McpServer) => {
     {
       title: "List Model Profiles",
       description:
-        "List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. Filter by `harness` to see what an agent on that harness can run.",
+        "List model profiles: named harness + model + effort combinations. Pass a profile's name as `profile` on send-task to run that task on it, or set it as an agent's default through PATCH /api/agents/{id}/runtime. A profile runs only on its own harness. `fallbacks` are the same-harness profiles a task hops to, in order, when a provider error (rate limit, seat, overload, auth, empty key pool) ends it. Filter by `harness` to see what an agent on that harness can run.",
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         harness: ProviderNameSchema.optional().describe(
@@ -26,6 +26,7 @@ export const registerListModelProfilesTool = (server: McpServer) => {
               model: z.string().optional(),
               effort: z.string().nullable().optional(),
               description: z.string().nullable().optional(),
+              fallbacks: z.array(z.string()).optional(),
             }),
           )
           .optional(),
@@ -35,7 +36,7 @@ export const registerListModelProfilesTool = (server: McpServer) => {
       const profiles = await listModelProfiles({ harness });
       const lines = profiles.map(
         (p) =>
-          `${p.name}: ${p.harness} / ${p.model}${p.effort ? ` / effort ${p.effort}` : ""}${p.description ? ` (${p.description})` : ""}`,
+          `${p.name}: ${p.harness} / ${p.model}${p.effort ? ` / effort ${p.effort}` : ""}${p.fallbacks.length > 0 ? ` → fallbacks ${p.fallbacks.join(", ")}` : ""}${p.description ? ` (${p.description})` : ""}`,
       );
       return toolOk(`${profiles.length} model profile(s)${harness ? ` for ${harness}` : ""}.`, {
         details: lines.join("\n"),
@@ -46,6 +47,7 @@ export const registerListModelProfilesTool = (server: McpServer) => {
             model: p.model,
             effort: p.effort,
             description: p.description,
+            fallbacks: p.fallbacks,
           })),
         },
       });

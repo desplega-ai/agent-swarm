@@ -3,7 +3,13 @@
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { AgentTask, SessionDetailResponse, SessionListItem } from "../api/types";
+import type {
+  AgentTask,
+  SessionDetailResponse,
+  SessionListItem,
+  SessionSectionCounts,
+  SessionTreeResponse,
+} from "../api/types";
 import { groupKeyOf } from "./session-groups";
 
 /**
@@ -12,12 +18,6 @@ import { groupKeyOf } from "./session-groups";
  * merged, so it has none of them: the first release with them is 2.5.1.
  */
 export const SESSIONS_V2_MIN_VERSION = "2.5.1";
-
-/**
- * Where sessions toasts sit: bottom left, over the sidebar. Bottom right
- * covers the composer's Send button (UX review R9).
- */
-export const SESSIONS_TOAST_POSITION = "bottom-left" as const;
 
 /** The "New session" tab in `?tabs=`. On the path it is `/sessions` with no id. */
 export const NEW_SESSION_TAB = "new";
@@ -28,9 +28,29 @@ export const NEW_SESSION_TAB = "new";
  */
 export const GROUP_TAB = "view";
 
-/** A tab that holds a session (not the New session tab or the group tab). */
+/**
+ * The pinned Overview tab of a use-case group (step-10). It never goes in
+ * `?tabs=`: it shows before the tabs while the group tab is open and its group
+ * qualifies, and `?tab=overview` focuses it (`?tab=list` focuses the list).
+ */
+export const OVERVIEW_TAB = "overview";
+
+/** The group tab's two faces: the Overview or the session list (`?tab=`). */
+export type GroupPane = "overview" | "list";
+
+/** `?tab=` as a group pane, or null when it names neither. */
+export function parseGroupPane(value: string | null): GroupPane | null {
+  return value === "overview" || value === "list" ? value : null;
+}
+
+/** A tab that holds a session (not the New session tab, the group tab, or the Overview). */
 export function isSessionTab(tab: string): boolean {
-  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB;
+  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
+}
+
+/** A tab the split pane can hold: a session or the New session tab. */
+function isSessionOrNewTab(tab: string): boolean {
+  return tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
 }
 
 /** The flat sidebar sections that `?view=` can open. A group key opens a group. */
@@ -108,9 +128,9 @@ export function urlTabs(
   tabsParam: string | null,
   { focused, view, split }: { focused: string; view: string | null; split: string | null },
 ): { tabs: string[]; split: string | null } {
-  const shownSplit = split && split !== GROUP_TAB && split !== focused ? split : null;
+  const shownSplit = split && isSessionOrNewTab(split) && split !== focused ? split : null;
   const listed = parseTabs(tabsParam).filter(
-    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit,
+    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit && tab !== OVERVIEW_TAB,
   );
   return { tabs: tabsWithFocus(listed, focused), split: shownSplit };
 }
@@ -327,4 +347,17 @@ export function itemFromDetail(
 /** The group of a session detail: the server's, else the key rule of older servers. */
 export function detailGroupKey(detail: SessionDetailResponse): string | undefined {
   return detail.groupKey ?? (detail.root.key ? groupKeyOf(detail.root.key) : undefined);
+}
+
+/**
+ * A count across every session in the tree: No group, every group, Later, and
+ * Done. The Inbox leaves out grouped sessions, so it cannot stand in for them.
+ */
+export function treeCount(
+  tree: SessionTreeResponse | undefined,
+  key: Exclude<keyof SessionSectionCounts, "total">,
+): number {
+  if (!tree) return 0;
+  const groups = tree.groups.reduce((sum, group) => sum + group[key], 0);
+  return tree.noGroup[key] + groups + tree.later[key] + tree.done[key];
 }

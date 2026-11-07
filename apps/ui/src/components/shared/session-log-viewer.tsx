@@ -7,23 +7,17 @@ import {
   ChevronRight,
   Clock,
   Copy,
-  FileText,
   Gauge,
-  Globe,
   Image as ImageIcon,
-  type LucideIcon,
-  Plug,
   Scissors,
   Search,
   Sparkles,
-  Terminal,
   Users,
   Wrench,
 } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
 import {
   type CSSProperties,
-  Fragment,
   memo,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -47,20 +41,13 @@ import {
   useCallComposition,
 } from "@/components/shared/request-composition-bar";
 import {
-  type EndSummary,
   formatDur,
-  type SessionLogView,
   type StreamRow,
   spawnCallUsage,
-  summarizeActivity,
-  summarizeEnd,
-  summaryText,
   type ToolEntry,
   type ToolKind,
-  toMessageRows,
 } from "@/components/shared/session-log-messages";
 import {
-  SubagentDetailField,
   SubagentDetails,
   SubagentDot,
   SubagentStatus,
@@ -77,19 +64,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Trace,
-  TraceCollapsible,
-  TraceCollapsibleContent,
-  TraceCollapsibleTrigger,
-  TraceDescription,
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@/components/ui/trace";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
@@ -109,7 +85,7 @@ import {
 } from "@/logs-parser";
 import { imageResultPreview } from "@/logs-parser/result-images";
 
-// --- Stream model (types and the Messages view: session-log-messages.ts) ---
+// --- Stream model (types: session-log-messages.ts) ---
 
 const FILE_TOOLS = new Set([
   "Read",
@@ -195,7 +171,7 @@ function shortDetail(input: unknown): string {
   return truncate(`${k}: ${String(v).replace(/\s+/g, " ")}`, 60);
 }
 
-/** A tool call's kind, title and one-line detail. The Sessions activity trace reuses it. */
+/** A tool call's kind, title and one-line detail. The shared transcript reuses it. */
 export function classifyTool(
   name: string,
   input: unknown,
@@ -460,8 +436,7 @@ function withoutCallUsage(messages: ParsedMessage[]): ParsedMessage[] {
 
 /**
  * Each result block's calls: the `call_usage` blocks since the previous
- * result, sub-agent calls included. Keyed by block, so the classic and the
- * trace layouts show the same totals.
+ * result, sub-agent calls included. Keyed by block.
  */
 function resultCallTotals(messages: ParsedMessage[]): Map<ProviderMetaBlock, CallUsageTotals> {
   const totals = new Map<ProviderMetaBlock, CallUsageTotals>();
@@ -906,59 +881,6 @@ function buildStream(
   return rows;
 }
 
-/**
- * `buildStream` for the trace layout. Messages a claude sub-agent emitted
- * (`parentToolUseId` names its Agent/Task call) leave the main stream and
- * become that run's `children`. Other harnesses carry no parent link, so their
- * runs keep no children and their steps stay in the main stream.
- */
-function buildNestedStream(
-  messages: ParsedMessage[],
-  subagents: SubagentRun[],
-  snapshots: ContextSnapshot[],
-  newIds: Set<string>,
-  isRunning?: boolean,
-  steering: SteeringMessage[] = [],
-): StreamRow[] {
-  // Only runs that get a row can hold children; the rest stay top-level.
-  const nestable = new Set(
-    subagents.filter((run) => Number.isFinite(Date.parse(run.startedAt))).map((run) => run.id),
-  );
-  const top: ParsedMessage[] = [];
-  const childMessages = new Map<string, ParsedMessage[]>();
-  for (const m of messages) {
-    const parent = m.parentToolUseId;
-    if (parent && nestable.has(parent)) {
-      const list = childMessages.get(parent);
-      if (list) list.push(m);
-      else childMessages.set(parent, [m]);
-    } else {
-      top.push(m);
-    }
-  }
-  const rows = buildStream(top, subagents, snapshots, newIds, isRunning, steering);
-  if (childMessages.size === 0) return rows;
-  for (const row of rows) {
-    if (row.type !== "subagent") continue;
-    const own = childMessages.get(row.run.id);
-    if (!own) continue;
-    row.children = buildStream(own, [], [], newIds, isRunning && row.run.status === "running");
-  }
-  return rows;
-}
-
-// A claude sub-agent's last message is its result, so the run's outcome
-// usually repeats it.
-function outcomeShownAsLastText(children: StreamRow[], outcome: string): boolean {
-  for (let i = children.length - 1; i >= 0; i--) {
-    const child = children[i];
-    if (child.type !== "agent" || child.role !== "assistant") continue;
-    const text = child.md.trim();
-    return text.length > 0 && outcome.includes(text);
-  }
-  return false;
-}
-
 function groupHeader(names: string[]): string {
   const shown = names.slice(0, 5).join(", ");
   return names.length > 5 ? `${shown} +${names.length - 5}` : shown;
@@ -980,11 +902,6 @@ function rowSearchText(row: StreamRow): string {
       return `steering ${row.message.mode} ${row.message.status} ${row.message.body}`;
     case "compaction":
       return "compaction";
-    case "activity":
-      // The filter finds a folded line by anything in the rows it holds.
-      return [summaryText(summarizeActivity(row)), ...row.rows.map(rowSearchText)].join(" ");
-    case "end":
-      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -1007,10 +924,6 @@ function outlineLabel(row: StreamRow): string {
       return `Steering · ${truncate(row.message.body.replace(/\s+/g, " ").trim(), 56)}`;
     case "compaction":
       return "Compaction";
-    case "activity":
-      return summaryText(summarizeActivity(row));
-    case "end":
-      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -1066,7 +979,7 @@ type TickTone = "agent" | "tool" | "user" | "muted";
 
 function rowTone(row: StreamRow): TickTone {
   if (row.type === "subagent") return "agent";
-  if (row.type === "toolgroup" || row.type === "activity") return "tool";
+  if (row.type === "toolgroup") return "tool";
   if (row.type === "agent") return row.role === "user" ? "user" : "agent";
   if (row.type === "steering") return "user";
   if (row.type === "thinking") return "agent";
@@ -2341,7 +2254,7 @@ function ToolRow({
   );
 }
 
-/** A tool call's input and result, shared by ToolRow and TraceToolItem. */
+/** A tool call's input and result (ToolRow). */
 function ToolDetails({
   tool,
   outputOpen,
@@ -2371,93 +2284,6 @@ function ToolDetails({
       </div>
       <ResultSection body={tool.body} open={outputOpen} onToggle={onToggleOutput} />
     </>
-  );
-}
-
-const TOOL_ICONS: Record<ToolKind, LucideIcon> = {
-  mcp: Plug,
-  bash: Terminal,
-  file: FileText,
-  web: Globe,
-  task: Bot,
-  skill: Sparkles,
-  other: Wrench,
-};
-
-type TraceStatus = "running" | "error" | "pending" | undefined;
-
-// No result yet: running while the session runs, pending once it ended.
-function toolTraceStatus(tool: ToolEntry, isRunning?: boolean): TraceStatus {
-  if (!tool.hasResult) return isRunning ? "running" : "pending";
-  return tool.ok ? undefined : "error";
-}
-
-/** One tool call as a Trace line; opening it shows the input and the result. */
-function TraceToolItem({
-  tool,
-  isRunning,
-  open,
-  onToggle,
-  outputOpen,
-  onToggleOutput,
-}: {
-  tool: ToolEntry;
-  isRunning?: boolean;
-  open: boolean;
-  onToggle: () => void;
-  outputOpen: boolean;
-  onToggleOutput: () => void;
-}) {
-  const Icon = TOOL_ICONS[tool.kind];
-  const dur = formatDur(tool.durMs);
-  return (
-    <TraceCollapsible open={open} onOpenChange={onToggle}>
-      <TraceCollapsibleTrigger className="hit-area">
-        <TraceLine status={toolTraceStatus(tool, isRunning)} className="text-xs">
-          <TraceIcon>
-            <Icon className={cn("size-3.5", tool.kind === "skill" && "text-status-info-strong")} />
-          </TraceIcon>
-          <TraceTitle className="font-mono">
-            {tool.kind === "mcp" && tool.server ? `${tool.server}.${tool.name}` : tool.title}
-            {tool.detail && <span className="opacity-70"> {tool.detail}</span>}
-          </TraceTitle>
-          {tool.usage && <CallUsageChip usage={tool.usage} className="max-sm:hidden" />}
-          {dur && <TraceDescription className="font-mono text-meta">{dur}</TraceDescription>}
-        </TraceLine>
-      </TraceCollapsibleTrigger>
-      <TraceCollapsibleContent>
-        <div className="overflow-hidden rounded-md border border-border bg-surface">
-          <ToolDetails tool={tool} outputOpen={outputOpen} onToggleOutput={onToggleOutput} />
-        </div>
-      </TraceCollapsibleContent>
-    </TraceCollapsible>
-  );
-}
-
-/** A reasoning block as a Trace line; the one-line preview hides when open. */
-function TraceThinkingItem({ text, usage }: { text: string; usage?: CallUsage }) {
-  const [open, setOpen] = useState(false);
-  const preview = truncate(text.replace(/\s+/g, " ").trim(), 90);
-  return (
-    <TraceCollapsible open={open} onOpenChange={setOpen}>
-      <TraceCollapsibleTrigger className="hit-area">
-        <TraceLine className="text-xs">
-          <TraceIcon>
-            <Brain className="size-3.5" />
-          </TraceIcon>
-          <TraceTitle>
-            <span className="font-medium italic">Thinking</span>
-            {!open && <span className="opacity-70"> {preview}</span>}
-          </TraceTitle>
-          {usage && <CallUsageChip usage={usage} className="max-sm:hidden" />}
-        </TraceLine>
-      </TraceCollapsibleTrigger>
-      <TraceCollapsibleContent>
-        <div className="prose-chat prose-session-log text-xs text-muted-foreground">
-          <LogMarkdown>{text}</LogMarkdown>
-        </div>
-      </TraceCollapsibleContent>
-    </TraceCollapsible>
   );
 }
 
@@ -2584,11 +2410,6 @@ const MinimapRail = memo(function MinimapRail({
 
 // --- Main component ---
 
-const LOG_VIEW_OPTIONS = [
-  { value: "messages", label: "Messages" },
-  { value: "everything", label: "Everything" },
-] as const satisfies readonly { value: SessionLogView; label: string }[];
-
 // Staggered-reveal tuning: when a poll appends a small batch of new rows while
 // following, each row after the first is delayed by STAGGER_STEP_MS so they
 // cascade in one-by-one. Batches larger than STAGGER_MAX_ROWS (catch-up /
@@ -2639,35 +2460,10 @@ interface SessionLogViewerProps {
    */
   touchTargets?: boolean;
   /**
-   * Which rows show. "everything" (the default) is one row per event.
-   * "messages" keeps the messages and folds each run of tool and thinking
-   * rows into one line (`toMessageRows`).
-   */
-  view?: SessionLogView;
-  /**
-   * Shows the Messages / Everything switch in the toolbar. The caller owns
-   * the view. Without it, the toolbar keeps its "Logs" tab.
-   */
-  onViewChange?: (view: SessionLogView) => void;
-  /**
    * The task status. When the session has ended, the footer names a failed
    * or a cancelled end instead of "Session complete".
    */
   status?: AgentTaskStatus;
-  /**
-   * The run's cost, run time and turns, as text, for the Messages view's
-   * last end line. The task page passes its details rail's numbers, so the
-   * page shows one set. Without it, the end line shows the harness result's
-   * numbers.
-   */
-  endSummary?: EndSummary;
-  /**
-   * Trace layout (the Sessions view): reasoning, tool calls and sub-agent
-   * runs render as shadcn Trace lines, and a claude sub-agent's own steps
-   * nest under its run instead of interleaving with the main stream. Rows,
-   * virtualization and scroll behave the same either way.
-   */
-  trace?: boolean;
 }
 
 export function SessionLogViewer({
@@ -2678,11 +2474,7 @@ export function SessionLogViewer({
   steeringMessages,
   scrollElement,
   touchTargets = false,
-  view = "everything",
-  onViewChange,
   status,
-  endSummary,
-  trace = false,
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
@@ -2736,31 +2528,15 @@ export function SessionLogViewer({
 
   const rows = useMemo(
     () =>
-      trace
-        ? buildNestedStream(
-            streamMessages,
-            subagents,
-            compactionSnapshots ?? [],
-            newIds,
-            isRunning,
-            streamSteering,
-          )
-        : buildStream(
-            streamMessages,
-            subagents,
-            compactionSnapshots ?? [],
-            newIds,
-            isRunning,
-            streamSteering,
-          ),
-    [trace, streamMessages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
-  );
-
-  // Messages folds the rows before the filter, so a folded line matches by
-  // anything it holds.
-  const viewRows = useMemo(
-    () => (view === "messages" ? toMessageRows(rows, endSummary) : rows),
-    [rows, view, endSummary],
+      buildStream(
+        streamMessages,
+        subagents,
+        compactionSnapshots ?? [],
+        newIds,
+        isRunning,
+        streamSteering,
+      ),
+    [streamMessages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
   const { searchParams, setParam } = useUrlSearchState();
@@ -2768,23 +2544,17 @@ export function SessionLogViewer({
   const setQuery = useCallback((value: string) => setParam("logSearch", value), [setParam]);
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return viewRows;
-    return viewRows.filter(
+    if (!q) return rows;
+    return rows.filter(
       (r) => r.type !== "compaction" && rowSearchText(r).toLowerCase().includes(q),
     );
-  }, [viewRows, query]);
+  }, [rows, query]);
 
-  // The footer counts events: a folded activity line holds several.
-  const eventCount = useMemo(
-    () => visibleRows.reduce((n, r) => n + (r.type === "activity" ? r.rows.length : 1), 0),
-    [visibleRows],
-  );
+  const eventCount = visibleRows.length;
 
   // Per-id collapse state, keyed by stable id so it survives refetch + recycling.
   const [groupToggle, setGroupToggle] = useState<Map<string, boolean>>(new Map());
   const [openSubagents, setOpenSubagents] = useState<Set<string>>(new Set());
-  // Messages view: open activity lines (closed by default).
-  const [openActivities, setOpenActivities] = useState<Set<string>>(new Set());
   const [openTools, setOpenTools] = useState<Set<string>>(new Set());
   const [openOutputs, setOpenOutputs] = useState<Set<string>>(new Set());
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -2814,14 +2584,6 @@ export function SessionLogViewer({
 
   const toggleSubagent = useCallback((id: string) => {
     setOpenSubagents((previous) => {
-      const next = new Set(previous);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleActivity = useCallback((id: string) => {
-    setOpenActivities((previous) => {
       const next = new Set(previous);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -2871,15 +2633,11 @@ export function SessionLogViewer({
           return openSubagents.has(r.id) ? 148 : 42;
         case "compaction":
           return 40;
-        case "activity":
-          return openActivities.has(r.id) ? 36 + 40 * r.rows.length : 36;
-        case "end":
-          return 36;
         default:
           return 64;
       }
     },
-    [visibleRows, openSubagents, openActivities],
+    [visibleRows, openSubagents],
   );
 
   const {
@@ -2895,7 +2653,6 @@ export function SessionLogViewer({
     pending,
     showJumpPill,
     stickToBottom,
-    changeView,
     scrollToRow,
     pageStyle,
     minimapStickyHeight,
@@ -2904,9 +2661,7 @@ export function SessionLogViewer({
     rows: visibleRows,
     estimateSize,
     isRunning,
-    view,
     query,
-    onViewChange,
   });
 
   const jumpTo = useCallback(
@@ -2940,17 +2695,6 @@ export function SessionLogViewer({
   const renderRow = useCallback(
     (row: StreamRow) => {
       const flash = flashId === row.id;
-      const traceTool = (t: ToolEntry, running?: boolean) => (
-        <TraceToolItem
-          key={t.id}
-          tool={t}
-          isRunning={running}
-          open={openTools.has(t.id)}
-          onToggle={() => toggleTool(t.id)}
-          outputOpen={openOutputs.has(t.id)}
-          onToggleOutput={() => toggleOutput(t.id)}
-        />
-      );
       if (row.type === "compaction") return <CompactionDivider snapshot={row.snapshot} />;
       const streamDelayMs = staggerById.get(row.id) ?? 0;
       if (row.type === "agent") {
@@ -3015,11 +2759,7 @@ export function SessionLogViewer({
             highlight={row.isNew && atBottomRef.current}
             streamDelayMs={streamDelayMs}
           >
-            {trace ? (
-              <TraceThinkingItem text={row.text} usage={row.usage} />
-            ) : (
-              <ThinkingRow text={row.text} usage={row.usage} />
-            )}
+            <ThinkingRow text={row.text} usage={row.usage} />
           </RowShell>
         );
       }
@@ -3069,116 +2809,6 @@ export function SessionLogViewer({
       if (row.type === "subagent") {
         const open = openSubagents.has(row.id);
         const duration = formatDur(row.run.durationMs);
-        if (trace) {
-          const children = row.children ?? [];
-          const childRunning = isRunning === true && row.run.status === "running";
-          const steps = children.reduce(
-            (n, child) => n + (child.type === "toolgroup" ? child.tools.length : 0),
-            0,
-          );
-          const description = [
-            steps > 0 ? `${steps} ${steps === 1 ? "step" : "steps"}` : "",
-            duration,
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          return (
-            <RowShell
-              time={row.time}
-              iso={row.iso}
-              flash={flash}
-              isNew={row.isNew}
-              highlight={row.isNew && atBottomRef.current}
-              streamDelayMs={streamDelayMs}
-            >
-              <TraceCollapsible open={open} onOpenChange={() => toggleSubagent(row.id)}>
-                <TraceCollapsibleTrigger className="hit-area">
-                  <TraceLine
-                    status={
-                      row.run.status === "running"
-                        ? "running"
-                        : row.run.status === "failed"
-                          ? "error"
-                          : undefined
-                    }
-                    className="text-xs"
-                  >
-                    <TraceIcon>
-                      <Bot className="size-3.5" />
-                    </TraceIcon>
-                    <TraceTitle>
-                      <span className="font-medium">{row.run.label}</span>
-                      <span className="font-mono opacity-70 max-sm:hidden">
-                        {" "}
-                        {row.run.agentType}
-                      </span>
-                    </TraceTitle>
-                    {row.usage && <CallUsageChip usage={row.usage} className="max-sm:hidden" />}
-                    {description && (
-                      <TraceDescription className="font-mono text-meta">
-                        {description}
-                      </TraceDescription>
-                    )}
-                  </TraceLine>
-                </TraceCollapsibleTrigger>
-                <TraceCollapsibleContent>
-                  {children.length === 0 ? (
-                    <SubagentDetails run={row.run} />
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <dl className="grid content-start gap-2">
-                        <SubagentDetailField label="Input">
-                          {row.run.input || "No input recorded."}
-                        </SubagentDetailField>
-                      </dl>
-                      <Trace className="gap-1.5">
-                        {children.map((child) => {
-                          if (child.type === "thinking")
-                            return (
-                              <TraceThinkingItem
-                                key={child.id}
-                                text={child.text}
-                                usage={child.usage}
-                              />
-                            );
-                          if (child.type === "toolgroup")
-                            return child.tools.map((t) => traceTool(t, childRunning));
-                          if (child.type === "meta")
-                            return (
-                              <ProviderMetaBubble
-                                key={child.id}
-                                block={child.block}
-                                cacheHit={usageDetails}
-                              />
-                            );
-                          // The sub-agent's user turn is its prompt, shown as Input.
-                          if (child.type === "agent" && child.role === "assistant")
-                            return (
-                              <div
-                                key={child.id}
-                                className="prose-chat prose-session-log break-words text-xs text-foreground"
-                              >
-                                <LogMarkdown>{child.md}</LogMarkdown>
-                                {child.usage && <CallUsageChip usage={child.usage} />}
-                              </div>
-                            );
-                          return null;
-                        })}
-                      </Trace>
-                      {row.run.outcome && !outcomeShownAsLastText(children, row.run.outcome) && (
-                        <dl className="grid content-start gap-2">
-                          <SubagentDetailField label="Outcome">
-                            {row.run.outcome}
-                          </SubagentDetailField>
-                        </dl>
-                      )}
-                    </div>
-                  )}
-                </TraceCollapsibleContent>
-              </TraceCollapsible>
-            </RowShell>
-          );
-        }
         return (
           <RowShell
             time={row.time}
@@ -3223,175 +2853,9 @@ export function SessionLogViewer({
           </RowShell>
         );
       }
-      if (row.type === "activity") {
-        // Messages view: one muted line for a run of tool and thinking rows.
-        // Open, it shows them with their own renderers, tools first-level
-        // (the line already counts them).
-        const open = openActivities.has(row.id);
-        const summary = summarizeActivity(row);
-        return (
-          <RowShell
-            time={row.time}
-            iso={row.iso}
-            flash={flash}
-            isNew={row.isNew}
-            highlight={row.isNew && atBottomRef.current}
-            streamDelayMs={streamDelayMs}
-          >
-            <button
-              type="button"
-              onClick={() => toggleActivity(row.id)}
-              aria-expanded={open}
-              className="hit-area flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ChevronRight
-                className={cn(
-                  "size-3 shrink-0 transition-transform duration-200",
-                  open && "rotate-90",
-                )}
-              />
-              <span className="shrink-0 font-medium">{summary.title}</span>
-              {summary.stats.map((stat) => (
-                <Fragment key={stat}>
-                  <span aria-hidden>·</span>
-                  <span className="shrink-0 font-mono tabular-nums">{stat}</span>
-                </Fragment>
-              ))}
-              {summary.names.length > 0 && (
-                <span className="ml-1 min-w-0 flex-1 truncate font-mono">
-                  {groupHeader(summary.names)}
-                </span>
-              )}
-            </button>
-            <AnimatedReveal open={open} speed="fast">
-              <div className="mt-1.5 flex flex-col gap-1.5 pl-0.5">
-                {row.rows.map((child) => (
-                  <Fragment key={child.id}>
-                    {child.type === "thinking" ? (
-                      <ThinkingRow text={child.text} usage={child.usage} />
-                    ) : child.type === "meta" ? (
-                      <ProviderMetaBubble
-                        block={child.block}
-                        callTotals={resultTotals.get(child.block)}
-                        cacheHit={usageDetails}
-                      />
-                    ) : child.type === "toolgroup" ? (
-                      child.tools.map((t) => (
-                        <ToolRow
-                          key={t.id}
-                          tool={t}
-                          open={openTools.has(t.id)}
-                          onToggle={() => toggleTool(t.id)}
-                          outputOpen={openOutputs.has(t.id)}
-                          onToggleOutput={() => toggleOutput(t.id)}
-                        />
-                      ))
-                    ) : null}
-                  </Fragment>
-                ))}
-              </div>
-            </AnimatedReveal>
-          </RowShell>
-        );
-      }
-      if (row.type === "end") {
-        // Messages view: the run result as one line. The answer itself is
-        // in the messages above it (and on the page's outcome card).
-        const summary = summarizeEnd(row);
-        return (
-          <RowShell
-            time={row.time}
-            iso={row.iso}
-            flash={flash}
-            isNew={row.isNew}
-            highlight={row.isNew && atBottomRef.current}
-            streamDelayMs={streamDelayMs}
-          >
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 text-xs">
-              <TaskStatusIcon status={row.isError ? "failed" : "completed"} className="size-3.5" />
-              <span
-                className={cn(
-                  "font-medium",
-                  row.isError ? "text-status-error-strong" : "text-foreground",
-                )}
-              >
-                {summary.title}
-              </span>
-              {summary.stats.map((stat) => (
-                <Fragment key={stat}>
-                  <span aria-hidden className="text-muted-foreground">
-                    ·
-                  </span>
-                  <span className="font-mono tabular-nums text-muted-foreground">{stat}</span>
-                </Fragment>
-              ))}
-            </div>
-          </RowShell>
-        );
-      }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       const worstUsage = worstCacheUsage(row.tools);
-      if (trace) {
-        // One call needs no group line: it is its own trace line.
-        if (row.tools.length === 1) {
-          return (
-            <RowShell
-              time={row.time}
-              iso={row.iso}
-              flash={flash}
-              isNew={row.isNew}
-              highlight={row.isNew && atBottomRef.current}
-            >
-              <div className="py-0.5">{traceTool(row.tools[0], isRunning)}</div>
-            </RowShell>
-          );
-        }
-        const live = isRunning === true && row.tools.some((t) => !t.hasResult);
-        const failed = row.tools.filter((t) => t.hasResult && !t.ok).length;
-        return (
-          <RowShell
-            time={row.time}
-            iso={row.iso}
-            flash={flash}
-            isNew={row.isNew}
-            highlight={row.isNew && atBottomRef.current}
-          >
-            <TraceCollapsible
-              open={open}
-              onOpenChange={() => toggleGroup(row.id, open)}
-              className="py-0.5"
-            >
-              <TraceCollapsibleTrigger className="hit-area">
-                <TraceLine status={live ? "running" : undefined} className="text-xs">
-                  <TraceIcon>
-                    <Wrench className="size-3.5" />
-                  </TraceIcon>
-                  <TraceTitle>
-                    <span className="font-semibold">{row.tools.length} steps</span>
-                    <span className="font-mono opacity-70"> {groupHeader(row.names)}</span>
-                  </TraceTitle>
-                  {!open && worstUsage && (
-                    <CallUsageChip usage={worstUsage} className="max-sm:hidden" />
-                  )}
-                  {(dur || failed > 0) && (
-                    <TraceDescription className="font-mono text-meta">
-                      {failed > 0 && (
-                        <span className="text-status-error-strong">{failed} failed</span>
-                      )}
-                      {failed > 0 && dur && " · "}
-                      {dur}
-                    </TraceDescription>
-                  )}
-                </TraceLine>
-              </TraceCollapsibleTrigger>
-              <TraceCollapsibleContent>
-                <Trace className="gap-1.5">{row.tools.map((t) => traceTool(t, isRunning))}</Trace>
-              </TraceCollapsibleContent>
-            </TraceCollapsible>
-          </RowShell>
-        );
-      }
       return (
         <RowShell
           time={row.time}
@@ -3444,19 +2908,15 @@ export function SessionLogViewer({
     [
       flashId,
       isGroupOpen,
-      openActivities,
       openOutputs,
       openSubagents,
       openTools,
-      toggleActivity,
       toggleGroup,
       toggleOutput,
       toggleSubagent,
       toggleTool,
       staggerById,
       atBottomRef,
-      trace,
-      isRunning,
       resultTotals,
       usageDetails,
     ],
@@ -3464,21 +2924,11 @@ export function SessionLogViewer({
 
   const virtualItems = virtualizer.getVirtualItems();
 
-  // The view switch replaces the lone "Logs" tab. The tabs stay for the
-  // Agents view, and without a switch (other callers).
-  const showTabList = !onViewChange || subagents.length > 0;
   // The log has one keyboard stop, with a visible ring. Page mode: the panel.
   // The caller's scroller scrolls the log, and arrow keys on the panel
   // scroll it. Own scroller: the scroller (a "Session log" region), and the
-  // panel leaves the Tab order. Without a tab list, the panel is not a tab
-  // panel: no trigger names it.
-  const logPanelProps = pageMode
-    ? showTabList
-      ? {}
-      : { role: "region", "aria-label": "Session log", "aria-labelledby": undefined }
-    : showTabList
-      ? { tabIndex: -1 }
-      : { role: undefined, "aria-labelledby": undefined, tabIndex: -1 };
+  // panel leaves the Tab order.
+  const logPanelProps = pageMode ? {} : { tabIndex: -1 };
 
   const jumpPill = (
     <button
@@ -3526,45 +2976,29 @@ export function SessionLogViewer({
                 "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
             )}
           >
-            {showTabList && (
-              <TabsList
-                variant="line"
-                className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
+            <TabsList
+              variant="line"
+              className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
+            >
+              <TabsTrigger
+                value="logs"
+                className={cn("flex-none rounded-none px-2 text-xs", touchTargets ? "h-11" : "h-7")}
               >
+                Logs
+              </TabsTrigger>
+              {subagents.length > 0 && (
                 <TabsTrigger
-                  value="logs"
+                  value="agents"
                   className={cn(
                     "flex-none rounded-none px-2 text-xs",
                     touchTargets ? "h-11" : "h-7",
                   )}
                 >
-                  Logs
+                  Agents{" "}
+                  <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
                 </TabsTrigger>
-                {subagents.length > 0 && (
-                  <TabsTrigger
-                    value="agents"
-                    className={cn(
-                      "flex-none rounded-none px-2 text-xs",
-                      touchTargets ? "h-11" : "h-7",
-                    )}
-                  >
-                    Agents{" "}
-                    <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
-                  </TabsTrigger>
-                )}
-              </TabsList>
-            )}
-            {onViewChange && activeView === "logs" && (
-              <SegmentedControl
-                size="sm"
-                aria-label="Log view"
-                value={view}
-                onValueChange={changeView}
-                options={LOG_VIEW_OPTIONS}
-                // Touch: 44 px options inside the control's border and padding.
-                className={cn(touchTargets && "h-12.5")}
-              />
-            )}
+              )}
+            </TabsList>
             {activeView === "logs" && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3587,14 +3021,7 @@ export function SessionLogViewer({
               </Tooltip>
             )}
             {activeView === "logs" && (
-              <div
-                className={cn(
-                  "relative ml-auto",
-                  // With the view switch, a phone gives the filter the rest of
-                  // the row, so the toolbar stays one row.
-                  onViewChange && "min-w-24 flex-1 sm:flex-none",
-                )}
-              >
+              <div className="relative ml-auto">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
@@ -3603,8 +3030,7 @@ export function SessionLogViewer({
                   aria-label="Filter session log"
                   // Touch: 16 px text, or iOS Safari zooms the page on focus.
                   className={cn(
-                    "pl-7 sm:w-52",
-                    onViewChange ? "w-full" : "w-40",
+                    "w-40 pl-7 sm:w-52",
                     touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
                   )}
                 />

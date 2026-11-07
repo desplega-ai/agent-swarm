@@ -18,7 +18,7 @@ const waitingSchedule: StatusAutomation = {
   missing: { params: ["REPO_URL"], integrations: ["github"] },
   fixes: [
     { type: "param", key: "REPO_URL", url: "/schedules/schedule-1?param=REPO_URL" },
-    { type: "integration", key: "github", url: "/settings/integrations/github" },
+    { type: "integration", key: "github", url: "/integrations/github" },
   ],
   fixUrl: "/schedules/schedule-1?param=REPO_URL",
 };

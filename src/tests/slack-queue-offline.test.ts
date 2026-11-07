@@ -173,6 +173,14 @@ describe("Slack queue-when-offline", () => {
       expect(result).toBe("");
     });
 
+    test("keeps a bot mention inside a pasted table row", () => {
+      const result = extractTaskFromMessage(
+        "<@BOT123> owners:\n| Owner | Page |\n| --- | --- |\n| <@BOT123> | /acme |",
+        "BOT123",
+      );
+      expect(result).toBe("owners:\n| Owner | Page |\n| --- | --- |\n| <@BOT123> | /acme |");
+    });
+
     test("strips swarm# references too", () => {
       const result = extractTaskFromMessage(
         "<@BOT123> swarm#all do something swarm#00000000-0000-0000-0000-000000000000",

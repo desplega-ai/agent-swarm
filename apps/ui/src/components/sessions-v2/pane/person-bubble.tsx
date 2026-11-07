@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
+import { MessageCopyButton, MessageRawToggle } from "@/components/shared/message-copy-button";
 import { PromptContext } from "@/components/shared/prompt-context";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
+import { MessageText } from "@/components/shared/transcript/message-text";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { parsePromptDisplay } from "@/lib/prompt-display";
 import { userName } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
-import { MessageCopyButton, MessageTime } from "./swarm-reply";
+import { MessageTime } from "./swarm-reply";
 
 /** Where a message came from, when not the dashboard (SPEC R10.1). */
 function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {
@@ -22,27 +25,42 @@ function viaNote(task: AgentTask, rootSource: AgentTaskSource): string | null {
 /**
  * A person's message (SPEC R10.1). Mine sit on the right with no name;
  * other people's sit on the left with their name. The avatar is beside the
- * bubble, on its first line. The meta row under the bubble holds the time,
- * the via note, and a Copy that fades in on hover.
+ * bubble, on its first line. The text shows as markdown. The meta row under
+ * the bubble holds the time, the via note, and "Show raw" and Copy, which
+ * fade in on hover.
  */
 export function PersonBubble({
   task,
   rootSource,
+  text: givenText,
 }: {
   task: AgentTask;
   /** The root's source: a dashboard message in a Slack session says where it was sent. */
   rootSource: AgentTaskSource;
+  /**
+   * The person's words, when the caller pulls them out of a longer task
+   * prompt (`TurnTimeline`'s `requestText`). Such a message was typed on the
+   * dashboard, so it is not greyed as external. Omitted: `task.task`.
+   */
+  text?: string;
 }) {
   const { userId } = useCurrentUser();
   const { data: users } = useUsers();
   const personId = task.requestedByUserId;
   const mine = !!personId && personId === userId;
-  const text = stripContextFooter(task.task);
+  const [raw, setRaw] = useState(false);
+  const text = givenText ?? stripContextFooter(task.task);
   // Slack and chat prompts carry their thread as a wrapper block before the ask.
   const prompt = parsePromptDisplay(text);
   const name = personId ? userName(users, personId) : (prompt.speaker ?? "Someone");
   const via = viaNote(task, rootSource);
-  const external = task.source !== "ui";
+  const external = givenText === undefined && task.source !== "ui";
+  const actions = (
+    <>
+      {prompt.ask.trim() ? <MessageRawToggle raw={raw} onRawChange={setRaw} hover /> : null}
+      <MessageCopyButton text={text} hover />
+    </>
+  );
   return (
     <section
       aria-label={mine ? "Your message" : `Message from ${name}`}
@@ -55,7 +73,8 @@ export function PersonBubble({
         className={cn("mt-2", mine && "@max-[30rem]/turns:hidden")}
       />
       <div className={cn("flex max-w-[85%] min-w-0 flex-col gap-1.5", mine && "items-end")}>
-        <TaskPromptAttachments taskId={task.id} attachments={task.attachments} />
+        {/* Only what the person sent: the agent's files show with its reply (`SwarmReply`). */}
+        <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="person" />
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
@@ -66,7 +85,7 @@ export function PersonBubble({
           )}
         >
           <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />
-          {prompt.ask}
+          <MessageText text={prompt.ask} raw={raw} />
         </div>
         <div
           className={cn(
@@ -79,13 +98,15 @@ export function PersonBubble({
               {name} ·
             </span>
           )}
+          {/* Mine: the hover actions sit left of the time, so the hidden buttons leave no gap at the bubble edge. */}
+          {mine ? actions : null}
           <MessageTime at={task.createdAt} />
           {via ? (
             <span className="min-w-0 truncate text-meta" title={via}>
               · {via}
             </span>
           ) : null}
-          <MessageCopyButton text={text} hover />
+          {mine ? null : actions}
         </div>
       </div>
     </section>

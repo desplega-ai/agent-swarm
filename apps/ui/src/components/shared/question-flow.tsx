@@ -1,3 +1,4 @@
+import { Check, CircleAlert } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
@@ -11,8 +12,10 @@ import { QuestionCard } from "@/components/shared/questions/question-card";
 import { optionValues, QuestionField } from "@/components/shared/questions/question-field";
 import { SubmitBar } from "@/components/shared/questions/submit-bar";
 import type { StatusTone } from "@/components/shared/status-icon";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { answerHint, answerProgress, isAnswered } from "@/lib/approval-format";
 import { type DetailShortcut, matchDetailShortcut } from "@/lib/approval-shortcuts";
+import { cn } from "@/lib/utils";
 
 export type QuestionFlowValues = Record<string, unknown>;
 
@@ -35,7 +38,8 @@ function keyHintFor(question: ApprovalQuestion) {
  * ticking counter, and a fade swap to `done` once `onSubmit` resolves.
  *
  * Keys listen only while the pointer or focus is inside the flow, because
- * several flows can be mounted at once.
+ * several flows can be mounted at once. Focus wins over hover: a hovered flow
+ * yields its keys while focus sits inside another flow.
  */
 export function QuestionFlow({
   questions,
@@ -45,6 +49,8 @@ export function QuestionFlow({
   onSubmit,
   onChange,
   foldAnswered,
+  submitLabel,
+  embedded = false,
 }: {
   questions: ApprovalQuestion[];
   /** Pre-filled answers (for example a website from the email domain). Read on mount. */
@@ -62,6 +68,13 @@ export function QuestionFlow({
   onChange?: (values: QuestionFlowValues) => void;
   /** Fold answered cards to one line. Approvals does this above 5 questions. */
   foldAnswered?: boolean;
+  /** The submit button text. Unset, it reads "Submit" (or "Submit · reject"). */
+  submitLabel?: string;
+  /**
+   * Inside a host card: one question per tab (no strip for a single question),
+   * flat question bodies, and the submit bar as the card footer.
+   */
+  embedded?: boolean;
 }) {
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
@@ -78,7 +91,8 @@ export function QuestionFlow({
   const cards = useRef<(HTMLElement | null)[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const compact = foldAnswered ?? questions.length > 5;
+  const compact = !embedded && (foldAnswered ?? questions.length > 5);
+  const tabbed = embedded && questions.length > 1;
   const progress = useMemo(() => answerProgress(questions, responses), [questions, responses]);
   const firstOpenIndex = useMemo(
     () => questions.findIndex((question) => !isAnswered(question, responses[question.id])),
@@ -88,13 +102,18 @@ export function QuestionFlow({
 
   const focusCard = useCallback(
     (index: number) => {
-      const card = cards.current[index];
       setActiveIndex(index);
-      if (!card) return;
-      card.focus({ preventScroll: true });
-      card.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+      const go = () => {
+        const card = cards.current[index];
+        if (!card) return;
+        card.focus({ preventScroll: true });
+        card.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+      };
+      // A tab panel stays hidden until the tab switch renders, and a hidden card takes no focus.
+      if (tabbed) requestAnimationFrame(go);
+      else go();
     },
-    [reduceMotion],
+    [reduceMotion, tabbed],
   );
 
   const isCollapsed = (question: ApprovalQuestion, index: number): boolean | null => {
@@ -152,6 +171,13 @@ export function QuestionFlow({
   };
 
   const onShortcut = (action: DetailShortcut): boolean | undefined => {
+    // Every enabled flow hears the key, and the first to handle it prevents
+    // the rest. A hovered flow passes when the focused element belongs to
+    // another flow, so the focused one answers.
+    const focusedFlow = (document.activeElement as HTMLElement | null)?.closest(
+      "[data-question-flow]",
+    );
+    if (focusedFlow && focusedFlow !== rootRef.current) return false;
     const n = questions.length;
     const question = questions[targetIndex];
     switch (action.type) {
@@ -260,7 +286,8 @@ export function QuestionFlow({
         statusTone={tone}
         statusLabel={label}
         focused={focused}
-        beam={!submitting && index === firstOpenIndex}
+        beam={!embedded && !submitting && index === firstOpenIndex}
+        plain={embedded}
         collapsed={collapsed}
         onToggleCollapsed={() =>
           setCollapsedOverride((prev) => ({ ...prev, [question.id]: !collapsed }))
@@ -283,9 +310,52 @@ export function QuestionFlow({
     );
   });
 
+  const questionsView = tabbed ? (
+    <Tabs value={String(targetIndex)} onValueChange={(value) => setActiveIndex(Number(value))}>
+      <TabsList variant="line" aria-label="Questions" className="mx-4 mt-3 flex-wrap">
+        {questions.map((question, index) => {
+          const answered = isAnswered(question, responses[question.id]);
+          const flagged =
+            !answered &&
+            (question.id in responses || attempted) &&
+            Boolean(answerHint(question, responses[question.id]));
+          return (
+            <TabsTrigger
+              key={question.id}
+              value={String(index)}
+              aria-label={`Question ${index + 1}${answered ? ", answered" : flagged ? ", needs a fix" : ""}`}
+              className="min-w-11 flex-none font-mono tabular-nums"
+            >
+              {index + 1}
+              {answered ? (
+                <Check aria-hidden className="size-3.5 text-status-success-strong" />
+              ) : flagged ? (
+                <CircleAlert aria-hidden className="size-3.5 text-status-error-strong" />
+              ) : null}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+      {cardsList.map((card, index) => (
+        // Mounted while hidden: a half-typed answer and its card ref survive a tab switch.
+        <TabsContent
+          key={questions[index].id}
+          value={String(index)}
+          forceMount
+          className="data-[state=inactive]:hidden"
+        >
+          {card}
+        </TabsContent>
+      ))}
+    </Tabs>
+  ) : (
+    cardsList
+  );
+
   return (
     <div
       ref={rootRef}
+      data-question-flow=""
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocus={() => setFocusWithin(true)}
@@ -304,8 +374,8 @@ export function QuestionFlow({
             <FadeIn className="flex flex-col gap-3">{done?.(responses)}</FadeIn>
           ) : (
             <>
-              <FadeIn className="flex flex-col gap-3">
-                {cardsList}
+              <FadeIn className={cn("flex flex-col", !embedded && "gap-3")}>
+                {questionsView}
                 {footer}
               </FadeIn>
               <SubmitBar
@@ -316,6 +386,8 @@ export function QuestionFlow({
                 error={error}
                 onSubmit={handleSubmit}
                 onDiscard={() => {}}
+                label={submitLabel}
+                embedded={embedded}
               />
             </>
           )}

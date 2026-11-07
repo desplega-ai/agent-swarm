@@ -63,15 +63,17 @@ import {
   snapshotApp,
 } from "../apps/version";
 import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
-import type { RbacPrincipal, RbacResource } from "../rbac";
+import type { RbacResource } from "../rbac";
 import { can } from "../rbac";
-import { AgentTaskStatusSchema } from "../types";
+import { APP_SESSION_KEY_PATTERN, appSessionContextKey } from "../tasks/context-key";
+import { AgentTaskStatusSchema, AppIconSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
-import { agentFirstPrincipal } from "./request-principal";
+import { agentFirstPrincipal, authUser, authUserId, requestPrincipal } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { denyParentAttach } from "./session-access";
+import { resolveTaskRequester } from "./task-requester";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
@@ -139,6 +141,8 @@ const AppSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
+  /** Projected from `definition.icon` (see `extractIcon` in `src/apps/store.ts`). */
+  icon: AppIconSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -289,6 +293,11 @@ const listAppsRoute = route({
   pattern: ["api", "apps"],
   summary: "List apps",
   tags: ["Apps"],
+  query: z.object({
+    /** Matches the name or description anywhere, case-insensitive. */
+    q: z.string().trim().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+  }),
   responses: {
     200: {
       description: "App summaries without definitions",
@@ -631,6 +640,36 @@ const runActionRoute = route({
     input: z.record(z.string(), z.unknown()).optional(),
     /** Chains the new task off an existing one. Task-kind actions only: a script or sync action rejects it (400). */
     parentTaskId: z.string().min(1).optional(),
+    /**
+     * `false`: no Lead follow-up (review) task when the created task finishes
+     * (`followUpConfig.disabled`). A json-render `SessionThread` sends it, so
+     * the chat stays one task per message. Script and sync actions create no
+     * task and ignore it, so a generic caller may always send it.
+     */
+    followUp: z.boolean().optional(),
+    /**
+     * The person the task is for, when the caller is the shared operator key
+     * (the dashboard's picked identity). Resolved like `POST /api/tasks`: a
+     * caller bound to a user always wins, and the hint is honored only when
+     * the caller may assign requesters.
+     */
+    requestedByUserId: z.string().min(1).optional(),
+    /**
+     * A json-render `SessionThread` session. The server builds the task's
+     * `contextKey` (`task:app:<appId>:<key>:user:<requester>`) from this
+     * app's id, the key and the resolved requester; a raw `contextKey` is
+     * never taken from the client. Scope `user` needs a requesting user.
+     * Scope `shared` is reserved: it answers 400 until shared sessions land
+     * (planned: an everyone:write `session_shares` row on the root). A
+     * follow-up (`parentTaskId`) inherits its parent's key instead. Script
+     * and sync actions ignore it.
+     */
+    session: z
+      .object({
+        key: z.string().regex(APP_SESSION_KEY_PATTERN),
+        scope: z.enum(["user", "shared"]).optional(),
+      })
+      .optional(),
   }),
   responses: {
     200: { description: "Action invoked", schema: runActionResultSchema },
@@ -680,28 +719,26 @@ async function authorizeAppCaller(
   resource: RbacResource,
 ): Promise<{ actor: string; caller: AppActionCaller } | null> {
   const auth = getRequestAuth(req);
-  let principal: RbacPrincipal;
+  const principal = await requestPrincipal(req, myAgentId, {
+    unauthenticatedFallback: "anonymous-agent",
+  });
   let actor: string;
   let caller: AppActionCaller;
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
+  if (principal.kind === "operator") {
     // Page sessions never act as an agent, even if a header names one.
-    const agent = myAgentId && !auth.page ? await getAgentById(myAgentId) : null;
+    const agent = myAgentId && !auth?.page ? await getAgentById(myAgentId) : null;
     actor = agent ? `agent:${agent.id}` : "operator";
     caller = agent
       ? { kind: "agent", id: agent.id, name: agent.name }
       : { kind: "operator", id: null };
-  } else if (auth?.kind === "user") {
-    principal = { kind: "user", userId: auth.userId };
-    actor = `user:${auth.userId}`;
-    caller = { kind: "user", id: auth.userId, name: auth.user.name };
-  } else if (auth?.kind === "guest" || auth?.kind === "controller") {
-    principal = { kind: "guest" };
+  } else if (principal.kind === "user") {
+    actor = `user:${principal.userId}`;
+    caller = { kind: "user", id: principal.userId, name: authUser(auth)?.name };
+  } else if (principal.kind === "guest") {
     actor = "guest";
     caller = { kind: "guest", id: null };
   } else {
     const agent = myAgentId ? await getAgentById(myAgentId) : null;
-    principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
     actor = myAgentId ? `agent:${myAgentId}` : "agent";
     caller = { kind: "agent", id: myAgentId ?? null, name: agent?.name };
   }
@@ -1110,7 +1147,7 @@ export async function handleApps(
     const definition = await parseAppDefinition(parsed.body.definition, {
       resolveApp: getApp,
       writerAgentId: myAgentId ?? null,
-      writerIsUser: getRequestAuth(req)?.kind === "user",
+      writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
     });
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
@@ -1129,7 +1166,11 @@ export async function handleApps(
   }
 
   if (listAppsRoute.match(req.method, pathSegments)) {
-    listAppsRoute.respond(res, 200, { apps: await listApps() });
+    const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    listAppsRoute.respond(res, 200, {
+      apps: await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+    });
     return true;
   }
 
@@ -1177,7 +1218,7 @@ export async function handleApps(
         forceElementBreak: parsed.body.forceElementBreak,
         changedByAgentId: myAgentId,
         writerAgentId: myAgentId ?? null,
-        writerIsUser: getRequestAuth(req)?.kind === "user",
+        writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
       });
       rollbackAppRoute.respond(res, 200, { app: rolledBack.app, migration: rolledBack.migration });
     } catch (error) {
@@ -1394,15 +1435,15 @@ export async function handleApps(
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
+    const actions = app.definition.actions;
+    const action =
+      actions && Object.hasOwn(actions, parsed.params.name)
+        ? actions[parsed.params.name]
+        : undefined;
     if (parsed.body.parentTaskId) {
       // `parentTaskId` only means something to a task-kind action: a script or
       // sync action rejects it rather than silently dropping it. An unknown
       // action keeps `runAppAction`'s 404.
-      const actions = app.definition.actions;
-      const action =
-        actions && Object.hasOwn(actions, parsed.params.name)
-          ? actions[parsed.params.name]
-          : undefined;
       if (action && action.kind !== "task") {
         jsonError(res, "parentTaskId is only supported for task-kind actions", 400);
         return true;
@@ -1419,11 +1460,43 @@ export async function handleApps(
         if (await denyParentAttach(req, res, myAgentId, parentTask, principal)) return true;
       }
     }
+    // Only a task-kind action creates a task to attribute and key.
+    const requestedByUserId =
+      action?.kind === "task"
+        ? await resolveTaskRequester(req, myAgentId, parsed.body.requestedByUserId)
+        : undefined;
+    let contextKey: string | undefined;
+    const session = parsed.body.session;
+    if (session && action?.kind === "task") {
+      if (session.scope === "shared") {
+        jsonError(res, 'session scope "shared" is not supported yet', 400);
+        return true;
+      }
+      if (!requestedByUserId) {
+        jsonError(
+          res,
+          "A user-scoped session needs a requesting user: sign in or pick an identity",
+          400,
+        );
+        return true;
+      }
+      // A follow-up joins its parent's chain and inherits the parent's key.
+      if (!parsed.body.parentTaskId) {
+        contextKey = appSessionContextKey({
+          appId: app.id,
+          sessionKey: session.key,
+          userId: requestedByUserId,
+        });
+      }
+    }
     const output = await runAppAction({
       app,
       name: parsed.params.name,
       input: parsed.body.input,
       parentTaskId: parsed.body.parentTaskId,
+      followUp: parsed.body.followUp,
+      requestedByUserId,
+      contextKey,
       caller,
       actor,
     });
@@ -1496,7 +1569,7 @@ export async function handleApps(
           currentAppId: parsed.params.id,
           resolveApp: getApp,
           writerAgentId: myAgentId ?? null,
-          writerIsUser: getRequestAuth(req)?.kind === "user",
+          writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
           existingDefinition: existing.definition,
         });
         if (!definition.success) {
@@ -1582,7 +1655,7 @@ export async function handleApps(
             currentAppId: parsed.params.id,
             resolveApp: getApp,
             writerAgentId: myAgentId ?? null,
-            writerIsUser: getRequestAuth(req)?.kind === "user",
+            writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
             existingDefinition: existing.definition,
           });
           if (!parsedDefinition.success) {

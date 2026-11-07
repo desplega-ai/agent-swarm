@@ -17,6 +17,7 @@ const ALL_EVENTS: SlackReactionEvent[] = [
   "steered",
   "completed",
   "failed",
+  "skipped",
 ];
 
 /** The four acceptance-stage names `main` removed as a fixed list at finalize. */
@@ -214,6 +215,45 @@ describe("reaction-shortcode.ts", () => {
       DEFAULT_ACCEPTANCE_NAMES,
     );
     expect(calls.at(-1)).toEqual({ method: "add", name: "white_check_mark" });
+  });
+
+  test("finalize sends the removals together and adds the outcome only after all of them", async () => {
+    const events: string[] = [];
+    let releaseRemovals: () => void = () => {};
+    const allRemovalsStarted = new Promise<void>((resolve) => {
+      releaseRemovals = resolve;
+    });
+    let started = 0;
+    const client = {
+      reactions: {
+        remove: async ({ name }: { name: string }) => {
+          events.push(`remove:${name}`);
+          started += 1;
+          if (started === DEFAULT_ACCEPTANCE_NAMES.length) releaseRemovals();
+          // A serial loop would wait out this timer once per name.
+          await Promise.race([allRemovalsStarted, Bun.sleep(500)]);
+          events.push(`removed:${name}`);
+          return { ok: true };
+        },
+        add: async ({ name }: { name: string }) => {
+          events.push(`add:${name}`);
+          return { ok: true };
+        },
+      },
+    };
+    await finalizeSlackMessageReaction(
+      client as never,
+      "C_TEST",
+      "2000.0003",
+      reactionName("completed"),
+      "completed",
+    );
+    const firstSettled = events.findIndex((event) => event.startsWith("removed:"));
+    expect(events.slice(0, firstSettled)).toEqual(
+      DEFAULT_ACCEPTANCE_NAMES.map((name) => `remove:${name}`),
+    );
+    expect(events.at(-1)).toBe("add:white_check_mark");
+    expect(events.filter((event) => event.startsWith("removed:"))).toHaveLength(4);
   });
 
   test("finalize removes the configured acceptance-stage names when the config overrides them", async () => {

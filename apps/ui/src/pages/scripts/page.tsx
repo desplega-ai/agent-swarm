@@ -2,11 +2,13 @@ import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Search, SquareCode } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useScriptsSavings } from "@/api/hooks/use-savings";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScripts } from "@/api/hooks/use-scripts";
-import type { ScriptListItem, ScriptScope } from "@/api/types";
+import type { SavingsJobRow, ScriptListItem, ScriptScope } from "@/api/types";
 import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -23,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
+import { formatUsd } from "@/pages/usage/usage-format";
 
 const SCOPE_OPTIONS: Array<ScriptScope | "all"> = ["all", "agent", "global"];
 
@@ -58,6 +61,23 @@ export default function ScriptsPage() {
     return counts;
   }, [runs]);
 
+  const { data: savings } = useScriptsSavings();
+  // One request for the whole list, joined by script name.
+  const savingsByName = useMemo(() => {
+    const m = new Map<string, SavingsJobRow>();
+    if (savings?.valid)
+      for (const row of savings.rows) if (row.scriptName) m.set(row.scriptName, row);
+    return m;
+  }, [savings]);
+  // Savings are keyed by name: scripts of one name in several scopes share a row.
+  const sharedNames = useMemo(() => {
+    const seen = new Set<string>();
+    const shared = new Set<string>();
+    for (const s of scripts ?? []) (seen.has(s.name) ? shared : seen).add(s.name);
+    return shared;
+  }, [scripts]);
+
+  const gridColumns = useDataGridColumns("scripts");
   const scriptColumns = useMemo<ColDef<ScriptListItem>[]>(
     () => [
       {
@@ -104,10 +124,34 @@ export default function ScriptsPage() {
         valueFormatter: (params) => (params.value != null ? `v${params.value}` : ""),
       },
       {
+        colId: "runs",
         headerName: "Runs",
         context: HIDE_WHEN_COMPACT,
         width: 90,
         valueGetter: (params) => (params.data ? (runCounts.get(params.data.name) ?? 0) : 0),
+      },
+      {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; scripts without a saving sort below every amount.
+        valueGetter: (params) =>
+          params.data ? (savingsByName.get(params.data.name)?.savingUsd.p50 ?? null) : null,
+        cellRenderer: (params: { data?: ScriptListItem }) => {
+          const row = params.data ? savingsByName.get(params.data.name) : undefined;
+          if (!row || !params.data) return <span className="text-muted-foreground">—</span>;
+          const kind =
+            row.kind === "script-scheduled"
+              ? "scheduled"
+              : "called by agents (priced as extra turns)";
+          const title = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), ${kind}, ${row.substitutedRuns.toLocaleString("en-US")} of ${row.runs.toLocaleString("en-US")} runs${row.capApplied ? ", capped at 24 a day" : ""}${sharedNames.has(params.data.name) ? ". Shared with the script of the same name in the other scope" : ""}`;
+          return (
+            <span className="font-mono tabular-nums" title={title}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
+          );
+        },
       },
       {
         field: "updatedAt",
@@ -117,7 +161,7 @@ export default function ScriptsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [runCounts],
+    [runCounts, savingsByName, sharedNames],
   );
 
   const onScriptRowClicked = useCallback(
@@ -191,6 +235,9 @@ export default function ScriptsPage() {
                   Include scratch
                 </Label>
               </div>
+              <div className="ml-auto">
+                <DataGridColumnsMenu state={gridColumns} />
+              </div>
             </div>
           )}
           {activeTab === "runs" && (
@@ -217,6 +264,7 @@ export default function ScriptsPage() {
             <DataGrid
               rowData={scripts ?? []}
               columnDefs={scriptColumns}
+              columns={gridColumns}
               quickFilterText={search}
               onRowClicked={onScriptRowClicked}
               loading={scriptsLoading}

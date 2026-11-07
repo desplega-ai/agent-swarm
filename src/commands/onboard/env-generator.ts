@@ -5,7 +5,7 @@ import type { OnboardState } from "./types.ts";
  * Generate a .env file string from onboard wizard state.
  * Uses real values from state (not placeholders).
  */
-export function generateEnv(state: OnboardState): string {
+export function generateEnv(state: OnboardState, env: NodeJS.ProcessEnv = process.env): string {
   const expanded = expandServices(state.services, state.agentIds);
   const lines: string[] = [];
 
@@ -33,6 +33,18 @@ export function generateEnv(state: OnboardState): string {
   );
   if (state.presetId) {
     lines.push(`INSTALL_PRESET=${state.presetId}`);
+  }
+
+  // Knobs from the installer's environment, so the first boot already honours
+  // them: telemetry (`ANONYMIZED_TELEMETRY=false`, `DESPLEGA_TELEMETRY_ENV=<cohort>`)
+  // and the host address for published ports (`AGENT_SWARM_BIND_ADDRESS=127.0.0.1`).
+  for (const key of [
+    "ANONYMIZED_TELEMETRY",
+    "DESPLEGA_TELEMETRY_ENV",
+    "AGENT_SWARM_BIND_ADDRESS",
+  ]) {
+    const value = env[key]?.trim();
+    if (value) lines.push(`${key}=${value}`);
   }
 
   lines.push("");

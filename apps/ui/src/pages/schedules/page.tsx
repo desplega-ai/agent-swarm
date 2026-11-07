@@ -4,303 +4,41 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
-import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
+import { useSchedulesSavings } from "@/api/hooks/use-savings";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTaskSummary, ScheduledTaskTargetType } from "@/api/types";
+import type {
+  SavingsScheduleRow,
+  ScheduledTaskSummary,
+  ScheduledTaskTargetType,
+} from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
-  EMPTY_SCHEDULE_TARGET,
-  isScheduleTargetInvalid,
-  ScheduleTargetFields,
-  type ScheduleTargetFormValue,
-} from "@/components/schedules/schedule-target-fields";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+  ScheduleDialog,
+  type ScheduleFormData,
+  scheduleCreateInput,
+} from "@/components/schedules/schedule-dialog";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
-import { ModelCombobox } from "@/components/shared/model-combobox";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
 import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
-import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
+import { modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
-
-interface ScheduleFormData extends ScheduleTargetFormValue {
-  name: string;
-  scheduleType: "cron" | "interval";
-  cronExpression: string;
-  intervalMinutes: number;
-  description: string;
-  taskType: string;
-  tags: string;
-  priority: number;
-  targetAgentId: string;
-  timezone: string;
-  model: string;
-  modelTier: string;
-  enabled: boolean;
-}
-
-const emptyScheduleForm: ScheduleFormData = {
-  name: "",
-  ...EMPTY_SCHEDULE_TARGET,
-  scheduleType: "cron",
-  cronExpression: "",
-  intervalMinutes: 60,
-  description: "",
-  taskType: "",
-  tags: "",
-  priority: 50,
-  targetAgentId: "",
-  timezone: "UTC",
-  model: "",
-  modelTier: "",
-  enabled: true,
-};
-
-function ScheduleDialog({
-  open,
-  onOpenChange,
-  onSubmit,
-  editData,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (data: ScheduleFormData) => void;
-  editData?: ScheduleFormData | null;
-}) {
-  const { data: agents } = useAgents();
-  const { data: modelsCatalog } = useModelsCatalog();
-  const modelGroups = useMemo(
-    () => modelGroupsForSchedule(modelsCatalog?.providers),
-    [modelsCatalog?.providers],
-  );
-  const [form, setForm] = useState<ScheduleFormData>(editData ?? emptyScheduleForm);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    onSubmit(form);
-    if (!editData) setForm(emptyScheduleForm);
-    onOpenChange(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>{editData ? "Edit Schedule" : "Create Schedule"}</DialogTitle>
-            <DialogDescription>
-              {editData ? "Update schedule configuration." : "Set up a recurring task schedule."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                placeholder="Schedule name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            </div>
-            <ScheduleTargetFields value={form} onChange={(next) => setForm({ ...form, ...next })} />
-            <div className="space-y-2">
-              <Label>Schedule Type</Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={form.scheduleType === "cron" ? "default" : "outline"}
-                  onClick={() => setForm({ ...form, scheduleType: "cron" })}
-                >
-                  Cron
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={form.scheduleType === "interval" ? "default" : "outline"}
-                  onClick={() => setForm({ ...form, scheduleType: "interval" })}
-                >
-                  Interval
-                </Button>
-              </div>
-            </div>
-            {form.scheduleType === "cron" ? (
-              <div className="space-y-2">
-                <Label>Cron Expression *</Label>
-                <Input
-                  placeholder="0 * * * *"
-                  value={form.cronExpression}
-                  onChange={(e) => setForm({ ...form, cronExpression: e.target.value })}
-                  className="font-mono"
-                  required={form.scheduleType === "cron"}
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Label>Interval (minutes)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.intervalMinutes}
-                  onChange={(e) => setForm({ ...form, intervalMinutes: Number(e.target.value) })}
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Input
-                placeholder="Optional description"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Model Tier</Label>
-              <Select
-                value={form.modelTier}
-                onValueChange={(v) => setForm({ ...form, modelTier: v === "_none" ? "" : v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Default" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">Default</SelectItem>
-                  {MODEL_TIER_OPTIONS.map((tier) => (
-                    <SelectItem key={tier.value} value={tier.value}>
-                      {tier.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Target Agent</Label>
-                <Select
-                  value={form.targetAgentId}
-                  onValueChange={(v) => setForm({ ...form, targetAgentId: v === "_none" ? "" : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Task Pool" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">Task Pool</SelectItem>
-                    {agents?.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name}
-                        {a.isLead ? " (Lead)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Priority (0–100)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={form.priority}
-                  onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Task Type</Label>
-                <Input
-                  placeholder="e.g. code, research"
-                  value={form.taskType}
-                  onChange={(e) => setForm({ ...form, taskType: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <ModelCombobox
-                  value={form.model}
-                  onChange={(model) => setForm({ ...form, model })}
-                  groups={modelGroups}
-                  selected={findModelOption(form.model, modelGroups)}
-                  placeholder="Default"
-                  clearLabel="Default"
-                  creatable
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Timezone</Label>
-                <Input
-                  placeholder="UTC"
-                  value={form.timezone}
-                  onChange={(e) => setForm({ ...form, timezone: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Tags (comma-separated)</Label>
-                <Input
-                  placeholder="daily, sync"
-                  value={form.tags}
-                  onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="schedule-enabled"
-                checked={form.enabled}
-                onCheckedChange={(checked) => setForm({ ...form, enabled: checked })}
-              />
-              <Label htmlFor="schedule-enabled">Enabled</Label>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className="bg-primary hover:bg-primary/90"
-              disabled={!form.name.trim() || isScheduleTargetInvalid(form)}
-            >
-              {editData ? "Update" : "Create"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
+import { formatUsd } from "@/pages/usage/usage-format";
 
 function targetLabel(targetType: ScheduledTaskTargetType | undefined): string {
   return targetType === "workflow" ? "Workflow" : targetType === "script" ? "Script" : "Agent Task";
@@ -329,32 +67,7 @@ export default function SchedulesPage() {
   }, [schedules]);
 
   function handleCreateSubmit(data: ScheduleFormData) {
-    const tags = data.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-    createSchedule.mutate({
-      name: data.name,
-      targetType: data.targetType,
-      ...(data.targetType === "agent-task" && { taskTemplate: data.taskTemplate }),
-      ...(data.targetType === "workflow" && { workflowId: data.workflowId }),
-      ...(data.targetType === "script" && {
-        scriptName: data.scriptName,
-        scriptArgs: data.scriptArgsText.trim() ? JSON.parse(data.scriptArgsText) : undefined,
-      }),
-      ...(data.scheduleType === "cron"
-        ? { cronExpression: data.cronExpression }
-        : { intervalMs: data.intervalMinutes * 60 * 1000 }),
-      ...(data.description && { description: data.description }),
-      ...(data.taskType && { taskType: data.taskType }),
-      ...(tags.length > 0 && { tags }),
-      ...(data.priority !== 50 && { priority: data.priority }),
-      ...(data.targetAgentId && { targetAgentId: data.targetAgentId }),
-      ...(data.timezone !== "UTC" && { timezone: data.timezone }),
-      ...(data.model && { model: data.model }),
-      ...(data.modelTier && { modelTier: data.modelTier }),
-      enabled: data.enabled,
-    });
+    createSchedule.mutate(scheduleCreateInput(data));
   }
 
   const agentMap = useMemo(() => {
@@ -393,6 +106,15 @@ export default function SchedulesPage() {
     [updateSchedule],
   );
 
+  const { data: savings } = useSchedulesSavings();
+  // One request for the whole list, joined by schedule id.
+  const savingsBySchedule = useMemo(() => {
+    const m = new Map<string, SavingsScheduleRow>();
+    if (savings?.valid) for (const row of savings.rows) m.set(row.scheduleId, row);
+    return m;
+  }, [savings]);
+
+  const gridColumns = useDataGridColumns("schedules");
   const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
     () => [
       {
@@ -453,6 +175,7 @@ export default function SchedulesPage() {
         ),
       },
       {
+        colId: "setup",
         headerName: "Setup",
         context: HIDE_WHEN_COMPACT,
         width: 190,
@@ -473,6 +196,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "schedule",
         headerName: "Schedule",
         context: HIDE_WHEN_COMPACT,
         width: 250,
@@ -519,6 +243,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "model",
         headerName: "Model",
         context: HIDE_WHEN_COMPACT,
         width: 150,
@@ -558,6 +283,37 @@ export default function SchedulesPage() {
               </TooltipTrigger>
               <TooltipContent>{formatUTCTime(params.value)}</TooltipContent>
             </Tooltip>
+          );
+        },
+      },
+      {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; schedules without a saving sort below every amount.
+        valueGetter: (params) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          return row?.basis === "modelled" ? row.savingUsd.p50 : null;
+        },
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          if (!row) return <span className="text-muted-foreground">—</span>;
+          if (row.basis === "measured") {
+            return (
+              <span
+                className="font-mono tabular-nums text-muted-foreground"
+                title={`Already agent work: ${formatUsd(row.actualUsd)} spent on ${row.runs.toLocaleString("en-US")} tasks, no saving to model`}
+              >
+                {formatUsd(row.actualUsd)}
+              </span>
+            );
+          }
+          const title = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), the saving of the target ${row.kind === "workflow" ? "workflow" : "script"}, shared with any other schedule of it`;
+          return (
+            <span className="font-mono tabular-nums" title={title}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
           );
         },
       },
@@ -604,7 +360,7 @@ export default function SchedulesPage() {
         },
       },
     ],
-    [agentMap, favoriteToggle, handleToggleEnabled, status?.automations],
+    [agentMap, favoriteToggle, handleToggleEnabled, savingsBySchedule, status?.automations],
   );
 
   const onRowClicked = useCallback(
@@ -661,8 +417,17 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
+        {isMobile ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
         {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setDialogOpen(true)}>
+        <Button
+          size="sm"
+          className={isMobile ? "ml-auto" : undefined}
+          onClick={() => setDialogOpen(true)}
+        >
           <Plus className="h-4 w-4" />
           New schedule
         </Button>
@@ -724,6 +489,7 @@ export default function SchedulesPage() {
         <DataGrid
           rowData={searchedRows}
           columnDefs={columnDefs}
+          columns={gridColumns}
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No scheduled tasks"

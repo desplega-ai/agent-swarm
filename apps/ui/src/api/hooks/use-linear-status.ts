@@ -95,11 +95,6 @@ export function useLinearTrackerStatus() {
   });
 }
 
-/** Absolute authorize URL — callers open it in a new tab via `window.open`. */
-export function buildLinearAuthorizeUrl(): string {
-  return `${getBaseUrl()}/api/trackers/linear/authorize`;
-}
-
 /**
  * Mutation hook for `DELETE /api/trackers/linear/disconnect`. On success, the
  * status query is invalidated so the card immediately reflects the

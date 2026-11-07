@@ -109,6 +109,30 @@ export interface ResolveCredentialOptions {
 }
 
 /**
+ * Credential kinds in precedence order. `resolveCredentials` walks this list;
+ * `resolveCredential` returns the first hit.
+ */
+export const CREDENTIAL_KIND_PRECEDENCE: readonly CredentialKind[] = [
+  "openrouter",
+  "anthropic",
+  "openai",
+  "openai-codex",
+  "claude-cli",
+];
+
+export interface ResolveCredentialsOptions extends ResolveCredentialOptions {
+  /**
+   * Only resolve these kinds (in precedence order). Lets a caller probe one
+   * provider at a time, so the codex OAuth lookup (an HTTP call that can
+   * rotate a refresh token) runs only when that kind is actually needed.
+   * Default: every kind.
+   */
+  kinds?: readonly CredentialKind[];
+  /** Stop after this many credentials. Default: no limit. */
+  limit?: number;
+}
+
+/**
  * Resolve a credential according to the documented precedence. Returns `null`
  * if no credential could be resolved — callers MUST treat null as a graceful
  * no-op (do NOT throw; structured-output completion is a best-effort path).
@@ -125,112 +149,141 @@ export interface ResolveCredentialOptions {
 export async function resolveCredential(
   opts: ResolveCredentialOptions = {},
 ): Promise<ResolvedCredential | null> {
+  const [first] = await resolveCredentials({ ...opts, limit: 1 });
+  return first ?? null;
+}
+
+/**
+ * Every credential the environment offers, in the precedence order documented
+ * on {@link resolveCredential}. Callers that can fall back across providers
+ * (task titles) walk the list; `resolveCredential` is the `limit: 1` case.
+ * The codex OAuth probe runs only when `openai-codex` is reached, so an env
+ * key ahead of it (or `kinds` that exclude it) never triggers the HTTP call.
+ */
+export async function resolveCredentials(
+  opts: ResolveCredentialsOptions = {},
+): Promise<ResolvedCredential[]> {
   const env = opts.env ?? process.env;
   const getEnvKey = opts._getEnvApiKey ?? getEnvApiKey;
+  const wanted = opts.kinds ?? CREDENTIAL_KIND_PRECEDENCE;
+  const limit = opts.limit ?? Number.POSITIVE_INFINITY;
+  const found: ResolvedCredential[] = [];
+
+  for (const kind of CREDENTIAL_KIND_PRECEDENCE) {
+    if (found.length >= limit) break;
+    if (!wanted.includes(kind)) continue;
+    const cred = await resolveKind(kind, opts, env, getEnvKey);
+    if (cred) found.push(cred);
+  }
+  return found;
+}
+
+async function resolveKind(
+  kind: CredentialKind,
+  opts: ResolveCredentialOptions,
+  env: NodeJS.ProcessEnv,
+  getEnvKey: typeof getEnvApiKey,
+): Promise<ResolvedCredential | null> {
+  switch (kind) {
+    case "openrouter": {
+      const key = env.OPENROUTER_API_KEY ?? getEnvKey("openrouter");
+      if (!key) return null;
+      return {
+        kind,
+        apiKey: selectCredential(key, undefined, "OPENROUTER_API_KEY").selected,
+        modelDefault: resolveRaterModelString(kind),
+      };
+    }
+    case "anthropic": {
+      // pi-ai sends this key to api.anthropic.com, so skip it when
+      // ANTHROPIC_BASE_URL names a gateway: the key belongs to the gateway (#1800).
+      const anthropicBaseUrl = env.ANTHROPIC_BASE_URL?.trim();
+      const keyIsForGateway =
+        Boolean(anthropicBaseUrl) && !isFirstPartyAnthropicUrl(anthropicBaseUrl ?? "");
+      const key = keyIsForGateway ? undefined : (env.ANTHROPIC_API_KEY ?? getEnvKey("anthropic"));
+      if (!key) return null;
+      return {
+        kind,
+        apiKey: selectCredential(key, undefined, "ANTHROPIC_API_KEY").selected,
+        modelDefault: resolveRaterModelString(kind),
+      };
+    }
+    case "openai": {
+      const key = env.OPENAI_API_KEY ?? getEnvKey("openai");
+      if (!key) return null;
+      return {
+        kind,
+        apiKey: selectCredential(key, undefined, "OPENAI_API_KEY").selected,
+        modelDefault: resolveRaterModelString(kind),
+      };
+    }
+    case "openai-codex":
+      // Only if we have apiUrl + apiKey to probe the config store.
+      if (!opts.apiUrl || !opts.apiKey) return null;
+      return resolveCodexOAuthCredential(opts, opts.apiUrl, opts.apiKey);
+    case "claude-cli":
+      // `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` is the mirror set by claude-adapter.ts
+      // before spawning `claude` — the CLI strips `CLAUDE_CODE_OAUTH_TOKEN` from
+      // hook subprocesses (security), so the hook reads the mirror instead.
+      if (!env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN && !env.CLAUDE_CODE_OAUTH_TOKEN) return null;
+      return { kind, modelDefault: resolveRaterModelString(kind) };
+  }
+}
+
+async function resolveCodexOAuthCredential(
+  opts: ResolveCredentialOptions,
+  apiUrl: string,
+  apiKey: string,
+): Promise<ResolvedCredential | null> {
   const getCodex = opts._getValidCodexOAuth ?? getValidCodexOAuth;
   const getOAuth = opts._getOAuthApiKey ?? resolveOAuthApiKey;
   const persistCodex = opts._persistCodexOAuth ?? persistCodexOAuth;
-
-  // 1. OpenRouter.
-  const openrouterKey = env.OPENROUTER_API_KEY ?? getEnvKey("openrouter");
-  if (openrouterKey) {
-    return {
-      kind: "openrouter",
-      apiKey: selectCredential(openrouterKey, undefined, "OPENROUTER_API_KEY").selected,
-      modelDefault: resolveRaterModelString("openrouter"),
+  try {
+    const codexCreds = await getCodex(apiUrl, apiKey);
+    if (!codexCreds) return null;
+    // pi-ai expects a Record<providerID, OAuthCredentials>.
+    const credMap: Record<string, OAuthCredentials> = {
+      "openai-codex": {
+        access: codexCreds.access,
+        refresh: codexCreds.refresh,
+        expires: codexCreds.expires,
+      },
     };
-  }
-
-  // 2. Anthropic. pi-ai sends this key to api.anthropic.com, so skip it when
-  // ANTHROPIC_BASE_URL names a gateway: the key belongs to the gateway (#1800).
-  const anthropicBaseUrl = env.ANTHROPIC_BASE_URL?.trim();
-  const anthropicKeyIsForGateway =
-    Boolean(anthropicBaseUrl) && !isFirstPartyAnthropicUrl(anthropicBaseUrl ?? "");
-  const anthropicKey = anthropicKeyIsForGateway
-    ? undefined
-    : (env.ANTHROPIC_API_KEY ?? getEnvKey("anthropic"));
-  if (anthropicKey) {
-    return {
-      kind: "anthropic",
-      apiKey: selectCredential(anthropicKey, undefined, "ANTHROPIC_API_KEY").selected,
-      modelDefault: resolveRaterModelString("anthropic"),
-    };
-  }
-
-  // 3. OpenAI.
-  const openaiKey = env.OPENAI_API_KEY ?? getEnvKey("openai");
-  if (openaiKey) {
-    return {
-      kind: "openai",
-      apiKey: selectCredential(openaiKey, undefined, "OPENAI_API_KEY").selected,
-      modelDefault: resolveRaterModelString("openai"),
-    };
-  }
-
-  // 4. Codex OAuth — only if we have apiUrl + apiKey to probe the config store.
-  if (opts.apiUrl && opts.apiKey) {
-    try {
-      const codexCreds = await getCodex(opts.apiUrl, opts.apiKey);
-      if (codexCreds) {
-        // pi-ai expects a Record<providerID, OAuthCredentials>.
-        const credMap: Record<string, OAuthCredentials> = {
-          "openai-codex": {
-            access: codexCreds.access,
-            refresh: codexCreds.refresh,
-            expires: codexCreds.expires,
-          },
-        };
-        const oauthResult = await getOAuth("openai-codex", credMap);
-        if (oauthResult) {
-          // Persist any rotated refresh token — best-effort, must not block.
-          // Wrap defensively here even though the production helper already
-          // swallows; tests may inject a throwing hook, and persistence
-          // failure must never prevent the current call from succeeding.
-          if (oauthResult.newCredentials) {
-            const updated = oauthResult.newCredentials;
-            try {
-              await persistCodex(opts.apiUrl, opts.apiKey, {
-                access: String(updated.access),
-                refresh: String(updated.refresh),
-                expires: Number(updated.expires),
-                accountId: codexCreds.accountId,
-              });
-            } catch (err) {
-              console.error(
-                `internal-ai: persistCodexOAuth failed (callerTag=${opts.callerTag ?? "<unset>"}):`,
-                err,
-              );
-            }
-          }
-          return {
-            kind: "openai-codex",
-            apiKey: oauthResult.apiKey,
-            modelDefault: resolveRaterModelString("openai-codex"),
-          };
-        }
+    const oauthResult = await getOAuth("openai-codex", credMap);
+    if (!oauthResult) return null;
+    // Persist any rotated refresh token — best-effort, must not block.
+    // Wrap defensively here even though the production helper already
+    // swallows; tests may inject a throwing hook, and persistence
+    // failure must never prevent the current call from succeeding.
+    if (oauthResult.newCredentials) {
+      const updated = oauthResult.newCredentials;
+      try {
+        await persistCodex(apiUrl, apiKey, {
+          access: String(updated.access),
+          refresh: String(updated.refresh),
+          expires: Number(updated.expires),
+          accountId: codexCreds.accountId,
+        });
+      } catch (err) {
+        console.error(
+          `internal-ai: persistCodexOAuth failed (callerTag=${opts.callerTag ?? "<unset>"}):`,
+          err,
+        );
       }
-    } catch (err) {
-      console.error(
-        `internal-ai: codex OAuth probe failed (callerTag=${opts.callerTag ?? "<unset>"}):`,
-        err,
-      );
-      // Fall through to claude-cli fallback below.
     }
-  }
-
-  // 5. CLAUDE_CODE_OAUTH_TOKEN → claude-cli fallback.
-  // `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` is the mirror set by claude-adapter.ts
-  // before spawning `claude` — the CLI strips `CLAUDE_CODE_OAUTH_TOKEN` from
-  // hook subprocesses (security), so the hook reads the mirror instead.
-  if (env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
-      kind: "claude-cli",
-      modelDefault: resolveRaterModelString("claude-cli"),
+      kind: "openai-codex",
+      apiKey: oauthResult.apiKey,
+      modelDefault: resolveRaterModelString("openai-codex"),
     };
+  } catch (err) {
+    console.error(
+      `internal-ai: codex OAuth probe failed (callerTag=${opts.callerTag ?? "<unset>"}):`,
+      err,
+    );
+    // The caller falls through to the claude-cli fallback.
+    return null;
   }
-
-  // 6. No creds.
-  return null;
 }
 
 // Re-export for convenience to keep imports flat.

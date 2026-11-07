@@ -1,7 +1,7 @@
 # Workflows.tla action map
 
 Every TLA+ action, the code it models, and the SQL guard (or its absence) it encodes.
-Line numbers are against `main` @ `1a5ee4796` (after #2441, #2452). A DB transaction is one atomic action. Every
+Line numbers are against `main` @ `7dc87f455` (after #2727, #2730). A DB transaction is one atomic action. Every
 `await` outside a transaction is an action boundary: other actors interleave there, and a crash
 can land there.
 
@@ -15,12 +15,12 @@ branch of each action for the `Ctl-*` and calibration configs.
 |---|---|
 | `run` | `workflow_runs.status` (`none` before the INSERT) |
 | `steps[i]` | one `workflow_run_steps` row: `node`=nodeId, `st`=status, `rc`=retryCount, `nra`=`nextRetryAt IS NOT NULL`, `task`=state of the agent task bound to the row (`none` when detached), `tg`=task generation, +1 per dispatch (F7: a retry binds a fresh task to the same row) |
-| `active` | `activeWalks.get(runId)` (`engine.ts:360`, process-local), taken by `walkGraph` and `holdWorkflowRun` (`engine.ts:407`) |
+| `active` | `activeWalks.get(runId)` (`engine.ts:392`, process-local), taken by `walkGraph` and `holdWorkflowRun` (`engine.ts:439`) |
 | `execLive[n]` | `executor.run` calls in flight for node `n` (process-local) |
 | `okCount[n]` | ghost: successful completions of node `n` (for Inv3) |
 | `thr[Ev(i, g)]` | the bus handler for the `g`-th task bound to row `i` (`Bound(i, g)` = that task is still the one bound, `isTaskBoundToStep` `task-step-routing.ts:62`) |
-| `Owned` (derived) | F3: `executingSteps` (`engine.ts:365`, process-local, cleared by a crash) |
-| `TreeLive` (derived) | F9 (#2377): `getRunLineageBlock` (`workflow-runs.ts:205-241`) finds no cancelled run in the lineage. The model has one root run, so it is `run # "cancelled"` |
+| `Owned` (derived) | F3: `executingSteps` (`engine.ts:397`, process-local, cleared by a crash) |
+| `TreeLive` (derived) | F9 (#2377): `getRunLineageBlock` (`workflow-runs.ts:218-254`) finds no cancelled run in the lineage. The model has one root run, so it is `run # "cancelled"` |
 
 Graph: `T` fans out to `Branches`; with `Converge`, every branch has `next: "M"`.
 All nodes are non-loop, so every node has one logical iteration.
@@ -29,33 +29,33 @@ All nodes are non-loop, so every node has one logical iteration.
 
 | Action | Code | Guard modelled |
 |---|---|---|
-| `Call` | `walkGraph` `engine.ts:426` | `activeWalks` +1 via `holdWorkflowRun` (no DB guard) |
-| `WStart` | `engine.ts:457-527`: rehydrate completed steps `:472`, `loadCompletedStepRouting` `:476`, active edges from `waiting` steps `:492-504`, seed filter `:513-527` | Seed filter = `GuardConvergeSeed`. F6: a predecessor in `awaitedNodeIds` (`:506`, `engine.ts:710`) also holds the node. Reads only, no transaction. |
-| `WPick` | `engine.ts:545` `Promise.all` over the batch | Batch members interleave in any order |
-| `XDedup` | `executeStep` `engine.ts:804`, claim transaction `:908` | `run.status IN (running, waiting)` else halted (`:821-824`, returned as completed `:914`). F3: `getCurrentStepForNode` (`:836`, `db.ts:8366`) memoizes a node whose latest row is completed, waiting, or running and owned by this process (`executingSteps`), with no newer predecessor completion; a live one pauses the walk (`:915-921`). Otherwise `iteration = COUNT(*)` (`:859`, `getStepCountForNode` `db.ts:8340`) and INSERT. F9 (#2377): the claim also halts while `getRunLineageBlock` (`:827`) blocks, implied by the run-status check for a root run. F8 + `ChildRunResume`: a `sub-workflow` node whose latest row is `running` and not owned (orphaned by a crash) is re-claimed (`:846-855`): same row, same `retryCount`, now owned; `XChild` reconnects to that attempt's child or starts it. |
-| `XRun` | `executor.run` `engine.ts:1063` (in `runClaimedStep` `:963`) | none (process-local). Async: the agent-task executor inserts the step's task (`createTaskExtended`, `executors/agent-task.ts:149`). F9 (#2377): the INSERT's transaction refuses unless the step is `running` in a `running`/`waiting` run with no cancelled lineage (`getStepExecutionBlock` `db.ts:2887-2894`, `workflow-runs.ts:526-544`); the executor throws, and the catch (`engine.ts:1070`) goes to the fenced `XFail`. Pre-F9 a cancel between the claim and the dispatch left a running task on a cancelled row. F8 + `ChildRunResume`: the async branch is `ChildStart` (below). The step watchdog (`startStepDeadline` `node-timeout.ts:38-51`, raced at `engine.ts:1062-1069`) is the `fail` outcome: on expiry it rejects, then since #2441 aborts `meta.signal`, so an executor that forwards it (swarm-script) stops instead of running on past the `XFail`. The agent-task executor ignores the signal; its dispatch stays fenced by F9 as above |
-| `XChild` | F8 + `ChildRunResume`: `executor.run` of a re-claimed row | `ChildStart`: `SubWorkflowExecutor.execute` (`sub-workflow.ts:85-170`) reads the attempt (`retryCount`) and reuses that attempt's child (`getChildWorkflowRunId(stepId, attempt)`, `workflow-runs.ts:489-498`): running parks, finished is a sync result. With none, `createRunWithInitialState` (`engine.ts:307-349`) inserts the child in one transaction only while the attempt still runs (`isParentStepAttemptCurrent` `workflow-runs.ts:506-519`, same predicate as `Fence`; since #2377 also no cancelled lineage) and returns a child another call of the attempt started (unique `(parentStepId, parentStepAttempt)`, migration 240). Not current: `ParentStepNotCurrentError`, the executor fails, and the fenced `XFail` writes nothing |
-| `XCkOk` | `checkpointStep` `engine.ts:1202` -> `checkpoint.ts:31-55` | transaction, `UPDATE step SET status='completed'`. F8 (#2364): fenced (`holdsFence` `checkpoint.ts:15-25`): only while the step is `running` with the claimed `retryCount` and the run is `running`/`waiting` (since #2377 also no cancelled lineage, `:24`, implied for a root run); else nothing is written and `executeStep` returns `failed` (`engine.ts:975`, `:1202`), so `WBatchEnd` re-reads the run and skips the node's successors |
-| `XFail` | `checkpointStepFailure` `engine.ts:1076` / `:1099` / `:1181` -> `checkpoint.ts:72-103` | `UPDATE step SET status='failed', retryCount+1, nextRetryAt`, fenced as `XCkOk` since #2364 (F8; stale returns `failed`, `:1085`, `:1109`, `:1189`); `executeStep` returns `completed` with no successors (`:1090`, `:1114`, `:1190`), so the walk adds the node to `completedNodeIds` (`engine.ts:577`). **The F2 edge is not kept (open, CX8).** The System One guards (#1715: `systemOneRetryViolations` `:982`, `strictUnresolved` `:1026`) fail the step with no retry before `executor.run`: an `XFail` whose retry budget is already spent. F8: with the budget spent (reachable in the model only through a re-claimed row), the step and the run (while `running`/`waiting`) fail in one transaction (`checkpoint.ts:93-116`) and the walk sees `failed`. Since #2290 they cover both `system-one-decision` and `system-one-extraction` nodes (`isSystemOneNodeType`); the model does not distinguish node types, so this `XFail` already covers both. |
-| `XCkWait` | `checkpointStepWaiting` `engine.ts:1133` -> `checkpoint.ts:127-154` | CAS (not fenced on `retryCount`) `WHERE status='running'`, run `IN (running, waiting)`; since #2377 also no cancelled lineage (`checkpoint.ts:134`), implied for a root run. The `keepRunStatus` option (#2314) is passed only by the foreach park, which the model does not have |
-| `WBatchEnd` | `engine.ts:557-623` in-walk convergence | in-memory `completedNodeIds` / `activeEdges`. F6: re-reads the steps (`:598-600`): a predecessor whose latest row completed elsewhere is rehydrated (`:605-611`), one in `awaitedNodeIds` holds the join (`:612-614`) |
-| `WFinal` | `engine.ts:633-691` finalization transaction | `run.status = 'running'` (since #2377 also no cancelled lineage, `:637`, implied for a root run); F6: returns while any node's latest row is `running` (`hasRunningStep` `:641`, `engine.ts:724`); `waiting` steps -> waiting; pending retries -> stay running; else completed/failed. A `pending` row is not counted (CX10). Since #2314 foreach item rows are left out of the failed/completed tallies (`:646-659`); the model has no foreach items, so the guard is unchanged for it. |
-| `WRet` | `engine.ts:442` `release()` | `activeWalks` -1 |
+| `Call` | `walkGraph` `engine.ts:458` | `activeWalks` +1 via `holdWorkflowRun` (no DB guard) |
+| `WStart` | `engine.ts:489-559`: rehydrate completed steps `:504`, `loadCompletedStepRouting` `:508`, active edges from `waiting` steps `:524-536`, seed filter `:545-559` | Seed filter = `GuardConvergeSeed`. F6: a predecessor in `awaitedNodeIds` (`:538`, `engine.ts:742`) also holds the node. Reads only, no transaction. |
+| `WPick` | `engine.ts:577` `Promise.all` over the batch | Batch members interleave in any order |
+| `XDedup` | `executeStep` `engine.ts:836`, claim transaction `:940` | `run.status IN (running, waiting)` else halted (`:853-856`, returned as completed `:946`). F3: `getCurrentStepForNode` (`:868`, `db.ts:8494`) memoizes a node whose latest row is completed, waiting, or running and owned by this process (`executingSteps`), with no newer predecessor completion; a live one pauses the walk (`:947-953`). Otherwise `iteration = COUNT(*)` (`:891`, `getStepCountForNode` `db.ts:8468`) and INSERT. F9 (#2377): the claim also halts while `getRunLineageBlock` (`:859`) blocks, implied by the run-status check for a root run. F8 + `ChildRunResume`: a `sub-workflow` node whose latest row is `running` and not owned (orphaned by a crash) is re-claimed (`:878-887`): same row, same `retryCount`, now owned; `XChild` reconnects to that attempt's child or starts it. |
+| `XRun` | `executor.run` `engine.ts:1095` (in `runClaimedStep` `:995`) | none (process-local). Async: the agent-task executor inserts the step's task (`createTaskExtended`, `executors/agent-task.ts:163`). F9 (#2377): the INSERT's transaction refuses unless the step is `running` in a `running`/`waiting` run with no cancelled lineage (`getStepExecutionBlock` `db.ts:2926-2929`, `workflow-runs.ts:539-557`); the executor throws, and the catch (`engine.ts:1102`) goes to the fenced `XFail`. Pre-F9 a cancel between the claim and the dispatch left a running task on a cancelled row. F8 + `ChildRunResume`: the async branch is `ChildStart` (below). The step watchdog (`startStepDeadline` `node-timeout.ts:38-51`, raced at `engine.ts:1094-1101`) is the `fail` outcome: on expiry it rejects, then since #2441 aborts `meta.signal`, so an executor that forwards it (swarm-script) stops instead of running on past the `XFail`. The agent-task executor ignores the signal; its dispatch stays fenced by F9 as above |
+| `XChild` | F8 + `ChildRunResume`: `executor.run` of a re-claimed row | `ChildStart`: `SubWorkflowExecutor.execute` (`sub-workflow.ts:89-182`) reads the attempt (`retryCount`) and reuses that attempt's child (`getChildWorkflowRunId(stepId, attempt)`, `workflow-runs.ts:502-511`): running parks, finished is a sync result. With none, `createRunWithInitialState` (`engine.ts:320-381`) inserts the child in one transaction only while the attempt still runs (`isParentStepAttemptCurrent` `workflow-runs.ts:519-532`, same predicate as `Fence`; since #2377 also no cancelled lineage) and returns a child another call of the attempt started (unique `(parentStepId, parentStepAttempt)`, migration 240). Not current: `ParentStepNotCurrentError`, the executor fails, and the fenced `XFail` writes nothing |
+| `XCkOk` | `checkpointStep` `engine.ts:1234` -> `checkpoint.ts:31-55` | transaction, `UPDATE step SET status='completed'`. F8 (#2364): fenced (`holdsFence` `checkpoint.ts:15-25`): only while the step is `running` with the claimed `retryCount` and the run is `running`/`waiting` (since #2377 also no cancelled lineage, `:24`, implied for a root run); else nothing is written and `executeStep` returns `failed` (`engine.ts:1007`, `:1234`), so `WBatchEnd` re-reads the run and skips the node's successors |
+| `XFail` | `checkpointStepFailure` `engine.ts:1108` / `:1133` / `:1213` -> `checkpoint.ts:72-103` | `UPDATE step SET status='failed', retryCount+1, nextRetryAt`, fenced as `XCkOk` since #2364 (F8; stale returns `failed`, `:1117`, `:1141`, `:1221`); `executeStep` returns `completed` with no successors (`:1122`, `:1146`, `:1222`), so the walk adds the node to `completedNodeIds` (`engine.ts:609`). **The F2 edge is not kept (open, CX8).** The System One guards (#1715: `systemOneRetryViolations` `:1014`, `strictUnresolved` `:1058`) fail the step with no retry before `executor.run`: an `XFail` whose retry budget is already spent. F8: with the budget spent (reachable in the model only through a re-claimed row), the step and the run (while `running`/`waiting`) fail in one transaction (`checkpoint.ts:93-116`) and the walk sees `failed`. Since #2290 they cover both `system-one-decision` and `system-one-extraction` nodes (`isSystemOneNodeType`); the model does not distinguish node types, so this `XFail` already covers both. |
+| `XCkWait` | `checkpointStepWaiting` `engine.ts:1165` -> `checkpoint.ts:127-154` | CAS (not fenced on `retryCount`) `WHERE status='running'`, run `IN (running, waiting)`; since #2377 also no cancelled lineage (`checkpoint.ts:134`), implied for a root run. The `keepRunStatus` option (#2314) is passed only by the foreach park, which the model does not have |
+| `WBatchEnd` | `engine.ts:589-655` in-walk convergence | in-memory `completedNodeIds` / `activeEdges`. F6: re-reads the steps (`:630-632`): a predecessor whose latest row completed elsewhere is rehydrated (`:637-643`), one in `awaitedNodeIds` holds the join (`:644-646`) |
+| `WFinal` | `engine.ts:665-723` finalization transaction | `run.status = 'running'` (since #2377 also no cancelled lineage, `:669`, implied for a root run); F6: returns while any node's latest row is `running` (`hasRunningStep` `:673`, `engine.ts:756`); `waiting` steps -> waiting; pending retries -> stay running; else completed/failed. A `pending` row is not counted (CX10). Since #2314 foreach item rows are left out of the failed/completed tallies (`:678-691`); the model has no foreach items, so the guard is unchanged for it. |
+| `WRet` | `engine.ts:474` `release()` | `activeWalks` -1 |
 
-## Trigger (`engine.ts:121-318`)
+## Trigger (`engine.ts:130-337`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `IStart` | `createRunWithInitialState` `engine.ts:188` -> `:307-349` commits `running` with the initial context in one transaction | none. Since #2364 `holdWorkflowRun` (`:186`) is taken before the commit and released after the walk (`:230`), so `isWorkflowRunActive` is true from the commit on. #2380 runs the caller's `accept` hook (the HTTP trigger's `Idempotency-Key` record) last in the same transaction (`:343`, setup-failure path `:133-144`); a throw rolls the run back. Not modelled: the model has one trigger, and the hook adds no run or step write. #2441 adds `detach` (`trigger-workflow` `wait: false`, `:222-226`): the start returns after the commit and the walk runs on, as a child run does. `walkGraph` takes its own hold before its first await, so the start hold's release (`:230`) leaves `isWorkflowRunActive` true; the model's `IStart` then `Call` order is unchanged |
-| `IWalk` | pre-#2364 only (`InputAwait`): `resolveRenderedWorkflowInputs` awaited after the INSERT and before `walkGraph` | none; F3 covers the recovery walk that lands in this window (CX6). On `main` the inputs resolve in `buildInitialRunState` (`engine.ts:255-296`, `:285`) before the row exists and the hold covers the commit-to-walk gap, so `InputAwait = TRUE` models older code only |
+| `IStart` | `createRunWithInitialState` `engine.ts:200` -> `:320-381` commits `running` with the initial context in one transaction | none. Since #2364 `holdWorkflowRun` (`:198`) is taken before the commit and released after the walk (`:243`), so `isWorkflowRunActive` is true from the commit on. #2380 runs the caller's `accept` hook (the HTTP trigger's `Idempotency-Key` record) last in the same transaction (`:375`, setup-failure path `:145-156`); a throw rolls the run back. Not modelled: the model has one trigger, and the hook adds no run or step write. #2441 adds `detach` (`trigger-workflow` `wait: false`, `:235-239`): the start returns after the commit and the walk runs on, as a child run does. `walkGraph` takes its own hold before its first await, so the start hold's release (`:243`) leaves `isWorkflowRunActive` true; the model's `IStart` then `Call` order is unchanged. #2572 rechecks the cooldown inside this transaction (`:343-352`): when another run of the workflow committed inside the window, the run commits as `skipped` with no step and the start returns before the walk (`:213`). Not modelled: the check reads other runs of the same workflow, and the model has one run and one trigger, so the recheck never fires and `IStart` is exact. #2727 pins the definition in the same transaction (`pinWorkflowDefinition` `:353`, an `INSERT OR IGNORE` into `workflow_run_definitions` keyed by content hash, stored as the run's `definitionHash`). Not modelled separately: it writes no run or step state, and `IStart` already covers the commit. Every resume path (`P2`, `H2`, `H6`, `H16`, `E1`, `U1`, `resumeFromChildRun`) now reads the graph through `getRunWorkflow` (`db/workflow-run-definitions.ts:99-107`), the pinned snapshot merged over the live row, so an edit mid-run no longer changes the graph a run resumes on. The model's graph is fixed, so this makes that assumption exact instead of changing a guard |
+| `IWalk` | pre-#2364 only (`InputAwait`): `resolveRenderedWorkflowInputs` awaited after the INSERT and before `walkGraph` | none; F3 covers the recovery walk that lands in this window (CX6). On `main` the inputs resolve in `buildInitialRunState` (`engine.ts:268-309`, `:298`) before the row exists and the hold covers the commit-to-walk gap, so `InputAwait = TRUE` models older code only |
 
-Not modelled: the readiness preflight (#1715, `findWorkflowReadinessProblems` `engine.ts:263-270`). Since #2364 it runs before the run row exists, and a run that cannot start commits directly as `failed` (with a cooldown, `skipped`). The model assumes every executor is ready, so that branch is unreachable.
+Not modelled: the readiness preflight (#1715, `findWorkflowReadinessProblems` `engine.ts:276-283`). Since #2364 it runs before the run row exists, and a run that cannot start commits directly as `failed` (with a cooldown, `skipped`). The model assumes every executor is ready, so that branch is unreachable.
 
 ## Retry poller (`src/workflows/retry-poller.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `P1` | `getRetryableSteps` `retry-poller.ts:39` -> `db.ts:8296-8309` | `status='failed' AND nextRetryAt <= now`. F1: `AND run.status IN (running, waiting, failed)`. A foreach child row is re-queued to `pending` for the foreach driver instead (`:49-60`, `claimRetry` `requeueForeachChild`, #2370); not modelled (no foreach node) |
+| `P1` | `getRetryableSteps` `retry-poller.ts:39` -> `db.ts:8424-8437` | `status='failed' AND nextRetryAt <= now`. F1: `AND run.status IN (running, waiting, failed)`. A foreach child row is re-queued to `pending` for the foreach driver instead (`:49-60`, `claimRetry` `requeueForeachChild`, #2370); not modelled (no foreach node) |
 | `P2` | `getWorkflowRun` `retry-poller.ts:44` | read |
 | `P3` | pre-F1: blind `run -> running` if the snapshot said `failed` | F1: removed; the revive moved into `claimRetry` (`P4`) |
 | `P4` | `holdWorkflowRun` `retry-poller.ts:73`, `claimRetry` `:78` -> `:294-329` | F1: one transaction; `UPDATE step SET status='running', nextRetryAt=NULL WHERE status='failed' AND nextRetryAt IS NOT NULL`, only while the run is `running`/`waiting`/`failed`; revives a `failed` run. F9 (#2377): a run with a cancelled lineage is not claimed and its queued retries are dropped (`:302-305`); for a root run the status check already excludes `cancelled`. F4: the hold makes `isWorkflowRunActive` true for recovery |
@@ -75,34 +75,34 @@ Not modelled: the readiness preflight (#1715, `findWorkflowReadinessProblems` `e
 | `H2` | re-read run `:107`, completed steps, routing, `findReadyNodes` `:133` | `findReadyNodes` excludes only nodes with a **completed** step. F4: also drops nodes with a retry-pending row (`retryPendingNodeIds` `:132-135`, `:216`). Since #2364 a child run with no stored context fails here (`:112-115`); the model's run is never a child |
 | `H3` | second `isWorkflowRunActive` `:137`, then complete or `walkGraph` `:144` | `GuardActiveWalk` |
 | `H4` | `recovery.ts:138-141` `readyNodes.length === 0` | F4: `completeIfSettled` `recovery.ts:230-251`, one transaction, only while `running` (since #2377 with no cancelled lineage, `:234`) with no retry-pending row and no live latest row |
-| `H5` | `getStuckWorkflowRuns` `recovery.ts:258` (waiting steps whose task is terminal); snapshot `<<step, task generation, task status>>` | `run.status = 'waiting'` |
-| `H6` | per stuck row, re-read run `:263-265` | `run.status = 'waiting'` |
-| `H7R` | F7: failed task only, `scheduleTaskStepRetry` `recovery.ts:268-285` -> `task-step-routing.ts:231-271` | one transaction: step `waiting` AND the snapshot's task still bound AND (F9, `task-step-routing.ts:265`) `TreeLive`, else not-claimed (skip the row). `retryCount < maxRetries`: detach the task, `checkpointStepFailure` (failed, retryCount+1, nextRetryAt), skip the row. Exhausted: not-eligible, fall through to `H7` |
-| `H7` | `failStepAndRunIfWaiting` `recovery.ts:286-304` -> `task-step-routing.ts:81-115` | CAS on `step.status='waiting'`; F7: `ownerTaskId` fence, the snapshot's task must still be bound. The fail-fast test is `stepFailureMode` (#2316), which is the workflow's `onNodeFailure` for every non-foreach step |
-| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:317-326` -> `task-step-routing.ts:283-336`, then `walkGraph(successors)` `:335` | CAS on `step.status='waiting'` inside the transaction (F7: plus the `ownerTaskId` fence; F9: plus `TreeLive`, `task-step-routing.ts:304`); sets `run -> running` |
+| `H5` | `getStuckWorkflowRuns` `recovery.ts:264` -> `db.ts:8378-8400` (waiting steps whose task is `completed`, `failed`, `cancelled` or, since #2571, `skipped`); snapshot `<<step, task generation, task status>>` | `run.status = 'waiting'`. `TaskEndNoRetry`: a `cancelled`/`skipped` task is the `nr` outcome |
+| `H6` | per stuck row, re-read run `recovery.ts:269-271` | `run.status = 'waiting'`. `failed` goes to `H7R` (F7), `nr` (`cancelled`/`skipped`, `:292`) to `H7` with no retry, `completed` to `H8` |
+| `H7R` | F7: failed task only, `scheduleTaskStepRetry` `recovery.ts:274-291` -> `task-step-routing.ts:231-271` | one transaction: step `waiting` AND the snapshot's task still bound AND (F9, `task-step-routing.ts:265`) `TreeLive`, else not-claimed (skip the row). `retryCount < maxRetries`: detach the task, `checkpointStepFailure` (failed, retryCount+1, nextRetryAt), skip the row. Exhausted: not-eligible, fall through to `H7` |
+| `H7` | `failStepAndRunIfWaiting` `recovery.ts:292-309` -> `task-step-routing.ts:81-115` | CAS on `step.status='waiting'`; F7: `ownerTaskId` fence, the snapshot's task must still be bound. The fail-fast test is `stepFailureMode` (#2316), which is the workflow's `onNodeFailure` for every non-foreach step |
+| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:321-330` -> `task-step-routing.ts:283-336`, then `walkGraph(successors)` `:335` | CAS on `step.status='waiting'` inside the transaction (F7: plus the `ownerTaskId` fence; F9: plus `TreeLive`, `task-step-routing.ts:304`); sets `run -> running` |
 
 ## Task events (`src/workflows/resume.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `TaskFinish` | agent task reaches a terminal state; the after-commit bus event is queued | — |
-| `E1` | `resumeFromTaskCompletionUnguarded` `resume.ts:216-246` / `handleTaskFailureUnguarded` `:349-364` pre-checks | reads, outside any transaction: run `waiting`/`running`, step `waiting`, `isStaleTaskEvent` (`:462-466`, another task is bound). Since #2316 a run that is not `waiting`/`running` goes to `recordLateForeachOutcome` (`:233-239`, `:351-357`, `:434-453`), which writes only a foreach item of a `failed` run; for every modelled row it returns with no write |
-| `E2` | `completeTaskStepAndResolveSuccessors` `resume.ts:251` (CAS on the step only), then `walkGraph(successors)` `:273` | step CAS; F9 (#2377): `TreeLive` (`task-step-routing.ts:304`). A `failed` run is not re-checked. In the model a cancel cancels every open step in the same transaction, so no `waiting` row survives in a cancelled run and the new check changes no state |
-| `EFin` | `finalizeOrWait` `resume.ts:291-322` | transaction. F9 (#2377, closes CX13): returns unless the run is `running`/`waiting` with no cancelled lineage (`:298-300`); pre-F9 there was no run-status guard. F6: while any node's latest row is `running` (`:304`), only `waiting -> running` and return, leaving the run to the live walk's finalizer. F7: a retry-pending row (`failed` with `nextRetryAt`) keeps the run `waiting` (`:309-311`) |
-| `ER` | F7: `task.failed` only (`retryable: true`, `resume.ts:128`; `task.cancelled` skips it), `scheduleTaskStepRetry` `resume.ts:366-381` | same transaction as `H7R` (F9: not-claimed when not `TreeLive`). scheduled or not-claimed: stop. not-eligible: `EF` |
-| `EF` | `markRunFailed` `resume.ts:388` -> `:474-488` `failStepAndRunIfWaiting` | step CAS (no `ownerTaskId` on the live path). The fail-fast test is `stepFailureMode` (`:385`, #2316), the workflow's `onNodeFailure` for every non-foreach step |
+| `TaskFinish` | agent task reaches a terminal state; the after-commit bus event is queued | — `ok` / `fail`, plus `nr` with `TaskEndNoRetry`: a task cancelled outside a run cancel, or (#2571) skipped by `skipTask` (`db/tasks/write.ts:814-871`, emits `task.skipped`) |
+| `E1` | `resumeFromTaskCompletionUnguarded` `resume.ts:235-265` / `handleTaskFailureUnguarded` `:368-383` pre-checks | reads, outside any transaction: run `waiting`/`running`, step `waiting`, `isStaleTaskEvent` (`:481-485`, another task is bound). Since #2316 a run that is not `waiting`/`running` goes to `recordLateForeachOutcome` (`:252-258`, `:370-376`, `:453-472`), which writes only a foreach item of a `failed` run; for every modelled row it returns with no write |
+| `E2` | `completeTaskStepAndResolveSuccessors` `resume.ts:270` (CAS on the step only), then `walkGraph(successors)` `:292` | step CAS; F9 (#2377): `TreeLive` (`task-step-routing.ts:304`). A `failed` run is not re-checked. In the model a cancel cancels every open step in the same transaction, so no `waiting` row survives in a cancelled run and the new check changes no state |
+| `EFin` | `finalizeOrWait` `resume.ts:310-341` | transaction. F9 (#2377, closes CX13): returns unless the run is `running`/`waiting` with no cancelled lineage (`:317-319`); pre-F9 there was no run-status guard. F6: while any node's latest row is `running` (`:323`), only `waiting -> running` and return, leaving the run to the live walk's finalizer. F7: a retry-pending row (`failed` with `nextRetryAt`) keeps the run `waiting` (`:328-330`) |
+| `ER` | F7: `task.failed` only (`retryable: true`, `resume.ts:128`; `task.cancelled` `:136-145` and, since #2571, `task.skipped` `:149-163` pass `retryable: false`, so `nr` goes from `E1` straight to `EF`), `scheduleTaskStepRetry` `resume.ts:385-400` | same transaction as `H7R` (F9: not-claimed when not `TreeLive`). scheduled or not-claimed: stop. not-eligible: `EF` |
+| `EF` | `markRunFailed` `resume.ts:407` -> `:493-507` `failStepAndRunIfWaiting` | step CAS (no `ownerTaskId` on the live path). The fail-fast test is `stepFailureMode` (`:404`, #2316), the workflow's `onNodeFailure` for every non-foreach step |
 
 ## User actions (`src/workflows/resume.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `Cancel` | `cancelWorkflowRun` `resume.ts:769` -> `cancelWorkflowRunRows` `:705-757` | one transaction (`:728-756`). Cancels every non-terminal step (`cancelOpenWorkflowTreeSteps` `:746`). F9 (#2377): also cancels every open task of the run, current and earlier attempts (`:740-745`), drops the queued retry of every `failed` row (`disarmWorkflowTreeRetries` `:747`, `nra` FALSE), and walks the child tree (`getWorkflowRunTreeIds` `:736`). An already `cancelled` run is swept again (`:731-734`), after a read-only check that finds open work (`:717-724`). Pre-F9: terminal rows were skipped, **including `failed` rows that still carried `nextRetryAt`** (F1 kept the poller from claiming them). The model has one canceller and no child runs |
-| `U1` | `retryFailedRun` reads `resume.ts:493-534` (`findReadyNodes` `:589`) | reads outside the transaction. Since #2316 the failed step is the first node, in order of its first row, whose **latest** row is `failed` (`latestStepPerNode` `:502-505`, `:611-615`); an older failed row of a node with a newer row is not picked. F5: drops nodes with any `running` or `waiting` row (`liveNodeIds` `:586-591`). **Retry-pending nodes are not dropped (open, CX9).** |
-| `U2` | claim transaction `resume.ts:540-579`, then `walkGraph(nodesToRun)` `:600` | `run.status = 'failed'` (since #2377 a cancelled lineage throws, `:545-546`; never for a root run); resets the failed row to `pending` (orphaned: the walk inserts a new row). The foreach attempt rows and step-cap refusal (`:551-576`, #2316) add nothing for a run without foreach items |
+| `Cancel` | `cancelWorkflowRun` `resume.ts:788` -> `cancelWorkflowRunRows` `:724-776` | one transaction (`:747-775`). Cancels every non-terminal step (`cancelOpenWorkflowTreeSteps` `:765`). F9 (#2377): also cancels every open task of the run, current and earlier attempts (`:759-764`), drops the queued retry of every `failed` row (`disarmWorkflowTreeRetries` `:766`, `nra` FALSE), and walks the child tree (`getWorkflowRunTreeIds` `:755`). An already `cancelled` run is swept again (`:750-753`), after a read-only check that finds open work (`:736-743`). Pre-F9: terminal rows were skipped, **including `failed` rows that still carried `nextRetryAt`** (F1 kept the poller from claiming them). The model has one canceller and no child runs |
+| `U1` | `retryFailedRun` reads `resume.ts:512-553` (`findReadyNodes` `:608`) | reads outside the transaction. Since #2316 the failed step is the first node, in order of its first row, whose **latest** row is `failed` (`latestStepPerNode` `:521-524`, `:630-634`); an older failed row of a node with a newer row is not picked. F5: drops nodes with any `running` or `waiting` row (`liveNodeIds` `:605-610`). **Retry-pending nodes are not dropped (open, CX9).** |
+| `U2` | claim transaction `resume.ts:559-598`, then `walkGraph(nodesToRun)` `:619` | `run.status = 'failed'` (since #2377 a cancelled lineage throws, `:564-565`; never for a root run); resets the failed row to `pending` (orphaned: the walk inserts a new row). The foreach attempt rows and step-cap refusal (`:570-595`, #2316) add nothing for a run without foreach items |
 
 Retry eligibility (#2262, `scheduleTaskStepRetry` `task-step-routing.ts:238-251`, before the claim transaction): a node's own `retry` wins; a node without one gets `SUPERSEDE_RETRY_POLICY` (`:200-205`, one retry) when its task failed with `superseded_workflow_task` (`isSupersedeCut` `:273-277`), else not-eligible. Since #2370 a foreach child (`<foreachId>#<key>`) takes its parent's `retry` and is queued only while the run is live (`:258-261`); not modelled (no foreach node). Not modelled separately: every model branch already has a retry policy with `MaxRetries >= 1`, so `ER` and `H7R` already retry any failed task, which over-approximates the supersede-only policy. The claim transaction is unchanged.
 
-Not modelled: `retryFailedRun` refuses before the claim when a node still to run is not ready (#1715, `resume.ts:512-518`). It is a read with no write, and the model's executors are always ready.
+Not modelled: `retryFailedRun` refuses before the claim when a node still to run is not ready (#1715, `resume.ts:531-537`). It is a read with no write, and the model's executors are always ready.
 
 ## Unreadable replay state (#1926, `ReplayUnreadable`)
 
@@ -110,30 +110,30 @@ Run and step reads default to the replay view, which opens the sealed `context_r
 `output_replay` copy lazily, on first property access (`defineWorkflowPayload`
 `workflow-replay.ts:43-77`). When the copy cannot be opened (missing or rotated key, corrupt
 ciphertext) the read throws `WorkflowReplayStateError`, and `failRunOnUnreadableReplay`
-(`engine.ts:373-391`) fails the claimed step, then the run. Both writes go through
-`updateWorkflowRunStep` / `updateWorkflowRun` (`db.ts:8158`, `:7959`), whose `UPDATE` is
+(`engine.ts:405-423`) fails the claimed step, then the run. Both writes go through
+`updateWorkflowRunStep` / `updateWorkflowRun` (`db.ts:8281`, `:8082`), whose `UPDATE` is
 `WHERE id = ?` only, and they are separate awaits. With `ReplayUnreadable`, each read site below may
 throw instead of the action that performs the read.
 
 | Action | Code | Guard |
 |---|---|---|
-| `WStartUnreadable` | `rehydrateCompletedStepOutputs` `engine.ts:472` opens each completed step's output; `walkGraph` catch `:440` | enabled only when a completed row exists. Run write only (no step id); the walk then releases `activeWalks` (`WRet`) |
-| `XDedupUnreadable` | F3: a memoized completed node opens its stored output after the dedup transaction (`engine.ts:919`, `:926`); `.catch` `:550` | run write only; the node reports `failed`. `WBatchEnd` then re-reads the run and stops the walk if it is `failed` (`engine.ts:563-569`), else skips the node's successors |
+| `WStartUnreadable` | `rehydrateCompletedStepOutputs` `engine.ts:504` opens each completed step's output; `walkGraph` catch `:472` | enabled only when a completed row exists. Run write only (no step id); the walk then releases `activeWalks` (`WRet`) |
+| `XDedupUnreadable` | F3: a memoized completed node opens its stored output after the dedup transaction (`engine.ts:951`, `:958`); `.catch` `:582` | run write only; the node reports `failed`. `WBatchEnd` then re-reads the run and stops the walk if it is `failed` (`engine.ts:595-601`), else skips the node's successors |
 | `P5Unreadable` | `run.context` in `rebuildNodeExecutionInput` (`retry-poller.ts:92` -> `step-input.ts:42`), after `claimRetry`; catch `:251` / `:260` | step write on the claimed row, then run write; `PRel` releases the hold |
 | `H2Unreadable` | `run.context` `recovery.ts:121`, after the `running` re-check `:108`; catch `:156` | run write only; the sweep moves on to the waiting runs (`H5`) |
-| `H8Unreadable` | completed task: `run.context` `recovery.ts:306`, before the claim; catch `:347` | run write only; the sweep moves on to the next stuck row (`H6`) |
-| `E2Unreadable` | `run.context` `resume.ts:249`, after the `E1` checks, before the claim; `failClosedOnUnreadableReplay` `resume.ts:183-193`. With `ChildRunResume` also from `eF` (see Sub-workflow steps) | step write on the event's row, then run write |
-| `RFStep` | `updateWorkflowRunStep(stepId, failed, nextRetryAt null)` `engine.ts:382-387` | **none** (`WHERE id = ?`) |
-| `RFRun` | `updateWorkflowRun(runId, failed)` `engine.ts:389` | **none** (`WHERE id = ?`); a completed or cancelled run becomes `failed` (open, CX14) |
+| `H8Unreadable` | completed task: `run.context` `recovery.ts:311`, before the claim; catch `:351` | run write only; the sweep moves on to the next stuck row (`H6`) |
+| `E2Unreadable` | `run.context` `resume.ts:268`, after the `E1` checks, before the claim; `failClosedOnUnreadableReplay` `resume.ts:202-212`. With `ChildRunResume` also from `eF` (see Sub-workflow steps) | step write on the event's row, then run write |
+| `RFStep` | `updateWorkflowRunStep(stepId, failed, nextRetryAt null)` `engine.ts:414-419` | **none** (`WHERE id = ?`) |
+| `RFRun` | `updateWorkflowRun(runId, failed)` `engine.ts:421` | **none** (`WHERE id = ?`); a completed or cancelled run becomes `failed` (open, CX14) |
 
-Not modelled: `runClaimedStep`'s catch (`engine.ts:948`). The ctx it renders from was already
+Not modelled: `runClaimedStep`'s catch (`engine.ts:980`). The ctx it renders from was already
 opened by `WStart`'s rehydration or by the caller's `run.context` read, and the model's executors
-read no other replay state. The approval and wait-state sweeps (`recovery.ts:450`, `:484`) and
-resumes (`resume.ts:902`, `:988`, `:1004`), and `handleTaskFailure`'s `onNodeFailure: "continue"` read
-(`resume.ts:393`), belong to node kinds and policies the model does not have. `retryFailedRun`
-reads `run.context` (`resume.ts:539`) before its claim and throws to the caller with no write.
+read no other replay state. The approval and wait-state sweeps (`recovery.ts:454`, `:488`) and
+resumes (`resume.ts:921`, `:1007`, `:1023`), and `handleTaskFailure`'s `onNodeFailure: "continue"` read
+(`resume.ts:412`), belong to node kinds and policies the model does not have. `retryFailedRun`
+reads `run.context` (`resume.ts:558`) before its claim and throws to the caller with no write.
 The wait-state sweep's replay of a wait resolved before a crash (#2257, `recoverResolvedWaitState`
-`resume.ts:994-1007`) is the same unmodelled node kind.
+`resume.ts:1013-1026`) is the same unmodelled node kind.
 
 ## Sub-workflow steps (#2030, `ChildRunResume`; #2364, F8)
 
@@ -141,11 +141,11 @@ A `sub-workflow` step starts a child run (`executors/sub-workflow.ts`) and parks
 the child is terminal. With `ChildRunResume`, every async branch is such a step: the bound
 "task" is the child run of the row's current attempt, `TaskFinish` is that child reaching a
 terminal status (completed: `ok`; failed: `fail`), and every resume path runs `resumeFromChildRun`
-(`resume.ts:1085-1174`). It reads the step outside any transaction (`:1089-1090`), then the run
-(`:1094-1095`) and `run.context` (`:1099`) inside `failClosedOnUnreadableReplay`. Since #2364 (F8)
-one transaction (`:1103-1146`) re-reads the step, picks the child of its current attempt
+(`resume.ts:1104-1193`). It reads the step outside any transaction (`:1108-1109`), then the run
+(`:1113-1114`) and `run.context` (`:1118`) inside `failClosedOnUnreadableReplay`. Since #2364 (F8)
+one transaction (`:1122-1165`) re-reads the step, picks the child of its current attempt
 (`getChildWorkflowRunId(stepId, retryCount)`), and settles: a failed child with retries left
-schedules a retry (`checkpointStepFailure`, `:1118-1124`; the poller re-executes the step under
+schedules a retry (`checkpointStepFailure`, `:1137-1143`; the poller re-executes the step under
 the next attempt, which starts a new child), any other failure fails the step and the run, and a
 completed child claims with the step CAS plus a run-status check (#2257). The current attempt is
 the generation fence: an older attempt's child never settles the row. Before #2364 (F8 off) the
@@ -154,17 +154,17 @@ step and the run.
 
 | Action | Code | Guard |
 |---|---|---|
-| `E1` | `workflow.child.finished` listener `resume.ts:158-167` -> `resumeFromChildRun` pre-checks `:1089-1095` | step `waiting`, run `waiting`/`running`. No `isStaleTaskEvent`. F8: goes to `EC`; pre-F8: child terminal, a failed child goes to `EF` (no `ER`) |
-| `EC` | F8: claim transaction `resume.ts:1103-1146`, then `walkGraph` `:1160` or `finalizeOrWait` `:1170` | `ChildClaim`: step `waiting` and the current attempt's child terminal (F9: and `TreeLive`, `resume.ts:1107`), else nothing. Failed with `retryCount < maxRetries`: `RetryRow` (as `ER`). Failed, exhausted: `failStepAndRunIfWaiting` (`:1128-1135`, step CAS). Completed: `checkpointPortStepAndResolveSuccessors` (`task-step-routing.ts:134-179`): step CAS AND run `waiting`/`running` (#2257), `run -> running` |
-| `E2` / `E2Unreadable` / `EFin` / `EF` | pre-F8 claim (`E2`, `EF`); `run.context` `resume.ts:1099`; `finalizeOrWait` `:1170` | as the agent-task rows, except the `E2` claim: step CAS AND run `waiting`/`running` in the same transaction (#2257, `task-step-routing.ts:147-150`). No run guard in `finalizeOrWait`. The `run.context` read precedes every branch, so `E2Unreadable` is enabled from `eC` (F8) and `eF` as well as `e2` |
-| `XCkWait` (re-arm) | `runClaimedStep` `engine.ts:1133-1138`: a parked step calls `resumeFromChildRun` inline | a child that finished before the park had its event dropped (`E1` saw the step `running`). Modelled as re-entering the row's event thread at `E1`. The walker blocks on the real call and then reports `waiting`, so letting it run on concurrently only adds interleavings. F8: `P8` re-arms the same way (`retry-poller.ts:176-181`) |
-| `H9` | Case 5 `recovery.ts:72-79` -> `getSettledChildRunParentSteps` `workflow-runs.ts:611-621` | waiting sub-workflow rows whose current attempt's child is terminal (joined on `parentStepAttempt = retryCount` since #2364). **No run-status filter**, unlike `H5` |
-| `H10` | `resumeFromChildRun` pre-checks `resume.ts:1089-1095` | as `E1`; F8 goes to `HC` |
-| `HC` | F8: claim transaction `resume.ts:1103-1146` | as `EC`, then `walkGraph(successors)` back to `H10`, or `H13` |
-| `H11` / `H11Unreadable` | pre-F8 claim / `run.context` `resume.ts:1099` (before `H12` and `HC` too) | step CAS AND run `waiting`/`running` (#2257), `run -> running`, then `walkGraph(successors)` back to `H10`, or `H13` |
-| `H12` | pre-F8 `failStepAndRunIfWaiting` `resume.ts:1128-1135` | step CAS (no `ownerTaskId`) |
-| `H13` | `finalizeOrWait` `resume.ts:1170` | as `EFin` (run-status guard only with F9) |
-| `H14` | F8 Case 7 `recovery.ts:84-85` -> `getRunningSubWorkflowSteps` `workflow-runs.ts:551-565` | each node's latest `sub-workflow` row that is `running`, in a `running`/`waiting` run |
+| `E1` | `workflow.child.finished` listener `resume.ts:176-185` -> `resumeFromChildRun` pre-checks `:1108-1114` | step `waiting`, run `waiting`/`running`. No `isStaleTaskEvent`. F8: goes to `EC`; pre-F8: child terminal, a failed child goes to `EF` (no `ER`) |
+| `EC` | F8: claim transaction `resume.ts:1122-1165`, then `walkGraph` `:1179` or `finalizeOrWait` `:1189` | `ChildClaim`: step `waiting` and the current attempt's child terminal (F9: and `TreeLive`, `resume.ts:1126`), else nothing. Failed with `retryCount < maxRetries`: `RetryRow` (as `ER`). Failed, exhausted: `failStepAndRunIfWaiting` (`:1147-1154`, step CAS). Completed: `checkpointPortStepAndResolveSuccessors` (`task-step-routing.ts:134-179`): step CAS AND run `waiting`/`running` (#2257), `run -> running` |
+| `E2` / `E2Unreadable` / `EFin` / `EF` | pre-F8 claim (`E2`, `EF`); `run.context` `resume.ts:1118`; `finalizeOrWait` `:1189` | as the agent-task rows, except the `E2` claim: step CAS AND run `waiting`/`running` in the same transaction (#2257, `task-step-routing.ts:147-150`). No run guard in `finalizeOrWait`. The `run.context` read precedes every branch, so `E2Unreadable` is enabled from `eC` (F8) and `eF` as well as `e2` |
+| `XCkWait` (re-arm) | `runClaimedStep` `engine.ts:1165-1170`: a parked step calls `resumeFromChildRun` inline | a child that finished before the park had its event dropped (`E1` saw the step `running`). Modelled as re-entering the row's event thread at `E1`. The walker blocks on the real call and then reports `waiting`, so letting it run on concurrently only adds interleavings. F8: `P8` re-arms the same way (`retry-poller.ts:176-181`) |
+| `H9` | Case 5 `recovery.ts:72-79` -> `getSettledChildRunParentSteps` `workflow-runs.ts:624-634` | waiting sub-workflow rows whose current attempt's child is terminal (joined on `parentStepAttempt = retryCount` since #2364). **No run-status filter**, unlike `H5` |
+| `H10` | `resumeFromChildRun` pre-checks `resume.ts:1108-1114` | as `E1`; F8 goes to `HC` |
+| `HC` | F8: claim transaction `resume.ts:1122-1165` | as `EC`, then `walkGraph(successors)` back to `H10`, or `H13` |
+| `H11` / `H11Unreadable` | pre-F8 claim / `run.context` `resume.ts:1118` (before `H12` and `HC` too) | step CAS AND run `waiting`/`running` (#2257), `run -> running`, then `walkGraph(successors)` back to `H10`, or `H13` |
+| `H12` | pre-F8 `failStepAndRunIfWaiting` `resume.ts:1147-1154` | step CAS (no `ownerTaskId`) |
+| `H13` | `finalizeOrWait` `resume.ts:1189` | as `EFin` (run-status guard only with F9) |
+| `H14` | F8 Case 7 `recovery.ts:84-85` -> `getRunningSubWorkflowSteps` `workflow-runs.ts:564-578` | each node's latest `sub-workflow` row that is `running`, in a `running`/`waiting` run |
 | `H15` | `recoverOrphanedSubWorkflowSteps` `recovery.ts:189` | skip when `isWorkflowRunActive` (`GuardActiveWalk`) or `isStepExecuting` (`Owned`) |
 | `H16` | `getWorkflowRun` `recovery.ts:190-191` | run `running`/`waiting` |
 | `H17` / `H17Unreadable` | second `isWorkflowRunActive` `recovery.ts:196`, then `walkGraph([node])` `:197-205`; `run.context` `:200`, catch `:208` | `GuardActiveWalk`; the walk's `XDedup` re-claims the row while it is still `running`. **The row's status is not re-checked: a row that parked and was queued for retry since `H14` gets a second row (open, CX15)**. Unreadable: run write only |
@@ -173,18 +173,18 @@ With `ChildRunResume`, `H5` finds no row: `getStuckWorkflowRuns` joins `agent_ta
 sub-workflow step has none. F8 makes every sub-workflow executor call `ChildStart` (see `XChild`):
 it reuses the current attempt's child or starts one only while the attempt still runs, so one
 attempt never has two children, and a retry (a new attempt) starts a new child. Since #2364 a
-child that cannot be retried (cancelled or skipped: `retryable: false`, `childRunOutcome` `sub-workflow.ts:43-59`)
-skips the retry policy on the executor path (`engine.ts:1097`, `retry-poller.ts:129-130`); the
+child that cannot be retried (cancelled or skipped: `retryable: false`, `childRunOutcome` `sub-workflow.ts:47-63`)
+skips the retry policy on the executor path (`engine.ts:1129`, `retry-poller.ts:129-130`); the
 model's failed child is always a retryable `failed` end. Not modelled: a deleted child
-(`wakeParentsOfDeletedRuns`, `workflow-runs.ts:627-633`) fails the step like an exhausted
+(`wakeParentsOfDeletedRuns`, `workflow-runs.ts:640-646`) fails the step like an exhausted
 failed child. Since #2433 a child deleted between its start and the executor's read back fails
-the step with `retryable: false` (`sub-workflow.ts:136-143`): an `XFail` whose retry budget is
+the step with `retryable: false` (`sub-workflow.ts:148-155`): an `XFail` whose retry budget is
 already spent, as the System One guards are (the model has no workflow delete); the child run's own walk (one run in the model); a child of a different workflow
-under a recovered step (`settle` conflict check, `sub-workflow.ts:147-170`), which fails the
+under a recovered step (`settle` conflict check, `sub-workflow.ts:159-182`), which fails the
 step like `XFail`; and the alert dedup of a child that needs setup
 (`automation-preflight.ts`).
 
-Port routing (#1706, `resolveValidationPort` at `engine.ts:1199` and `retry-poller.ts:229`) is not modelled: the graph has no ports, and every node's successors are fixed.
+Port routing (#1706, `resolveValidationPort` at `engine.ts:1231` and `retry-poller.ts:229`) is not modelled: the graph has no ports, and every node's successors are fixed.
 
 ## Crash
 
@@ -224,7 +224,7 @@ exhausted failure's step and run in one transaction (`XFail`, `P7`; `P10` is pre
 with `ChildRunResume`, adds `ChildStart` / `XChild`, the re-claim in `XDedup`, `ChildClaim`
 (`EC`, `HC`), the `P8` re-arm, and Case 7 (`H14`-`H17`). It is `TRUE` in the configs that model
 current `main` (`Workflows`, `Long`, `Probe-child-run*` except the crash control,
-`Probe-orphan-sweep`, `Probe-replay-unreadable*`, `Probe-task-retry`) and `FALSE` in the calibration, `Fix-*`, `Ctl-*`, `Probe-cancel-finalize` and
+`Probe-orphan-sweep`, `Probe-replay-unreadable*`, `Probe-task-retry`, `Probe-task-skip*`) and `FALSE` in the calibration, `Fix-*`, `Ctl-*`, `Probe-cancel-finalize` and
 `Probe-input-await` configs, which keep their verdicts and state spaces. `Probe-child-run-crash-control.cfg`
 is `Probe-child-run-crash.cfg` with it off.
 
@@ -247,12 +247,20 @@ variant sets it `FALSE`), so the other configs keep their verdicts and state spa
 "Unreadable replay state" throw. It is `FALSE` in every config except `Probe-replay-unreadable.cfg`
 and `Probe-child-run-unreadable.cfg`, so those configs keep their verdicts and state spaces.
 
+`TaskEndNoRetry` is an environment constant, not a fix flag: `TRUE` lets an agent task end `nr`,
+cancelled outside a run cancel or (#2571) skipped. Its `task.cancelled` / `task.skipped` handler
+passes `retryable: false`, so `E1` goes to `EF` with retries left, and the sweep routes the row
+from `H6` to `H7`, never `H7R`. Agent tasks only: it adds nothing with `ChildRunResume`. It is
+`FALSE` in every config except `Probe-task-skip.cfg` (no sweeps, holds) and
+`Probe-task-skip-sweep.cfg` (one sweep, reaches the open CX12), so the other configs keep their
+verdicts and state spaces.
+
 ## Not modelled: foreach fan-outs (#2314, #2316)
 
 The graph has no `foreach` node, so none of the foreach paths are reachable: the parent park and
-item drive (`parkAndDriveForeach`, `engine.ts:1119-1132`, `retry-poller.ts:140-166`), the
+item drive (`parkAndDriveForeach`, `engine.ts:1151-1164`, `retry-poller.ts:140-166`), the
 heartbeat Case 6 re-drive of queued or orphaned items (`recoverForeachFanouts`,
-`recovery.ts:501-545`, which selects only `#`-suffixed item rows), item settlement through
+`recovery.ts:505-549`, which selects only `#`-suffixed item rows), item settlement through
 `settleForeachChild` in `failStepAndRunIfWaiting`, `checkpointPortStepAndResolveSuccessors` and
 `completeTaskStepAndResolveSuccessors`, the per-fan-out failure policy (`stepFailureMode`), late
 outcomes of a failed run's items (`recordLateForeachOutcome`), and the attempt rows a run retry

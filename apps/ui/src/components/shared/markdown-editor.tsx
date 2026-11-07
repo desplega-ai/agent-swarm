@@ -1,7 +1,7 @@
 import Editor, { type Monaco } from "@monaco-editor/react";
 import { useCallback } from "react";
 import { useTheme } from "@/hooks/use-theme";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { cn } from "@/lib/utils";
 
 interface MarkdownEditorProps {
@@ -28,15 +28,14 @@ export function MarkdownEditor({
   const { theme } = useTheme();
 
   const handleBeforeMount = useCallback((monaco: Monaco) => {
-    monaco.editor.defineTheme("github-light", monacoLightTheme);
-    monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+    defineGithubThemes(monaco);
   }, []);
 
   return (
     <div className={cn("min-h-0 overflow-hidden rounded-md border bg-card", className)}>
       <Editor
         language="markdown"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={value}
         onChange={(next) => onChange?.(next ?? "")}
         beforeMount={handleBeforeMount}

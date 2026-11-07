@@ -25,7 +25,10 @@ import { useAgent } from "@/api/hooks/use-agents";
 import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
+import { RelativeTime } from "@/components/shared/relative-time";
 import { isAutoReview } from "@/lib/auto-review";
+import { CHAT_COLUMN } from "@/lib/chat-width";
+import { dispatchParentId } from "@/lib/dispatch-parent";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ParallelGroup, TaskCard } from "./task-card";
@@ -63,15 +66,14 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
               ? " gave up here"
               : parent.status === "superseded"
                 ? " was superseded"
-                : " was cancelled"}
+                : parent.status === "skipped"
+                  ? " skipped this fork"
+                  : " was cancelled"}
           <span className="text-muted-foreground/70">
             {" · finished "}
-            <time
-              dateTime={parent.lastUpdatedAt}
-              title={new Date(parent.lastUpdatedAt).toLocaleString()}
-            >
+            <RelativeTime at={parent.lastUpdatedAt} label="Finished">
               {formatRelativeTime(parent.lastUpdatedAt)}
-            </time>
+            </RelativeTime>
           </span>
         </span>
       </div>
@@ -138,6 +140,8 @@ function buildTimelineTree(
   opts: { hideAutoReviews: boolean },
 ): TimelineTree {
   const byId = new Map<string, AgentTask>(chain.map((t) => [t.id, t]));
+  // A task hangs under the task that dispatched it, else its parentTaskId.
+  const above = (task: AgentTask) => dispatchParentId(task, (id) => byId.has(id));
 
   // First pass: which tasks are hidden? In the default mode every auto-review
   // is hidden; in "show handoffs" mode none are.
@@ -154,7 +158,7 @@ function buildTimelineTree(
     let p = parentId ?? null;
     while (p && hidden.has(p)) {
       const t = byId.get(p);
-      p = t?.parentTaskId ?? null;
+      p = (t && above(t)) ?? null;
     }
     return p ?? null;
   };
@@ -169,7 +173,7 @@ function buildTimelineTree(
       // Attach the ack to the closest visible ancestor (typically the
       // worker the review was about). If that worker is itself hidden
       // (unusual), the ack rolls up to whatever sits above in the chain.
-      const worker = resolveVisibleParent(task.parentTaskId);
+      const worker = resolveVisibleParent(above(task));
       if (worker) {
         const list = acksByWorker.get(worker);
         if (list) list.push(task);
@@ -182,7 +186,7 @@ function buildTimelineTree(
       else orphans.push(task);
       continue;
     }
-    const visibleParent = resolveVisibleParent(task.parentTaskId);
+    const visibleParent = resolveVisibleParent(above(task));
     if (visibleParent == null) {
       // Parent chain dissolves into hidden nodes all the way up. Extremely
       // unlikely (the root is `source: "ui"`, never hidden) but route to
@@ -370,7 +374,7 @@ export function SessionTimeline({
   const rootDefers = parentClosedAfterDirectChildren(root, tree.childrenByParent);
 
   return (
-    <div className={cn("max-w-3xl mx-auto w-full", className)}>
+    <div className={cn(CHAT_COLUMN, className)}>
       {/* Single timeline column, no spine. Each row's `pb-*` provides the
           rhythm between turns; grouping comes from indentation + the
           parallel-group caption. */}

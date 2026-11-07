@@ -8,6 +8,20 @@ import {
 } from "../utils/context-window";
 
 describe("getContextWindowSize", () => {
+  test("prefers the live harness window over the API catalog maximum", () => {
+    expect(getContextWindowSize("gpt-5.6-luna", 272_000)).toBe(272_000);
+    expect(getContextWindowSize("openai-codex/gpt-5.6-luna", 272_000)).toBe(272_000);
+    expect(getContextWindowSize("unknown-model", 64_000)).toBe(64_000);
+  });
+
+  test("ignores missing or invalid live windows", () => {
+    for (const window of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(getContextWindowSize("gpt-5.6-luna", window)).toBe(
+        getContextWindowSize("gpt-5.6-luna"),
+      );
+    }
+  });
+
   // Windows come from the model catalog: a model the catalog lacks (mythos is
   // not on models.dev) gets the 200K default until an overlay row adds it.
   test("returns 1M for fable models", () => {
@@ -39,6 +53,13 @@ describe("getContextWindowSize", () => {
 
   test("reads OpenAI windows from the catalog", () => {
     expect(getContextWindowSize("gpt-5")).toBe(400_000);
+  });
+
+  test("reads a ChatGPT subscription id's window from its OpenAI id, as codex does", () => {
+    expect(getContextWindowSize("openai-codex/gpt-5.6-luna")).toBe(
+      getContextWindowSize("gpt-5.6-luna"),
+    );
+    expect(getContextWindowSize("openai-codex/gpt-5.6-luna")).not.toBe(200_000);
   });
 
   test("returns 200K default for unknown models", () => {

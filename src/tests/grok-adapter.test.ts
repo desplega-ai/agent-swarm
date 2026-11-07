@@ -145,6 +145,8 @@ class FakeGrok {
   }
   async newSession(params) {
     capture.newSession = { meta: params._meta ?? null, mcpServers: params.mcpServers.map((s) => s.name) };
+    capture.newSessionKeys = Object.keys(params).sort();
+    capture.mcpUrls = params.mcpServers.map((s) => s.url);
     writeFileSync("capture.json", JSON.stringify(capture));
     if (${JSON.stringify(mode)} === "auth-required") throw RequestError.authRequired();
     return { sessionId: "grok-session-1" };
@@ -420,6 +422,40 @@ describe("GrokAdapter", () => {
       // The per-session GROK_HOME is removed once the session settles.
       await Bun.sleep(50);
       expect(existsSync(capture.env.GROK_HOME)).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("the opt-in ACP hooks leave grok's session/new payload, MCP URL and steering unchanged", async () => {
+    const dir = makeTempDir();
+    const grok = writeFakeGrok(dir, "ok");
+    const { server, apiUrl } = await startTokenStub();
+    // Reachable but plain-HTTP and non-loopback: a target with requiresSecureMcpUrl would proxy it.
+    const publicStyleUrl = apiUrl.replace("127.0.0.1", "0.0.0.0");
+    try {
+      const config = baseConfig({
+        apiUrl: publicStyleUrl,
+        resumeSessionId: "ignored-without-a-resume-hook",
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: makeTempDir(),
+          GROK_BINARY: grok,
+          XAI_API_KEY: "xai-test-key",
+        },
+      });
+      const adapter = new GrokAdapter();
+      const session = await adapter.createSession(config);
+      await session.waitForCompletion();
+      expect(session.deliverSteering).toBeUndefined();
+      expect(await adapter.canResume("grok-session-1")).toBe(false);
+      const capture = JSON.parse(await Bun.file(join(config.cwd, "capture.json")).text());
+      expect(capture.newSession).toEqual({
+        meta: { rules: "You are a swarm worker.", yoloMode: true },
+        mcpServers: ["swarm"],
+      });
+      expect(capture.newSessionKeys).toEqual(["_meta", "cwd", "mcpServers"]);
+      expect(capture.mcpUrls).toEqual([`${publicStyleUrl}/mcp`]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

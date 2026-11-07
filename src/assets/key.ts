@@ -89,15 +89,94 @@ export function keyPrefixRange(prefix: string): { lo: string; hi: string } {
   return { lo, hi: `${lo.slice(0, -1)}${String.fromCharCode(lo.charCodeAt(lo.length - 1) + 1)}` };
 }
 
-export const SESSION_LEAF_KINDS = ["task", "thread", "schedule", "workflow"] as const;
-const sessionLeafPattern = new RegExp(`/(?:${SESSION_LEAF_KINDS.join("|")}):[^/]+/$`);
+/**
+ * Resource kinds whose default key (`defaultAssetKey`) names a session group
+ * of its own. At a namespace root (`shared/<kind>:<id>/`,
+ * `personal/<me>/<kind>:<id>/`) the leaf is the group, shown under a section
+ * per kind (Pages, Workflows, ...). Below a user group it is a plain leaf.
+ */
+export const SESSION_RESOURCE_KINDS = [
+  "page",
+  "workflow",
+  "schedule",
+  "app",
+  "script",
+  "fs",
+] as const;
+export type SessionResourceKind = (typeof SESSION_RESOURCE_KINDS)[number];
 
-/** Remove only a resource leaf, preserving user groups that contain a colon. */
+/** Leaves that file a session into the group above them. */
+export const SESSION_LEAF_KINDS = ["task", "thread", ...SESSION_RESOURCE_KINDS] as const;
+/** The leaves a namespace root (`shared/`, `personal/<me>/`) holds as No group. */
+export const NO_GROUP_LEAF_KINDS = ["task", "thread"] as const;
+const sessionLeafPattern = new RegExp(`/(${SESSION_LEAF_KINDS.join("|")}):[^/]+/$`);
+
+/** A user group key excludes namespace roots and resource leaves. */
+export function isGroupKey(key: string): boolean {
+  const parsed = parseAssetKey(key);
+  return parsed.relativeSegments.length > 0 && !sessionLeafPattern.test(parsed.key);
+}
+const resourceGroupPattern = new RegExp(
+  `^(shared/|personal/[^/]+/)((${SESSION_RESOURCE_KINDS.join("|")}):([^/]+))/(?:(action:[^/]+)/)?`,
+);
+
+const resourcePrefixPattern = new RegExp(
+  `^(?:shared/|personal/[^/]+/)(?:${SESSION_RESOURCE_KINDS.join("|")}):`,
+);
+
+/** Whether a key sits under a resource group (`shared/<kind>:...`), which is read-only. */
+export function isResourceGroupPrefix(key: string): boolean {
+  return resourcePrefixPattern.test(key);
+}
+
+export const RESOURCE_GROUPS_READ_ONLY = "Resource groups are read-only.";
+
+/** The resource a session group belongs to, from `sessionGroupKey`. */
+export interface SessionResourceGroup {
+  kind: SessionResourceKind;
+  /** The resource id (`fs` ids keep their provider: `agent-fs:<id>`). */
+  id: string;
+  /** The namespace root: `shared/` or `personal/<user>/`. */
+  base: string;
+  /** The group of the resource itself: `<base><kind>:<id>/`. */
+  resourceKey: string;
+  /** An app action below the app (`shared/app:<id>/action:<name>/`). */
+  action?: string;
+}
+
+/**
+ * The resource of a session group key, or null. Only exact resource groups
+ * match: `<base><kind>:<id>/`, or `<base>app:<id>/action:<name>/`. The UI
+ * mirrors this in `apps/ui/src/lib/session-groups.ts` (pinned by a test).
+ */
+export function sessionResourceGroupOf(groupKey: string): SessionResourceGroup | null {
+  const match = resourceGroupPattern.exec(groupKey);
+  if (!match || match[0] !== groupKey) return null;
+  const kind = match[3] as SessionResourceKind;
+  if (match[5] && kind !== "app") return null;
+  return {
+    kind,
+    id: match[4]!,
+    base: match[1]!,
+    resourceKey: `${match[1]}${match[2]}/`,
+    ...(match[5] ? { action: match[5].slice("action:".length) } : {}),
+  };
+}
+
+/**
+ * A root key's session group: the key without its trailing `<kind>:<id>/`
+ * leaf, preserving user groups that contain a colon. A resource leaf right at
+ * a namespace root stays: it is the resource's group (`shared/page:<id>/`).
+ */
 export function sessionGroupKey(key: string): string {
   const normalized = normalizeAssetKey(key);
   const namespace = parseAssetKey(normalized);
   if (namespace.relativeSegments.length === 0) return normalized;
-  return normalized.replace(sessionLeafPattern, "/");
+  const leaf = sessionLeafPattern.exec(normalized);
+  if (!leaf) return normalized;
+  const group = normalized.slice(0, leaf.index + 1);
+  const resource = (SESSION_RESOURCE_KINDS as readonly string[]).includes(leaf[1]!);
+  return resource && parseAssetKey(group).relativeSegments.length === 0 ? normalized : group;
 }
 
 export function parseAssetKey(input: string): AssetNamespace {

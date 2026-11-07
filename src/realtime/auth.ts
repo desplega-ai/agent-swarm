@@ -7,7 +7,7 @@ import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can, isRbacEnabled } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
-import type { HttpRequestAuth } from "../utils/request-auth-context";
+import { authUserId, type HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 
 export type RoomNamespaceInfo = {
@@ -96,7 +96,7 @@ export function roomRequestInfo(
     return Array.isArray(value) ? value[0] : value;
   };
   return {
-    agentId: auth?.kind === "user" ? undefined : header("x-agent-id"),
+    agentId: authUserId(auth) ? undefined : header("x-agent-id"),
     sourceTaskId: header("x-source-task-id"),
     pageId: header("x-page-id"),
   };

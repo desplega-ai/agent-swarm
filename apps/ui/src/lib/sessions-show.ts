@@ -5,9 +5,10 @@
 //   user started from a human channel, plus the ones shared with them. All
 //   adds the workflow, schedule, and system runs attributed to them.
 // - Shown sources: the root sources (the dashboard, Slack, GitHub, ...) that
-//   lists and counts keep, the Inbox included. Only `ui` by default, so any
-//   other source, one never seen before included, stays out until the user
-//   ticks it.
+//   lists and counts keep, the Inbox included. By default only the two
+//   dashboard sources: `ui` (a chat) and `comb` (comments sent from Files).
+//   Any other source, one never seen before included, stays out until the
+//   user ticks it.
 //
 // The server applies both (`show` and `showSource` on
 // `GET /api/sessions?scope=tree` and `GET /api/session-tree`), so totals and
@@ -22,11 +23,11 @@ export type SessionsShow = "mine" | "all";
 
 const SHOW_KEY = "swarm:v1:sessions-v2:show";
 // A new key: the older hidden-sources list was a denylist, and everyone
-// starts on the `ui`-only default.
+// starts on the default.
 const SHOWN_KEY = "swarm:v1:sessions-v2:shown-sources";
 
-/** The sources shown until the user changes the filter. */
-export const DEFAULT_SHOWN_SOURCES: readonly string[] = ["ui"];
+/** The sources shown until the user changes the filter. Sorted, like a stored list. */
+export const DEFAULT_SHOWN_SOURCES: readonly string[] = ["comb", "ui"];
 const DEFAULT_SHOWN_RAW = DEFAULT_SHOWN_SOURCES.join(",");
 
 // One store for every hook instance in this tab, plus the `storage` event for
@@ -134,7 +135,7 @@ export function sessionsFilterParams(
   return { ...(show === "all" ? { show } : {}), showSource: shown.join(",") };
 }
 
-/** Whether the filter differs from the default (Mine, only `ui`): the menu icon shows a dot. */
+/** Whether the filter differs from the default (Mine, `comb` and `ui`): the menu icon shows a dot. */
 export function sessionsFilterActive(show: SessionsShow, shown: readonly string[]): boolean {
   return show !== "mine" || shown.join(",") !== DEFAULT_SHOWN_RAW;
 }

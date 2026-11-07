@@ -40,13 +40,14 @@ import {
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { getApiKey } from "../utils/api-key";
+import { isCodexRejectedAccessError } from "../utils/codex-auth-failure";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
 import { selectCredential } from "../utils/credentials";
-import { isEnvFlagEnabled, isSessionSummarySkipped } from "../utils/env-flag";
+import { isSessionSummarySkipped } from "../utils/env-flag";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
@@ -67,10 +68,10 @@ import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from ".
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
-import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { buildPoolRevalidationFailureReason, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { pruneCodexRollouts } from "./codex-rollouts";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
-import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { readPkgVersion } from "./harness-version";
 import { buildOtelTraceparentEnv } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -87,6 +88,8 @@ import type {
   SteerDelivery,
   SteerDeliveryResult,
 } from "./types";
+
+export { buildPoolRevalidationFailureReason } from "./codex-oauth/storage.js";
 
 type CodexConfig = Record<string, CodexConfigValue | undefined>;
 
@@ -116,8 +119,12 @@ export function codexGatewayConfig(route: ModelRoute): CodexConfig {
   };
 }
 
-/** Plugin id the worker image installs (`codex plugin add context-mode@context-mode`). */
-const CONTEXT_MODE_CODEX_PLUGIN = "context-mode@context-mode";
+/**
+ * Plugin id older worker images installed (`codex plugin add
+ * context-mode@context-mode`). context-mode is removed; every session turns a
+ * stale install off so its MCP server, skills and hooks never load.
+ */
+const LEGACY_CONTEXT_MODE_CODEX_PLUGIN = "context-mode@context-mode";
 
 interface Usage {
   input_tokens: number;
@@ -442,29 +449,6 @@ export async function resolveCodexAuthMode(
 }
 
 /**
- * Build the `failureReason` for a pool-slot OAuth revalidation failure
- * (see `resolveCodexAuthMode` above).
- *
- * Wording matters: every variant carries `[auth-error]`, but the runner's
- * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
- * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
- * refresh lock") and any other thrown error (refresh-lock HTTP or network
- * failure, config-store persistence failure: "not a confirmed auth
- * rejection") are excluded as transient, so an outage does NOT bench a
- * healthy login.
- */
-export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
-  if (err instanceof CodexOAuthRefreshError) {
-    if (err.reason === "lock_timeout") {
-      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
-    }
-    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
-}
-
-/**
  * Build the configuration supplied through the `thread/start` request.
  * It overrides the baseline `~/.codex/config.toml` in the worker image.
  *
@@ -586,22 +570,6 @@ export async function buildCodexConfig(
     }
   }
 
-  // (4) context-mode — pre-installed stdio MCP server providing the `ctx_*`
-  // context-compression tools. Gated by `CONTEXT_MODE_DISABLED` so builds /
-  // deploys without the `context-mode` binary on PATH don't break the session.
-  // Same entry shape as the swarm + installed-server stdio entries above.
-  // When disabled, the installed Codex plugin is turned off too: it registers
-  // its own `context-mode` MCP server, skills and hooks.
-  const contextModeDisabled = isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false);
-  if (!contextModeDisabled) {
-    mcpServers["context-mode"] = {
-      command: "context-mode",
-      enabled: true,
-      startup_timeout_sec: 30,
-      tool_timeout_sec: 120,
-    };
-  }
-
   // Phase 4 (reasoning-effort plan): translate the normalized level into
   // `model_reasoning_effort`. `show_raw_agent_reasoning` stays pinned false
   // regardless — separate, deliberately-pinned knob, not in scope here.
@@ -614,8 +582,7 @@ export async function buildCodexConfig(
   // (no baseline file) behave identically to the Docker worker.
   //
   // Keep ChatGPT apps/connectors disabled because their `codex_apps` tools use
-  // the worker's host OAuth identity. Hooks remain enabled for Codex steering
-  // and the installed context-mode plugin.
+  // the worker's host OAuth identity. Hooks remain enabled for Codex steering.
   return {
     model,
     approval_policy: "never",
@@ -624,9 +591,7 @@ export async function buildCodexConfig(
     show_raw_agent_reasoning: false,
     features: { apps: false, hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
-    ...(contextModeDisabled
-      ? { plugins: { [CONTEXT_MODE_CODEX_PLUGIN]: { enabled: false } } }
-      : {}),
+    plugins: { [LEGACY_CONTEXT_MODE_CODEX_PLUGIN]: { enabled: false } },
     ...reasoningConfig,
   };
 }
@@ -997,7 +962,7 @@ export class CodexSession implements ProviderSession {
   private readonly thread: CodexThread;
   private readonly config: ProviderSessionConfig;
   private readonly resolvedModel: string;
-  private readonly contextWindow: number;
+  private contextWindow: number;
   private readonly skillsDir: string;
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
@@ -1478,7 +1443,14 @@ export class CodexSession implements ProviderSession {
         this.accountUsage(event.usage);
         break;
       case "context.updated":
-        this.emitContextUsage(event.usage, event.contextWindow ?? this.contextWindow);
+        if (
+          event.contextWindow != null &&
+          Number.isFinite(event.contextWindow) &&
+          event.contextWindow > 0
+        ) {
+          this.contextWindow = event.contextWindow;
+        }
+        this.emitContextUsage(event.usage, this.contextWindow);
         // Codex input tokens already include the cached read and write subsets.
         void this.observeContextBound(event.usage.input_tokens);
         break;
@@ -1593,26 +1565,11 @@ export class CodexSession implements ProviderSession {
       };
     }
 
-    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized".
-    // Also catches the "revoked-while-valid" OAuth pool failure mode: a
-    // credential revoked server-side while its access token is still
-    // unexpired never enters `getValidCodexOAuth` (the token looks fresh, it
-    // fast-returns) — the ONLY artifact of that death mode is the spawned
-    // Codex CLI self-refreshing straight from the blanked-refresh-token
-    // auth.json and surfacing this turn-level error.
-    const authPatterns = [
-      "unauthorized",
-      "http 401",
-      " 401 ",
-      "invalid api key",
-      "invalid_api_key",
-      "missing api key",
-      "no api key",
-      "authentication failed",
-      "failed to refresh token",
-      "invalid 'refresh_token'",
-    ];
-    if (authPatterns.some((p) => normalized.includes(p))) {
+    // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized" — or
+    // a pool login revoked while its access token is unexpired: the spawned
+    // Codex CLI self-refreshes from the blanked-refresh-token auth.json and
+    // surfaces this turn-level error.
+    if (isCodexRejectedAccessError(normalized)) {
       const slot = this.config.codexSlot;
       const guidance =
         slot === undefined
@@ -1790,6 +1747,9 @@ export class CodexSession implements ProviderSession {
         sessionId: this._sessionId,
         cost,
         isError: true,
+        // Provider failures arrive as turn.failed / error events (terminalError,
+        // handled above); a throw with none is the app-server or MCP transport.
+        errorOrigin: "harness",
         failureReason: message,
         rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
         rateLimitWindows: this.errorTracker.getRateLimitWindows(),
@@ -2044,7 +2004,6 @@ export async function createInProcessCodexSession(
     ...(process.env.NODE_EXTRA_CA_CERTS
       ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
       : {}),
-    CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
     ...(config.env ?? {}),
     // Gated cross-service OTel linking: when SWARM_ENABLE_HARNESS_OTEL (or
     // the deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias) is on, inject
@@ -2087,6 +2046,7 @@ export async function createInProcessCodexSession(
     const appServerFactory = opts.appServerFactory ?? ((options) => new CodexAppServer(options));
     const client = appServerFactory({
       ...(codexPathOverride ? { codexPath: codexPathOverride } : {}),
+      ...(gateway ? { configOverrides: codexGatewayConfig(gateway) } : {}),
       env,
       onStderr: (line) => {
         if (liveSession) liveSession.emitTransportStderr(line);
@@ -2101,8 +2061,12 @@ export async function createInProcessCodexSession(
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         config: mergedConfig,
-        ephemeral: true,
+        // Must persist a rollout: a `spawn_agent` call with `fork_context` loads
+        // the parent thread's rollout, and an ephemeral thread has none ("no
+        // rollout found for thread id"), which fails every such spawn.
+        ephemeral: false,
       });
+      void pruneCodexRollouts(env).catch(() => {});
       thread = new AppServerCodexThread(client, response.thread.id);
     } catch (error) {
       await client.close();
@@ -2243,7 +2207,6 @@ class CodexSubprocessSession implements ProviderSession {
           ...(process.env.CODEX_SKILLS_DIR
             ? { CODEX_SKILLS_DIR: process.env.CODEX_SKILLS_DIR }
             : {}),
-          CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
           ...(process.env.SKIP_SESSION_SUMMARY
             ? { SKIP_SESSION_SUMMARY: process.env.SKIP_SESSION_SUMMARY }
             : {}),

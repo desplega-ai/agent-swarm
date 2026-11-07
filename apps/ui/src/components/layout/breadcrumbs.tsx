@@ -1,4 +1,5 @@
-import { ChevronDown, ChevronRight, CornerDownRight, Home } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Ellipsis, Home } from "lucide-react";
+import { Fragment, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAgent } from "@/api/hooks/use-agents";
 import { useApprovalRequest } from "@/api/hooks/use-approval-requests";
@@ -8,14 +9,14 @@ import { useMetricDefinition } from "@/api/hooks/use-metric-definitions";
 import { usePage } from "@/api/hooks/use-pages";
 import { useRepo } from "@/api/hooks/use-repos";
 import { useScheduledTask } from "@/api/hooks/use-schedules";
-import { useScriptConnection } from "@/api/hooks/use-script-connections";
+import { useOAuthApps, useScriptConnection } from "@/api/hooks/use-script-connections";
 import { useScriptRun } from "@/api/hooks/use-script-runs";
 import { useScript } from "@/api/hooks/use-scripts";
 import { useSession } from "@/api/hooks/use-sessions";
 import { useSkill } from "@/api/hooks/use-skills";
-import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
 import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
+import type { AgentTask } from "@/api/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,9 +24,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { INTEGRATIONS } from "@/lib/integrations-catalog";
-import { taskListTitle } from "@/lib/task-title";
+import { chatSdkPageChannel } from "@/lib/channel-cards";
+import { connectPageHref, connectPageTitle, INTEGRATIONS } from "@/lib/integrations-catalog";
+import { shortId } from "@/lib/short-id";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
+import {
+  AncestorMenuItem,
+  HiddenAncestorsMenu,
+  TaskCrumbPeek,
+  taskCrumbLabel,
+  useAncestorFit,
+} from "./task-crumbs";
+import { collapseAncestors } from "./task-trail";
+import { useTaskPath } from "./use-task-path";
 
 const routeLabels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -56,7 +67,10 @@ const routeLabels: Record<string, string> = {
   templates: "Templates",
   history: "History",
   debug: "Debug",
-  integrations: "Integrations",
+  integrations: "Connect",
+  channels: "Channels",
+  tools: "Tools",
+  ai: "AI providers",
   keys: "Provider keys",
   lineage: "Lineage",
   "api-keys": "Provider keys",
@@ -66,16 +80,47 @@ const routeLabels: Record<string, string> = {
   unmapped: "Unmapped",
 };
 
+/** A desktop crumb link: muted, the foreground on hover, the focus ring. */
+const CRUMB_LINK =
+  "rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60";
+
 const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
   INTEGRATIONS.map((def) => [def.id, def.name]),
 );
 
 /** Routes that don't have their own list page — redirect breadcrumb to a parent. */
 const routeRedirects: Record<string, string> = {
+  repos: "/settings/repos",
   "workflow-runs": "/workflows",
   "script-runs": "/scripts?tab=runs",
-  "oauth-apps": "/connections?tab=oauth-apps",
 };
+
+/** First segments of the pages the Settings shell renders outside `/settings`. */
+const SETTINGS_SHELL_ROOTS = new Set(["people", "templates", "repos"]);
+
+/** Labels and links for whole paths, where a segment name alone is ambiguous. */
+const pathLabels: Record<string, string> = {
+  "/settings/connections": "Servers",
+  "/integrations/tools/connections": "Script connections",
+  "/settings/connection-playground": "Playground",
+  "/settings/fetch-credentials": "Fetch credentials",
+  // `/fs/continue` (the agent-fs sign-in handoff) has no `/fs` page of its own.
+  "/fs": "Files",
+};
+const pathLinks: Record<string, string> = {
+  "/integrations/tools/connections": "/integrations/tools?tab=connections",
+  "/integrations/tools/oauth-apps": "/integrations/tools?tab=oauth-apps",
+  "/integrations/tools/mcp-servers": "/integrations/tools?tab=mcp",
+  "/fs": "/file",
+};
+
+/**
+ * Connect › Tools lists sit one level down (`/integrations/tools/<list>/:id`),
+ * so their entity id is segment 3, not 1.
+ */
+function detailBase(segments: string[]): number {
+  return segments[0] === "integrations" && segments[1] === "tools" ? 2 : 0;
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Pages use 32-char random-hex IDs (`lower(hex(randomblob(16)))`), not UUIDs.
@@ -135,13 +180,18 @@ export function Breadcrumbs() {
 
   // Detail routes (/<parent>/:id[/...]) get a contextual leaf name fetched
   // from the matching single-entity hook instead of the truncated raw id.
-  // The id segment is always `segments[1]` under a known `segments[0]`
-  // parent. We compute one id-or-empty value per entity type and call every
+  // The id segment follows a known parent: `segments[1]` under
+  // `segments[0]`, or `segments[3]` under a Connect › Tools list
+  // (`detailBase`). We compute one id-or-empty value per entity type and call every
   // hook unconditionally (empty string → query disabled) so hook order stays
   // stable across renders (React rules of hooks).
-  const parent = segments[0];
+  const base = detailBase(segments);
+  const parent = segments[base];
+  const detailIndex = base + 1;
   const detailId =
-    segments.length >= 2 && isEntityId(segments[1]) ? (segments[1] as string) : undefined;
+    segments.length > detailIndex && isEntityId(segments[detailIndex])
+      ? (segments[detailIndex] as string)
+      : undefined;
   const idFor = (route: string): string => (parent === route && detailId ? detailId : "");
 
   // `usePage` / `useUser` / `useSession` accept `string | undefined`; the rest
@@ -157,7 +207,6 @@ export function Breadcrumbs() {
 
   const { data: appMeta } = useApp(idFor("apps") || undefined);
   const { data: agentMeta } = useAgent(idFor("agents"));
-  const { data: taskMeta } = useTask(idFor("tasks"));
   const { data: workflowMeta } = useWorkflow(idFor("workflows"));
   // A run has no name of its own; label it by its workflow, not its id.
   const { data: workflowRunMeta } = useWorkflowRun(idFor("workflow-runs"));
@@ -170,6 +219,9 @@ export function Breadcrumbs() {
   const { data: repoMeta } = useRepo(idFor("repos"));
   const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
   const { data: connectionMeta } = useScriptConnection(idFor("connections") || undefined);
+  // No single-app read: the list is small and the page shares the query.
+  const { data: oauthApps } = useOAuthApps({ enabled: !!idFor("oauth-apps") });
+  const oauthAppName = oauthApps?.find((app) => app.id === idFor("oauth-apps"))?.provider;
 
   // `/usage/metrics/:id` — the one detail id at segment index 2. Resolved
   // here (like the index-1 entities above) because `PageHeader` drops string
@@ -178,10 +230,21 @@ export function Breadcrumbs() {
     parent === "usage" && segments[1] === "metrics" && segments[2] ? segments[2] : undefined;
   const { data: metricMeta } = useMetricDefinition(metricId);
 
+  // A task's ancestors go between "Tasks" and its id (`useTaskPath`, the
+  // fetch the task page shares for its Session link). The desktop trail
+  // folds the middle into "…" past a few crumbs or when it overflows; the
+  // phone menu folds it into a row that expands in place.
+  const taskId = parent === "tasks" ? detailId : undefined;
+  const { data: taskPath } = useTaskPath(taskId);
+  const ancestors = taskPath?.ancestors ?? [];
+  const [desktopNav, setDesktopNav] = useState<HTMLElement | null>(null);
+  const ancestorFit = useAncestorFit(desktopNav, taskId ?? "", ancestors.length);
+  const [phoneAncestorsOpen, setPhoneAncestorsOpen] = useState(false);
+
   if (segments.length === 0) {
     return (
-      <span className="min-w-0 truncate text-sm font-medium text-foreground">
-        {user?.name ? `Welcome back, ${user.name}` : "Welcome to Agent Swarm"}
+      <span className="min-w-0 truncate text-sm font-medium text-foreground max-md:px-1.5 max-md:text-base max-md:font-semibold">
+        {user?.name ? `Hi, ${user.name}` : "Welcome to Agent Swarm"}
       </span>
     );
   }
@@ -199,28 +262,28 @@ export function Breadcrumbs() {
             ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
             : parent === "agents"
               ? agentMeta?.name
-              : parent === "tasks"
-                ? taskMeta && taskListTitle(taskMeta)
-                : parent === "workflows"
-                  ? workflowMeta?.name
-                  : parent === "workflow-runs"
-                    ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
-                    : parent === "schedules"
-                      ? scheduleMeta?.name
-                      : parent === "scripts"
-                        ? scriptMeta?.name
-                        : parent === "script-runs"
-                          ? scriptRunMeta?.run.scriptName
-                          : parent === "skills"
-                            ? skillMeta?.name
-                            : parent === "mcp-servers"
-                              ? mcpServerMeta?.name
-                              : parent === "repos"
-                                ? repoMeta?.name
-                                : parent === "approval-requests"
-                                  ? approvalMeta?.title
-                                  : parent === "connections"
-                                    ? connectionMeta?.slug
+              : parent === "workflows"
+                ? workflowMeta?.name
+                : parent === "workflow-runs"
+                  ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
+                  : parent === "schedules"
+                    ? scheduleMeta?.name
+                    : parent === "scripts"
+                      ? scriptMeta?.name
+                      : parent === "script-runs"
+                        ? scriptRunMeta?.run.scriptName
+                        : parent === "skills"
+                          ? skillMeta?.name
+                          : parent === "mcp-servers"
+                            ? mcpServerMeta?.name
+                            : parent === "repos"
+                              ? repoMeta?.name
+                              : parent === "approval-requests"
+                                ? approvalMeta?.title
+                                : parent === "connections"
+                                  ? connectionMeta?.slug
+                                  : parent === "oauth-apps"
+                                    ? oauthAppName
                                     : undefined
     : undefined;
 
@@ -233,30 +296,112 @@ export function Breadcrumbs() {
     ? (appMeta?.app.definition.pages?.[appPageName]?.title ?? appPageName)
     : undefined;
 
+  // A task's title is the page's own heading (often long, and editable
+  // there), so its crumb is the short id instead.
+  const taskCrumb = parent === "tasks" && detailId ? `#${shortId(detailId)}` : undefined;
+  const adapterChannel = chatSdkPageChannel(location.pathname, location.search);
+
   const crumbs = segments
     .map((segment, index) => {
       const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
-      const path = routeRedirects[segment] ?? defaultPath;
-      let label = formatSegment(segment, segments[index - 1]);
+      const path = pathLinks[defaultPath] ?? routeRedirects[segment] ?? defaultPath;
+      let label = pathLabels[defaultPath] ?? formatSegment(segment, segments[index - 1]);
       // Pretty-print the detail-id leaf with the resolved entity name. Only the
-      // id segment at index 1 is replaced — other path segments keep their
+      // id segment (`detailIndex`) is replaced. Other path segments keep their
       // routeLabels behavior.
-      if (index === 1 && segment === detailId && contextualName) {
+      if (index === detailIndex && segment === detailId && contextualName) {
         label = contextualName.trim();
       }
+      const mono = index === 1 && segment === detailId && !!taskCrumb;
+      if (mono) label = taskCrumb;
       if (index === 3 && appPageTitle) {
         label = appPageTitle.trim();
       }
+      if (index === 1 && adapterChannel) label = adapterChannel.name;
       if (index === 2 && metricId && segment === metricId && metricMeta?.title) {
         label = metricMeta.title.trim();
       }
       const isLast = index === segments.length - 1;
+      // The task crumb's lineage row: its hover card, and where its
+      // ancestors go.
+      const task = mono ? taskPath?.task : undefined;
 
-      return { path, label, isLast };
+      return { path, label, isLast, mono, task };
     })
     .filter((_, index) => !(appPageName && index === 2));
 
+  // `/integrations/<id>` sits under the Connect page that lists it:
+  // Connect › Tools › GitHub, Connect › Channels › Slack.
+  const integration =
+    segments.length === 2 && segments[0] === "integrations"
+      ? INTEGRATIONS.find((def) => def.id === segments[1])
+      : undefined;
+  // Pages the Settings shell renders under their own URLs get a Settings crumb.
+  if (segments[0] && SETTINGS_SHELL_ROOTS.has(segments[0])) {
+    crumbs.unshift({
+      path: "/settings",
+      label: "Settings",
+      isLast: false,
+      mono: false,
+      task: undefined,
+    });
+  }
+  if (integration) {
+    crumbs.splice(1, 0, {
+      path: connectPageHref(integration),
+      label: connectPageTitle(integration.category),
+      isLast: false,
+      mono: false,
+      task: undefined,
+    });
+  }
+
   const leaf = crumbs[crumbs.length - 1];
+
+  // Phone menu rows, one indent step per level. The folded middle is one
+  // row ("3 more") until it is opened; its tasks then share that level.
+  type PhoneRow =
+    | { kind: "crumb"; crumb: (typeof crumbs)[number] }
+    | { kind: "ancestor"; task: AgentTask }
+    | { kind: "more"; count: number };
+  const phoneRows: { key: string; level: number; row: PhoneRow }[] = [];
+  const nextLevel = () => (phoneRows.at(-1)?.level ?? 0) + 1;
+  const addAncestor = (task: AgentTask, level = nextLevel()) =>
+    phoneRows.push({ key: task.id, level, row: { kind: "ancestor", task } });
+  for (const crumb of crumbs) {
+    if (crumb.task && ancestors.length > 0) {
+      const fold = collapseAncestors(ancestors, 2);
+      for (const task of fold.head) addAncestor(task);
+      if (fold.hidden.length > 0) {
+        const level = nextLevel();
+        if (phoneAncestorsOpen) {
+          for (const task of fold.hidden) addAncestor(task, level);
+        } else {
+          phoneRows.push({ key: "more", level, row: { kind: "more", count: fold.hidden.length } });
+        }
+      }
+      for (const task of fold.tail) addAncestor(task);
+    }
+    phoneRows.push({ key: crumb.path, level: nextLevel(), row: { kind: "crumb", crumb } });
+  }
+
+  // Desktop: the ancestors that fit, the rest behind "…". Null when not even
+  // "…" fits: the trail is then the one it was before ancestors.
+  const desktopFold = ancestorFit < 0 ? null : collapseAncestors(ancestors, ancestorFit);
+  const ancestorCrumb = (task: AgentTask) => (
+    <span key={task.id} className="flex shrink-0 items-center gap-1">
+      <ChevronRight className="size-3 shrink-0" />
+      <TaskCrumbPeek task={task}>
+        <Link
+          to={`/tasks/${task.id}`}
+          aria-label={taskCrumbLabel(task)}
+          className={cn(CRUMB_LINK, "font-mono")}
+        >
+          #{shortId(task.id)}
+        </Link>
+      </TaskCrumbPeek>
+    </span>
+  );
 
   return (
     <>
@@ -264,9 +409,9 @@ export function Breadcrumbs() {
           the deepest level (truncated); the menu stacks every level
           top-to-bottom so the hierarchy is still readable on a narrow screen. */}
       <nav className="flex min-w-0 items-center md:hidden" aria-label="Breadcrumb">
-        <DropdownMenu>
-          <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-foreground font-medium transition-colors hover:bg-accent">
-            <span className="truncate">{leaf.label}</span>
+        <DropdownMenu onOpenChange={(open) => !open && setPhoneAncestorsOpen(false)}>
+          <DropdownMenuTrigger className="flex min-h-11 min-w-0 items-center gap-1 rounded-md px-1.5 text-base font-semibold text-foreground transition-colors hover:bg-accent">
+            <span className={cn("truncate", leaf.mono && "font-mono")}>{leaf.label}</span>
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-w-[min(20rem,calc(100vw-2rem))]">
@@ -276,19 +421,50 @@ export function Breadcrumbs() {
                 <span className="truncate">Home</span>
               </Link>
             </DropdownMenuItem>
-            {crumbs.map((crumb, index) => {
+            {phoneRows.map(({ key, level, row }) => {
+              // Indent one step per level so the depth reads at a glance.
+              const indent = { paddingLeft: `${0.5 + level * 0.75}rem` };
+              if (row.kind === "more") {
+                return (
+                  <DropdownMenuItem
+                    key={key}
+                    style={indent}
+                    // Opens the folded tasks in place and keeps the menu open.
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setPhoneAncestorsOpen(true);
+                    }}
+                    className="text-muted-foreground"
+                  >
+                    <Ellipsis className="size-3.5" />
+                    {row.count} more
+                  </DropdownMenuItem>
+                );
+              }
+              if (row.kind === "ancestor") {
+                return (
+                  <AncestorMenuItem
+                    key={key}
+                    task={row.task}
+                    style={indent}
+                    leading={
+                      <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+                    }
+                  />
+                );
+              }
+              const { crumb } = row;
               const content = (
                 <>
                   <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{crumb.label}</span>
+                  <span className={cn("truncate", crumb.mono && "font-mono")}>{crumb.label}</span>
                 </>
               );
               return (
                 <DropdownMenuItem
-                  key={crumb.path}
+                  key={key}
                   asChild={!crumb.isLast}
-                  // Indent one step per level so the depth reads at a glance.
-                  style={{ paddingLeft: `${0.5 + (index + 1) * 0.75}rem` }}
+                  style={indent}
                   // The leaf is the current page: shown for context, not
                   // navigable (Radix `disabled` would grey it out, so it's
                   // just a non-link row that closes the menu).
@@ -308,30 +484,61 @@ export function Breadcrumbs() {
         </DropdownMenu>
       </nav>
 
-      {/* Desktop: the full inline trail. */}
+      {/* Desktop: the full inline trail. It takes the header's free width, so
+          `useAncestorFit` can measure what fits. */}
       <nav
-        className="hidden md:flex items-center gap-1 text-sm text-muted-foreground min-w-0"
+        ref={setDesktopNav}
+        className="hidden md:flex flex-1 items-center gap-1 text-sm text-muted-foreground min-w-0"
         aria-label="Breadcrumb"
       >
-        <Link to="/" className="hover:text-foreground transition-colors shrink-0">
+        <Link to="/" className={cn(CRUMB_LINK, "shrink-0")}>
           Home
         </Link>
         {crumbs.map((crumb) => (
-          // Only the leaf gives up width: a long task title used to squeeze
-          // the "Tasks" crumb to nothing ("Home > > Fix the…").
-          <span
-            key={crumb.path}
-            className={cn("flex items-center gap-1", crumb.isLast ? "min-w-0" : "shrink-0")}
-          >
-            <ChevronRight className="size-3 shrink-0" />
-            {crumb.isLast ? (
-              <span className="text-foreground font-medium truncate">{crumb.label}</span>
-            ) : (
-              <Link to={crumb.path} className="hover:text-foreground transition-colors truncate">
-                {crumb.label}
-              </Link>
-            )}
-          </span>
+          <Fragment key={crumb.path}>
+            {crumb.task && desktopFold ? (
+              <>
+                {desktopFold.head.map(ancestorCrumb)}
+                {desktopFold.hidden.length > 0 ? (
+                  <span className="flex shrink-0 items-center gap-1">
+                    <ChevronRight className="size-3 shrink-0" />
+                    <HiddenAncestorsMenu tasks={desktopFold.hidden} />
+                  </span>
+                ) : null}
+                {desktopFold.tail.map(ancestorCrumb)}
+              </>
+            ) : null}
+            {/* Only the leaf gives up width: a long task title used to squeeze
+                the "Tasks" crumb to nothing ("Home > > Fix the…"). */}
+            <span className={cn("flex items-center gap-1", crumb.isLast ? "min-w-0" : "shrink-0")}>
+              <ChevronRight className="size-3 shrink-0" />
+              {crumb.isLast ? (
+                <TaskCrumbPeek task={crumb.task}>
+                  <span
+                    data-crumb-leaf
+                    // Focus opens the task's hover card for keyboard users.
+                    tabIndex={crumb.task ? 0 : undefined}
+                    className={cn(
+                      "rounded-sm text-foreground font-medium truncate outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                      crumb.mono && "font-mono",
+                    )}
+                  >
+                    {crumb.label}
+                  </span>
+                </TaskCrumbPeek>
+              ) : (
+                <TaskCrumbPeek task={crumb.task}>
+                  <Link
+                    to={crumb.path}
+                    aria-label={crumb.task ? taskCrumbLabel(crumb.task) : undefined}
+                    className={cn(CRUMB_LINK, "truncate", crumb.mono && "font-mono")}
+                  >
+                    {crumb.label}
+                  </Link>
+                </TaskCrumbPeek>
+              )}
+            </span>
+          </Fragment>
         ))}
       </nav>
     </>

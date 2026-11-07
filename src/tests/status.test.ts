@@ -87,6 +87,8 @@ const ENV_KEYS_TO_RESET = [
   "SWARM_BRAND_COLOR",
   "SWARM_MARKETING_URL",
   "SWARM_HIDE_CLOUD_PROMO",
+  "APP_URL",
+  "DASHBOARD_URL",
   "HARNESS_PROVIDER",
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
@@ -104,6 +106,8 @@ const ENV_KEYS_TO_RESET = [
   "GITHUB_WEBHOOK_SECRET",
   "GITHUB_APP_ID",
   "GITHUB_APP_PRIVATE_KEY",
+  "GITHUB_URL",
+  "GITHUB_API_URL",
   "AGENT_FS_API_URL",
   "API_AGENT_FS_API_KEY",
   "AGENT_FS_API_KEY",
@@ -191,6 +195,7 @@ describe("buildStatusPayload — identity", () => {
       marketing_url: null,
       hide_cloud_promo: false,
       org_id: null,
+      dashboard_url: null,
     });
   });
 
@@ -212,7 +217,15 @@ describe("buildStatusPayload — identity", () => {
       marketing_url: "https://swarm.acme.example",
       hide_cloud_promo: true,
       org_id: "org_acme_123",
+      dashboard_url: null,
     });
+  });
+
+  test("reports the configured dashboard URL: the first APP_URL entry, else DASHBOARD_URL", async () => {
+    process.env.DASHBOARD_URL = "https://old.example.com";
+    expect((await buildStatusPayload()).identity.dashboard_url).toBe("https://old.example.com");
+    process.env.APP_URL = "https://swarm.example.com/, https://other.example.com";
+    expect((await buildStatusPayload()).identity.dashboard_url).toBe("https://swarm.example.com");
   });
 
   test("treats SWARM_CLOUD=1 the same as 'true'", async () => {
@@ -247,6 +260,30 @@ describe("buildStatusPayload — telemetry", () => {
     expect((await buildStatusPayload()).telemetry?.enabled).toBe(false);
     process.env.ANONYMIZED_TELEMETRY = "true";
     expect((await buildStatusPayload()).telemetry?.enabled).toBe(true);
+  });
+});
+
+// ─── GitHub web base ─────────────────────────────────────────────────────────
+
+describe("buildStatusPayload — github", () => {
+  test("defaults to github.com", async () => {
+    expect((await buildStatusPayload()).github).toEqual({
+      web_url: "https://github.com",
+      enterprise: false,
+    });
+  });
+
+  test("reports the GITHUB_URL web base for GitHub Enterprise Server", async () => {
+    process.env.GITHUB_URL = "https://ghe.test/";
+    expect((await buildStatusPayload()).github).toEqual({
+      web_url: "https://ghe.test",
+      enterprise: true,
+    });
+  });
+
+  test("leaves the field out on an invalid GITHUB_URL instead of failing /status", async () => {
+    process.env.GITHUB_URL = "https://ghe.test/sub/path";
+    expect((await buildStatusPayload()).github).toBeUndefined();
   });
 });
 
@@ -567,9 +604,9 @@ describe("setup milestones", () => {
     expect(getMilestone(empty, "gsc").state).toBe("unverified");
     expect(getMilestone(empty, "agentmail").state).toBe("unverified");
     expect(getMilestone(empty, "agentfs").state).toBe("unverified");
-    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/integrations/gsc");
-    expect(getMilestone(empty, "agentmail").action_url).toBe("/settings/integrations/agentmail");
-    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/integrations/agentfs");
+    expect(getMilestone(empty, "gsc").action_url).toBe("/integrations/gsc");
+    expect(getMilestone(empty, "agentmail").action_url).toBe("/integrations/agentmail");
+    expect(getMilestone(empty, "agentfs").action_url).toBe("/integrations/agentfs");
 
     process.env.GSC_SERVICE_ACCOUNT_BASE64 = "encoded-service-account";
     process.env.AGENTMAIL_API_KEY = "am_test";
@@ -712,7 +749,7 @@ describe("automation setup status", () => {
         missing: { params: ["REPO_URL"], integrations: ["github"] },
         fixes: [
           { type: "param", key: "REPO_URL", url: `/schedules/${schedule.id}?param=REPO_URL` },
-          { type: "integration", key: "github", url: "/settings/integrations/github" },
+          { type: "integration", key: "github", url: "/integrations/github" },
         ],
         fixUrl: `/schedules/${schedule.id}?param=REPO_URL`,
       },

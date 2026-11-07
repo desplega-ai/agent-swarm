@@ -20,6 +20,7 @@ import {
   Database,
   HeartPulse,
   Layers,
+  ListTodo,
   type LucideIcon,
   Palette,
   Plug,
@@ -169,6 +170,32 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         options: ["steer", "queue"],
         defaultValue: "queue",
         docsUrl: `${DOCS}guides/task-steering`,
+      },
+    ],
+  },
+  {
+    id: "tasks",
+    title: "Tasks & sessions",
+    description: "How new tasks are named in the dashboard and the sessions sidebar.",
+    icon: ListTodo,
+    entries: [
+      {
+        key: "TASK_AUTO_TITLE_ENABLED",
+        label: "Automatic task titles",
+        description:
+          "Give every new task a short display title from the cheapest configured model (OpenRouter DeepSeek v4.1 Flash, Claude Haiku, GPT Luna, or the claude CLI). A title a person set is never replaced. Off keeps the prompt as the title.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#task-titles`,
+      },
+      {
+        key: "TASK_AUTO_TITLE_MODEL",
+        label: "Task title model",
+        description:
+          "Pin one model for task titles: provider/model-id (openrouter/deepseek/deepseek-v4.1-flash, anthropic/claude-haiku-5-5, openai/gpt-6-luna, openai-codex/gpt-6-luna) or a claude -p alias such as haiku. Unset picks the first provider with a credential, cheapest model first, and falls back down the list on errors.",
+        kind: "string",
+        placeholder: "openrouter/deepseek/deepseek-v4.1-flash",
+        docsUrl: `${DOCS}ui/configuration#task-titles`,
       },
     ],
   },
@@ -999,6 +1026,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "DB_QUERY_WORKER_POOL_ENABLED",
+        label: "Query worker pool",
+        description:
+          "Reuse long-lived child processes for bounded db-query instead of spawning one per query (saves roughly 65 ms per call). On by default; turn it off to spawn a fresh child per query. Only applies while bounded execution is on.",
+        kind: "boolean",
+        defaultValue: "true",
+      },
+      {
         key: "DB_QUERY_HTTP_BUDGET_MS",
         label: "HTTP query budget",
         description:
@@ -1111,6 +1146,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_TASK_WATCHER_INTERVAL_MS",
+        label: "Task watcher interval",
+        description:
+          "Time between Slack task watcher ticks. Under the v2 renderer each tick is the full reconcile; task events render their own thread in between. Inbound mentions do not wait on it.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "10000",
+        placeholder: "10000",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "SLACK_CONCLUSION_SETTLE_SEC",
         label: "Conclusion settle window",
         description:
@@ -1195,6 +1242,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
         kind: "string",
         defaultValue: "x",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_SKIPPED",
+        label: "Skipped-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "mute",
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
@@ -1340,6 +1396,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_THREAD_WAKE_ON_ANY_MESSAGE",
+        label: "Wake on replies to other users",
+        description:
+          "Treat a Slack thread reply as a follow-up even when it @-mentions another user and not the bot. Off means a reply like `@Alice wdyt?` is ignored.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_LEAVE_THREAD_DISABLE",
+        label: "Disable leaving Slack threads",
+        description:
+          "Remove the `slack-leave-thread` tool from new agent sessions. Sessions that already list it get an error when they call it.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#leaving-a-thread`,
+      },
+      {
         key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
         label: "Block external Slack channels",
         description:
@@ -1383,16 +1457,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "COMB_ENABLED",
         label: "Files",
-        description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
+        description:
+          "Show the agent-fs review space in the dashboard. Needs agent-fs (AGENT_FS_API_URL). Unset, it is on when browsers can reach agent-fs: through AGENT_FS_PUBLIC_URL, or the API's /agentfs proxy (AGENT_FS_PROXY). Save off to turn it off.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/comb`,
       },
       {
         key: "AGENT_FS_LINK_TARGET",
         label: "File link target",
         description:
-          "Where agents and task attachments link people for files. dashboard opens Files at APP_URL and needs Files on. Workers need APP_URL in their own environment (a saved APP_URL does not reach them). live opens the agent-fs live app. Unset keeps the automatic choice.",
+          "Where agents and task attachments link people for files. Unset: the dashboard when APP_URL is set and Files is not turned off, else the agent-fs live app. dashboard opens Files at APP_URL (links also need Files on). live always opens the agent-fs live app.",
         kind: "enum",
         options: ["live", "dashboard"],
         docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
@@ -1410,9 +1485,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_FS_PROXY",
         label: "Serve agent-fs through the API",
         description:
-          "Serve agent-fs through the swarm API at /agentfs, so the browser reaches a bundled agent-fs with no public port. Files then uses <public API URL>/agentfs.",
+          "Serve agent-fs through the swarm API at /agentfs. Defaults on when AGENT_FS_API_URL is set. Files then uses <public API URL>/agentfs.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/agent-fs-co-deployment`,
       },
     ],
@@ -1444,6 +1519,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "COMPANY_EMAIL_DOMAINS",
+        label: "Company email domains",
+        description:
+          "Comma-separated email domains of your company. Slack thread participants with one of these emails count as internal and get a member user row; other people are external and untrusted. Unset falls back to SLACK_ALLOWED_EMAIL_DOMAINS; with both unset no users are auto-created.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#company-email-domains`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:
@@ -1467,6 +1551,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "days",
         defaultValue: "30",
         placeholder: "30",
+      },
+      {
+        key: "BOOT_SCRUB_MODE",
+        label: "Secret redaction of stored rows",
+        description:
+          "When a release adds secret-redaction rules, backfill re-scrubs stored rows in the background, paced by load and resumable across restarts. forward-only applies the rules to new writes only and leaves stored rows alone; switching back to backfill sweeps what was skipped. Stopping a running backfill takes effect at once; starting one takes effect after a restart.",
+        kind: "enum",
+        options: ["backfill", "forward-only"],
+        defaultValue: "backfill",
+        restartRequired: true,
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
@@ -1561,6 +1655,44 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}concepts/workflows`,
       },
       {
+        key: "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER",
+        label: "Default SystemOne extraction provider",
+        description:
+          "Extraction host for a system-one-extraction node that names no provider. cloudflare serves Clairic and needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. A node that names its provider keeps it. Applies to the next extraction.",
+        kind: "enum",
+        options: ["cloudflare"],
+        defaultValue: "cloudflare",
+        docsUrl: `${DOCS}concepts/workflows`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_MODE",
+        label: "Follow-up gate mode",
+        description:
+          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up.",
+        kind: "enum",
+        options: ["off", "shadow"],
+        defaultValue: "off",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_SCHEDULE_IDS",
+        label: "Follow-up gate schedules",
+        description:
+          "Comma-separated schedule ids whose runs the follow-up gate evaluates. Empty evaluates nothing. Leave off any schedule whose follow-up does required work.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_VERIFIER_SCRIPT",
+        label: "Follow-up gate verifier",
+        description:
+          "Name of a global script run as the Lead with { taskId }. It returns { ok: true | false | null, controls: { ok }, check?, detail?, unverified? }. Empty in shadow mode logs an error row for each gated run.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
         key: "SCRIPT_EXECUTOR",
         label: "Script executor",
         description:
@@ -1618,6 +1750,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "SEED_SCRIPTS_ENABLED",
+        label: "Seed built-in scripts",
+        description:
+          "Create the bundled script catalog at boot and via the seed CLI. Turn off for installs whose scripts are managed entirely by an external pipeline. Existing seeded scripts are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SKILLS_ENABLED",
+        label: "Seed built-in skills",
+        description:
+          "Create the bundled skill catalog at boot and via the seed CLI. Turn off for installs whose skills are managed entirely by an external pipeline. Existing seeded skills are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_WORKFLOWS_ENABLED",
+        label: "Seed built-in workflows",
+        description:
+          "Create the bundled workflow catalog at boot and via the seed CLI. Turn off for installs whose workflows are managed entirely by an external pipeline. Existing seeded workflows are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
+      },
+      {
+        key: "SEED_SCHEDULES_ENABLED",
+        label: "Seed built-in schedules",
+        description:
+          "Create the bundled schedule catalog at boot and via the seed CLI. Turn off for installs whose schedules are managed entirely by an external pipeline. Existing seeded schedules are never retired by this switch.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#seed-suppression`,
       },
       {
         key: "EXTENSION_HANDLER_TIMEOUT_MS",
@@ -1686,12 +1858,31 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "EVENT_LOOP_STALL_WARN_MS",
+        label: "Event-loop stall warning",
+        description:
+          "Log one [event-loop] stall line when a single macrotask blocks the API event loop for at least this long. The line names the entry point (HTTP route, MCP tool, timer) and its slowest database statements. Applies without a restart.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "1000",
+        placeholder: "1000",
+      },
+      {
         key: "ANONYMIZED_TELEMETRY",
         label: "Anonymized telemetry",
         description:
           "Send anonymized usage telemetry to help improve Agent Swarm. Set to false to opt out. Turning it on applies without a restart.",
         kind: "boolean",
         defaultValue: "true",
+      },
+      {
+        key: "IMPROVEMENTS_ENABLED",
+        label: "Improvements",
+        description:
+          "Let people and agents draft product improvements for the Agent Swarm team. Agents can only draft; nothing is sent until a person approves it. Only the text, the approver's email (required) and the install id are sent. Drafts wait for approval in the lightbulb popover in the header. Set to false to turn drafting and sending off.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#improvements`,
       },
     ],
   },
@@ -1789,10 +1980,19 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/personalization`,
       },
       {
-        key: "DASHBOARD_URL",
+        key: "APP_URL",
         label: "Dashboard URL",
         description:
-          "Public URL of this dashboard. Used to build deep links in Slack, email, and other outbound messages.",
+          "Public URL of this dashboard, or a comma-separated list where the first entry wins. Used for deep links in Slack, email, and other outbound messages. With APP_URL set, agents link files to Files in the dashboard by default. A saved value reaches running workers at their next poll.",
+        kind: "string",
+        placeholder: "https://swarm.example.com",
+        docsUrl: `${DOCS}ui/comb#links-to-agent-fs-files`,
+      },
+      {
+        key: "DASHBOARD_URL",
+        label: "Dashboard URL (deprecated)",
+        description:
+          "Deprecated alias of APP_URL, read only when APP_URL is unset. Use APP_URL: a saved DASHBOARD_URL does not reach workers.",
         kind: "string",
         placeholder: "https://swarm.example.com",
       },

@@ -21,7 +21,8 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
-import { MAIN_GUTTER, MAIN_GUTTER_NO_TOP } from "@/lib/main-gutter";
+import { GitHubStarNudge } from "@/lib/github-star-nudge-toast";
+import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AccessEndedScreen } from "./access-ended-screen";
 import { AppFooter } from "./app-footer";
@@ -85,15 +86,9 @@ export function RootLayout() {
   const { pathname, search, hash } = useLocation();
   const { config, isConfigured } = useConfig();
   // The unified Home (`/`) owns its own internal padding so the full-bleed
-  // canvas can reach the content-area edges. Comb (`/file`) drops the top
-  // gutter: its header (path, file actions) sits right under the app header.
-  // Every other route gets the standard gutter.
-  const mainPadding =
-    pathname === "/"
-      ? "p-0"
-      : pathname === "/file" || pathname.startsWith("/file/")
-        ? MAIN_GUTTER_NO_TOP
-        : MAIN_GUTTER;
+  // canvas can reach the content-area edges. Every other route gets the
+  // standard gutter, which has no top: content starts under the app header.
+  const mainPadding = pathname === "/" ? "p-0" : MAIN_GUTTER;
 
   const access = useAccessCheck();
 
@@ -124,9 +119,12 @@ export function RootLayout() {
             >
               Skip to content
             </a>
-            <SidebarProvider className="h-svh max-w-full overflow-hidden">
+            {/* Inset shell: the sidebar (`variant="floating"`) and the page are
+              two rounded panels on the canvas, 8px apart. Phones keep the
+              full-bleed page and the sheet. */}
+            <SidebarProvider className="h-dvh max-w-full overflow-hidden bg-canvas">
               <AppSidebar />
-              <SidebarInset className="min-w-0">
+              <SidebarInset className="min-w-0 md:my-2 md:mr-2 md:rounded-xl md:border md:border-border md:shadow-xs">
                 <AppHeader />
                 {/* The page's one `main` landmark (the inset is a div). Below lg
                 the main column is the scroll container so pages that flow
@@ -137,7 +135,7 @@ export function RootLayout() {
                   id="main-content"
                   tabIndex={-1}
                   className={cn(
-                    "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
+                    "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto max-lg:[scrollbar-gutter:stable] lg:overflow-hidden outline-none",
                     mainPadding,
                   )}
                 >
@@ -160,6 +158,7 @@ export function RootLayout() {
         <IdentityGate />
         <ConnectionParamsCleanup />
         <LaterNotifier />
+        <GitHubStarNudge />
         <NameConnectionModal />
         <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />

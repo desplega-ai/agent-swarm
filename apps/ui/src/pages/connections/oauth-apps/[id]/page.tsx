@@ -142,7 +142,7 @@ export default function OAuthAppDetailPage() {
   const navigate = useNavigate();
   const { data: apps = [], isLoading, error } = useOAuthApps();
   // Resolve by id first, then fall back to provider so old provider-keyed
-  // bookmarks (`/connections/oauth-apps/<provider>`) still land — and get
+  // bookmarks (`/integrations/tools/oauth-apps/<provider>`) still land, and get
   // rewritten to the canonical id URL below.
   const app: OAuthAppSummary | undefined =
     apps.find((candidate) => candidate.id === decoded) ??
@@ -158,7 +158,9 @@ export default function OAuthAppDetailPage() {
 
   useEffect(() => {
     if (app && app.id !== decoded) {
-      void navigate(`/connections/oauth-apps/${encodeURIComponent(app.id)}`, { replace: true });
+      void navigate(`/integrations/tools/oauth-apps/${encodeURIComponent(app.id)}`, {
+        replace: true,
+      });
     }
   }, [app, decoded, navigate]);
 
@@ -196,7 +198,7 @@ export default function OAuthAppDetailPage() {
     try {
       await deleteApp.mutateAsync(app.id);
       toast.success("OAuth app deleted");
-      void navigate("/connections?tab=oauth-apps");
+      void navigate("/integrations/tools?tab=oauth-apps");
     } catch (err) {
       toastMutationError(err);
     }
@@ -208,7 +210,7 @@ export default function OAuthAppDetailPage() {
   if (error || !app) {
     return (
       <div className="flex flex-col gap-3 p-4">
-        <BackButton fallback="/connections?tab=oauth-apps" />
+        <BackButton fallback="/integrations/tools?tab=oauth-apps" />
         <InlineError error={error ?? "OAuth app not found"} />
       </div>
     );
@@ -219,7 +221,7 @@ export default function OAuthAppDetailPage() {
       <PageHeader
         title={
           <span className="flex min-w-0 flex-wrap items-center gap-2">
-            <BackButton fallback="/connections?tab=oauth-apps" iconOnly />
+            <BackButton fallback="/integrations/tools?tab=oauth-apps" iconOnly />
             <span className="truncate text-xl font-semibold">{app.provider}</span>
             <OAuthSourceBadge source={app.source} />
             <LegacyCallbackWarning app={app} staticCallback={staticCallback} />

@@ -4,6 +4,8 @@ Delivery uses configured admin channels with an in-app fallback.
 
 Capture lessons from the day into memory, skills, and workflow improvements.
 
+Seeded disabled: the `dreaming` workflow, triggered by the `dreaming-daily` schedule, replaces it.
+
 ## Schedule
 
 ```json
@@ -11,7 +13,7 @@ Capture lessons from the day into memory, skills, and workflow improvements.
   "cron": "10 2 * * *",
   "timezone": "UTC",
   "agentRole": "lead",
-  "enabled": true
+  "enabled": false
 }
 ```
 

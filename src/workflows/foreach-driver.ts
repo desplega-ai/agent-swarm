@@ -3,8 +3,8 @@ import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
   getLatestStepForNode,
+  getRunWorkflow,
   getTaskByWorkflowRunStepId,
-  getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
@@ -128,7 +128,7 @@ export async function driveForeach(
 ): Promise<ForeachDriveResult> {
   const run = await getWorkflowRun(runId);
   if (!run || (run.status !== "running" && run.status !== "waiting")) return NOT_JOINED;
-  const workflow = await getRenderedWorkflow(run.workflowId);
+  const workflow = await getRenderedWorkflow(run);
   if (!workflow) return NOT_JOINED;
   const def = workflow.definition;
   const parentNode = def.nodes.find((node) => node.id === parentNodeId);
@@ -277,7 +277,7 @@ export async function runForeachDrive(
       return drive;
     }
     const run = await getWorkflowRun(runId);
-    const workflow = run ? await getRenderedWorkflow(run.workflowId) : null;
+    const workflow = run ? await getRenderedWorkflow(run) : null;
     if (!run || !workflow) return drive;
     const ctx = (run.context ?? {}) as Record<string, unknown>;
     if (drive.successors.length > 0) {
@@ -313,8 +313,11 @@ export async function drainForeachDrives(): Promise<void> {
  * post-join walk reload the definition, so without this a `{{PARAM}}` token in
  * the body config or in `over` would reach the per-item pass unresolved.
  */
-async function getRenderedWorkflow(workflowId: string): Promise<Workflow | null> {
-  const workflow = await getWorkflow(workflowId);
+async function getRenderedWorkflow(run: {
+  id: string;
+  workflowId: string;
+}): Promise<Workflow | null> {
+  const workflow = await getRunWorkflow(run);
   return workflow ? renderAutomationTokens(workflow, workflow.params ?? {}) : null;
 }
 

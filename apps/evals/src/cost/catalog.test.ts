@@ -198,7 +198,7 @@ describe("model catalog", () => {
     const catalog = await getResolutionCatalog();
     expect(reasoningLevelsForModel("codex", "gpt-5.5", catalog)).toContain("xhigh");
     expect(reasoningLevelsForModel("pi", "openrouter/deepseek/deepseek-v4-flash", catalog)).toEqual(
-      ["high", "xhigh"],
+      ["off", "high", "xhigh"],
     );
   });
 

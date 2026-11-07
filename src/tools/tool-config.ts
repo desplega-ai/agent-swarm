@@ -81,8 +81,9 @@ export const DEFERRED_TOOLS = new Set([
   "model-catalog-refresh",
   "model-catalog-overlay-upsert",
 
-  // Model profiles (1)
+  // Model profiles (2)
   "list-model-profiles",
+  "check-model-profile",
 
   // Repos (1)
   "update-repo",
@@ -96,7 +97,7 @@ export const DEFERRED_TOOLS = new Set([
   "read-messages",
   "post-message",
 
-  // Slack (12): task-context gated; keep out of CORE_TOOLS
+  // Slack (13): task-context gated; keep out of CORE_TOOLS
   "slack-reply",
   "slack-read",
   "slack-upload-file",
@@ -109,6 +110,7 @@ export const DEFERRED_TOOLS = new Set([
   "slack-archive-channel",
   "slack-delete",
   "slack-update",
+  "slack-leave-thread",
 
   // Channel management (2)
   "create-channel",
@@ -153,6 +155,9 @@ export const DEFERRED_TOOLS = new Set([
   // Approval Requests (2)
   "request-human-input",
   "cancel-approval-request",
+
+  // Improvements (1)
+  "submit-improvement",
 
   // Decisions (1)
   "system-one-decide",

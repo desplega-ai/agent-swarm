@@ -1,0 +1,132 @@
+/* ============================================================
+   Post-onboarding UI spike, round 4: additions to the round-3 kit.
+
+   Load order: tokens.css, r2-kit.css, r3-kit.css, then this file.
+   Adds the Connect top row, the tab row that holds a search, the
+   "not yet supported" marker, usage meters, the row menu, the side
+   drawer, the confirm dialog and a few icons. Nothing here copies an
+   r2 or r3 rule. Throwaway reference material: nothing ships.
+   ============================================================ */
+
+/* ---------- z-index scale inside a frame ---------- */
+:root { --z-menu: 20; --z-scrim: 30; --z-drawer: 31; --z-dialog: 40; }
+.app .main { position: relative; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* ---------- top bar: the breadcrumb carries the page name ---------- */
+.topbar .crumbs .cg { color: var(--color-muted-foreground); }
+.topbar .crumbs b { font-weight: 500; }
+
+/* ---------- Connect top row: search left, primary action right ---------- */
+.trow { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 8px 0 16px; }
+.trow .field { width: 320px; }
+.trow .btn { height: 32px; }
+.field kbd.k1 { margin-left: auto; }
+.phone .trow { margin: 0 0 12px; }
+.phone .trow .field { flex: 1; width: auto; height: 44px; font-size: 16px; }
+.phone .trow .btn.sq { width: 44px; height: 44px; }
+
+/* ---------- tab row that also holds the search (Tools) ---------- */
+.tabrow { display: flex; align-items: stretch; gap: 8px; margin: 4px 0 16px; box-shadow: inset 0 -1px 0 var(--color-border); }
+.tabrow .utabs { flex: 1; min-width: 0; margin: 0; border-bottom: 0; }
+.tabrow .utabs [role="tab"] { margin-bottom: 0; border-bottom: 0; transition: color 150ms var(--ease-snappy), box-shadow 150ms var(--ease-snappy); }
+.tabrow .utabs [role="tab"][aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--color-foreground); }
+.tabrow .tact { flex: none; display: flex; align-items: center; gap: 8px; }
+.tabrow .tact .field { width: 232px; }
+.tabrow .tact .btn { height: 32px; }
+.tabrow .vsep { width: 1px; height: 16px; background: var(--color-border); margin: 0 2px; }
+.tabrow .adv { margin-left: 0; padding: 0 2px 0 4px; height: 32px; }
+.tabrow .utabs .adv { display: none; }
+.phone .tabrow { margin: 0 -14px 12px; padding-left: 6px; }
+.phone .tabrow .utabs { padding: 0; }
+.phone .tabrow .utabs .adv { display: inline-flex; margin-left: 4px; }
+.phone .tabrow .tact { gap: 0; padding-right: 4px; box-shadow: -12px 0 12px -8px var(--color-background); background: var(--color-background); }
+.phone .tabrow .tact .field, .phone .tabrow .tact .vsep, .phone .tabrow .tact .adv, .phone .tabrow .tact .bl { display: none; }
+.phone .tabrow .tact .btn { width: 44px; height: 44px; padding: 0; border: 0; box-shadow: none; background: none; }
+.tact .only-phone { display: none; }
+.phone .tact .only-phone { display: inline-flex; }
+@media (prefers-reduced-motion: reduce) { .tabrow .utabs [role="tab"] { transition: none; } }
+
+/* ---------- "not yet supported" marker: dashed, never a status color ---------- */
+.nys { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px dashed color-mix(in oklch, var(--color-muted-foreground) 60%, transparent); border-radius: var(--radius-sm); font-size: 11px; font-weight: 500; line-height: 1; color: var(--color-muted-foreground); white-space: nowrap; vertical-align: 1px; }
+
+/* ---------- usage meter: label, bar, percent ---------- */
+.mt { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-muted-foreground); white-space: nowrap; }
+.mt .bar { width: 44px; height: 6px; border-radius: 3px; background: color-mix(in oklch, var(--color-muted-foreground) 18%, transparent); overflow: hidden; flex: none; }
+.mt .bar i { display: block; height: 100%; width: var(--v); border-radius: inherit; background: color-mix(in oklch, var(--color-foreground) 50%, transparent); }
+.mt .v { min-width: 3.2ch; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--color-foreground); font-variant-numeric: tabular-nums; }
+.mt.hi .bar i { background: var(--color-status-warning); }
+.mt.hi .v { color: var(--color-status-warning-strong); }
+.mt.lg .bar { width: auto; flex: 1; height: 8px; border-radius: 4px; }
+.mts { display: inline-flex; align-items: center; gap: 14px; }
+
+/* ---------- row menu (DropdownMenu look) ----------
+   Pre-opened exhibit states render without motion: headless capture
+   freezes animations at their first frame. Only a click adds .anim. */
+.menu { position: absolute; z-index: var(--z-menu); min-width: 232px; padding: 4px; background: var(--color-popover); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--frame-shadow); transform-origin: top right; }
+.menu.anim { animation: pop-in 150ms var(--ease-snappy); }
+.menu .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; font-size: 13px; color: var(--color-foreground); text-align: left; white-space: nowrap; }
+.menu .mi .ic { width: 14px; height: 14px; color: var(--color-muted-foreground); }
+.menu .mi .hint { margin-left: auto; padding-left: 16px; font-size: 12px; color: var(--color-muted-foreground); }
+.menu .mi:hover, .menu .mi.hl { background: var(--color-accent); }
+.menu .mi:disabled { color: var(--color-muted-foreground); background: none; }
+.menu .mi.danger, .menu .mi.danger .ic { color: var(--color-status-error-strong); }
+.menu .mi.danger:hover { background: color-mix(in oklch, var(--color-status-error) 10%, transparent); }
+.menu .msep { height: 1px; margin: 4px -4px; background: var(--color-border-subtle); }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.97); } }
+
+/* ---------- side drawer (Sheet look) inside the main panel ---------- */
+.scrim { position: absolute; inset: 0; z-index: var(--z-scrim); background: oklch(0.141 0.005 285 / 0.16); }
+.scrim.anim { animation: fade-in 250ms var(--ease-swift); }
+html.dark .scrim { background: oklch(0 0 0 / 0.45); }
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: var(--z-drawer); width: 472px; max-width: 100%; display: flex; flex-direction: column; background: var(--color-background); border-left: 1px solid var(--color-border); box-shadow: -28px 0 48px -36px oklch(0 0 0 / 0.4); }
+.drawer.anim { animation: slide-in 400ms var(--ease-swift); }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
+
+/* ---------- confirm dialog (AlertDialog look) ---------- */
+.dlg-wrap { position: absolute; inset: 0; z-index: var(--z-dialog); display: grid; place-items: center; background: oklch(0.141 0.005 285 / 0.28); }
+.dlg-wrap.anim { animation: fade-in 200ms var(--ease-snappy); }
+.dlg-wrap.anim .dlg { animation: pop-in 200ms var(--ease-snappy); }
+html.dark .dlg-wrap { background: oklch(0 0 0 / 0.55); }
+.dlg { width: 440px; max-width: calc(100% - 32px); padding: 20px 20px 16px; background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--frame-shadow); }
+.dlg h3 { margin: 0 0 8px; font-size: 16px; line-height: 22px; font-weight: 600; text-wrap: balance; }
+.dlg p { margin: 0 0 6px; font-size: 13px; line-height: 1.55; color: var(--color-muted-foreground); text-wrap: pretty; }
+.dlg p b { color: var(--color-foreground); font-weight: 500; }
+.dlg .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* destructive buttons (Button destructive / destructive-outline) */
+.btn.danger { background: var(--color-destructive); border-color: var(--color-destructive); color: var(--color-destructive-foreground); }
+html.dark .btn.danger { background: oklch(0.55 0.19 25); border-color: oklch(0.55 0.19 25); }
+.btn.danger:hover { background: color-mix(in oklch, var(--color-destructive) 90%, black); }
+.btn.danger-outline { background: transparent; box-shadow: none; color: var(--color-status-error-strong); border-color: color-mix(in oklch, var(--color-status-error) 35%, transparent); }
+.btn.danger-outline:hover { background: color-mix(in oklch, var(--color-status-error) 10%, transparent); }
+.btn.danger-outline .ic { color: inherit; }
+
+/* a copyable command */
+.cmd { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); font-family: var(--font-mono); font-size: 12px; color: var(--color-foreground); min-width: 0; }
+.cmd .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd .t::before { content: "$ "; color: var(--color-muted-foreground); }
+.cmd .btn { flex: none; }
+code.k { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 4px; border-radius: 4px; background: color-mix(in oklch, var(--color-muted-foreground) 12%, transparent); color: var(--color-foreground); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .menu.anim, .scrim.anim, .drawer.anim, .dlg-wrap.anim, .dlg-wrap.anim .dlg { animation: none; }
+}
+
+/* ---------- extra lucide icons ---------- */
+.i-trash { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/svg%3E"); }
+.i-pencil { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/%3E%3Cpath d='m15 5 4 4'/%3E%3C/svg%3E"); }
+.i-copy { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E"); }
+.i-card { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='20' height='14' x='2' y='5' rx='2'/%3E%3Cpath d='M2 10h20'/%3E%3C/svg%3E"); }
+.i-help { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E"); }
+.i-log-in { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4'/%3E%3Cpath d='m10 17 5-5-5-5'/%3E%3Cpath d='M15 12H3'/%3E%3C/svg%3E"); }
+.i-timer { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2h4'/%3E%3Cpath d='M12 14l3-3'/%3E%3Ccircle cx='12' cy='14' r='8'/%3E%3C/svg%3E"); }
+
+/* Advanced link outside the tab strip (round-3 look) */
+.tabrow .adv { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-muted-foreground); white-space: nowrap; }
+.tabrow .adv .ic { width: 12px; height: 12px; }
+.tabrow .adv:hover { color: var(--color-foreground); }
+.tabrow .utabs .adv { display: none; }
+.phone .tabrow .tact .btn { color: var(--color-foreground); }
+.phone .tabrow .tact .btn.primary { width: 36px; height: 36px; margin: 0 4px; border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-primary-foreground); }

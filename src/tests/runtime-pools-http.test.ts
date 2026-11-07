@@ -70,6 +70,35 @@ async function dispatch(
   ).toBe(true);
   return { status, text, data: JSON.parse(text) };
 }
+test("operator can configure a pool cache through HTTP without selecting provider volume names", async () => {
+  const controller = await dispatch("/api/runtime-controllers", "POST", {
+    name: "cache-controller",
+    kind: "docker",
+  });
+  const input = {
+    name: "cache-pool",
+    kind: "docker",
+    placements: [controller.data.controller.id],
+    image: "worker:test",
+    cache: { mountPath: "/cache" },
+  };
+  const created = await dispatch("/api/runtime-pools", "POST", input);
+  expect(created.status).toBe(200);
+  expect(created.data.pool.cache).toEqual({ mountPath: "/cache" });
+  const id = created.data.pool.id;
+  const renamed = await dispatch(`/api/runtime-pools/${id}`, "PATCH", {
+    name: "renamed-cache-pool",
+  });
+  expect(renamed.data.pool.cache).toEqual({ mountPath: "/cache" });
+  const rejected = await dispatch(`/api/runtime-pools/${id}`, "PATCH", {
+    cache: { mountPath: "/cache", key: "foreign-volume" },
+  });
+  expect(rejected.status).toBe(400);
+  const disabled = await dispatch(`/api/runtime-pools/${id}`, "PATCH", { cache: null });
+  expect(disabled.status).toBe(200);
+  expect(disabled.data.pool.cache).toBeNull();
+});
+
 beforeAll(async () => {
   await cleanup();
   initDb(path);

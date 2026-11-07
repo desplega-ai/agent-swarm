@@ -5,9 +5,7 @@ import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
   createTaskExtended,
   extensionAgentAssignmentError,
-  findCompletedTaskInThread,
   findExistingLinearTrackerContextWork,
-  findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
   getDbClient,
@@ -23,11 +21,17 @@ import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { can } from "@/rbac";
+import {
+  evaluateFollowUpRedelegation,
+  followUpThreadForSourceTask,
+} from "@/tasks/follow-up-redelegation-guard";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
+  modelTierDeprecatedOutputSchema,
+  modelTierDeprecation,
   type SwarmToolResult,
   swarmToolOutputSchema,
   toolErr,
@@ -137,10 +141,10 @@ export const sendTaskInputSchema = z
       .min(1)
       .optional()
       .describe(
-        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
+        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
       ),
     modelTier: ModelTierSchema.optional().describe(
-      "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
+      "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
     ),
     allowCustomModel: z
       .boolean()
@@ -163,7 +167,13 @@ export const sendTaskInputSchema = z
       .boolean()
       .default(false)
       .describe(
-        "If true, skip duplicate detection and create the task even if a similar one exists.",
+        "If true, skip duplicate detection and create the task even if a similar one exists. Does not bypass the follow-up re-delegation guard; see allowRedelegation.",
+      ),
+    allowRedelegation: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Only matters when you call send-task from a follow-up task in a Slack thread. Such a dispatch is blocked when it repeats a task already completed in that thread (same-work rule, unless a task there was cancelled or failed after that completion), or when you already dispatched 10 tasks into the thread in the last 6 hours (loop-cap rule). Set true to dispatch anyway; the override is logged. Use it only for deliberate re-runs or long chains, never to retry a block you have not read.",
       ),
     slackChannelId: z
       .string()
@@ -196,7 +206,7 @@ export const sendTaskInputSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items.",
+        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. When omitted, the child inherits the schema of its parent task (your current task by default). An empty object {} means no schema: the child stores none and inherits none.",
       ),
   })
   .superRefine((data, ctx) => {
@@ -230,6 +240,7 @@ export const sendTaskInputSchema = z
 export const sendTaskOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
   task: looseAgentTaskOutputSchema.optional(),
+  modelTierDeprecated: modelTierDeprecatedOutputSchema.optional(),
 });
 
 type SendTaskArgs = z.infer<typeof sendTaskInputSchema>;
@@ -292,6 +303,7 @@ export async function sendTaskHandler(
     effort,
     profile,
     allowDuplicate,
+    allowRedelegation,
     slackChannelId,
     slackThreadTs,
     slackUserId,
@@ -316,6 +328,7 @@ export async function sendTaskHandler(
   const requestedLeadOnly = ctx.kind === "user" ? false : leadOnly;
   const requestedCapabilities = ctx.kind === "user" ? undefined : requiredCapabilities;
   const requestedAllowDuplicate = ctx.kind === "user" ? false : allowDuplicate;
+  const requestedAllowRedelegation = ctx.kind === "user" ? false : allowRedelegation;
   const requestedOverrideSlackContext = ctx.kind === "user" ? false : overrideSlackContext;
 
   // Defense in depth for direct TypeScript callers that bypass MCP schema parsing.
@@ -489,6 +502,8 @@ export async function sendTaskHandler(
     model: normalizedModel.model,
     modelTier: normalizedModel.modelTier,
     agentId: effectiveAgentId,
+    // createTaskExtended fills an unset repo from the parent; judge that repo's config.
+    vcsRepo: effectiveVcsRepo || effectiveParentTask?.vcsRepo,
   });
   if (profileError) return toolErr(profileError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
@@ -515,6 +530,9 @@ export async function sendTaskHandler(
     requestedByUserId,
     source: "mcp",
     sourceTaskId,
+    // Where this dispatch happened. parentTaskId can point at an earlier task
+    // for context continuity; the dashboard groups delegations by this.
+    dispatchedByTaskId: sourceTaskId,
     taskType,
     tags,
     priority,
@@ -572,7 +590,9 @@ export async function sendTaskHandler(
   // Every read in this handler releases the FIFO lock, so two concurrent
   // send-task calls with the same creator and text otherwise both pass the
   // guards and both create a task (no UNIQUE index arbitrates them).
-  const evaluateDedupGuards = async (): Promise<{
+  const evaluateDedupGuards = async (
+    logOverride: boolean,
+  ): Promise<{
     ok: boolean;
     message: string;
     task?: AgentTask;
@@ -602,59 +622,35 @@ export async function sendTaskHandler(
       }
     }
 
-    // Guard: prevent re-delegation from follow-up tasks
-    // When the source task is a "follow-up" (worker completed/failed notification),
-    // check if there are completed tasks in the same Slack thread recently.
-    // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
-    //
-    // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
-    // status='cancelled', or status='failed' with failureReason containing
-    // "cancelled"), bypass the guard. A cancellation means the work was
-    // interrupted — re-dispatch is the correct response, not a deduped no-op.
-    // Without this bypass, a cancelled worker permanently jams the thread
-    // against re-delegation when an earlier completed sibling exists.
+    // Guard: prevent re-delegation from follow-up tasks (same-work and
+    // loop-cap rules, see src/tasks/follow-up-redelegation-guard.ts).
+    // allowRedelegation bypasses both and is logged.
     //
     // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
     // supersede) is intentionally NOT in this guard — a resume IS the legitimate
     // re-dispatch and bypassing the check is correct. Do not add "resume" here.
-    if (sourceTaskId) {
-      const sourceTask = await getTaskById(sourceTaskId);
-      if (
-        sourceTask?.taskType === "follow-up" &&
-        sourceTask.slackThreadTs &&
-        sourceTask.slackChannelId
-      ) {
-        const recentCompleted = await findCompletedTaskInThread(
-          sourceTask.slackChannelId,
-          sourceTask.slackThreadTs,
-          2880, // 48 hours in minutes
+    const followUpThread = creatorAgentId ? await followUpThreadForSourceTask(sourceTaskId) : null;
+    if (followUpThread && creatorAgentId) {
+      const blocked = await evaluateFollowUpRedelegation({
+        ...followUpThread,
+        creatorAgentId,
+        taskDescription,
+        targetAgentId: taskOptions.agentId ?? taskOptions.offeredTo,
+      });
+      if (blocked && !requestedAllowRedelegation) {
+        return { ok: false, message: blocked.message };
+      }
+      if (blocked && logOverride) {
+        console.log(
+          `[send-task] follow-up re-delegation override: rule=${blocked.rule} creatorAgentId=${creatorAgentId} sourceTaskId=${sourceTaskId} thread=${followUpThread.channelId}/${followUpThread.threadTs}`,
         );
-        if (recentCompleted) {
-          const recentCancelled = await findRecentCancelledTaskInThread(
-            sourceTask.slackChannelId,
-            sourceTask.slackThreadTs,
-            2880,
-          );
-          const cancelledMoreRecent =
-            recentCancelled &&
-            new Date(recentCancelled.lastUpdatedAt).getTime() >
-              new Date(recentCompleted.lastUpdatedAt).getTime();
-          if (!cancelledMoreRecent) {
-            return {
-              ok: false,
-              message: `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`,
-            };
-          }
-          // else: fall through — the cancellation is more recent than the
-          // completion, so re-delegation is legitimate.
-        }
       }
     }
 
     return null;
   };
 
-  const guard = await evaluateDedupGuards();
+  const guard = await evaluateDedupGuards(true);
   if (guard) {
     const guardData = {
       yourAgentId: creatorAgentId,
@@ -669,7 +665,7 @@ export async function sendTaskHandler(
     // Authoritative re-check: the reads above are separated from the INSERT by
     // the whole handler, so only a guard inside this transaction can see a
     // concurrent send-task's committed task.
-    const raced = await evaluateDedupGuards();
+    const raced = await evaluateDedupGuards(false);
     if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
 
     // This transaction already checked the tracker key, excluding the caller's
@@ -767,9 +763,19 @@ export async function sendTaskHandler(
     return { success: false, message: `Unknown model profile "${profile}".`, task: undefined };
   });
 
+  // modelTier aliases the assignee harness's seeded profile; a pool task has no harness yet.
+  const assigneeId = result.task?.agentId ?? result.task?.offeredTo;
+  const modelTierDeprecated =
+    result.success && modelTier
+      ? modelTierDeprecation(
+          modelTier,
+          assigneeId ? (await getAgentById(assigneeId))?.harnessProvider : null,
+        )
+      : undefined;
   const data = {
     yourAgentId: creatorAgentId,
     task: result.task,
+    ...(modelTierDeprecated ? { modelTierDeprecated } : {}),
   };
 
   // Text channel must carry the created task too — most harnesses never show

@@ -11,8 +11,11 @@ import type {
 import {
   type GroupNode,
   personalOwner,
+  resourceSectionLabel,
   type SessionGroupTree,
+  type SessionResourceKind,
   type SessionSource,
+  sourceSectionLabel,
 } from "../../../lib/session-groups";
 import {
   type SessionSection,
@@ -56,9 +59,14 @@ export type TreeRow =
       searchMatch?: boolean;
     })
   | (RowBase & {
-      /** A source section header (Slack, Telegram, Discord). A click folds it. */
+      /**
+       * A source section header (Slack, Telegram, Discord) or a resource one
+       * (Pages, Workflows, ...). A click folds it.
+       */
       type: "source";
-      source: SessionSource;
+      source: SessionSource | SessionResourceKind;
+      /** What the header reads: `Slack`, `Pages`. */
+      label: string;
       open: boolean;
       counts: SessionSectionCounts;
     })
@@ -127,6 +135,11 @@ export function isMyGroupRow(
   return row?.type === "group" && !row.sharedWithMe && !row.readOnly;
 }
 
+/** The key a row's star stands for: real group rows only, not nested thread rows. */
+export function groupStarKey(row: TreeRow): string | null {
+  return row.type === "group" && !row.node.thread ? row.node.key : null;
+}
+
 export function isNavRow(row: TreeRow): row is NavRow {
   return NAV_TYPES.has(row.type);
 }
@@ -135,7 +148,7 @@ export function isNavRow(row: TreeRow): row is NavRow {
 export const ownerFoldId = (ownerId: string) => `owner:${ownerId}`;
 
 /** The fold id of a source section. */
-export const sourceFoldId = (source: SessionSource) => `source:${source}`;
+export const sourceFoldId = (source: SessionSource | SessionResourceKind) => `source:${source}`;
 
 /** The fold id of a container row: a section, a group key, a source, or an owner. */
 export function foldId(row: TreeRow): string | null {
@@ -237,12 +250,18 @@ export function foldIds(groups: SessionGroupTree): Set<string> {
     ids.add(sourceFoldId(section.source));
     for (const node of section.nodes) walk(node);
   }
+  for (const section of groups.resources) {
+    ids.add(sourceFoldId(section.kind));
+    for (const node of section.nodes) walk(node);
+  }
   return ids;
 }
 
 export interface ListState {
   data?: SessionsListResponse;
   failed: boolean;
+  /** `data` is the previous Mine / All view's page while this one loads. */
+  stale?: boolean;
 }
 
 interface BuildTreeRowsInput {
@@ -260,9 +279,9 @@ interface BuildTreeRowsInput {
 }
 
 /**
- * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, Later, Done,
- * No group, My groups, Shared with me, then one section per source
- * (SPEC R4, plan Phase 5). `containers` names the lists to
+ * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, then the
+ * groups (My groups, Shared with me, one section per source, No group), then
+ * Later and Done, so ongoing work sits right under the Inbox. `containers` names the lists to
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
  */
@@ -331,9 +350,6 @@ export function buildTreeRows({
     if (open) fill(id, key, counts.total, 1, flat, id);
   };
   box("inbox", tree.inbox, true);
-  box("later", tree.later, true);
-  box("done", tree.done, true);
-  box("nogroup", tree.noGroup, false);
 
   // My groups. A folded group shows its whole subtree in its counts, an open
   // one its own sessions only (they list under it, after its subgroups).
@@ -425,11 +441,31 @@ export function buildTreeRows({
       key: sourceFoldId(section.source),
       level: 0,
       source: section.source,
+      label: sourceSectionLabel(section.source),
       open,
       counts: section.counts,
     });
     if (open) for (const node of section.nodes) groupNode(node, 1, true);
   }
+
+  // One section per resource kind (Pages, Workflows, ...), like a source: folded, read-only.
+  for (const section of groups.resources) {
+    const open = isOpen(sourceFoldId(section.kind));
+    rows.push({
+      type: "source",
+      key: sourceFoldId(section.kind),
+      level: 0,
+      source: section.kind,
+      label: resourceSectionLabel(section.kind),
+      open,
+      counts: section.counts,
+    });
+    if (open) for (const node of section.nodes) groupNode(node, 1, true);
+  }
+
+  box("nogroup", tree.noGroup, false);
+  box("later", tree.later, true);
+  box("done", tree.done, true);
 
   return { rows, containers };
 }

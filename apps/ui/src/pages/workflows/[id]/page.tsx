@@ -43,6 +43,10 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
+import {
+  WorkflowSavingsHeaderAmount,
+  WorkflowSavingsTab,
+} from "@/components/savings/workflow-savings";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
@@ -51,6 +55,11 @@ import { FavoriteButton } from "@/components/shared/favorite-button";
 import { JsonTree } from "@/components/shared/json-tree";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,6 +81,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useTheme } from "@/hooks/use-theme";
 import {
   readBooleanParam,
@@ -79,10 +89,11 @@ import {
   readStringParam,
   useUrlSearchState,
 } from "@/hooks/use-url-search-state";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
+import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const RUNS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -101,7 +112,44 @@ export default function WorkflowDetailPage() {
       allowed: RUNS_PAGE_SIZE_OPTIONS,
     },
   );
-  const { data: workflow, isLoading } = useWorkflow(id!);
+  const { data: latestWorkflow, isLoading } = useWorkflow(id!);
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const workflowRevision =
+    latestWorkflow &&
+    JSON.stringify([
+      latestWorkflow.definition,
+      latestWorkflow.triggers,
+      latestWorkflow.cooldown,
+      latestWorkflow.input,
+      latestWorkflow.requiredParams,
+      latestWorkflow.requires,
+    ]);
+  const [paramsDraft, setParamsDraft] = useState(false);
+  const workflowVersion = useVersionedValue(id, latestWorkflow, workflowRevision, autoReload, {
+    draft: paramsDraft,
+    onAutoApply: () => showVersionUpdatedToast(),
+  });
+  useVersionUpdateToast({
+    entityKey: `workflow:${id}`,
+    latestRevision: workflowRevision,
+    pending: workflowVersion.pending,
+    editing: workflowVersion.editing,
+    autoReload,
+    canAutoReload: workflowVersion.canAutoReload,
+    onLoad: workflowVersion.apply,
+  });
+  const workflow =
+    latestWorkflow && workflowVersion.value
+      ? {
+          ...latestWorkflow,
+          definition: workflowVersion.value.definition,
+          triggers: workflowVersion.value.triggers,
+          cooldown: workflowVersion.value.cooldown,
+          input: workflowVersion.value.input,
+          requiredParams: workflowVersion.value.requiredParams,
+          requires: workflowVersion.value.requires,
+        }
+      : latestWorkflow;
   const { data: runsData, isLoading: runsLoading } = useWorkflowRuns(id!, {
     limit: runsPageSize,
     offset: runsPage * runsPageSize,
@@ -232,7 +280,7 @@ export default function WorkflowDetailPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div ref={workflowVersion.scopeRef} className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
       <div className="shrink-0 space-y-3">
         <button
@@ -265,6 +313,10 @@ export default function WorkflowDetailPage() {
           <Badge variant="outline" size="tag">
             {workflow.definition.edges?.length ?? 0} edges
           </Badge>
+          <WorkflowSavingsHeaderAmount
+            workflowId={workflow.id}
+            onOpen={() => setActiveTab("savings")}
+          />
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             <FavoriteButton
               favorite={workflow.favorite}
@@ -331,6 +383,7 @@ export default function WorkflowDetailPage() {
           <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
           <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
+          <TabsTrigger value="savings">Savings</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
@@ -401,7 +454,12 @@ export default function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="setup" className="flex flex-col flex-1 min-h-0">
-          <WorkflowSetupPanel workflow={workflow} focusParam={focusedParam} />
+          <WorkflowSetupPanel
+            key={workflow.id}
+            workflow={workflow}
+            focusParam={focusedParam}
+            onDraftChange={setParamsDraft}
+          />
         </TabsContent>
 
         {/* Triggers tab */}
@@ -440,6 +498,11 @@ export default function WorkflowDetailPage() {
             }
             emptyLabel="0 runs"
           />
+        </TabsContent>
+
+        {/* Savings tab */}
+        <TabsContent value="savings" className="flex flex-col flex-1 min-h-0">
+          <WorkflowSavingsTab workflowId={workflow.id} />
         </TabsContent>
 
         {/* Versions tab */}
@@ -497,6 +560,7 @@ export default function WorkflowDetailPage() {
 function WorkflowSetupPanel({
   workflow,
   focusParam,
+  onDraftChange,
 }: {
   workflow: {
     id: string;
@@ -504,11 +568,28 @@ function WorkflowSetupPanel({
     params?: Record<string, unknown>;
   };
   focusParam?: string;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const updateWorkflow = useUpdateWorkflow();
   const [params, setParams] = useState<Record<string, unknown>>(workflow.params ?? {});
+  const [dirty, setDirty] = useState(false);
+  const [baseParams, setBaseParams] = useState(() => JSON.stringify(workflow.params ?? {}));
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const paramsChangedRemotely = dirty && baseParams !== JSON.stringify(workflow.params ?? {});
 
-  useEffect(() => setParams(workflow.params ?? {}), [workflow.params]);
+  // A parameter draft holds new workflow versions until it is saved or reset.
+  useEffect(() => {
+    onDraftChange?.(dirty);
+    return () => onDraftChange?.(false);
+  }, [dirty, onDraftChange]);
+
+  useEffect(() => {
+    if (!dirty) {
+      setParams(workflow.params ?? {});
+      setBaseParams(JSON.stringify(workflow.params ?? {}));
+    }
+  }, [workflow.params, dirty]);
 
   return (
     <Card className="max-w-2xl">
@@ -519,22 +600,41 @@ function WorkflowSetupPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {paramsChangedRemotely && (
+          <AlertCallout
+            tone="warning"
+            action={
+              <Button size="sm" variant="outline" onClick={() => setDirty(false)}>
+                Load saved parameters
+              </Button>
+            }
+          >
+            The saved parameters changed while you were editing. Load them before saving.
+          </AlertCallout>
+        )}
         <AutomationParamsFields
           requiredParams={workflow.requiredParams}
           params={params}
           focusParam={focusParam}
-          onChange={setParams}
+          onChange={(next) => {
+            setParams(next);
+            setDirty(true);
+          }}
         />
         {workflow.requiredParams?.length ? (
           <Button
             type="button"
             size="sm"
-            disabled={updateWorkflow.isPending}
+            disabled={updateWorkflow.isPending || paramsChangedRemotely}
             onClick={() =>
               updateWorkflow.mutate(
                 { id: workflow.id, data: { params } },
                 {
-                  onSuccess: () => toast.success("Workflow parameters saved"),
+                  onSuccess: () => {
+                    if (JSON.stringify(paramsRef.current) === JSON.stringify(params))
+                      setDirty(false);
+                    toast.success("Workflow parameters saved");
+                  },
                   onError: (error) =>
                     toast.error(
                       error instanceof Error ? error.message : "Failed to save parameters",
@@ -834,12 +934,11 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
             </div>
             <Editor
               language={language}
-              theme={theme === "dark" ? "github-dark" : "github-light"}
+              theme={MONACO_GITHUB_THEME[theme]}
               value={code}
               height={`${editorHeight}px`}
               beforeMount={(monaco) => {
-                monaco.editor.defineTheme("github-light", monacoLightTheme);
-                monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+                defineGithubThemes(monaco);
               }}
               options={{
                 readOnly: true,
@@ -1426,13 +1525,12 @@ function JsonMonacoEditor({
     <div className="rounded-md overflow-hidden border border-border" data-testid={testId}>
       <Editor
         language="json"
-        theme={theme === "dark" ? "github-dark" : "github-light"}
+        theme={MONACO_GITHUB_THEME[theme]}
         value={value}
         height={`${height}px`}
         onChange={(v) => onChange(v ?? "")}
         beforeMount={(monaco) => {
-          monaco.editor.defineTheme("github-light", monacoLightTheme);
-          monaco.editor.defineTheme("github-dark", monacoDarkTheme);
+          defineGithubThemes(monaco);
         }}
         options={{
           readOnly,

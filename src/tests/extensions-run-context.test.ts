@@ -24,6 +24,17 @@ describe("runContext", () => {
     expect(context.subject?.includes("sk-ant-")).toBe(false);
   });
 
+  test("steering records its source and sender agent without message content", () => {
+    expect(
+      runContext("pre.task.steer", {
+        task: { id: "task-1", agentId: "worker", task: "Private task" },
+        source: "mcp",
+        sender: { kind: "agent", agentId: "lead" },
+        message: "Private correction",
+      }),
+    ).toEqual({ agentId: "lead", subject: "mcp: task task-1" });
+  });
+
   test("post task events record the task's agent", () => {
     expect(
       runContext("post.task.completed", {

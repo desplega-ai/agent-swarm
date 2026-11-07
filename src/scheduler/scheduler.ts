@@ -11,6 +11,7 @@ import {
 import {
   getDbClient,
   getDueScheduledTasks,
+  getLeadAgent,
   getScheduledTaskById,
   getUserById,
   getWorkflow,
@@ -26,12 +27,14 @@ import {
 import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
 import { runScriptWithRunCredential } from "@/be/scripts/run-credential";
+import { seededWorkflowState } from "@/be/seed/workflows-seeder";
 import { telemetry } from "@/telemetry";
-import type { AgentTask, ScheduledTask } from "@/types";
+import type { AgentTask, ScheduledTask, Workflow } from "@/types";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
 import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
+import { withLoopPath } from "../be/event-loop-lag";
 import { ensure } from "../utils/business-use";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
@@ -88,6 +91,8 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
   const agentId = schedule.createdByAgentId ?? "schedule";
   const args = schedule.scriptArgs ?? {};
   const record = {
+    // Fixed before the run so rows the script creates can point at it.
+    id: crypto.randomUUID(),
     agentId,
     scriptName: schedule.scriptName,
     // A pointer, not a copy: script schedules fire as often as every minute and
@@ -102,19 +107,22 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
   let output: Awaited<ReturnType<typeof runScriptWithRunCredential>>;
   try {
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId });
-    output = await runScriptWithRunCredential({
-      source: script.source,
-      args,
-      fsMode: "none",
-      executor: script.executor,
-      agentId,
-      egressSecrets: credentials.egressSecrets,
-      userConfig: credentials.userConfig,
-      agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
-      timeoutMs: 60_000,
-    });
+    output = await runScriptWithRunCredential(
+      {
+        source: script.source,
+        args,
+        fsMode: "none",
+        executor: script.executor,
+        agentId,
+        egressSecrets: credentials.egressSecrets,
+        userConfig: credentials.userConfig,
+        agentFs: credentials.agentFs,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+        timeoutMs: 60_000,
+      },
+      { sourceScriptRunId: record.id },
+    );
   } catch (err) {
     await recordScheduleScriptRun({
       ...record,
@@ -148,6 +156,7 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
  * Best effort: a persistence error never changes the schedule's outcome.
  */
 async function recordScheduleScriptRun(run: {
+  id: string;
   agentId: string;
   scriptName: string;
   source: string;
@@ -159,7 +168,7 @@ async function recordScheduleScriptRun(run: {
 }): Promise<void> {
   try {
     await recordInlineScriptRun({
-      id: crypto.randomUUID(),
+      id: run.id,
       agentId: run.agentId,
       scriptName: run.scriptName,
       source: run.source,
@@ -252,6 +261,7 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
+        triggeredByAgentId: await scheduledWorkflowPrincipal(schedule, workflow),
         requestedByUserId: schedule.createdBy,
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
@@ -291,6 +301,38 @@ export async function dispatchScheduleTarget(
       return { triggeredWorkflows, workflowRunIds };
     }
   }
+}
+
+/**
+ * The agent a scheduled workflow run acts as: the schedule's creator, as for
+ * script schedules (`targetAgentId` and trigger data are caller-chosen, so
+ * neither is ever the principal). A creator-less (seeded) schedule that fires
+ * a seeded workflow runs as the lead, resolved at fire time; with no lead the
+ * fire fails instead of running agentless. Operator settings such as inputs
+ * or on/off keep that. Any agent can edit a workflow, so one whose nodes or
+ * params changed never inherits the lead and its fire fails. Workflows the
+ * seeder never wrote keep their previous principal.
+ */
+async function scheduledWorkflowPrincipal(
+  schedule: ScheduledTask,
+  workflow: Workflow,
+): Promise<string | undefined> {
+  if (schedule.createdByAgentId) return schedule.createdByAgentId;
+  if (workflow.createdByAgentId) return undefined;
+  const seeded = await seededWorkflowState(workflow);
+  if (seeded === "unseeded") return undefined;
+  if (seeded === "edited") {
+    throw new Error(
+      `Schedule "${schedule.name}" has no creator and the nodes or params of seeded workflow "${workflow.name}" were edited, so it will not run as the lead. Re-create the schedule as the agent it should run as.`,
+    );
+  }
+  const lead = await getLeadAgent();
+  if (!lead) {
+    throw new Error(
+      `Schedule "${schedule.name}" has no creator and the swarm has no lead to run its workflow as`,
+    );
+  }
+  return lead.id;
 }
 
 async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): Promise<void> {
@@ -544,7 +586,9 @@ export function startScheduler(
     .then(async () => {
       if (schedulerRun !== run) return;
       schedulerInterval = setInterval(() => {
-        void processSchedules().catch((err) => console.error("[Scheduler] Poll failed:", err));
+        void withLoopPath("scheduler.poll", () => processSchedules()).catch((err) =>
+          console.error("[Scheduler] Poll failed:", err),
+        );
       }, intervalMs);
       await processSchedules();
     })

@@ -32,10 +32,12 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `HEARTBEAT_STEERING_GRACE_MIN` | `5` | Minutes a fresh pending steering message defers heartbeat stall remediation before normal crash recovery resumes. |
 | `SCRIPTS_ONLY_MCP` | unset (full surface) | Set `=true` on the API **and** agent containers as a global override to trim the external MCP surface to the 8 script tools ("code-mode") — all other swarm ops go through `script-run` + the scripts SDK. Per-agent `swarm_config` rows can enable the mode without setting this environment variable. See [docs-site guide "Scripts-only mode"](../docs-site/content/docs/(documentation)/guides/scripts-only-mode.mdx). |
 | `TRUST_BODY_REQUESTED_BY_USER_ID` | unset (ON) | When on (default), `POST /api/tasks` may attribute a task to a body-supplied `requestedByUserId` (validated against a real user row) when no authenticated/owned-task identity is available — this is what lets the UI attribute tasks under a shared operator key. **Set `=false` in deployments where holders of the shared/operator API key are not all equally trusted** — with it on, any such caller can attribute a task to any user by choosing that body value (PR #939's anti-spoofing behavior). |
-| `CONTEXT_MODE_DISABLED` | unset (enabled) | Set `=true` to opt a worker out of context-mode. Default-enabled — the worker image bakes in context-mode, and the Claude/Codex/OpenCode adapters wire it in unless this is `true`. When `true`, the Claude and Codex adapters also disable the installed context-mode plugin per session (`enabledPlugins` / `plugins` override), so its hooks stop too. |
+| `CONTEXT_MODE_DISABLED` | unset | Deprecated and ignored: context-mode is removed. Safe to leave set. The Claude and Codex adapters always disable a context-mode plugin left over from an older image (`enabledPlugins` / `plugins` override). |
 | `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, `devin`, or `claude-managed` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
 | `TEMPLATE_REGISTRY_URL` | `https://templates.agent-swarm.dev` | |
+| `DESPLEGA_TELEMETRY_ENDPOINT` | `https://proxy.desplega.sh/v1/events` | Telemetry sink. A test knob, read once at boot and honoured only for https origins or http on loopback; reserved from `swarm_config` writes. The black-box suite points it at a mock so `telemetry.enabled` never leaves the machine. |
+| `CODEX_OAUTH_DEVICE_BASE_URL` | `https://auth.openai.com` | Codex device-login host. A test knob honoured only for a loopback http origin; reserved from `swarm_config` writes. The black-box suite fixes a free port at boot and binds its stand-in there. |
 
 `HARNESS_PROVIDER=codex` requires `OPENAI_API_KEY` **or** `~/.codex/auth.json` **or** ChatGPT OAuth via `codex-login`. ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 
@@ -73,6 +75,14 @@ Full guides:
 - [docs-site/.../integrations/linear.mdx](../docs-site/content/docs/(documentation)/integrations/linear.mdx)
 
 OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md](./oauth-tokens.md).
+
+## Files (Comb) and agent-fs
+
+Files in the dashboard (Comb) needs `AGENT_FS_API_URL`. Unset, `COMB_ENABLED` defaults on when `AGENT_FS_PUBLIC_URL` is set or the proxy is on. `COMB_ENABLED=false` turns it off. There is no browser-reachability check anymore. The browser address of agent-fs is `AGENT_FS_PUBLIC_URL` when it is set (direct browser access), else `<PUBLIC_MCP_BASE_URL>/agentfs` through the API proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`). With the proxy explicitly off and no public URL, Comb stays off unless `COMB_ENABLED=true`, and then the browser gets `AGENT_FS_API_URL` itself.
+
+Each browser gets its own named agent-fs key with no click: the dashboard calls `POST /api/fs/keys` (label `Swarm dashboard · <browser> on <OS> · <date>`) when it has no saved key or agent-fs rejects the saved one, and keeps the key in localStorage. The swarm stores none of these keys. A key that a browser already holds keeps working. An agent-fs older than 0.18.17 answers `501`, and Files falls back to the paste-key form. Local QA: run `ghcr.io/desplega-ai/agent-fs:0.18.17` on a free port and set `AGENT_FS_API_URL` to it.
+
+File links: with `APP_URL` set, agents and task attachments link files to `APP_URL/file/~/<org>/<drive>/<path>` by default (attachments also need Comb on). Without `APP_URL`, they use the live app (`AGENT_FS_LIVE_URL`), with `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set. `AGENT_FS_LINK_TARGET=dashboard|live` overrides the default. `APP_URL` is in the reloadable set, so a global `swarm_config` row reaches running workers at their next poll. Set `APP_URL` in `.env` to your local dashboard (for example `http://localhost:5274`) to get dashboard links in local runs.
 
 ## Chat SDK channel
 

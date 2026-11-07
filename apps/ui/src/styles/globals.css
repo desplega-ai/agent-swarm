@@ -52,6 +52,8 @@
      plane (bg step + quiet rules), not a boxed column. */
   --color-sidebar-border: oklch(0.945 0.003 286);
   --color-sidebar-ring: oklch(0.555 0.163 48.998);
+  /* The window canvas behind the inset sidebar and page panels. */
+  --color-canvas: oklch(0.955 0.003 286);
 
   /* Semantic status tokens, light mode. PALE SET (2026-08-06, Taras-approved
      board): same hues as the original Tailwind-500 stops, ~40% less chroma,
@@ -199,6 +201,7 @@
   --color-sidebar-accent-foreground: oklch(0.985 0 0);
   --color-sidebar-border: oklch(1 0 0 / 8%);
   --color-sidebar-ring: oklch(0.769 0.188 70.08);
+  --color-canvas: oklch(0.105 0.004 286);
 
   /* Semantic status tokens, dark mode. PALE SET (2026-08-06): same hues as
      the old *-400 stops with chroma pulled down, glows, not neon. `-strong`
@@ -481,12 +484,15 @@ button[data-slot="sidebar-rail"] {
   height: 8px;
 }
 
+/* Transparent track: a painted track drew a background-colored strip over
+ * the sidebar in dark mode. The thumb uses the muted text color at 40%,
+ * because the border color is close to invisible on the sidebar. */
 ::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: color-mix(in oklch, var(--color-muted-foreground) 40%, transparent);
   border-radius: 4px;
 }
 
@@ -771,34 +777,8 @@ button[data-slot="sidebar-rail"] {
   margin: 0.1em 0;
 }
 
-.prose-chat blockquote {
-  margin: 0.5em 0;
-  padding-left: 0.75em;
-  border-left: 2px solid var(--color-border);
-  color: var(--color-muted-foreground);
-}
-
-.prose-chat a {
-  color: var(--color-primary);
-  text-decoration: none;
-}
-
-.prose-chat a:hover {
-  text-decoration: underline;
-}
-
-.prose-chat table {
-  border-collapse: collapse;
-  margin: 0.5em 0;
-  font-size: 0.85em;
-}
-
-.prose-chat th,
-.prose-chat td {
-  border: 1px solid var(--color-border);
-  padding: 0.3em 0.6em;
-}
-
+/* Chat keeps compact headings; the rest of the markdown look is shared
+ * (`markdown.css`). */
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3 {
@@ -874,11 +854,9 @@ button[data-slot="sidebar-rail"] {
 
 /* Document-scale markdown prose, SKILL.md content, schedule task templates,
  * and any other long-form authored document rendered in a card. Roomier than
- * `.prose-chat`: real heading hierarchy, visible list markers, and table
- * chrome, so a document reads like a document rather than a chat bubble.
- * (Streamdown's own utility classes aren't emitted by our Tailwind build,
- * it isn't a scanned `@source`, so list markers and blockquote rules have to
- * come from here, same as the chat/session-log prose classes above.) */
+ * `.prose-chat`. Headings, lists, tables, quotes and rules come from the
+ * shared markdown styles (`markdown.css`); this class sets the document's
+ * size, leading and paragraph spacing. */
 .prose-doc {
   font-size: 0.875rem;
   line-height: 1.65;
@@ -893,90 +871,6 @@ button[data-slot="sidebar-rail"] {
 
 .prose-doc p {
   margin: 0 0 0.75em;
-}
-
-.prose-doc h1,
-.prose-doc h2,
-.prose-doc h3,
-.prose-doc h4 {
-  font-weight: 600;
-  line-height: 1.3;
-  margin: 1.4em 0 0.5em;
-}
-
-.prose-doc h1 {
-  font-size: 1.35em;
-}
-.prose-doc h2 {
-  font-size: 1.15em;
-}
-.prose-doc h3 {
-  font-size: 1em;
-}
-.prose-doc h4 {
-  font-size: 0.925em;
-  color: var(--color-muted-foreground);
-}
-
-.prose-doc ul,
-.prose-doc ol {
-  margin: 0.5em 0 0.75em;
-  padding-left: 1.5em;
-}
-
-.prose-doc ul {
-  list-style: disc;
-}
-.prose-doc ol {
-  list-style: decimal;
-}
-.prose-doc ul ul {
-  list-style: circle;
-}
-
-.prose-doc li {
-  margin: 0.2em 0;
-}
-.prose-doc li > p {
-  margin: 0;
-}
-
-.prose-doc blockquote {
-  margin: 0.75em 0;
-  padding-left: 0.85em;
-  border-left: 2px solid var(--color-border);
-  color: var(--color-muted-foreground);
-}
-
-.prose-doc hr {
-  margin: 1.25em 0;
-  border: 0;
-  border-top: 1px solid var(--color-border);
-}
-
-.prose-doc table {
-  border-collapse: collapse;
-  margin: 0.75em 0;
-  font-size: 0.925em;
-}
-
-.prose-doc th,
-.prose-doc td {
-  border: 1px solid var(--color-border);
-  padding: 0.35em 0.7em;
-  text-align: left;
-}
-
-.prose-doc th {
-  background: var(--color-muted);
-  font-weight: 600;
-}
-
-/* Streamdown frames each table in its own bordered scroll box. Inside it, drop
- * the table margin and the outer cell borders, so the frame is not drawn twice. */
-.prose-doc [data-streamdown="table-wrapper"] table {
-  margin: 0;
-  border-style: hidden;
 }
 
 /* Streamdown fenced code blocks, on every page that renders markdown with

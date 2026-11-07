@@ -24,7 +24,15 @@ export type SessionShareRow = {
   revokedBy: string | null;
 };
 
-export type SessionRoot = { id: string; requestedByUserId: string | null };
+/**
+ * `scheduleId` is set when a schedule fired the root task. Such a session is
+ * readable by every user, the same as the schedule itself.
+ */
+export type SessionRoot = {
+  id: string;
+  requestedByUserId: string | null;
+  scheduleId?: string | null;
+};
 
 export type SessionSharesState = {
   everyone: SessionEveryoneAccess;
@@ -54,7 +62,12 @@ export async function getSessionRoot(taskId: string): Promise<SessionRoot | null
 
 const ROOT_LOOKUP_CHUNK = 500;
 
-type AncestorRow = { id: string; parentTaskId: string | null; requestedByUserId: string | null };
+type AncestorRow = {
+  id: string;
+  parentTaskId: string | null;
+  requestedByUserId: string | null;
+  scheduleId: string | null;
+};
 
 /** `getSessionRoot` for many tasks; unknown tasks and tasks in a cycle are absent. */
 export async function getSessionRoots(taskIds: string[]): Promise<Map<string, SessionRoot>> {
@@ -72,7 +85,7 @@ export async function getSessionRoots(taskIds: string[]): Promise<Map<string, Se
            SELECT t.parentTaskId FROM agent_tasks t JOIN up ON t.id = up.id
            WHERE t.parentTaskId IS NOT NULL
          )
-         SELECT t.id, t.parentTaskId, t.requestedByUserId
+         SELECT t.id, t.parentTaskId, t.requestedByUserId, t.scheduleId
          FROM up CROSS JOIN agent_tasks t ON t.id = up.id`,
       chunk,
     );
@@ -96,7 +109,11 @@ export async function getSessionRoots(taskIds: string[]): Promise<Map<string, Se
       onPath.add(current.id);
       const parent = current.parentTaskId ? tasks.get(current.parentTaskId) : undefined;
       if (!parent) {
-        root = { id: current.id, requestedByUserId: current.requestedByUserId };
+        root = {
+          id: current.id,
+          requestedByUserId: current.requestedByUserId,
+          scheduleId: current.scheduleId,
+        };
         break;
       }
       current = parent;
@@ -117,9 +134,12 @@ export async function getSessionRoots(taskIds: string[]): Promise<Map<string, Se
  * What `actingUserId` may do in the session rooted at `root`.
  *
  * - `owner` for the root's requester, and for every user when the root has no
- *   owner (Slack and schedule sessions stay open, as before sharing existed).
- * - Otherwise the best active share naming the user or everyone; `none` when
- *   there is none. A root with no rows is private to its owner.
+ *   owner (Slack sessions stay open, as before sharing existed).
+ * - Otherwise the best active share naming the user or everyone. A schedule
+ *   session (the root has a `scheduleId`) is at least `read` for every user:
+ *   the scheduler names the schedule's creator as the requester, but the
+ *   schedule and its tasks are visible to all. Any other root with no rows is
+ *   private to its owner (`none`).
  *
  * A null `actingUserId` is a viewer with no user (a guest page session): it
  * gets ownerless roots and everyone shares only. Callers that act for no user
@@ -138,7 +158,7 @@ export async function sessionAccessForRoot(
     [root.id, actingUserId],
   );
   if (rows.some((row) => row.access === "write")) return "write";
-  return rows.length > 0 ? "read" : "none";
+  return rows.length > 0 || root.scheduleId ? "read" : "none";
 }
 
 /** `sessionAccessForRoot` for any task in the session; `none` for an unknown task. */

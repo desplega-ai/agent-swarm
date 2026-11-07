@@ -3,14 +3,17 @@ import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
+  EXHAUSTIVE_SEARCH_MAX_ROWS,
   isHybridSearchEnabled,
+  LEARNING_TTL_DAYS,
   minSimilarity,
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
-import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
+import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
 import type {
@@ -45,14 +48,18 @@ function armFetchLimit(limit: number): number {
 // lookup against it is a full table scan per outer row. The old backfill used
 // `WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
 // which is N x N: at ~18k memories it held the main connection for minutes at
-// boot. Both statements below use a non-correlated `NOT IN (subquery)`, which
-// SQLite evaluates once into an ephemeral index, so each is one pass over each
-// table. `memory_id IS NOT NULL` keeps a stray NULL row from turning every
-// NOT IN into NULL (which would insert nothing).
-export const FTS_DELETE_EXTRA_SQL = `DELETE FROM memory_fts
-  WHERE memory_id NOT IN (SELECT id FROM agent_memory)`;
-export const FTS_MISSING_IDS_SQL = `SELECT m.id FROM agent_memory m
-  WHERE m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`;
+// boot. The diff below reads each table once, in rowid batches (FTS5 seeks a
+// rowid range), and yields the event loop between batches: one whole-table
+// statement held the loop for seconds on a large DB. A memory_fts row is an
+// orphan when its memory is gone; that check is a lookup on the agent_memory
+// primary key. A NULL memory_id is never an orphan, as with the old NOT IN.
+export const FTS_SCAN_BATCH_SQL = `SELECT rowid AS rowid, memory_id AS memoryId,
+  memory_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM agent_memory m WHERE m.id = memory_fts.memory_id) AS orphan
+  FROM memory_fts WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
+  WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
 export type AgentMemoryRow = {
@@ -189,7 +196,7 @@ export function applyEditMode(
 }
 
 function computeExpiresAt(source: AgentMemorySource, key: string | null): string | null {
-  const ttlDays = TTL_DEFAULTS[tierSource(source, key)];
+  const ttlDays = isLearningKey(key) ? LEARNING_TTL_DAYS : TTL_DEFAULTS[tierSource(source, key)];
   if (ttlDays == null) return null;
   return new Date(Date.now() + ttlDays * 86400000).toISOString();
 }
@@ -251,12 +258,45 @@ export class SqliteMemoryStore implements MemoryStore {
   private async populateFtsTable(): Promise<void> {
     const client = getDbClient();
     const startedAt = performance.now();
-    const deletedExtra = await client.run(FTS_DELETE_EXTRA_SQL);
-    if (deletedExtra.changes > 0) {
-      console.warn(`[memory-fts] removed_extra_rows count=${deletedExtra.changes}`);
+    const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Drop orphan rows and collect the memory ids the index holds.
+    const indexed = new Set<string>();
+    let removed = 0;
+    for (let after = 0; ; ) {
+      const rows = await client.query<{ rowid: number; memoryId: string | null; orphan: number }>(
+        FTS_SCAN_BATCH_SQL,
+        [after, FTS_SCAN_BATCH_SIZE],
+      );
+      if (rows.length === 0) break;
+      after = rows[rows.length - 1]!.rowid;
+      const orphans = rows.filter((row) => row.orphan).map((row) => row.rowid);
+      if (orphans.length > 0) {
+        await client.run(
+          `DELETE FROM memory_fts WHERE rowid IN (${orphans.map(() => "?").join(",")})`,
+          orphans,
+        );
+        removed += orphans.length;
+      }
+      for (const row of rows) if (!row.orphan && row.memoryId) indexed.add(row.memoryId);
+      await yieldLoop();
+    }
+    if (removed > 0) {
+      console.warn(`[memory-fts] removed_extra_rows count=${removed}`);
     }
 
-    const missing = await client.query<{ id: string }>(FTS_MISSING_IDS_SQL);
+    const missing: { id: string }[] = [];
+    for (let after = 0; ; ) {
+      const rows = await client.query<{ rowid: number; id: string }>(MEMORY_ID_BATCH_SQL, [
+        after,
+        FTS_SCAN_BATCH_SIZE,
+      ]);
+      if (rows.length === 0) break;
+      after = rows[rows.length - 1]!.rowid;
+      for (const row of rows) if (!indexed.has(row.id)) missing.push(row);
+      await yieldLoop();
+    }
+
     for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
       const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
       const placeholders = ids.map(() => "?").join(",");
@@ -577,6 +617,17 @@ export class SqliteMemoryStore implements MemoryStore {
     agentId: string,
     options: MemorySearchOptions = {},
   ): Promise<MemoryCandidate[]> {
+    // Nested breadcrumb: the stall line keeps the caller and names the search.
+    return withLoopPath(`${currentLoopPath()} > memory.search`, () =>
+      this.searchInLoopPath(embedding, agentId, options),
+    );
+  }
+
+  private async searchInLoopPath(
+    embedding: Float32Array,
+    agentId: string,
+    options: MemorySearchOptions,
+  ): Promise<MemoryCandidate[]> {
     const {
       scope = "all",
       limit = 10,
@@ -585,6 +636,18 @@ export class SqliteMemoryStore implements MemoryStore {
       includeExpired = false,
       keyPrefix,
     } = options;
+
+    if (options.exhaustive) {
+      return this.searchExhaustive(embedding, agentId, {
+        scope,
+        limit,
+        source,
+        isLead,
+        includeExpired,
+        keyPrefix,
+        minSimilarity: options.minSimilarity,
+      });
+    }
 
     const health = this.getHealth();
     if (
@@ -619,6 +682,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        minSimilarity: options.minSimilarity,
       });
     }
 
@@ -646,6 +710,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead,
       includeExpired,
       keyPrefix,
+      minSimilarity: options.minSimilarity,
     });
   }
 
@@ -818,9 +883,11 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
     // sqlite-vec hard ceiling is 4096 for knn queries
@@ -857,11 +924,133 @@ export class SqliteMemoryStore implements MemoryStore {
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
       const similarity = 1 - row.distance;
-      if (similarity < minSimilarity()) continue;
+      if (similarity < floor) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "vec" });
     }
 
     return candidates;
+  }
+
+  /**
+   * Exact cosine over the newest EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows,
+   * `updatedAt DESC` with an `id` tie-break. While the eligible set fits the
+   * cap, every eligible row is scored; past it, older rows are not scored and
+   * the call logs `capped=true`. With sqlite-vec loaded, SQLite scores the
+   * capped set with `vec_distance_cosine` and only the top `limit` rows leave
+   * the query. Without it, JS scores the same capped set reading only id and
+   * embedding, then loads full rows for the top `limit`. One call's memory and
+   * CPU stay bounded whatever the corpus size, and a missing extension never
+   * makes it throw.
+   */
+  private async searchExhaustive(
+    queryEmbedding: Float32Array,
+    agentId: string,
+    options: {
+      scope: string;
+      limit: number;
+      source?: AgentMemorySource;
+      isLead: boolean;
+      includeExpired: boolean;
+      keyPrefix?: string;
+      minSimilarity?: number;
+    },
+  ): Promise<MemoryCandidate[]> {
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
+
+    const conditions: string[] = ["embedding IS NOT NULL"];
+    const params: (string | number | null)[] = [];
+    this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
+    if (source) {
+      conditions.push("source = ?");
+      params.push(source);
+    }
+    if (!includeExpired) {
+      conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
+    }
+    // FROM..LIMIT of the capped eligible set, newest first, so a capped scan
+    // drops the oldest rows. Each path adds its own projection.
+    const capped = `FROM agent_memory
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY updatedAt DESC, id
+       LIMIT ?`;
+    const cappedParams = [...params, EXHAUSTIVE_SEARCH_MAX_ROWS];
+
+    const { scanned, top } = isSqliteVecAvailable()
+      ? await this.scoreCappedInSql(queryEmbedding, capped, cappedParams, floor, limit)
+      : await this.scoreCappedInJs(queryEmbedding, capped, cappedParams, floor, limit);
+    console.log(
+      `[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit} scanned=${scanned} hits=${top.length}${scanned >= EXHAUSTIVE_SEARCH_MAX_ROWS ? " capped=true" : ""}`,
+    );
+    if (top.length === 0) return [];
+
+    const rows = await getDbClient().query<AgentMemoryRow>(
+      `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
+      top.map((hit) => hit.id),
+    );
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const candidates: MemoryCandidate[] = [];
+    for (const hit of top) {
+      const row = byId.get(hit.id);
+      if (row)
+        candidates.push({ ...rowToCandidate(row, hit.similarity), retrievalSource: "fallback" });
+    }
+    return candidates;
+  }
+
+  /** Rank the capped set inside SQLite; only the top `limit` ids leave the query. */
+  private async scoreCappedInSql(
+    queryEmbedding: Float32Array,
+    capped: string,
+    cappedParams: (string | number | null)[],
+    floor: number,
+    limit: number,
+  ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
+    const db = getDbClient();
+    const counted = await db.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM (SELECT 1 ${capped})`,
+      cappedParams,
+    );
+    const queryBuffer = serializeEmbedding(queryEmbedding);
+    // The length guard keeps a row of another dimension from raising inside
+    // vec_distance_cosine; a zero vector scores NULL and fails the floor.
+    const top = await db.query<{ id: string; similarity: number }>(
+      `SELECT id, similarity FROM (
+         SELECT id,
+           CASE WHEN length(embedding) = ? THEN 1 - vec_distance_cosine(embedding, ?) END
+             AS similarity
+         FROM (SELECT id, embedding ${capped})
+       )
+       WHERE similarity >= ?
+       ORDER BY similarity DESC, id
+       LIMIT ?`,
+      [queryBuffer.byteLength, queryBuffer, ...cappedParams, floor, limit],
+    );
+    return { scanned: counted?.n ?? 0, top };
+  }
+
+  /** Score the capped set in JS when sqlite-vec is not loaded, reading only id + embedding. */
+  private async scoreCappedInJs(
+    queryEmbedding: Float32Array,
+    capped: string,
+    cappedParams: (string | number | null)[],
+    floor: number,
+    limit: number,
+  ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
+    const rows = await getDbClient().query<{ id: string; embedding: Buffer }>(
+      `SELECT id, embedding ${capped}`,
+      cappedParams,
+    );
+    const scored: { id: string; similarity: number }[] = [];
+    for (const row of rows) {
+      const emb = deserializeEmbedding(row.embedding);
+      if (emb.length !== queryEmbedding.length) continue;
+      const similarity = cosineSimilarity(queryEmbedding, emb);
+      if (similarity >= floor) scored.push({ id: row.id, similarity });
+    }
+    scored.sort((a, b) => b.similarity - a.similarity || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return { scanned: rows.length, top: scored.slice(0, limit) };
   }
 
   private async searchBruteForce(
@@ -874,9 +1063,11 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const floor = options.minSimilarity ?? minSimilarity();
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
@@ -906,7 +1097,7 @@ export class SqliteMemoryStore implements MemoryStore {
       const emb = deserializeEmbedding(row.embedding);
       if (emb.length !== queryEmbedding.length) continue;
       const similarity = cosineSimilarity(queryEmbedding, emb);
-      if (similarity < minSimilarity()) continue;
+      if (similarity < floor) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "fallback" });
     }
 
@@ -1112,9 +1303,16 @@ export class SqliteMemoryStore implements MemoryStore {
         if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
       }
 
-      // Moving into /longterm makes the memory curated, so it stops expiring.
-      // Moving out restores nothing: the TTL it had is gone.
-      const clearExpiry = moving && isLongtermKey(input.newKey);
+      // A move takes the expiry of its destination when the key decides it:
+      // into /longterm (curated, never expires), into /learnings (ages out) or
+      // out of /learnings (the source's own TTL; none for manual). Any other
+      // move, and every in-place edit, keeps the expiry the row already has.
+      const resetExpiry =
+        moving &&
+        (isLongtermKey(input.newKey) || isLearningKey(row.key) !== isLearningKey(input.newKey));
+      const expiresAt = resetExpiry
+        ? computeExpiresAt(row.source as AgentMemorySource, input.newKey!)
+        : row.expiresAt;
       const now = new Date().toISOString();
       const versionIntent = moving
         ? `${input.intent} [key ${row.key ?? "(none)"} -> ${input.newKey}]`
@@ -1148,7 +1346,7 @@ export class SqliteMemoryStore implements MemoryStore {
         await tx.run(
           `UPDATE agent_memory
            SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?,
-               expiresAt = CASE WHEN ? = 1 THEN NULL ELSE expiresAt END
+               expiresAt = CASE WHEN ? = 1 THEN ? ELSE expiresAt END
            WHERE id = ?`,
           [
             targetContent,
@@ -1156,7 +1354,8 @@ export class SqliteMemoryStore implements MemoryStore {
             targetVersion,
             now,
             moving ? input.newKey! : target.key,
-            clearExpiry ? 1 : 0,
+            resetExpiry ? 1 : 0,
+            expiresAt,
             target.id,
           ],
         );
@@ -1171,7 +1370,7 @@ export class SqliteMemoryStore implements MemoryStore {
             version: nextVersion,
             updatedAt: now,
             key: moving ? input.newKey! : row.key,
-            expiresAt: clearExpiry ? null : row.expiresAt,
+            expiresAt,
           }),
           changed: true,
           previousVersion,
@@ -1271,24 +1470,43 @@ export class SqliteMemoryStore implements MemoryStore {
     const db = getDbClient();
 
     const expiredIds = await db.query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
     );
 
     if (expiredIds.length === 0) return 0;
 
     const batchSize = 500;
+    let purged = 0;
     for (let i = 0; i < expiredIds.length; i += batchSize) {
-      await this.purgeByIds(expiredIds.slice(i, i + batchSize).map((r) => r.id));
+      // Yield a macrotask between batches: chained awaits on the DB client are
+      // microtasks, so without it the whole purge is one event-loop stall.
+      if (i > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+      const batch = expiredIds.slice(i, i + batchSize).map((r) => r.id);
+      // A memory can be curated (moved to /longterm, expiry cleared) during
+      // the yield. Recheck expiry and delete the index rows and memory rows of
+      // the batch in one transaction, so a live row never loses its index.
+      purged += await db.transaction(async (tx) => {
+        const placeholders = batch.map(() => "?").join(",");
+        const still = await tx.query<{ id: string }>(
+          `SELECT id FROM agent_memory WHERE id IN (${placeholders})
+           AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')`,
+          batch,
+        );
+        const ids = still.map((r) => r.id);
+        if (ids.length === 0) return 0;
+        await this.purgeByIds(ids);
+        const result = await tx.run(
+          `DELETE FROM agent_memory WHERE id IN (${ids.map(() => "?").join(",")})`,
+          ids,
+        );
+        return result.changes;
+      });
     }
 
-    const result = await db.run(
-      "DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-    );
-
     console.log(
-      `[memory] Purged ${result.changes} expired memory row(s) (vec cleanup: ${expiredIds.length} id(s))`,
+      `[memory] Purged ${purged} expired memory row(s) (candidates: ${expiredIds.length} id(s))`,
     );
-    return result.changes;
+    return purged;
   }
 
   async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
@@ -1321,6 +1539,17 @@ export class SqliteMemoryStore implements MemoryStore {
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
         }
+      }
+    });
+  }
+
+  async clearEmbedding(id: string): Promise<void> {
+    await getDbClient().transaction(async (tx) => {
+      await tx.run("UPDATE agent_memory SET embedding = NULL, embeddingModel = NULL WHERE id = ?", [
+        id,
+      ]);
+      if (this.vecInitialized && this.getVecTableSchema()) {
+        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
       }
     });
   }

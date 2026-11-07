@@ -226,6 +226,47 @@ async function busy(options: Partial<Parameters<typeof createRuntimePool>[0]> = 
   return state;
 }
 
+test("boxd env defaults apply only to builtin boxd targets and stored config wins", async () => {
+  const defaults = {
+    BOXD_ORG: "env-org",
+    BOXD_BASE_URL: "https://boxd-env.test",
+    BOXD_SNAPSHOT: "env-snapshot",
+    BOXD_DELETE_AFTER_SEC: "3600",
+    BOXD_START_TIMEOUT_SEC: "120",
+    BOXD_STATUS_TIMEOUT_SEC: "30",
+    BOXD_TEARDOWN_TIMEOUT_SEC: "60",
+  };
+  const storedKey = `stored-${crypto.randomUUID()}`;
+  const env = { ...defaults, BOXD_API_KEY: `env-${crypto.randomUUID()}` };
+  const builtin = await createRuntimeController({
+    name: "builtin-boxd",
+    kind: "boxd",
+    placement: "builtin",
+    secretConfig: { BOXD_API_KEY: storedKey },
+  });
+  expect(await getRuntimeControllerTarget(builtin, env)).toMatchObject({
+    ...defaults,
+    BOXD_API_KEY: storedKey,
+  });
+  const configured = await updateRuntimeController(builtin.id, {
+    config: { BOXD_BASE_URL: "https://boxd-config.test" },
+  });
+  expect((await getRuntimeControllerTarget(configured, env)).BOXD_BASE_URL).toBe(
+    "https://boxd-config.test",
+  );
+  const remote = await createRuntimeController({
+    name: "remote-boxd",
+    kind: "boxd",
+    placement: "remote",
+  });
+  for (const controller of [remote, (await getRuntimeController(controllerId))!]) {
+    const target = await getRuntimeControllerTarget(controller, env);
+    for (const key of [...Object.keys(defaults), "BOXD_API_KEY"]) {
+      expect(target[key]).toBeUndefined();
+    }
+  }
+});
+
 test("pending work provisions an E2B runtime with a short lease", async () => {
   const { pool, agent } = await setup();
   await tick();

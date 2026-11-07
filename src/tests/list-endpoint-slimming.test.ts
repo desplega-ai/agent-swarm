@@ -19,6 +19,7 @@ import {
   listWorkflows,
   updateAgentProfile,
 } from "../be/db";
+import { createModelProfile } from "../be/db/model-profiles";
 import type { Page, Workflow } from "../types";
 
 const TEST_DB_PATH = "./test-list-endpoint-slimming.sqlite";
@@ -62,6 +63,7 @@ describe("list-endpoint slimming", () => {
       heartbeatMd: "H".repeat(500),
       setupScript: "echo hi",
       avatar: { type: "lucide", icon: "rocket", color: "#8b5cf6" },
+      slackIcon: { type: "emoji", emoji: ":owl:" },
     });
 
     const slim = (await getAllAgents({ slim: true })).find((a) => a.id === agent.id);
@@ -79,11 +81,13 @@ describe("list-endpoint slimming", () => {
     // full, or the agents list would silently show the default avatar while
     // the detail page shows the custom one.
     expect(slim?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
+    expect(slim?.slackIcon).toEqual({ type: "emoji", emoji: ":owl:" });
 
     const full = (await getAllAgents()).find((a) => a.id === agent.id);
     expect(full?.claudeMd).toBe("C".repeat(500));
     expect(full?.setupScript).toBe("echo hi");
     expect(full?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
+    expect(full?.slackIcon).toEqual({ type: "emoji", emoji: ":owl:" });
   });
 
   test("updateAgentProfile — avatar set/reset round-trip", async () => {
@@ -226,6 +230,22 @@ describe("list-endpoint slimming", () => {
     expect(full).toBeDefined();
     expect(full?.task).toBe(longText);
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
+  });
+
+  test("getAllTasks — slim keeps the task profile and resolved profile", async () => {
+    await createModelProfile({ name: "slim-profile", harness: "claude", model: "opus" });
+    const task = await createTaskExtended("slim-profile-row", {
+      agentId: "slim-agent-1",
+      profile: "slim-profile",
+    });
+    await getDbClient().run("UPDATE agent_tasks SET resolvedProfile = ? WHERE id = ?", [
+      "slim-profile",
+      task.id,
+    ]);
+
+    const [row] = await getAllTasks({ search: "slim-profile-row", limit: 1 }, { slim: true });
+    expect(row?.profile).toBe("slim-profile");
+    expect(row?.resolvedProfile).toBe("slim-profile");
   });
 
   test("getAllTasks — SQL-side preview matches truncating the full text", async () => {

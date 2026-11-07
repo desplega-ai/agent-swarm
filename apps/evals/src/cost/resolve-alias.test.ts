@@ -7,6 +7,7 @@ import {
   parseAlias,
   resolveAlias,
   validateConfigModel,
+  validateConfigResolves,
 } from "./resolve-alias.ts";
 
 const CATALOG: ModelsDevCatalog = {
@@ -130,5 +131,18 @@ describe("alias configs against the reviewed catalog", () => {
       const id = resolved?.replace(/^openrouter\//, "") ?? "";
       expect(Object.keys(snapshot[section]?.models ?? {})).toContain(id);
     }
+  });
+});
+
+describe("validateConfigResolves registry models", () => {
+  test("a helmcode/ model in the registry resolves; an unknown one and a claude provider do not", () => {
+    const ok = { id: "pi-helmcode-glm5.3", provider: "pi", model: "helmcode/glm5.3" } as const;
+    expect(validateConfigResolves(ok, CATALOG)).toEqual([]);
+    expect(validateConfigResolves({ ...ok, model: "helmcode/nope" }, CATALOG)).toEqual([
+      'model "helmcode/nope" is not in the helmcode provider registry',
+    ]);
+    expect(validateConfigResolves({ ...ok, provider: "codex" }, CATALOG)[0]).toContain(
+      "is not in the openai catalog",
+    );
   });
 });

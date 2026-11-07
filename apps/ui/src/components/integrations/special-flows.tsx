@@ -8,6 +8,7 @@ import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { MemoryEmbeddingsSection } from "@/components/integrations/memory-embeddings-section";
 import { TranscriptionSection } from "@/components/integrations/transcription-section";
+import type { ChatSdkAdapterName } from "@/lib/chat-sdk-fields";
 import type { IntegrationDef, IntegrationSpecialFlow } from "@/lib/integrations-catalog";
 
 export interface SpecialFlowSectionProps {
@@ -16,6 +17,8 @@ export interface SpecialFlowSectionProps {
   envPresence: EnvPresenceMap;
   /** `dataUpdatedAt` of the env-presence query, for flows that cache results. */
   envPresenceRevision?: number;
+  /** Chat SDK only: `?adapter=` shows that one adapter. */
+  adapter?: ChatSdkAdapterName;
 }
 
 /**

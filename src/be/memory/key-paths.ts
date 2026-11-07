@@ -15,6 +15,9 @@ import type { AgentMemorySource } from "@/types";
 
 export const LONGTERM_ROOT = "/longterm";
 
+/** Where store-progress learnings live. They expire after LEARNING_TTL_DAYS (see `computeExpiresAt`). */
+export const LEARNINGS_ROOT = "/learnings";
+
 /** Shape of a key written through `memory-store` or `memory-edit` `newKey`. */
 export const MEMORY_KEY_PATTERN = /^\/[a-z0-9-]+(\/[a-z0-9._-]+)*$/;
 
@@ -51,6 +54,11 @@ export function isKeyUnderRoot(key: string, root: string): boolean {
 /** True when `key` is `/longterm` or sits beneath it: the curated tier. */
 export function isLongtermKey(key: string | null | undefined): boolean {
   return !!key && isKeyUnderRoot(key, LONGTERM_ROOT);
+}
+
+/** True when `key` sits beneath `/learnings`: a store-progress learning. */
+export function isLearningKey(key: string | null | undefined): boolean {
+  return !!key && key.startsWith(`${LEARNINGS_ROOT}/`);
 }
 
 /**

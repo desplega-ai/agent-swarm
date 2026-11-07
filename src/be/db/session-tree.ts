@@ -1,8 +1,14 @@
 import {
+  isGroupKey,
+  isResourceGroupPrefix,
   keyPrefixRange,
+  NO_GROUP_LEAF_KINDS,
   normalizeAssetKey,
+  parseAssetKey,
   SESSION_LEAF_KINDS,
+  SESSION_RESOURCE_KINDS,
   sessionGroupKey,
+  sessionResourceGroupOf,
 } from "../../assets/key";
 import {
   effectiveSource,
@@ -45,6 +51,8 @@ export interface SessionFilters {
   viewer?: SessionViewer;
   /** Match roots under this literal canonical asset key prefix. */
   keyPrefix?: string;
+  /** Match roots under any of these prefixes, one indexed range each. */
+  keyPrefixes?: string[];
   /** Match this exact group and its direct resource leaves. */
   groupKey?: string;
   /** Match shared and viewer-personal namespace roots and direct leaves. */
@@ -61,28 +69,80 @@ export interface SessionFilters {
   tree?: boolean;
   /** For user viewers: only human-started roots of the viewer and shares (the "Mine" view). */
   mine?: boolean;
+  /**
+   * Include every schedule run despite Mine, shown-source, and tree owner
+   * filters. Only `getSessionTree` sets it, and it applies the rule per row.
+   * A `groupKey` of a user group ({@link showsScheduleRuns}) turns it on by
+   * itself, so the list and its bulk triage agree.
+   */
+  includeScheduleRuns?: boolean;
   /** Match exactly this root (one session's summary, e.g. its read state). */
   rootId?: string;
 }
 
 type SqlFragment = { sql: string; params: (string | number | null)[] };
 
+/** How long a finished, read Inbox session stays quiet before it moves to Done on its own. */
+const AUTO_DONE_QUIET_MS = 24 * 3600000;
+
+/** The chain aggregates the read-state rule reads, as SQL expressions. */
+interface ReadStateColumns {
+  lastActivityAt: string;
+  openTasks: string;
+  pendingApproval: string;
+  /** Whether the chain changed in a way that reopens a Done session; read only for a Done row `s`. */
+  reopensDone: string;
+}
+
+/** The columns of the chain walk's `agg` rows (`legacySessionSummaryQuery`). */
+const LEGACY_READ_STATE_COLUMNS: ReadStateColumns = {
+  lastActivityAt: "a.lastActivityAt",
+  openTasks: "a.openTasks",
+  pendingApproval: "a.pendingApproval",
+  reopensDone: "a.reopensDone > 0",
+};
+
 /**
  * Shared read-state rule with bound ISO timestamps for the list and tree.
  * Done holds through agent activity (progress, status changes, child tasks):
- * only `a.reopensDone`, counted in `sessionSummaryQuery`, brings it back.
+ * only `reopensDone` brings it back.
+ *
+ * Auto-Done: an Inbox session (`inboxScopeCondition` on its root `r`) reads
+ * as Done once it reads as read, every chain task is finished, no approval
+ * waits, and neither the chain nor the viewer's triage row changed for 24
+ * hours. Nothing is written, so any new activity brings it back to the Inbox,
+ * and a "back to Inbox" (which writes the row) holds for another 24 hours.
+ * Later, Done marks, and groups are never auto-Done.
  */
-function sessionReadStateSql(now = new Date().toISOString()): SqlFragment {
+function sessionReadStateSql(
+  userId: string | null | undefined,
+  now = new Date().toISOString(),
+  a: ReadStateColumns = LEGACY_READ_STATE_COLUMNS,
+): SqlFragment {
+  const quiet = new Date(Date.parse(now) - AUTO_DONE_QUIET_MS).toISOString();
+  const scope = inboxScopeCondition(userId);
+  const autoDone = `(${a.openTasks} = 0 AND ${a.pendingApproval} = 0 AND ${a.lastActivityAt} <= ? AND ${scope.sql})`;
+  const autoDoneParams = [quiet, ...scope.params];
   return {
     sql: `CASE
-      WHEN s.id IS NULL THEN CASE WHEN a.lastActivityAt > ? THEN 'unread' ELSE 'read' END
+      WHEN s.id IS NULL THEN CASE
+        WHEN ${a.lastActivityAt} > ? THEN 'unread'
+        WHEN ${autoDone} THEN 'done'
+        ELSE 'read' END
       WHEN s.status = 'dismissed' THEN 'done'
-      WHEN s.status = 'done' THEN CASE WHEN a.reopensDone > 0 THEN 'unread' ELSE 'done' END
+      WHEN s.status = 'done' THEN CASE WHEN ${a.reopensDone} THEN 'unread' ELSE 'done' END
       WHEN s.status = 'snoozed' THEN CASE WHEN s.snoozeUntil > ? THEN 'later' ELSE 'unread' END
-      WHEN a.lastActivityAt > COALESCE(s.lastReadAt, s.lastUpdatedAt) THEN 'unread'
+      WHEN ${a.lastActivityAt} > COALESCE(s.lastReadAt, s.lastUpdatedAt) THEN 'unread'
+      WHEN ${autoDone} AND s.lastUpdatedAt <= ? THEN 'done'
       ELSE 'read'
     END`,
-    params: [new Date(Date.parse(now) - 7 * 86400000).toISOString(), now],
+    params: [
+      new Date(Date.parse(now) - 7 * 86400000).toISOString(),
+      ...autoDoneParams,
+      now,
+      ...autoDoneParams,
+      quiet,
+    ],
   };
 }
 
@@ -90,20 +150,40 @@ function sourceKeyRanges() {
   return SESSION_SOURCES.map((source) => ({ source, ...keyPrefixRange(`shared/${source}/`) }));
 }
 
-/** Count every owned root at the exact source thread key, independent of viewer filters. */
-export function threadRootsSql(): SqlFragment {
+/** Whether `r."key"` is a source thread key (`isSourceThreadKey`). */
+function sourceThreadKeySql(): SqlFragment {
   const key = 'r."key"';
   // Trim the final slash, then all non-slash characters to locate the last segment.
   // For example, shared/slack/c1/thread:1.2/ gives thread:1.2/.
   const leaf = `substr(${key}, length(rtrim(rtrim(${key}, '/'), replace(${key}, '/', ''))) + 1)`;
   const ranges = sourceKeyRanges();
   return {
-    sql: `(CASE WHEN (${ranges.map(() => `(${key} >= ? AND ${key} < ?)`).join(" OR ")}) AND ${leaf} GLOB 'thread:?*/'
-      THEN (SELECT COUNT(*) FROM agent_tasks session_thread_root WHERE session_thread_root."key" = ${key}
-        AND session_thread_root.parentTaskId IS NULL AND session_thread_root.requestedByUserId IS NOT NULL)
-      ELSE 0 END)`,
+    sql: `(${ranges.map(() => `(${key} >= ? AND ${key} < ?)`).join(" OR ")}) AND ${leaf} GLOB 'thread:?*/'`,
     params: ranges.flatMap(({ lo, hi }) => [lo, hi]),
   };
+}
+
+/** Count every owned root at the exact source thread key, independent of viewer filters. */
+export function threadRootsSql(): SqlFragment {
+  const thread = sourceThreadKeySql();
+  return {
+    sql: `(CASE WHEN ${thread.sql}
+      THEN (SELECT COUNT(*) FROM session_summaries session_thread_root
+        WHERE session_thread_root."key" = r."key" AND session_thread_root.requestedByUserId IS NOT NULL)
+      ELSE 0 END)`,
+    params: thread.params,
+  };
+}
+
+/** {@link threadRootsSql} for every source thread key at once: one grouped read for the tree. */
+async function threadRootCounts(): Promise<Map<string, number>> {
+  const thread = sourceThreadKeySql();
+  const rows = await getDbClient().query<{ key: string; threadRoots: number }>(
+    `SELECT r."key", COUNT(*) AS threadRoots FROM session_summaries r
+    WHERE r.requestedByUserId IS NOT NULL AND ${thread.sql} GROUP BY r."key"`,
+    thread.params,
+  );
+  return new Map(rows.map((row) => [row.key, row.threadRoots]));
 }
 
 /** A task's group with the list row's rule (`groupKey` on `GET /api/sessions`). */
@@ -116,16 +196,24 @@ export async function getSessionGroupKey(task: { id: string; key: string }): Pro
   return sessionThreadGroupKey(task.key, row?.threadRoots ?? 0);
 }
 
-function groupCondition(group: string): SqlFragment {
+/**
+ * `scan` keeps the key index out of the range (unary `+`). A broad prefix such
+ * as `shared/` holds most roots, where one pass over the narrow summaries
+ * beats an index lookup per row; without planner statistics SQLite cannot tell.
+ */
+function groupCondition(group: string, scan = false): SqlFragment {
   const { lo, hi } = keyPrefixRange(group);
+  // A namespace root keeps resource leaves out: they are resource groups (`sessionGroupKey`).
+  const kinds =
+    parseAssetKey(group).relativeSegments.length === 0 ? NO_GROUP_LEAF_KINDS : SESSION_LEAF_KINDS;
   // The remaining key must be one resource leaf, with no nested path.
   // SQLite substr/length count code points, so count them here too (not UTF-16 units).
   const start = [...lo].length + 1;
   const threadRoots = threadRootsSql();
   return {
-    sql: `(r."key" >= ? AND r."key" < ? AND (r."key" = ? OR (
+    sql: `(${scan ? "+" : ""}r."key" >= ? AND ${scan ? "+" : ""}r."key" < ? AND (r."key" = ? OR (
       instr(substr(r."key", ?, length(r."key") - ?), '/') = 0 AND
-      (${SESSION_LEAF_KINDS.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")}) AND
+      (${kinds.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")}) AND
       ${threadRoots.sql} < ?
     )))`,
     params: [
@@ -134,10 +222,60 @@ function groupCondition(group: string): SqlFragment {
       lo,
       start,
       start,
-      ...SESSION_LEAF_KINDS.flatMap((kind) => [start, `${kind}:?*/`]),
+      ...kinds.flatMap((kind) => [start, `${kind}:?*/`]),
       ...threadRoots.params,
       NESTED_THREAD_MIN_ROOTS,
     ],
+  };
+}
+
+/** No group: roots at `shared/` and at the viewer's `personal/<me>/`, with their direct leaves. */
+function noGroupCondition(userId: string | null | undefined): SqlFragment {
+  const groups = [groupCondition("shared/", true)];
+  if (userId) groups.push(groupCondition(`personal/${userId}/`, true));
+  return {
+    sql: `(${groups.map((g) => g.sql).join(" OR ")})`,
+    params: groups.flatMap((g) => g.params),
+  };
+}
+
+/** The namespace roots whose resource groups the Inbox holds: `shared/` and the viewer's own. */
+function resourceBases(userId: string | null | undefined): string[] {
+  return userId ? ["shared/", `personal/${userId}/`] : ["shared/"];
+}
+
+/**
+ * Whether a root key sits in a resource section (Pages, Workflows, ...) of
+ * the viewer: `inboxScopeCondition`'s resource ranges, in JS.
+ */
+export function inResourceScope(key: string, userId: string | null | undefined): boolean {
+  return resourceBases(userId).some((base) =>
+    SESSION_RESOURCE_KINDS.some((kind) => key.startsWith(`${base}${kind}:`)),
+  );
+}
+
+/** Key ranges of every `<base><kind>:` prefix ({@link inResourceScope}). */
+function resourceKeyRanges(userId: string | null | undefined) {
+  return resourceBases(userId).flatMap((base) =>
+    SESSION_RESOURCE_KINDS.map((kind) => {
+      const lo = normalizeAssetKey(`${base}${kind}:`).slice(0, -1);
+      return { lo, hi: `${lo.slice(0, -1)};` };
+    }),
+  );
+}
+
+/**
+ * Roots the Inbox holds: No group, the source sections (Slack, Telegram,
+ * Discord), and the resource sections (Pages, Workflows, ...), which file
+ * sessions on their own. A session that a person filed into a group (My
+ * groups, Shared with me) shows under that group only.
+ */
+function inboxScopeCondition(userId: string | null | undefined): SqlFragment {
+  const ranges = [...sourceKeyRanges(), ...resourceKeyRanges(userId)];
+  const noGroup = noGroupCondition(userId);
+  return {
+    sql: `(${ranges.map(() => '(+r."key" >= ? AND +r."key" < ?)').join(" OR ")} OR ${noGroup.sql})`,
+    params: [...ranges.flatMap(({ lo, hi }) => [lo, hi]), ...noGroup.params],
   };
 }
 
@@ -150,13 +288,39 @@ function effectiveSourceSql(): SqlFragment {
   };
 }
 
+/**
+ * One row per session root: `session_summaries` (migration 253) with the root
+ * id as `id`, so the root filters below apply to it as they would to the root
+ * task. SQLite flattens the subquery, so the summary indexes still serve them.
+ */
+const SESSION_ROOTS = "(SELECT rootId AS id, * FROM session_summaries)";
+
+/**
+ * Conditions on a session root `r`: a {@link SESSION_ROOTS} row or a root task
+ * (`legacySessionSummaryQuery`). Only `q` reads the root task itself.
+ */
+/**
+ * A user group (not a namespace root, a resource group, or a source group)
+ * shows the schedule runs filed in it, whoever owns them and whatever the
+ * source filter says. The list (`groupKey`) and the tree counts use this rule.
+ */
+export function showsScheduleRuns(groupKey: string): boolean {
+  return isGroupKey(groupKey) && !sourceOfKey(groupKey) && !isResourceGroupPrefix(groupKey);
+}
+
 export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
-  const conditions = ["r.parentTaskId IS NULL"];
+  const conditions: string[] = [];
   const params: SqlFragment["params"] = [];
   const add = (fragment: SqlFragment) => {
     conditions.push(fragment.sql);
     params.push(...fragment.params);
   };
+  const scheduleRuns =
+    opts.includeScheduleRuns || (!!opts.groupKey && showsScheduleRuns(opts.groupKey));
+  const includeScheduled = (fragment: SqlFragment): SqlFragment => ({
+    ...fragment,
+    sql: scheduleRuns ? `(${fragment.sql} OR r.scheduleId IS NOT NULL)` : fragment.sql,
+  });
   if (opts.rootId) add({ sql: "r.id = ?", params: [opts.rootId] });
   const sources = opts.source?.filter(Boolean) ?? [];
   if (sources.length)
@@ -173,18 +337,21 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     const shown = opts.showSource.filter(Boolean);
     const source = effectiveSourceSql();
     add(
-      shown.length
-        ? {
-            sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
-            params: [...source.params, ...shown],
-          }
-        : { sql: "0", params: [] },
+      includeScheduled(
+        shown.length
+          ? {
+              sql: `${source.sql} IN (${shown.map(() => "?").join(",")})`,
+              params: [...source.params, ...shown],
+            }
+          : { sql: "0", params: [] },
+      ),
     );
   }
   if (opts.q?.trim()) {
     const like = `%${opts.q.trim().toLowerCase()}%`;
     add({
-      sql: "(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)",
+      sql: `EXISTS (SELECT 1 FROM agent_tasks rt WHERE rt.id = r.id
+        AND (lower(rt.task) LIKE ? OR lower(COALESCE(rt.title, '')) LIKE ?))`,
       params: [like, like],
     });
   }
@@ -197,41 +364,56 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     });
   if (opts.viewer) {
     add(sessionViewerCondition(opts.viewer));
-    if (opts.tree) conditions.push("r.requestedByUserId IS NOT NULL");
-    if (opts.mine) add(sessionMineCondition(opts.viewer.userId));
+    // Unary +: a full pass over the narrow summaries beats the partial thread index here.
+    if (opts.tree) add(includeScheduled({ sql: "+r.requestedByUserId IS NOT NULL", params: [] }));
+    if (opts.mine)
+      add(includeScheduled(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll)));
   }
   if (opts.keyPrefix) {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
     add({ sql: 'r."key" >= ? AND r."key" < ?', params: [lo, hi] });
   }
-  if (opts.groupKey) add(groupCondition(normalizeAssetKey(opts.groupKey)));
-  if (opts.noGroup) {
-    const groups = [groupCondition("shared/")];
-    if (opts.viewer?.userId) groups.push(groupCondition(`personal/${opts.viewer.userId}/`));
+  if (opts.keyPrefixes?.length) {
+    const ranges = opts.keyPrefixes.map(keyPrefixRange);
     add({
-      sql: `(${groups.map((g) => g.sql).join(" OR ")})`,
-      params: groups.flatMap((g) => g.params),
+      sql: `(${ranges.map(() => '(r."key" >= ? AND r."key" < ?)').join(" OR ")})`,
+      params: ranges.flatMap(({ lo, hi }) => [lo, hi]),
     });
   }
+  if (opts.groupKey) add(groupCondition(normalizeAssetKey(opts.groupKey)));
+  if (opts.noGroup) add(noGroupCondition(opts.viewer?.userId));
+  if (opts.triage === "inbox") add(inboxScopeCondition(opts.viewer?.userId));
   if (opts.triage === "later" || opts.triage === "done") {
-    add({
+    const marked: SqlFragment = {
       sql: `r.id IN (SELECT itemId FROM inbox_item_state
         WHERE userId = ? AND itemType = 'to_read' AND status IN (${opts.triage === "later" ? "'snoozed'" : "'done','dismissed'"}))`,
       params: [opts.viewer?.userId ?? null],
-    });
+    };
+    // Done also holds auto-Done Inbox sessions, which have no Done row.
+    const scope = inboxScopeCondition(opts.viewer?.userId);
+    add(
+      opts.triage === "done" && opts.viewer?.userId
+        ? { sql: `(${marked.sql} OR ${scope.sql})`, params: [...marked.params, ...scope.params] }
+        : marked,
+    );
   }
-  return { sql: conditions.join(" AND "), params };
+  return { sql: conditions.length ? conditions.join(" AND ") : "1", params };
 }
 
 function excludesTriaged(opts: SessionFilters): boolean {
-  return !!(opts.viewer?.userId && (opts.groupKey || opts.keyPrefix || opts.noGroup));
+  return !!(
+    opts.viewer?.userId &&
+    (opts.groupKey || opts.keyPrefix || opts.keyPrefixes?.length || opts.noGroup)
+  );
 }
 
 function hasSessionChainFilter(opts: SessionFilters): boolean {
   return !!(opts.triage || opts.status || opts.withUserId || excludesTriaged(opts));
 }
 
-const runningSql = `latestStatus NOT IN (${TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",")})`;
+const terminalSql = TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",");
+const runningSql = `latestStatus NOT IN (${terminalSql})`;
+const openTaskSql = `chain.status NOT IN (${terminalSql})`;
 
 /**
  * Sources of tasks that agents and the server create: delegation and scripts
@@ -262,17 +444,9 @@ const reopensDoneSql = `(d.id IS NOT NULL AND (
           WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending' AND ar.createdAt > d.lastUpdatedAt)
       ))`;
 
-/**
- * A session starts at a parentTaskId IS NULL root. One recursive CTE computes
- * chain-wide latest activity for list ordering. Root filters precede recursion.
- * Read state and chain filters follow aggregation.
- */
-export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
-  const root = sessionRootFilter(opts);
-  const read = opts.viewer?.userId ? sessionReadStateSql(opts.now) : { sql: "NULL", params: [] };
-  const params = [...root.params];
-  if (opts.withUserId) params.push(opts.withUserId);
-  params.push(opts.viewer?.userId ?? null, ...read.params, opts.viewer?.userId ?? null);
+/** Filters on summary rows `a` (read state, latest status, participants), after aggregation. */
+function summaryRowFilters(opts: SessionFilters): SqlFragment {
+  const params: SqlFragment["params"] = [];
   const filters: string[] = [];
   if (opts.triage === "unread") filters.push("readState = 'unread'");
   else if (opts.triage === "later" || opts.triage === "done") {
@@ -289,6 +463,73 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
       WHERE sh.rootTaskId = a.root_id AND sh.revokedAt IS NULL AND sh.userId = ?))`);
     params.push(opts.withUserId);
   }
+  return { sql: filters.length ? `WHERE ${filters.join(" AND ")}` : "", params };
+}
+
+/**
+ * One row per visible session root, with its chain aggregates, the viewer's
+ * read state and `needsYou`. It reads the trigger-kept `session_summaries`, so
+ * no request walks a chain: root filters, then one primary-key join for the
+ * viewer's triage row. Same rule and columns as {@link legacySessionSummaryQuery},
+ * plus the root columns the list and tree order and group by.
+ */
+export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
+  const root = sessionRootFilter(opts);
+  const read = opts.viewer?.userId
+    ? sessionReadStateSql(opts.viewer.userId, opts.now, {
+        lastActivityAt: "r.lastActivityAt",
+        openTasks: "r.openTaskCount",
+        pendingApproval: "r.pendingApprovalCount",
+        // The newest human event is newer than the Done mark (`reopensDoneSql`).
+        reopensDone: "r.lastHumanAt > s.lastUpdatedAt",
+      })
+    : { sql: "NULL", params: [] };
+  const filters = summaryRowFilters(opts);
+  // Sessions where the user requested any chain task, from the requester index.
+  const withUser = opts.withUserId
+    ? `r.id IN (SELECT m.rootId FROM agent_tasks t JOIN session_members m ON m.taskId = t.id
+        WHERE t.requestedByUserId = ?) AS withUser,`
+    : "";
+  return {
+    sql: `WITH state AS (
+      SELECT r.id AS root_id, r.createdAt AS rootCreatedAt, r."key", r.source, r.slackChannelId,
+        r.chainCount, r.latestStatus, r.lastActivityAt, ${withUser}
+        r.pendingApprovalCount AS pendingApproval, r.openTaskCount AS openTasks,
+        ${read.sql} AS readState, s.snoozeUntil
+      FROM ${SESSION_ROOTS} r LEFT JOIN inbox_item_state s
+        ON s.userId = ? AND s.itemType = 'to_read' AND s.itemId = r.id
+      WHERE ${root.sql}
+    ), summary AS (
+      SELECT *, (COALESCE(readState = 'unread' AND latestStatus = 'failed', 0) OR pendingApproval) AS needsYou
+      FROM state
+    )
+    SELECT a.* FROM summary a ${filters.sql}`,
+    params: [
+      ...(opts.withUserId ? [opts.withUserId] : []),
+      ...read.params,
+      opts.viewer?.userId ?? null,
+      ...root.params,
+      ...filters.params,
+    ],
+  };
+}
+
+/**
+ * The chain walk the summaries replace: a session starts at a parentTaskId IS
+ * NULL root, and one recursive CTE computes chain-wide latest activity. Root
+ * filters precede recursion; read state and chain filters follow aggregation.
+ * Off the request path: tests compare {@link sessionSummaryQuery} with it.
+ */
+export function legacySessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
+  const root = sessionRootFilter(opts);
+  const read = opts.viewer?.userId
+    ? sessionReadStateSql(opts.viewer.userId, opts.now)
+    : { sql: "NULL", params: [] };
+  const filters = summaryRowFilters(opts);
+  const params = [...root.params];
+  if (opts.withUserId) params.push(opts.withUserId);
+  params.push(opts.viewer?.userId ?? null, ...read.params, opts.viewer?.userId ?? null);
+  params.push(...filters.params);
   return {
     // SQLite takes the bare status from the row with MAX(lastUpdatedAt).
     // Keep this as the only MIN/MAX aggregate so status follows activity.
@@ -298,7 +539,7 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
         createdAt, source, requestedByUserIdInherited) AS (
       SELECT r.id, r.id, r.lastUpdatedAt, r.status, r.requestedByUserId,
         r.createdAt, r.source, r.requestedByUserIdInherited
-      FROM agent_tasks r WHERE ${root.sql}
+      FROM agent_tasks r WHERE r.parentTaskId IS NULL AND ${root.sql}
       UNION ALL
       SELECT c.root_id, t.id, t.lastUpdatedAt, t.status, t.requestedByUserId,
         t.createdAt, t.source, t.requestedByUserIdInherited
@@ -309,19 +550,20 @@ export function sessionSummaryQuery(opts: SessionFilters = {}): SqlFragment {
         ${opts.withUserId ? "SUM(chain.requestedByUserId = ?) AS withUser," : ""}
         SUM(EXISTS (SELECT 1 FROM approval_requests ar
           WHERE ar.sourceTaskId = chain.id AND ar.status = 'pending')) AS pendingApproval,
+        SUM(${openTaskSql}) AS openTasks,
         SUM(${reopensDoneSql}) AS reopensDone
       FROM chain LEFT JOIN inbox_item_state d
         ON d.userId = ? AND d.itemType = 'to_read' AND d.itemId = chain.root_id AND d.status = 'done'
       GROUP BY chain.root_id
     ), state AS (
       SELECT a.*, ${read.sql} AS readState, s.snoozeUntil
-      FROM agg a LEFT JOIN inbox_item_state s
+      FROM agg a CROSS JOIN agent_tasks r ON r.id = a.root_id LEFT JOIN inbox_item_state s
         ON s.userId = ? AND s.itemType = 'to_read' AND s.itemId = a.root_id
     ), summary AS (
       SELECT *, (COALESCE(readState = 'unread' AND latestStatus = 'failed', 0) OR pendingApproval) AS needsYou
       FROM state
     )
-    SELECT a.* FROM summary a ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}`,
+    SELECT a.* FROM summary a ${filters.sql}`,
     params,
   };
 }
@@ -334,8 +576,9 @@ export async function getSessionReadState(
   rootId: string,
   userId: string,
   now?: string,
+  readAll?: boolean,
 ): Promise<{ readState: SessionReadState; lastActivityAt: string } | null> {
-  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all" }, now });
+  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all", readAll }, now });
   const row = await getDbClient().get<{ readState: SessionReadState; lastActivityAt: string }>(
     `SELECT readState, lastActivityAt FROM (${query.sql})`,
     query.params,
@@ -350,7 +593,7 @@ export function sessionCountQuery(opts: SessionFilters = {}): SqlFragment {
   return {
     sql: chain
       ? `SELECT COUNT(*) AS count FROM (${query.sql})`
-      : `SELECT COUNT(*) AS count FROM agent_tasks r WHERE ${query.sql}`,
+      : `SELECT COUNT(*) AS count FROM ${SESSION_ROOTS} r WHERE ${query.sql}`,
     params: query.params,
   };
 }
@@ -382,13 +625,11 @@ export async function sessionPageFields(
       name: string | null;
       preview: string | null;
     }>(
-      `WITH RECURSIVE chain(root_id, id) AS (
-        SELECT id, id FROM agent_tasks WHERE id IN (${ids.map(() => "?").join(",")})
-        UNION ALL SELECT c.root_id, t.id FROM chain c JOIN agent_tasks t ON t.parentTaskId = c.id
-      ) SELECT c.root_id, t.requestedByUserId AS id, u.name,
+      `SELECT m.rootId AS root_id, t.requestedByUserId AS id, u.name,
         CASE WHEN t.source = 'system' AND t.taskType = 'follow-up' THEN NULL ELSE NULLIF(trim(substr(t.output, 1, 200)), '') END AS preview
-      FROM chain c CROSS JOIN agent_tasks t ON t.id = c.id
+      FROM session_members m CROSS JOIN agent_tasks t ON t.id = m.taskId
       LEFT JOIN users u ON u.id = t.requestedByUserId
+      WHERE m.rootId IN (${ids.map(() => "?").join(",")})
       ORDER BY t.lastUpdatedAt DESC, t.createdAt DESC, t.id DESC`,
       ids,
     ),
@@ -459,6 +700,11 @@ export interface SessionTree {
   /** Slack channel ids backed by visible roots with matching Slack fields, including hidden sources. */
   slackChannels: string[];
   /**
+   * Every resource group key in this view and the key of its resource
+   * (`shared/app:<id>/` for an action group), hidden sources included, for labels.
+   */
+  resourceGroups: string[];
+  /**
    * The oldest visible root of each nested source thread, including hidden
    * sources: its title, else a preview of its prompt without the thread context.
    */
@@ -494,35 +740,51 @@ function threadPromptPreview(prompt: string): string {
 }
 
 export async function getSessionTree(
-  actor: { kind: "bypass" } | { kind: "user"; userId: string | null },
+  actor: { kind: "bypass" } | { kind: "user"; userId: string | null; readAll?: boolean },
   now?: string,
   opts: { mine?: boolean; hideSource?: string[]; showSource?: string[] } = {},
 ): Promise<SessionTree> {
   // No source filter in SQL: the source counts must include hidden sources,
   // so the filter menu can offer them back. The loop skips them instead.
-  const query = sessionSummaryQuery({
-    ...(actor.kind === "user" ? { viewer: { userId: actor.userId, scope: "all" } as const } : {}),
+  const filterOpts: SessionFilters = {
+    ...(actor.kind === "user"
+      ? { viewer: { userId: actor.userId, scope: "all", readAll: actor.readAll } as const }
+      : {}),
     now,
     tree: true,
     mine: opts.mine,
-  });
-  const threadRoots = threadRootsSql();
-  const rows = await getDbClient().query<{
-    id: string;
-    key: string;
-    source: string;
-    slackChannelId: string | null;
-    lastActivityAt: string;
-    latestStatus: string;
-    readState: SessionReadState | null;
-    needsYou: number;
-    threadRoots: number;
-  }>(
-    `SELECT r.id, r."key", r.source, r.slackChannelId, a.lastActivityAt, a.latestStatus, a.readState, a.needsYou,
-      ${threadRoots.sql} AS threadRoots
-    FROM (${query.sql}) a CROSS JOIN agent_tasks r ON r.id = a.root_id`,
-    [...threadRoots.params, ...query.params],
-  );
+  };
+  const query = sessionSummaryQuery({ ...filterOpts, includeScheduleRuns: true });
+  // The query relaxes the owner and Mine rules for schedule runs. A row outside
+  // a user group still needs them (the predicates `sessionRootFilter` relaxes).
+  const viewer = filterOpts.viewer;
+  const mine = viewer && opts.mine ? sessionMineCondition(viewer.userId, viewer.readAll) : null;
+  const defaultVisible: SqlFragment = viewer
+    ? {
+        sql: `(r.requestedByUserId IS NOT NULL${mine ? ` AND ${mine.sql}` : ""})`,
+        params: mine?.params ?? [],
+      }
+    : { sql: "1", params: [] };
+  const [rows, threadRoots] = await Promise.all([
+    getDbClient().query<{
+      root_id: string;
+      key: string;
+      source: string;
+      slackChannelId: string | null;
+      lastActivityAt: string;
+      latestStatus: string;
+      readState: SessionReadState | null;
+      needsYou: number;
+      scheduleId: string | null;
+      defaultVisible: number;
+    }>(
+      `SELECT a.root_id, a."key", a.source, a.slackChannelId, a.lastActivityAt, a.latestStatus,
+        a.readState, a.needsYou, r.scheduleId, (${defaultVisible.sql}) AS defaultVisible
+      FROM (${query.sql}) a JOIN ${SESSION_ROOTS} r ON r.id = a.root_id`,
+      [...defaultVisible.params, ...query.params],
+    ),
+    threadRootCounts(),
+  ]);
   const counts = (): SessionSectionCounts => ({ total: 0, unread: 0, running: 0, needsYou: 0 });
   const result: SessionTree = {
     groups: [],
@@ -533,6 +795,7 @@ export async function getSessionTree(
     sources: [],
     sourceGroups: [],
     slackChannels: [],
+    resourceGroups: [],
     threadLabels: {},
   };
   const hidden = new Set(opts.hideSource);
@@ -540,6 +803,7 @@ export async function getSessionTree(
   const sources = new Map<string, number>();
   const sourceGroups = new Set<string>();
   const slackChannels = new Set<string>();
+  const resourceGroups = new Set<string>();
   const threadRootIds: string[] = [];
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
@@ -550,19 +814,27 @@ export async function getSessionTree(
   };
   for (const row of rows) {
     const source = effectiveSource(row.key, row.source);
+    const rowThreadRoots = threadRoots.get(row.key) ?? 0;
+    const key = sessionThreadGroupKey(row.key, rowThreadRoots);
+    const groupedSchedule = row.scheduleId !== null && showsScheduleRuns(key);
+    if (!groupedSchedule && !row.defaultVisible) continue;
     sources.set(source, (sources.get(source) ?? 0) + 1);
-    const key = sessionThreadGroupKey(row.key, row.threadRoots);
     const sourceGroupKey = sessionGroupKey(row.key);
     const channelId = /^shared\/slack\/([^/]+)\/$/.exec(sourceGroupKey)?.[1];
     if (channelId && row.slackChannelId?.toLowerCase() === channelId) {
       slackChannels.add(channelId);
     }
-    if (row.threadRoots >= NESTED_THREAD_MIN_ROOTS && isSourceThreadKey(row.key)) {
-      threadRootIds.push(row.id);
+    if (rowThreadRoots >= NESTED_THREAD_MIN_ROOTS && isSourceThreadKey(row.key)) {
+      threadRootIds.push(row.root_id);
       sourceGroups.add(sourceGroupKey);
     }
     if (sourceOfKey(key)) sourceGroups.add(key);
-    if (hidden.has(source) || (shown && !shown.has(source))) continue;
+    const resource = sessionResourceGroupOf(key);
+    if (resource) resourceGroups.add(key).add(resource.resourceKey);
+    if (hidden.has(source) || (shown && !shown.has(source) && !groupedSchedule)) continue;
+    // The relaxation is for the group count only. Inbox, Later and Done lists keep
+    // the owner, Mine and shown-source rules, so their counts do too.
+    const sectionVisible = !!row.defaultVisible && (!shown || shown.has(source));
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
     let group: SessionTreeGroup | undefined;
@@ -574,9 +846,13 @@ export async function getSessionTree(
       }
       if (row.lastActivityAt > group.lastActivityAt) group.lastActivityAt = row.lastActivityAt;
     }
-    if (row.readState === "later" || row.readState === "done") add(result[row.readState], row);
-    else {
-      add(result.inbox, row);
+    if (row.readState === "later" || row.readState === "done") {
+      if (sectionVisible) add(result[row.readState], row);
+    } else {
+      // A session filed into a group shows under it only (`inboxScopeCondition`).
+      const viewer = actor.kind === "user" ? actor.userId : null;
+      const inInbox = noGroup || sourceOfKey(key) || inResourceScope(row.key, viewer);
+      if (sectionVisible && inInbox) add(result.inbox, row);
       if (noGroup) add(result.noGroup, row);
       else if (group) add(group, row);
     }
@@ -587,6 +863,7 @@ export async function getSessionTree(
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
   result.sourceGroups = [...sourceGroups].sort();
   result.slackChannels = [...slackChannels].sort();
+  result.resourceGroups = [...resourceGroups].sort();
   if (threadRootIds.length) {
     // A missing or empty title falls back to a preview of the prompt without its thread context.
     const labels = await getDbClient().query<{ key: string; title: string | null; prompt: string }>(
@@ -624,12 +901,13 @@ export async function triageSessionList(
     "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "showSource" | "now"
   >,
   action: SessionListTriage,
+  readAll?: boolean,
 ): Promise<number> {
   const now = filters.now ?? new Date().toISOString();
   const query = sessionSummaryQuery({
     ...filters,
     now,
-    viewer: { userId, scope: "all" },
+    viewer: { userId, scope: "all", readAll },
     tree: true,
   });
   const status = action === "done" ? "done" : "open";

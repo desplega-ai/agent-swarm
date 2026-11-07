@@ -171,6 +171,9 @@ describe("getTaskLineage", () => {
   test("a parentTaskId cycle ends at the ancestor cap instead of looping", async () => {
     const a = await createTaskExtended("cycle a", { agentId });
     const b = await createTaskExtended("cycle b", { agentId, parentTaskId: a.id });
+    // Product code never rewrites parentTaskId, and migration 253 guards it;
+    // this cycle fixture needs the guard off.
+    await getDbClient().run("DROP TRIGGER IF EXISTS session_task_parent_immutable");
     await getDbClient().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [b.id, a.id]);
 
     const lineage = await getTaskLineage(a.id, { maxAncestors: 5, maxDepth: 4 });

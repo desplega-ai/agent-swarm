@@ -22,6 +22,9 @@ work
 # Anything reusable belongs under scripts/ or src/tests/.
 tmp/
 
+# Dev notes left on the dashboard dev server (apps/ui/dev-notes).
+apps/ui/.dev-notes/
+
 # local-fs file-storage provider root (task attachments; AGENT_FS_LOCAL_DIR
 # defaults to ./data/fs when the server runs from the repo root)
 data/
@@ -108,3 +111,4 @@ __pycache__/
 
 # Bun compile scratch files
 *.bun-build
+.e2e-state

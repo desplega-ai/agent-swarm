@@ -5,12 +5,13 @@ import type {
   AgentLog,
   AgentLogEventType,
   AgentSkill,
+  AgentSlackIcon,
   AgentStatus,
   AgentTask,
   ProviderName,
   RoutingAffinity,
 } from "../../types";
-import { AgentAvatarSchema } from "../../types";
+import { AgentAvatarSchema, AgentSlackIconSchema } from "../../types";
 import { isEnvFlagEnabled } from "../../utils/env-flag";
 import { getDbClient } from "./runtime";
 
@@ -22,6 +23,8 @@ type AgentDependencies = {
     newValue?: string;
   }) => Promise<AgentLog>;
   installSystemDefaultSkillsForAgent: (agentId: string) => Promise<AgentSkill[]>;
+  /** File-import assignments waiting for this agent (src/be/import/pending.ts). */
+  resolvePendingImportAssignments: (agent: { id: string; name: string }) => Promise<boolean>;
 };
 
 let dependencies: AgentDependencies;
@@ -63,6 +66,8 @@ export type AgentRow = {
   cred_status: string | null;
   /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
   avatar: string | null;
+  /** Migration 256: JSON of AgentSlackIcon. */
+  slack_icon: string | null;
   runtime_pool_id: string | null;
   runtime_provision_attempts: number;
   runtime_provision_retry_at: string | null;
@@ -75,6 +80,17 @@ function parseAgentAvatar(raw: string | null): AgentAvatar | null {
   if (!raw) return null;
   try {
     const parsed = AgentAvatarSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Malformed content falls back to `null`, like `parseAgentAvatar`. */
+function parseAgentSlackIcon(raw: string | null): AgentSlackIcon | null {
+  if (!raw) return null;
+  try {
+    const parsed = AgentSlackIconSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
@@ -112,6 +128,7 @@ export function rowToAgent(row: AgentRow, slim = false): Agent {
       : null,
     credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
     avatar: parseAgentAvatar(row.avatar),
+    slackIcon: parseAgentSlackIcon(row.slack_icon),
   };
   if (slim) return base;
   return {
@@ -197,6 +214,15 @@ export async function createAgent(
       (err as Error).message,
     );
   }
+  let importChanged = false;
+  try {
+    importChanged = await dependencies.resolvePendingImportAssignments({ id, name: agent.name });
+  } catch (err) {
+    console.warn(
+      "[db] Failed to apply pending import assignments for new agent:",
+      (err as Error).message,
+    );
+  }
   try {
     await dependencies.createLogEntry({
       eventType: "agent_joined",
@@ -204,7 +230,7 @@ export async function createAgent(
       newValue: agent.status,
     });
   } catch {}
-  return rowToAgent(row);
+  return importChanged ? ((await getAgentById(id)) ?? rowToAgent(row)) : rowToAgent(row);
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {

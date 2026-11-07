@@ -45,6 +45,14 @@ type AgentTaskConfig = {
   requestedByUserId?: string;
   outputSchema?: Record<string, unknown>;
   /**
+   * Dispatch even when the follow-up re-delegation guard blocks this step.
+   * The guard applies only to a run launched from a follow-up task in a Slack
+   * thread, and decides once for the whole run at its first new step: it
+   * blocks a repeat of work already completed in the thread, or a run past the
+   * thread's dispatch cap. A blocked run's later new steps are blocked too.
+   */
+  allowRedelegation?: boolean;
+  /**
    * Block until the dispatched task reaches a terminal status and journal
    * its real output. Defaults to `true` — this is the natural semantic for
    * a durable step. Set `false` to keep the legacy fire-and-poll-yourself

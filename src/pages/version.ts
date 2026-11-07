@@ -35,6 +35,9 @@ export async function snapshotPage(
     passwordHash: page.passwordHash,
     body: page.body,
     needsCredentials: page.needsCredentials,
+    theme: page.theme,
+    themeTokens: page.themeTokens,
+    designVersion: page.designVersion,
   };
 
   return createPageVersion({

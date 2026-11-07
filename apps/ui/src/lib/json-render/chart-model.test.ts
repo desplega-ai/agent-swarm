@@ -1,0 +1,151 @@
+import { describe, expect, test } from "bun:test";
+import {
+  chartValueFormatter,
+  pieShareLabel,
+  seriesColor,
+  sparklineValues,
+  timeTickFormatter,
+  toChartPoints,
+  toPieSlices,
+  toTimestamp,
+} from "./chart-model";
+
+describe("toChartPoints", () => {
+  const rows = [
+    { day: "2026-11-03", a: 3, b: "4" },
+    { day: "nope", a: 1, b: 1 },
+    { day: "2026-11-01", a: "x", b: null },
+  ];
+
+  test("category axis keeps row order and turns bad numbers into gaps", () => {
+    expect(toChartPoints(rows, "day", "category", ["a", "b"])).toEqual([
+      { __x: "2026-11-03", a: 3, b: 4 },
+      { __x: "nope", a: 1, b: 1 },
+      { __x: "2026-11-01", a: null, b: null },
+    ]);
+  });
+
+  test("time axis drops unparseable x values and sorts by time", () => {
+    const points = toChartPoints(rows, "day", "time", ["a"]);
+    expect(points.map((p) => p.__x)).toEqual([Date.parse("2026-11-01"), Date.parse("2026-11-03")]);
+    expect(points.map((p) => p.a)).toEqual([null, 3]);
+  });
+
+  test("epoch ms parses as time; booleans and blanks do not", () => {
+    expect(toTimestamp(1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(toTimestamp("")).toBeNull();
+    expect(toTimestamp(true)).toBeNull();
+  });
+});
+
+describe("chartValueFormatter", () => {
+  test("percent reads ratios; currency uses the ISO code", () => {
+    expect(chartValueFormatter("percent")(0.425)).toContain("42.5");
+    expect(chartValueFormatter("currency", "EUR")(12)).toContain("12");
+    expect(chartValueFormatter("currency", "EUR")(12)).toMatch(/€|EUR/);
+    expect(chartValueFormatter("number", "USD", true)(12_000)).toMatch(/12\s?K/i);
+  });
+});
+
+describe("seriesColor", () => {
+  test("explicit color wins; otherwise the palette cycles", () => {
+    expect(seriesColor("error", 0)).toBe("var(--color-status-error)");
+    expect(seriesColor(undefined, 1)).toBe("var(--color-chart-2)");
+    expect(seriesColor(undefined, 0)).toBe("var(--color-primary)");
+    expect(seriesColor(undefined, 5)).toBe("var(--color-primary)");
+  });
+});
+
+describe("sparklineValues", () => {
+  test("numbers pass through with gaps; rows read through the key", () => {
+    expect(sparklineValues([1, null, 3], undefined)).toEqual([1, null, 3]);
+    expect(sparklineValues([{ v: 1 }, { v: "2" }], "v")).toEqual([1, 2]);
+  });
+
+  test("fewer than two numbers, rows without a key, or a non-array draw nothing", () => {
+    expect(sparklineValues([1, null], undefined)).toEqual([]);
+    expect(sparklineValues([{ v: 1 }, { v: 2 }], undefined)).toEqual([]);
+    expect(sparklineValues("1,2", undefined)).toEqual([]);
+  });
+});
+
+describe("timeTickFormatter", () => {
+  // Local-time constructors keep these independent of the runner's TZ.
+  const at = (day: number, hour = 0, minute = 0) => new Date(2026, 10, day, hour, minute).getTime();
+  const ticks = (xs: number[]) => {
+    const format = timeTickFormatter(xs.map((x) => ({ __x: x })));
+    return xs.map(format);
+  };
+
+  test("two consecutive daily points get distinct date labels", () => {
+    expect(ticks([at(3), at(4)])).toEqual(["Nov 3", "Nov 4"]);
+  });
+
+  test("points crossing midnight within a day carry the date on every tick", () => {
+    expect(ticks([at(3, 22), at(4, 0), at(4, 2, 30)])).toEqual([
+      "Nov 3 22:00",
+      "Nov 4",
+      "Nov 4 02:30",
+    ]);
+  });
+
+  test("points within one day show the clock only", () => {
+    expect(ticks([at(3, 9), at(3, 17, 45)])).toEqual(["09:00", "17:45"]);
+  });
+});
+
+describe("toPieSlices", () => {
+  test("keeps row order, labels slices by x and computes shares", () => {
+    const slices = toPieSlices(
+      [
+        { agent: "lead", spend: 30 },
+        { agent: "coder", spend: "10" },
+        { agent: null, spend: 60 },
+      ],
+      "agent",
+      "spend",
+    );
+    expect(slices.map((s) => [s.label, s.value, s.percent])).toEqual([
+      ["lead", 30, 0.3],
+      ["coder", 10, 0.1],
+      ["", 60, 0.6],
+    ]);
+    expect(slices[0]?.color).toBe("var(--color-primary)");
+    expect(slices[1]?.color).toBe("var(--color-chart-2)");
+  });
+
+  test("adjacent slices never share a color, including the last and the first", () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ k: `s${i}`, v: 1 }));
+    for (const n of [2, 6, 7, 8, 15]) {
+      const colors = toPieSlices(rows(n), "k", "v").map((s) => s.color);
+      for (let i = 0; i < n; i++) expect(colors[i]).not.toBe(colors[(i + 1) % n]);
+    }
+  });
+
+  test("drops zero, negative and non-numeric values before the shares", () => {
+    const slices = toPieSlices(
+      [
+        { k: "a", v: 0 },
+        { k: "b", v: -4 },
+        { k: "c", v: "x" },
+        { k: "d", v: 5 },
+      ],
+      "k",
+      "v",
+    );
+    expect(slices).toHaveLength(1);
+    expect(slices[0]?.percent).toBe(1);
+  });
+
+  test("no rows → no slices", () => {
+    expect(toPieSlices([], "k", "v")).toEqual([]);
+  });
+});
+
+describe("pieShareLabel", () => {
+  test("whole percents, with <1% for a sliver", () => {
+    expect(pieShareLabel(0.426)).toBe("43%");
+    expect(pieShareLabel(1)).toBe("100%");
+    expect(pieShareLabel(0.001)).toBe("<1%");
+  });
+});

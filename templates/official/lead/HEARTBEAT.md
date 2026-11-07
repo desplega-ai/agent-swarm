@@ -8,8 +8,10 @@
 - Check for failed tasks — especially "worker session not found" failures which indicate interrupted work that may need re-creation
 - Review reboot-retry tasks — verify they are progressing, cancel if work is no longer needed
 
-## Tracked Items
+## Tracked Item Rules
 
 - Live items only: active blockers and watch items. Cap 10, 20 max during a surge; prune before you add.
-- Each item states its lift trigger and a calendar date as a bare `MM-DD` (e.g. `lift when X; check 08-22`) or `DELETE MM-DD`. A full `YYYY-MM-DD` stamp does not arm the gate.
+- Each item states its lift trigger and an expiry as `DELETE MM-DD` (or `DELETE on MM-DD`). A bare date or a full `YYYY-MM-DD` stamp does not arm the gate.
 - An item closes: move its durable facts to memory, then delete the line. Never strike it through.
+
+## Tracked Items

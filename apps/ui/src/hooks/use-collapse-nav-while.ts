@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { useSidebar } from "@/components/ui/sidebar";
 
 // The app has one global nav, so every caller shares one count. The nav
@@ -39,7 +39,8 @@ export function useCollapseNavWhile(active: boolean) {
   // only, so the user can still expand the nav while the view is active.
   const sidebarRef = useRef(sidebar);
   sidebarRef.current = sidebar;
-  useEffect(() => {
+  // A newly mounted sessions shell must collapse before its first paint.
+  useLayoutEffect(() => {
     if (!active) return;
     holders += 1;
     if (holders === 1 && sidebarRef.current.open) {

@@ -77,6 +77,16 @@ spec:
                   name: {{ include "agent-swarm.agentFsSecretName" . }}
                   key: API_AGENT_FS_API_KEY
                   optional: true
+            {{- /* A configured public URL wins. Otherwise the default proxy uses the public API URL. */}}
+            {{- if .Values.agentFs.publicUrl }}
+            - name: AGENT_FS_PUBLIC_URL
+              value: {{ .Values.agentFs.publicUrl | quote }}
+            {{- else if and .Values.agentFs.ingress.enabled .Values.agentFs.ingress.host }}
+            - name: AGENT_FS_PUBLIC_URL
+              value: {{ printf "%s://%s" (ternary "https" "http" (eq (include "agent-swarm.ingressHasTls" .Values.agentFs.ingress) "true")) .Values.agentFs.ingress.host | quote }}
+            {{- end }}
+            - name: AGENT_FS_PROXY
+              value: {{ .Values.agentFs.proxy | quote }}
             {{- end }}
           startupProbe:
             httpGet:

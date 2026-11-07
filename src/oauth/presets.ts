@@ -13,6 +13,8 @@
  * pickers and by the app-creation response.
  */
 
+import { getGitHubLinkConfig } from "../utils/github-host";
+
 export interface OAuthPreset {
   /** Stable preset identifier referenced by the catalog manifest + pickers. */
   id: string;
@@ -43,6 +45,12 @@ export interface OAuthPreset {
   extraParams?: Record<string, string>;
   /** Operator-facing quirk notes surfaced in pickers + the creation response. */
   setupHints: string[];
+  /**
+   * Leave this preset out of the "add" pickers. The provider has one
+   * canonical flow elsewhere (Linear and Jira: their tracker integration
+   * page). Lookups by id still resolve, so existing rows keep working.
+   */
+  hiddenInCatalog?: boolean;
 }
 
 /**
@@ -137,6 +145,7 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
   },
   {
     id: "jira",
+    hiddenInCatalog: true,
     displayName: "Jira (Atlassian)",
     provider: "jira",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -156,6 +165,7 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
   },
   {
     id: "linear",
+    hiddenInCatalog: true,
     displayName: "Linear",
     provider: "linear",
     authorizeUrl: "https://linear.app/oauth/authorize",
@@ -222,7 +232,23 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
 
 /** All curated presets (stable order). */
 export function listOAuthPresets(): OAuthPreset[] {
-  return OAUTH_PRESETS.map((preset) => ({ ...preset }));
+  return OAUTH_PRESETS.map(withGitHubHost);
+}
+
+/** Point the GitHub preset at the configured GitHub host (GHES); other presets pass through. */
+function withGitHubHost(preset: OAuthPreset): OAuthPreset {
+  if (preset.id !== "github") return { ...preset };
+  const { webUrl, apiUrl, enterprise } = getGitHubLinkConfig();
+  if (!enterprise) return { ...preset };
+  return {
+    ...preset,
+    authorizeUrl: `${webUrl}/login/oauth/authorize`,
+    tokenUrl: `${webUrl}/login/oauth/access_token`,
+    userinfoUrl: `${apiUrl}/user`,
+    setupHints: preset.setupHints.map((hint) =>
+      hint.replace("github.com/settings/developers", `${webUrl}/settings/developers`),
+    ),
+  };
 }
 
 /** All valid preset ids, for validation error messages + pickers. */
@@ -232,7 +258,8 @@ export function listOAuthPresetIds(): string[] {
 
 /** Look up a preset by id, or `null` when unknown. */
 export function getOAuthPreset(id: string): OAuthPreset | null {
-  return OAUTH_PRESETS.find((preset) => preset.id === id) ?? null;
+  const preset = OAUTH_PRESETS.find((candidate) => candidate.id === id);
+  return preset ? withGitHubHost(preset) : null;
 }
 
 function mergeExtraParams(

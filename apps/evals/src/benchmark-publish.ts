@@ -1,10 +1,13 @@
 /**
  * `bun src/cli.ts publish --suite 1.0 --run <matrixRunId>`: the IO around the
  * pure snapshot builder in benchmark.ts. Reads the run from the evals DB, runs
- * grader validation, refuses or writes the bundle to `apps/evals/benchmark/<suite>/`.
+ * grader validation, refuses or writes the bundle to
+ * `apps/evals/benchmark/<suite>/<YYYY-MM-DD>/`.
  *
- * The written directory is what `/benchmark` serves. Commit it in its own PR:
- * merging that PR is the moment the numbers go public.
+ * The written directory is what `/benchmark` serves. Each publish adds a dated
+ * directory (a second publish on the same UTC day replaces that day's), so earlier
+ * weeks stay in the version dropdown. Commit it in its own PR: merging that PR is
+ * the moment the numbers go public.
  */
 
 import { mkdir, rm } from "node:fs/promises";
@@ -13,7 +16,7 @@ import type { Client } from "@libsql/client";
 import { GRADER_FIXTURES } from "../scenarios/grader-fixtures/index.ts";
 import { gradeOffline, nullContext } from "../scenarios/grader-validation-support.ts";
 import { mapAnalyticsRow, SUITE_ANALYTICS_SQL } from "./api/analytics-source.ts";
-import { benchmarkDir } from "./api/benchmark-routes.ts";
+import { benchmarkDir, snapshotDay } from "./api/benchmark-routes.ts";
 import {
   type BenchmarkSnapshot,
   buildSnapshot,
@@ -107,7 +110,7 @@ export type PublishResult =
 export interface PublishOptions {
   suiteVersion: string;
   runId: string;
-  /** Default: `<benchmarkDir()>/<suiteVersion>`. */
+  /** Default: `<benchmarkDir()>/<suiteVersion>/<publish day>`. */
   outDir?: string;
   registry?: Registry;
   now?: () => Date;
@@ -173,8 +176,11 @@ export async function buildPublishBundle(
 export async function publishBenchmark(db: Client, opts: PublishOptions): Promise<PublishResult> {
   const bundle = await buildPublishBundle(db, opts);
   if (!bundle.ok) return bundle;
-  const outDir = opts.outDir ?? join(benchmarkDir(), opts.suiteVersion);
-  // A re-publish replaces the whole version: no stale scenario or config file survives.
+  const outDir =
+    opts.outDir ??
+    join(benchmarkDir(), opts.suiteVersion, snapshotDay(bundle.snapshot.publishedAt));
+  // A re-publish on the same day replaces that snapshot whole: no stale scenario or config
+  // file survives. Other days' snapshots are untouched.
   await rm(outDir, { recursive: true, force: true });
   for (const [path, content] of Object.entries(bundle.files)) {
     const target = join(outDir, path);

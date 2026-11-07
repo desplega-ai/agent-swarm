@@ -264,6 +264,14 @@ For Docker workers, also add it to `.env.docker`:
 ANONYMIZED_TELEMETRY=false
 ```
 
+When you install with `install.sh` or `agent-swarm onboard --yes`, set it in the installer's environment and the generated `.env` carries it from the first boot:
+
+```bash
+ANONYMIZED_TELEMETRY=false curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
+```
+
+`DESPLEGA_TELEMETRY_ENV=<cohort>` is forwarded the same way.
+
 You can also set it in the dashboard under Settings → Configuration → Telemetry & observability. A value stored there takes precedence over the deployment environment.
 
 Two things reach Desplega with telemetry off, because each is an explicit action: feedback you submit, and the "Show our logo on agent-swarm.dev" consent, which sends your organization name and website when you change it. A company website also points the dashboard logo at `https://proxy.desplega.sh/v1/logo`, so browsers that show the dashboard load the logo from Desplega's proxy; set your own `SWARM_ORG_LOGO_URL` to avoid that.

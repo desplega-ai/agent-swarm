@@ -20,7 +20,23 @@ async function removeDb(path: string): Promise<void> {
   }
 }
 
+/** Migration 253's triggers read agent_tasks."key", so a pre-115 fixture predates them too. */
+function dropMigration253ForHistoricalFixture(): void {
+  const db = getDb();
+  const triggers = db
+    .prepare<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'session\\_%' ESCAPE '\\'",
+    )
+    .all();
+  for (const trigger of triggers) db.run(`DROP TRIGGER "${trigger.name}"`);
+  db.run("DROP VIEW session_summary_recompute");
+  db.run("DROP TABLE session_summaries");
+  db.run("DROP TABLE session_members");
+  db.run("DELETE FROM _migrations WHERE version = 253");
+}
+
 function dropMigration115ForHistoricalFixture(): void {
+  dropMigration253ForHistoricalFixture();
   const db = getDb();
   const triggers = db
     .prepare<{ name: string }, []>(
@@ -482,6 +498,16 @@ describe("asset namespace key migrations", () => {
     expect(getDb().query('SELECT "key" FROM agent_tasks WHERE id = ?').get(taskId)).toEqual({
       key: "shared/",
     });
+    // The rebuild keeps the session summary triggers, including the ones on other tables.
+    expect(
+      getDb()
+        .query(
+          `SELECT
+            (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'session_task_insert') AS onTasks,
+            (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'session_summary_recompute_apply') AS recompute`,
+        )
+        .get(),
+    ).toEqual({ onTasks: 1, recompute: 1 });
     expect(
       getDb()
         .prepare<

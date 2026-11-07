@@ -1,6 +1,10 @@
 import { getAgentById } from "@/be/db";
 import { mcpOverflowAuthError } from "@/kv-overflow";
-import { reservedNamespaceError, reservedRoomKeyError } from "@/kv-reserved-namespaces";
+import {
+  requiresLeadToWrite,
+  reservedNamespaceError,
+  reservedRoomKeyError,
+} from "@/kv-reserved-namespaces";
 import { can } from "@/rbac";
 
 /**
@@ -30,6 +34,18 @@ export async function kvWriteAuthError(
 
   if (namespace.startsWith("task:page:")) {
     return "task:page:* writes require a page-proxy request, not an MCP call";
+  }
+  if (requiresLeadToWrite(namespace)) {
+    const agent = info.agentId ? await getAgentById(info.agentId) : null;
+    const allowed =
+      info.agentId != null &&
+      can({
+        principal: { kind: "agent", agentId: info.agentId, isLead: agent?.isLead ?? false },
+        verb: "kv.write.any",
+        resource: { kind: "kv-namespace", namespace },
+        source: "mcp",
+      }).allow;
+    if (!allowed) return "writes to this namespace require lead";
   }
   if (namespace.startsWith("task:agent:")) {
     // A missing caller identity can never own a namespace nor be lead — same

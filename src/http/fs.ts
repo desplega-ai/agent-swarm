@@ -1,11 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import {
+  AgentFsKeyValidationError,
+  ensureUserAgentFsAccount,
+  mintUserAgentFsKey,
+} from "../be/agent-fs-user-keys";
 import { deleteTaskAttachment, getTaskAttachments, getTaskById } from "../be/db";
 import { appendDraftTaskText } from "../be/db/tasks/draft-text";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
+  resolveAgentFsSharedContext,
 } from "../be/seed/agent-fs-provision";
 import {
   backingProviderId,
@@ -13,14 +19,25 @@ import {
   recordTaskAttachmentUpload,
   scopeFromAttachment,
 } from "../be/task-attachment-store";
+import { findUserById } from "../be/users";
+import { getCombConfig } from "../comb/config";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, isRbacEnabled, type RbacResource } from "../rbac";
 import { type TaskAttachment, TaskAttachmentSchema } from "../types";
+import { getAgentFsLiveUrl } from "../utils/constants";
 import { attachmentContentDisposition } from "../utils/content-disposition";
-import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
+import {
+  authUser,
+  authUserId,
+  getCurrentRequestUserId,
+  getRequestAuth,
+  isOperatorAuth,
+} from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { transcribeAudioNotes } from "../utils/transcription";
+import { dashboardUserIdHeader } from "./favorite-owner";
+import { createIpRateLimiter } from "./ip-rate-limit";
 import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { canReadSession, SESSION_READ_DENIED } from "./session-access";
@@ -29,6 +46,160 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 // Upload wall-clock past which the provider round-trip is worth a log line.
 // Attachment stalls were invisible before: this path had no timing at all.
 const SLOW_UPLOAD_LOG_MS = 3_000;
+
+const fsKeyRateLimit = createIpRateLimiter({ capacity: 5, refillPerMs: 5 / 60_000 });
+
+const fsContinueRateLimit = createIpRateLimiter({ capacity: 10, refillPerMs: 10 / 60_000 });
+
+// `GET /api/fs/me` registers and invites on demand. Each Comb page load calls it once.
+const fsMeRateLimit = createIpRateLimiter({ capacity: 20, refillPerMs: 20 / 60_000 });
+
+export function _resetFsKeyRateLimitForTests(): void {
+  fsKeyRateLimit.reset();
+  fsContinueRateLimit.reset();
+  fsMeRateLimit.reset();
+}
+
+const userAgentFsStateSchema = z.object({
+  status: z
+    .enum(["ready", "pending", "off", "unsupported"])
+    .describe("Account readiness in agent-fs."),
+  agentFsUserId: z.string().optional().describe("User ID in agent-fs when ready."),
+  email: z.string().optional().describe("Email of the swarm user, when available."),
+  displayName: z.string().optional().describe("Name of the swarm user when ready."),
+  orgId: z.string().optional().describe("Shared agent-fs org ID when configured."),
+  driveId: z.string().optional().describe("Shared agent-fs drive ID when configured."),
+  reason: z.string().optional().describe("Reason the account is not ready."),
+});
+
+const userAgentFsMeRoute = route({
+  method: "get",
+  path: "/api/fs/me",
+  pattern: ["api", "fs", "me"],
+  summary: "Ensure the current user's agent-fs account and shared membership",
+  tags: ["FS"],
+  responses: {
+    200: { description: "Account readiness", schema: userAgentFsStateSchema },
+    401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    429: { description: "Limit of twenty account checks per minute reached" },
+    502: { description: "agent-fs request failed" },
+  },
+});
+
+const mintUserAgentFsKeyRoute = route({
+  method: "post",
+  path: "/api/fs/keys",
+  pattern: ["api", "fs", "keys"],
+  summary: "Mint a named agent-fs key for the current user",
+  description: "The key is scoped to the shared org. The API returns it once and never stores it.",
+  tags: ["FS"],
+  body: z.object({ label: z.string().min(1).max(100) }),
+  rbac: { permission: "fs.join.own" },
+  responses: {
+    201: {
+      description: "Named key returned once and never stored",
+      schema: z.object({
+        apiKey: z.string().describe("Plaintext key returned once. The API never stores this key."),
+        keyId: z.string(),
+        label: z.string(),
+        agentFsUserId: z.string(),
+        orgId: z.string(),
+        driveId: z.string(),
+      }),
+    },
+    400: { description: "Invalid key label" },
+    401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    409: { description: "agent-fs account or membership is pending" },
+    429: { description: "Limit of five keys per minute reached" },
+    501: { description: "agent_fs_too_old" },
+    502: { description: "agent-fs request failed" },
+    503: { description: "agent_fs_not_configured" },
+  },
+});
+
+const continueToAgentFsRoute = route({
+  method: "post",
+  path: "/api/fs/continue",
+  pattern: ["api", "fs", "continue"],
+  summary: "Mint a named agent-fs key for the live agent-fs app and return the redirect URL",
+  description:
+    "Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.",
+  tags: ["FS"],
+  body: z.object({ returnTo: z.url().max(4096) }),
+  rbac: { permission: "fs.join.own" },
+  responses: {
+    200: {
+      description: "Redirect URL with the named key in the fragment",
+      schema: z.object({
+        redirectUrl: z
+          .string()
+          .describe(
+            "`returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment.",
+          ),
+      }),
+    },
+    400: {
+      description:
+        "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org.",
+    },
+    401: { description: "User identity required" },
+    403: { description: "Caller cannot join the shared org" },
+    409: { description: "agent-fs account or membership is pending" },
+    429: { description: "Limit of ten continues per minute reached" },
+    501: { description: "agent_fs_too_old" },
+    502: { description: "agent-fs request failed" },
+    503: { description: "agent_fs_not_configured" },
+  },
+});
+
+/**
+ * The one origin that may receive a key: the live agent-fs app
+ * (`AGENT_FS_LIVE_URL`). `AGENT_FS_APP_URL` names the dashboard that agent-fs
+ * links open, so it is not a key target.
+ */
+function allowedReturnOrigin(): string | null {
+  try {
+    const { origin } = new URL(getAgentFsLiveUrl());
+    return origin === "null" ? null : origin;
+  } catch {
+    // An unparseable URL allows nothing.
+    return null;
+  }
+}
+
+/**
+ * The agent-fs org that a live-app URL names, or null when its path names
+ * none (for example the live root, `/files`, or `/keys`). The live app puts
+ * the org in `/<view>/~/<orgId>/...` (`/file`, `/detail`, `/page`, `/sql`,
+ * `/members`) and in `/orgs/<orgId>/...`.
+ */
+/**
+ * The live app's own routes, the only paths a minted key may be sent to. The
+ * live origin also serves user content (`/site/...`, `/share/...`, raw files),
+ * whose scripts could read the fragment, so anything else is refused. Mirrors
+ * `isAppReturnPath` in agent-fs `live/src/lib/key-handoff.ts`, plus the root
+ * and the account pages the sign-in screen returns to.
+ */
+const LIVE_APP_PATH =
+  /^\/(?:|credentials|keys|files|(?:file|detail|page)\/~\/[^/]+\/[^/]+(?:\/.*)?|(?:sql|members|shares|webhooks)\/~\/[^/]+\/[^/]+\/?|orgs\/[^/]+\/files(?:\/.*)?)$/;
+
+/** True when `target` is one of the live app's own routes (see `LIVE_APP_PATH`). */
+export function isLiveAppReturnPath(target: URL): boolean {
+  return LIVE_APP_PATH.test(target.pathname);
+}
+
+export function liveAppOrgId(target: URL): string | null {
+  const segments = target.pathname.split("/").slice(1);
+  const raw = segments[1] === "~" ? segments[2] : segments[0] === "orgs" ? segments[1] : undefined;
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
 
 const taskParams = z.object({ taskId: z.uuid() });
 const attachmentParams = z.object({ taskId: z.uuid(), attachmentId: z.uuid() });
@@ -71,7 +242,7 @@ const agentFsInviteStateSchema = z.object({
   status: z
     .enum(["already_member", "added", "pending"])
     .describe(
-      "already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.",
+      "already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account).",
     ),
   inviteId: z.string().optional().describe("Pending invite id (status pending)."),
   expiresAt: z.string().optional().describe("ISO time the accept link expires (status pending)."),
@@ -80,6 +251,12 @@ const agentFsInviteStateSchema = z.object({
     .optional()
     .describe(
       "Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured.",
+    ),
+  token: z
+    .string()
+    .optional()
+    .describe(
+      "Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept.",
     ),
 });
 
@@ -126,7 +303,7 @@ const inviteMemberRoute = route({
   pattern: ["api", "fs", "members", "invite"],
   summary: "Invite an external member into the agent-fs shared org",
   description:
-    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.",
   tags: ["FS"],
   body: z.object({
     email: z.email(),
@@ -264,23 +441,83 @@ async function resolveInvite(
   req: IncomingMessage,
   body: { email: string; role: InviteRole },
 ): Promise<{ email: string; role: InviteRole } | { denied: string }> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind !== "user" || !isRbacEnabled()) return body;
-  const grant = await getUserGrant(auth.userId);
+  const user = authUser(getRequestAuth(req));
+  if (!user || !isRbacEnabled()) return body;
+  const grant = await getUserGrant(user.id);
   if (grant.grantsAll) return body;
   const decision = can({
-    principal: { kind: "user", userId: auth.userId },
+    principal: { kind: "user", userId: user.id },
     verb: "fs.join.own",
     resource: { kind: "none" },
     source: "http",
   });
   // Admission already required the role to hold `fs.join.own`.
   if (!decision.allow) return { denied: decision.reason };
-  const ownEmail = auth.user.email?.trim();
+  const ownEmail = user.email?.trim();
   if (!ownEmail || ownEmail.toLowerCase() !== body.email.trim().toLowerCase()) {
     return { denied: "You can only join the shared drive with your own account email" };
   }
   return { email: ownEmail, role: grant.verbs.has("task.fs.mutate") ? "editor" : "viewer" };
+}
+
+/**
+ * The `fs.join.own` gate for the resolved user, also a user picked behind the
+ * operator key (`X-Swarm-User-Id`). Admission checks the caller's own grant
+ * only for non-GET routes and grants the operator key everything, so this
+ * reads the user's grant directly.
+ */
+async function denyFsJoin(userId: string): Promise<string | null> {
+  const decision = can({
+    principal: { kind: "user", userId },
+    verb: "fs.join.own",
+    resource: { kind: "none" },
+    source: "http",
+  });
+  if (!decision.allow) return decision.reason;
+  // `can()` records the check but allows any user (legacy policy: anyAuthenticated),
+  // and admission skips GETs and the operator key: under RBAC the role grant decides.
+  if (!isRbacEnabled()) return null;
+  const grant = await getUserGrant(userId);
+  return grant.grantsAll || grant.verbs.has("fs.join.own")
+    ? null
+    : "missing permission 'fs.join.own'";
+}
+
+async function resolveAgentFsUserId(req: IncomingMessage): Promise<string | null> {
+  const auth = getRequestAuth(req);
+  if (auth?.page) return null;
+  const userId = authUserId(auth);
+  if (userId) return userId;
+  if (!isOperatorAuth(auth) || req.headers["x-agent-id"] !== undefined) return null;
+  const pickedUserId = dashboardUserIdHeader(req);
+  if (!pickedUserId) return null;
+  const user = await findUserById(pickedUserId);
+  return user?.status === "active" ? user.id : null;
+}
+
+function respondMintFailure(
+  res: ServerResponse,
+  result: { status: "pending" | "unsupported" | "off"; reason: string },
+): void {
+  switch (result.status) {
+    case "pending":
+      jsonError(res, scrubSecrets(`agent-fs account pending: ${result.reason}`), 409);
+      break;
+    case "unsupported":
+      jsonError(res, "agent_fs_too_old", 501);
+      break;
+    case "off":
+      jsonError(res, "agent_fs_not_configured", 503);
+      break;
+  }
+}
+
+function respondMintError(res: ServerResponse, error: unknown): void {
+  jsonError(
+    res,
+    scrubSecrets(error instanceof Error ? error.message : String(error)),
+    error instanceof AgentFsKeyValidationError ? 400 : 502,
+  );
 }
 
 export async function handleFs(
@@ -290,6 +527,120 @@ export async function handleFs(
   queryParams: URLSearchParams,
   myAgentId?: string,
 ): Promise<boolean> {
+  if (userAgentFsMeRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
+      return true;
+    }
+    if (!fsMeRateLimit.take(userId)) {
+      jsonError(res, "Limit of twenty account checks per minute reached", 429);
+      return true;
+    }
+    try {
+      userAgentFsMeRoute.respond(res, 200, await ensureUserAgentFsAccount(userId));
+    } catch (error) {
+      jsonError(res, scrubSecrets(error instanceof Error ? error.message : String(error)), 502);
+    }
+    return true;
+  }
+
+  if (mintUserAgentFsKeyRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const parsed = await mintUserAgentFsKeyRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
+      return true;
+    }
+    if (!fsKeyRateLimit.take(userId)) {
+      jsonError(res, "Limit of five keys per minute reached", 429);
+      return true;
+    }
+    try {
+      const result = await mintUserAgentFsKey(userId, parsed.body.label);
+      if (result.status === "minted") {
+        res.setHeader("Cache-Control", "no-store");
+        const { status: _, ...key } = result;
+        mintUserAgentFsKeyRoute.respond(res, 201, key);
+      } else {
+        respondMintFailure(res, result);
+      }
+    } catch (error) {
+      respondMintError(res, error);
+    }
+    return true;
+  }
+
+  if (continueToAgentFsRoute.match(req.method, pathSegments)) {
+    const userId = await resolveAgentFsUserId(req);
+    if (!userId) {
+      jsonError(res, "user identity required", 401);
+      return true;
+    }
+    const parsed = await continueToAgentFsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const denied = await denyFsJoin(userId);
+    if (denied) {
+      jsonError(res, denied, 403);
+      return true;
+    }
+    const target = new URL(parsed.body.returnTo);
+    if (target.origin !== allowedReturnOrigin() || !isLiveAppReturnPath(target)) {
+      jsonError(res, "invalid_return_to", 400);
+      return true;
+    }
+    if (!fsContinueRateLimit.take(userId)) {
+      jsonError(res, "Limit of ten continues per minute reached", 429);
+      return true;
+    }
+    // The same browser-facing agent-fs URL the dashboard uses (`/status` `agent_fs.comb.api_url`).
+    const browserApiUrl = getCombConfig().apiUrl;
+    if (!browserApiUrl) {
+      jsonError(res, "agent_fs_not_configured", 503);
+      return true;
+    }
+    try {
+      // A link for another org (for example one that names this swarm by
+      // mistake) must not mint a key that the live app cannot use there.
+      const linkOrgId = liveAppOrgId(target);
+      if (linkOrgId) {
+        const shared = await resolveAgentFsSharedContext();
+        if (!shared) {
+          jsonError(res, "agent_fs_not_configured", 503);
+          return true;
+        }
+        if (shared.orgId !== linkOrgId) {
+          jsonError(res, "org_mismatch", 400);
+          return true;
+        }
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      const result = await mintUserAgentFsKey(userId, `${target.host} · ${date}`);
+      if (result.status === "minted") {
+        // The fragment never reaches a server. The live app stores the key and strips it.
+        target.hash = `key=${encodeURIComponent(result.apiKey)}&apiUrl=${encodeURIComponent(browserApiUrl)}`;
+        res.setHeader("Cache-Control", "no-store");
+        continueToAgentFsRoute.respond(res, 200, { redirectUrl: target.toString() });
+      } else {
+        respondMintFailure(res, result);
+      }
+    } catch (error) {
+      respondMintError(res, error);
+    }
+    return true;
+  }
+
   if (ensureAgentCredentialsRoute.match(req.method, pathSegments)) {
     const parsed = await ensureAgentCredentialsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -472,7 +823,6 @@ async function sendUpload(
     return sendProviderError(res, error);
   }
 
-  const auth = getCurrentRequestAuth();
   const attachment = await recordTaskAttachmentUpload({
     provider,
     scope,
@@ -484,7 +834,7 @@ async function sendUpload(
     intent: query.intent,
     description: query.description,
     isPrimary: query.isPrimary === "true",
-    createdBy: auth?.kind === "user" ? auth.userId : undefined,
+    createdBy: getCurrentRequestUserId(),
   });
   const mimeType = contentType.split(";")[0]!.trim().toLowerCase();
   if (isDraft && mimeType.startsWith("audio/")) {

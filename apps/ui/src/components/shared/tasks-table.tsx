@@ -2,7 +2,6 @@ import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import {
   Activity,
   Calendar,
-  ChevronDown,
   Code2,
   FlaskConical,
   FolderOpen,
@@ -34,40 +33,32 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentTask, User } from "@/api/types";
+import type { AgentTask, ModelProfile, User } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
+import { ColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EffortMark } from "@/components/shared/effort-mark";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { ModelDetailsCard, type ModelDetailsTask } from "@/components/shared/model-details-card";
 import { ModelEffortLabel } from "@/components/shared/model-effort-label";
-import { PromptContext } from "@/components/shared/prompt-context";
-import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskHoverCard } from "@/components/shared/task-hover-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { parsePromptDisplay } from "@/lib/prompt-display";
 import {
-  describeModelResolution,
   taskDisplayEffort,
   taskDisplayModel,
+  taskDisplayProfile,
 } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // ─── Column model ────────────────────────────────────────────────────────────
 
@@ -174,7 +165,7 @@ function TooltipMarkdown({ text }: { text: string }) {
 
 function StatusCell({ task }: { task: AgentTask }) {
   const tooltip =
-    task.status === "failed"
+    task.status === "failed" || task.status === "skipped"
       ? task.failureReason
       : task.status === "completed"
         ? task.output
@@ -196,73 +187,59 @@ function StatusCell({ task }: { task: AgentTask }) {
 }
 
 /**
- * Description cell. A task's `title` is the short human-authored label; `task`
- * is the full prompt. Show the title when there is one — a row of truncated
- * prompt text is much harder to scan — and keep the full prompt in the tooltip
- * so nothing is hidden behind the shorter label.
+ * Description cell: the task's title, or the first real line of its prompt
+ * (most prompts open with the same "Repo: <url>." line, so every row read
+ * alike). Hovering shows the task card: details, the prompt and the outcome.
  */
-function DescriptionCell({ title, prompt }: { title?: string; prompt?: string }) {
-  // Most prompts open with the same "Repo: <url>." line, which made every row
-  // read alike. Show the title or the first real line; the tooltip keeps all.
-  const label = taskListTitle({ title, task: prompt ?? "" });
-  if (!label) return DASH;
-  const display = parsePromptDisplay(prompt ?? "");
-  const tooltipText = display.ask || prompt?.trim() || label;
+function DescriptionCell({ task }: { task: AgentTask | undefined }) {
+  const label = task ? taskListTitle(task) : "";
+  if (!task || !label) return DASH;
   return (
-    <Tooltip delayDuration={400}>
-      <TooltipTrigger asChild>
-        <span className="block truncate">{label}</span>
-      </TooltipTrigger>
-      <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
-        <PromptContext display={display} className="mb-2" />
-        <TooltipMarkdown text={tooltipText} />
-      </TooltipContent>
-    </Tooltip>
+    <TaskHoverCard task={task}>
+      <span className="block truncate">{label}</span>
+    </TaskHoverCard>
   );
 }
 
 function ModelCell({
   task,
   liveCatalog,
+  profilesByName,
 }: {
-  task: Pick<
-    AgentTask,
-    | "model"
-    | "modelTier"
-    | "resolvedModel"
-    | "modelSource"
-    | "modelAlias"
-    | "effort"
-    | "resolvedEffort"
-  >;
+  task: Partial<ModelDetailsTask>;
   liveCatalog?: LiveModelsCatalog;
+  profilesByName: Map<string, ModelProfile>;
 }) {
   const shown = taskDisplayModel(task);
   const effort = taskDisplayEffort(task);
-  if (!shown && !task.modelTier) return DASH;
-  if (!shown) {
-    return (
-      <Badge variant="outline" size="tag" className="gap-1">
-        tier: {modelTierLabel(task.modelTier)}
-        <EffortMark effort={effort} />
-      </Badge>
-    );
-  }
-  const cell = <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} />;
-  const lines = [
-    ...describeModelResolution(task),
-    ...(effort ? [`Effort: ${REASONING_EFFORT_LABEL[effort]}`] : []),
-  ];
-  if (lines.length === 0) return cell;
+  const profile = taskDisplayProfile(task);
+  if (!shown && !task.modelTier && !profile) return DASH;
+  // The cell stays logo + name + effort; the profile, cost and credential live
+  // in the details card so the model name keeps the column's width.
+  const cell = shown ? (
+    <ModelEffortLabel model={shown} effort={effort} catalog={liveCatalog} className="max-w-full" />
+  ) : (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {task.modelTier ? (
+        <Badge variant="outline" size="tag" className="shrink-0 gap-1">
+          tier: {modelTierLabel(task.modelTier)}
+          <EffortMark effort={effort} />
+        </Badge>
+      ) : null}
+      {profile ? <span className="truncate text-muted-foreground">{profile}</span> : null}
+    </span>
+  );
+  // Skeleton rows (no id yet) have nothing to look up.
+  if (!task.id) return cell;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{cell}</TooltipTrigger>
-      <TooltipContent side="right" align="start">
-        {lines.map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-      </TooltipContent>
-    </Tooltip>
+    <ModelDetailsCard
+      task={task as ModelDetailsTask}
+      profile={profile ? profilesByName.get(profile) : undefined}
+      catalog={liveCatalog}
+      label={shown ?? profile ?? `${task.modelTier} tier`}
+    >
+      {cell}
+    </ModelDetailsCard>
   );
 }
 
@@ -511,49 +488,29 @@ export function TasksColumnsMenu({
   trigger?: ReactNode;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {trigger ?? (
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" />
-            Columns
-            <ChevronDown className="h-3 w-3 opacity-60" />
-          </Button>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel className="text-xs">Show columns</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {ALWAYS_VISIBLE.map((id) => (
-          <DropdownMenuCheckboxItem
-            key={id}
-            checked
-            disabled
-            className={cn("capitalize opacity-60")}
-            onCheckedChange={() => {}}
-          >
-            {id}
-          </DropdownMenuCheckboxItem>
-        ))}
-        <DropdownMenuSeparator />
-        {TOGGLEABLE_COLUMNS.filter(({ id }) => !state.gateHidden.has(id)).map(({ id, label }) => {
+    <ColumnsMenu
+      trigger={trigger}
+      groups={[
+        ALWAYS_VISIBLE.map((id) => ({
+          id,
+          label: id,
+          checked: true,
+          disabled: true,
+          className: "capitalize opacity-60",
+        })),
+        TOGGLEABLE_COLUMNS.filter(({ id }) => !state.gateHidden.has(id)).map(({ id, label }) => {
           const forced = state.forcedHidden.has(id);
-          return (
-            <DropdownMenuCheckboxItem
-              key={id}
-              checked={!state.isHidden(id)}
-              disabled={forced}
-              onCheckedChange={(checked) => state.toggle(id, Boolean(checked))}
-            >
-              {label}
-              {forced ? (
-                <span className="ml-auto text-[10px] text-muted-foreground">locked</span>
-              ) : null}
-            </DropdownMenuCheckboxItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          return {
+            id,
+            label,
+            checked: !state.isHidden(id),
+            disabled: forced,
+            note: forced ? "locked" : undefined,
+            onCheckedChange: (checked: boolean) => state.toggle(id, checked),
+          };
+        }),
+      ]}
+    />
   );
 }
 
@@ -596,6 +553,11 @@ export function TasksTable({
   paginationQueryKey,
 }: TasksTableProps) {
   const { data: modelsCatalog } = useModelsCatalog();
+  const { data: modelProfiles } = useModelProfiles();
+  const profilesByName = useMemo(
+    () => new Map(modelProfiles?.map((profile) => [profile.name, profile])),
+    [modelProfiles],
+  );
   // Build a `userId → User` lookup for the "Requested by" column. We skip the
   // network call entirely on swarms that don't support the column — the
   // gate-hidden set already filters the column out of `columnDefs`, so the
@@ -631,9 +593,7 @@ export function TasksTable({
         // Sort / filter / quick-search on the same string the cell displays,
         // otherwise a titled row sorts by a prompt the user can't see.
         valueGetter: (p) => (p.data ? taskListTitle(p.data) : ""),
-        cellRenderer: (p: { data?: AgentTask }) => (
-          <DescriptionCell title={p.data?.title} prompt={p.data?.task} />
-        ),
+        cellRenderer: (p: { data?: AgentTask }) => <DescriptionCell task={p.data} />,
       },
       {
         _id: "status",
@@ -668,7 +628,11 @@ export function TasksTable({
         width: 200,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
-          <ModelCell task={p.data ?? {}} liveCatalog={modelsCatalog?.providers} />
+          <ModelCell
+            task={p.data ?? {}}
+            liveCatalog={modelsCatalog?.providers}
+            profilesByName={profilesByName}
+          />
         ),
       },
       {
@@ -754,7 +718,7 @@ export function TasksTable({
     ];
 
     return all.filter((c) => !columns.isHidden(c._id)).map(({ _id, ...col }) => col);
-  }, [agentNameById, columns, userById, modelsCatalog?.providers]);
+  }, [agentNameById, columns, userById, modelsCatalog?.providers, profilesByName]);
 
   return (
     <DataGrid

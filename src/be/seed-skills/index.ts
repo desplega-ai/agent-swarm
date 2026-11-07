@@ -136,6 +136,12 @@ import learningConfig from "../../../templates/skills/learning/config.json" with
 import learningContent from "../../../templates/skills/learning/content.md" with { type: "text" };
 import memoryConfig from "../../../templates/skills/memory/config.json" with { type: "text" };
 import memoryContent from "../../../templates/skills/memory/content.md" with { type: "text" };
+import modernizePrConfig from "../../../templates/skills/modernize-pr/config.json" with {
+  type: "text",
+};
+import modernizePrContent from "../../../templates/skills/modernize-pr/content.md" with {
+  type: "text",
+};
 import oneShotConfig from "../../../templates/skills/one-shot/config.json" with { type: "text" };
 import oneShotContent from "../../../templates/skills/one-shot/content.md" with { type: "text" };
 import pagesConfig from "../../../templates/skills/pages/config.json" with { type: "text" };
@@ -361,6 +367,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: kvStorageConfig, body: kvStorageContent },
   { config: learningConfig, body: learningContent },
   { config: memoryConfig, body: memoryContent },
+  { config: modernizePrConfig, body: modernizePrContent },
   { config: oneShotConfig, body: oneShotContent },
   { config: pagesConfig, body: pagesContent },
   { config: phaseRunningConfig, body: phaseRunningContent },

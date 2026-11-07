@@ -3,7 +3,7 @@ import { selectCredential } from "../../../utils/credentials";
 import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import { noteEmbeddingFailure, noteEmbeddingSuccess } from "../embedding-recovery";
-import type { EmbeddingInputKind, EmbeddingProvider, EmbedOptions } from "../types";
+import type { EmbeddingInputKind, EmbeddingProvider, EmbeddingSpace, EmbedOptions } from "../types";
 
 // text-embedding-3-* reject any input over 8,192 tokens with a 400, and one
 // such input fails every input in its request. There is no tokenizer here, and
@@ -32,6 +32,19 @@ function cleanInput(text: string, prefix = ""): string {
   const cleaned = text.replace(/[\n\r]/g, " ").trim();
   if (!cleaned) return "";
   return prefix + cleaned.slice(0, Math.max(0, MAX_EMBEDDING_INPUT_CHARS - prefix.length));
+}
+
+/** Same endpoint, same string: no credentials, no trailing slash. */
+function normalizeBaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  try {
+    const url = new URL(trimmed);
+    url.username = "";
+    url.password = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
 }
 
 /** A 400 is about the request's inputs, so the other inputs can still embed. */
@@ -76,6 +89,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI | null = null;
   private readonly model: string;
   private readonly apiKey: string | undefined;
+  private readonly baseURL: string | undefined;
   private readonly queryPrefix: string;
   private readonly documentPrefix: string;
 
@@ -86,6 +100,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       : undefined;
 
     this.model = config?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
+    this.baseURL = process.env.EMBEDDING_API_BASE_URL || undefined; // Optional custom base URL
 
     this.dimensions = config?.dimensions ?? EMBEDDING_DIMENSIONS;
 
@@ -109,10 +124,22 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     return !!this.apiKey;
   }
 
+  space(): EmbeddingSpace {
+    return {
+      // With no base URL the SDK falls back to OPENAI_BASE_URL, then to OpenAI.
+      baseUrl: normalizeBaseUrl(
+        this.baseURL ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+      ),
+      model: this.model,
+      dimensions: this.dimensions,
+      documentPrefix: this.documentPrefix,
+    };
+  }
+
   private getClient(): OpenAI | null {
     if (!this.apiKey) return null;
     if (!this.client) {
-      const baseURL = process.env.EMBEDDING_API_BASE_URL; // Optional custom base URL
+      const baseURL = this.baseURL;
       this.client = new OpenAI({
         baseURL,
         apiKey: this.apiKey,

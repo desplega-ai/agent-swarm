@@ -28,22 +28,38 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   Braces,
+  Database,
   ExternalLink,
+  FileDown,
   Lock,
   Maximize2,
   MessageSquarePlus,
   Minimize2,
-  Printer,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { usePage } from "@/api/hooks/use-pages";
-import type { PageMetadata } from "@/api/types";
+import type { PageListItem, PageMetadata } from "@/api/types";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
+import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { PageActions } from "@/components/shared/page-actions";
+import {
+  showVersionUpdatedToast,
+  useVersionUpdateToast,
+} from "@/components/shared/version-update-notice";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,13 +67,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useTheme } from "@/hooks/use-theme";
+import { useVersionedValue } from "@/hooks/use-versioned-value";
 import { getConfig } from "@/lib/config";
 import { getPageContext } from "@/lib/page-context";
+import { PAGE_MODE_PARAM, PAGE_THEME_PARAM, pageFrameQuery } from "@/lib/page-query";
+import { DEFAULT_THEME_ID } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
 import { FeedbackConfirmDialog } from "./feedback-confirm-dialog";
 import { JsonPageRenderer } from "./json-page-renderer";
-import { RoomInspector } from "./room-inspector";
+import { PageHeaderSummary } from "./page-header-summary";
+import { RoomInspectorDialog } from "./room-inspector";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -80,25 +103,20 @@ function getPageHtmlUrl(id: string): string {
 }
 
 /**
- * Query params the SPA owns on `/pages/:id` and must never forward to the
- * page body: `mode` (full-screen toggle), `key` (password unlock is handled
- * by the password frame itself) and the connection overrides, which would
- * otherwise hand the API key to agent-authored HTML.
+ * `frameQuery` plus the viewer's theme, for the URLs that load the page body:
+ * the iframe src and the "Open" link. Hive and light mode are the page
+ * defaults, so they add no param. The "Full" route renders the frame itself,
+ * so it does not take this query. "Export PDF" takes the preset only (it
+ * passes light), because print is always light.
  */
-const SPA_RESERVED_PAGE_PARAMS = new Set(["mode", "key", "apiUrl", "apiKey"]);
-
-/**
- * Query string forwarded from the SPA route to the page body, so a link like
- * `/pages/<id>?target=pr-1373` reaches the iframe as `/p/<id>?target=pr-1373`
- * and the page can filter or deep-link on its own params. Empty when there is
- * nothing to forward.
- */
-function pageFrameQuery(searchParams: URLSearchParams): string {
-  const forwarded = new URLSearchParams();
-  for (const [name, value] of searchParams) {
-    if (!SPA_RESERVED_PAGE_PARAMS.has(name)) forwarded.append(name, value);
-  }
-  const query = forwarded.toString();
+function withViewerTheme(
+  frameQuery: string,
+  viewer: { preset: string; theme: "dark" | "light" },
+): string {
+  const params = new URLSearchParams(frameQuery);
+  if (viewer.preset !== DEFAULT_THEME_ID) params.set(PAGE_THEME_PARAM, viewer.preset);
+  if (viewer.theme === "dark") params.set(PAGE_MODE_PARAM, "dark");
+  const query = params.toString();
   return query ? `?${query}` : "";
 }
 
@@ -113,6 +131,19 @@ const FEEDBACK_PARAM = "__swarm-feedback";
 function isFeedbackOn(searchParams: URLSearchParams): boolean {
   const value = searchParams.get(FEEDBACK_PARAM);
   return value !== null && value.toLowerCase() !== "0" && value.toLowerCase() !== "false";
+}
+
+/** Compare page content while ignoring view counts and viewer-specific metadata. */
+function pageContentRevision(page: PageListItem): string {
+  const ignored = new Set([
+    "viewCount",
+    "favorite",
+    "updatedAt",
+    "createdAt",
+    "api_url",
+    "app_url",
+  ]);
+  return JSON.stringify(Object.entries(page).filter(([key]) => !ignored.has(key)));
 }
 
 /** SPA route for the page, keeping the forwarded params and toggling `mode=full`. */
@@ -177,24 +208,47 @@ async function fetchPageMetadataWithLaunchRetry(id: string): Promise<PageMetadat
 interface FrameProps {
   id: string;
   title: string;
-  /** `?a=b` string forwarded to the page body (see `pageFrameQuery`), or "". */
+  /**
+   * `?a=b` string for the page body URL: the forwarded params plus the viewer
+   * theme (see `pageFrameQuery` and `withViewerTheme`), or "".
+   */
   frameQuery: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  /** Replaces the frame's size classes (the link preview panel fills its body). */
+  className?: string;
+  revision?: string;
 }
+
+const FRAME_CLASS = cn(
+  "w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background",
+  // Below md the frame bleeds through `<main>`'s gutter to the screen
+  // edges, so a phone gives the page its full width.
+  "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
+);
 
 function PageIframe({
   src,
   title,
   iframeRef,
+  className = FRAME_CLASS,
+  revision,
 }: {
   src: string;
   title: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  className?: string;
+  revision?: string;
 }) {
+  const frameUrl = new URL(src);
+  if (revision) frameUrl.searchParams.set("__swarm_revision", revision);
   return (
     <iframe
+      // A new src (a theme or mode switch, a param change) mounts a new
+      // frame. Changing the src of a loaded frame would add a browser
+      // history entry, so Back would step through old frame URLs.
+      key={`${src}:${revision ?? ""}`}
       ref={iframeRef}
-      src={src}
+      src={frameUrl.toString()}
       title={title}
       // `allow-same-origin` is required for the Browser SDK (`window.swarm`)
       // to function — it makes XHR/fetch calls to `/@swarm/api/*` from
@@ -202,19 +256,22 @@ function PageIframe({
       // lets agent-emitted forms POST. We deliberately do NOT include
       // `allow-top-navigation` to prevent runaway-redirect attacks.
       sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-      className={cn(
-        "w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background",
-        // Below md the frame bleeds through `<main>`'s gutter to the screen
-        // edges, so a phone gives the page its full width.
-        "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
-      )}
+      className={className}
     />
   );
 }
 
-function PublicHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PublicHtmlFrame({ id, title, frameQuery, iframeRef, className, revision }: FrameProps) {
   const src = getPageHtmlUrl(id) + frameQuery;
-  return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
+  return (
+    <PageIframe
+      src={src}
+      title={title}
+      iframeRef={iframeRef}
+      className={className}
+      revision={revision}
+    />
+  );
 }
 
 async function assertAuthedPageBodyReady(
@@ -242,11 +299,13 @@ async function assertAuthedPageBodyReady(
   throw new Error(`page body ${id}: ${res.status}`);
 }
 
-function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function AuthedHtmlFrame({ id, title, frameQuery, iframeRef, className, revision }: FrameProps) {
   const [frameState, setFrameState] = useState<
     { status: "loading" } | { status: "ready"; src: string } | { status: "error"; message: string }
   >({ status: "loading" });
 
+  // Reissue the page session when the accepted revision reloads the iframe.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision intentionally restarts the session
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -290,32 +349,51 @@ function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
       active = false;
       controller.abort();
     };
-  }, [id, frameQuery]);
+  }, [id, frameQuery, revision]);
 
   if (frameState.status === "loading") {
-    return <Skeleton className="h-[calc(100vh-6rem)] w-full rounded-md" />;
+    return <Skeleton className={cn("h-[calc(100vh-6rem)] w-full rounded-md", className)} />;
   }
 
   if (frameState.status === "error") {
     return <ArtifactPageError message={frameState.message} />;
   }
 
-  return <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} />;
+  return (
+    <PageIframe
+      src={frameState.src}
+      title={title}
+      iframeRef={iframeRef}
+      className={className}
+      revision={revision}
+    />
+  );
 }
 
-function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+function PasswordHtmlFrame({ id, title, frameQuery, iframeRef, className, revision }: FrameProps) {
   const [password, setPassword] = useState("");
-  const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
 
-  if (iframeSrc) {
-    return <PageIframe src={iframeSrc} title={title} iframeRef={iframeRef} />;
+  // The src comes from the current `frameQuery` on each render, so a theme or
+  // mode switch reloads the unlocked frame too. The form is gone after the
+  // submit, so `password` keeps the submitted key.
+  if (unlocked) {
+    const params = new URLSearchParams(frameQuery);
+    params.set("key", password);
+    return (
+      <PageIframe
+        src={`${getPageHtmlUrl(id)}?${params.toString()}`}
+        title={title}
+        iframeRef={iframeRef}
+        className={className}
+        revision={revision}
+      />
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const params = new URLSearchParams(frameQuery);
-    params.set("key", password);
-    setIframeSrc(`${getPageHtmlUrl(id)}?${params.toString()}`);
+    setUnlocked(true);
   }
 
   return (
@@ -353,6 +431,78 @@ function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
 // handlers live there (kept separate so the artifact page itself stays
 // focused on the iframe / auth-mode plumbing).
 
+/**
+ * The page body: the JSON renderer, or the HTML frame for the page's auth
+ * mode. `className` sizes the HTML frame (see `FrameProps`).
+ */
+function PageBody({
+  id,
+  data,
+  frameQuery,
+  iframeRef,
+  className,
+  revision,
+}: Omit<FrameProps, "title"> & { data: PageMetadata }) {
+  if (data.contentType === "application/json") {
+    return (
+      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
+        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <Braces className="size-3" />
+          <span>JSON-rendered page</span>
+        </div>
+        <JsonPageRenderer body={data.body} />
+      </div>
+    );
+  }
+  const frame = { id, title: data.title, frameQuery, iframeRef, className, revision };
+  switch (data.authMode) {
+    case "public":
+      return <PublicHtmlFrame {...frame} />;
+    case "authed":
+      return <AuthedHtmlFrame {...frame} />;
+    case "password":
+      return <PasswordHtmlFrame {...frame} />;
+  }
+}
+
+/**
+ * The page body alone, for the link preview panel (task and session pages):
+ * no header, feedback overlay, or full mode. It shares the metadata query
+ * with the page route. `frameQuery` is the link's forwarded query
+ * (`pageFrameQuery`), so the preview shows the view the link names.
+ */
+export function PagePreviewBody({
+  id,
+  frameQuery,
+  className,
+}: {
+  id: string;
+  frameQuery: string;
+  className?: string;
+}) {
+  const viewer = useTheme();
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["page-metadata", id],
+    queryFn: () => fetchPageMetadataWithLaunchRetry(id),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+  if (isLoading) return <Skeleton className={className} />;
+  if (error || !data) {
+    return <ArtifactPageError message={error instanceof Error ? error.message : "Not found"} />;
+  }
+  return (
+    <PageBody
+      id={id}
+      data={data}
+      frameQuery={withViewerTheme(frameQuery, viewer)}
+      className={className}
+    />
+  );
+}
+
 // ─── Loading / error ────────────────────────────────────────────────────────
 
 function ArtifactPageSkeleton() {
@@ -377,8 +527,12 @@ function ArtifactPageError({ message }: { message: string }) {
 export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const viewer = useTheme();
   const fullMode = searchParams.get("mode") === "full";
   const frameQuery = pageFrameQuery(searchParams);
+  // The page body URLs (the frames, "Open") follow the dashboard theme. A
+  // theme or mode switch changes this string, which reloads the frame.
+  const themedFrameQuery = withViewerTheme(frameQuery, viewer);
   const feedbackOn = isFeedbackOn(searchParams);
   const toggleFeedback = useCallback(() => {
     setSearchParams(
@@ -414,9 +568,38 @@ export default function ArtifactPage() {
     iframeRef,
   });
   const { data: pageRow } = usePage(pageId);
+  const [autoReload] = useLocalToggle("entity-auto-reload", false);
+  const pageRevision = useMemo(() => pageRow && pageContentRevision(pageRow), [pageRow]);
+  // Set when auto reload applied the displayed revision, read by the frame reload.
+  const autoAppliedRef = useRef(false);
+  const pageVersion = useVersionedValue(pageId, pageRow, pageRevision, autoReload, {
+    onAutoApply: () => {
+      autoAppliedRef.current = true;
+    },
+  });
+  useVersionUpdateToast({
+    entityKey: `page:${pageId}`,
+    latestRevision: pageRevision,
+    pending: pageVersion.pending,
+    editing: pageVersion.editing,
+    autoReload,
+    canAutoReload: pageVersion.canAutoReload,
+    onLoad: pageVersion.apply,
+  });
+  const displayedRevision = useMemo(
+    () => pageVersion.value && pageContentRevision(pageVersion.value),
+    [pageVersion.value],
+  );
+  const [frameRevision, setFrameRevision] = useState(0);
+  const [frameInstance] = useState(() => String(Date.now()));
   const favoriteToggle = useFavoriteToggle("page");
 
-  const { data, error, isLoading } = useQuery({
+  const {
+    data,
+    error,
+    isLoading,
+    refetch: refetchMetadata,
+  } = useQuery({
     queryKey: ["page-metadata", pageId],
     queryFn: () => fetchPageMetadataWithLaunchRetry(pageId ?? ""),
     enabled: !!pageId,
@@ -424,10 +607,53 @@ export default function ArtifactPage() {
     // refetch + re-render the iframe while the user is interacting with it
     // (and for password mode this would re-trigger the unlock flow).
     staleTime: Infinity,
+    refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
   });
+
+  const [reloadError, setReloadError] = useState<{ pageId: string; auto: boolean } | null>(null);
+  const reloadFrame = useCallback(
+    async (auto: boolean) => {
+      setReloadError(null);
+      const result = await refetchMetadata();
+      if (result.isError || !result.data) {
+        if (pageId) setReloadError({ pageId, auto });
+        return;
+      }
+      setFrameRevision((version) => version + 1);
+      if (auto) showVersionUpdatedToast();
+    },
+    [refetchMetadata, pageId],
+  );
+  const reloadFrameRef = useRef(reloadFrame);
+  reloadFrameRef.current = reloadFrame;
+  // The error toast closes when the viewer leaves the page or retries.
+  useEffect(() => {
+    if (!reloadError || reloadError.pageId !== pageId) return;
+    const id = toast.error("Could not load the latest version", {
+      duration: Number.POSITIVE_INFINITY,
+      action: {
+        label: "Try again",
+        onClick: () => void reloadFrameRef.current(reloadError.auto),
+      },
+    });
+    return () => {
+      toast.dismiss(id);
+    };
+  }, [reloadError, pageId]);
+  const lastRevision = useRef<{ id: string; revision: string } | null>(null);
+  useEffect(() => {
+    if (!pageId || !displayedRevision) return;
+    const previous = lastRevision.current;
+    lastRevision.current = { id: pageId, revision: displayedRevision };
+    if (previous?.id === pageId && previous.revision !== displayedRevision) {
+      const auto = autoAppliedRef.current;
+      autoAppliedRef.current = false;
+      void reloadFrame(auto);
+    }
+  }, [pageId, displayedRevision, reloadFrame]);
 
   // Open the page in a new tab with `?print=1` so it self-prints in the
   // user's own browser. The agent-authored HTML (or formatted JSON) prints —
@@ -435,12 +661,13 @@ export default function ArtifactPage() {
   // server appends an auto-print snippet to the `?print=1` response, and the
   // page-session cookie (minted during the metadata fetch) rides along on the
   // top-level navigation so authed/password pages still resolve. Triggered
-  // synchronously from the click so the pop-up isn't blocked.
+  // synchronously from the click so the pop-up isn't blocked. The PDF keeps
+  // the viewer's preset but never the dark mode: print is always light.
   const handleExportPdf = useCallback(() => {
     if (!pageId) return;
-    const url = `${getAbsoluteApiUrl()}/p/${encodeURIComponent(pageId)}?print=1`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, [pageId]);
+    const query = withViewerTheme("?print=1", { preset: viewer.preset, theme: "light" });
+    window.open(`${getPageHtmlUrl(pageId)}${query}`, "_blank", "noopener,noreferrer");
+  }, [pageId, viewer.preset]);
 
   if (!gate.supported) {
     return (
@@ -460,56 +687,20 @@ export default function ArtifactPage() {
     return <ArtifactPageError message={msg} />;
   }
   if (isLoading) return <ArtifactPageSkeleton />;
-  if (error || !data) {
+  if (!data) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return <ArtifactPageError message={msg} />;
   }
 
-  let body: React.ReactNode;
-  if (data.contentType === "application/json") {
-    body = (
-      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
-        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-          <Braces className="size-3" />
-          <span>JSON-rendered page</span>
-        </div>
-        <JsonPageRenderer body={data.body} />
-      </div>
-    );
-  } else {
-    switch (data.authMode) {
-      case "public":
-        body = (
-          <PublicHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={frameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-      case "authed":
-        body = (
-          <AuthedHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={frameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-      case "password":
-        body = (
-          <PasswordHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={frameQuery}
-            iframeRef={iframeRef}
-          />
-        );
-        break;
-    }
-  }
+  const body = (
+    <PageBody
+      id={pageId!}
+      data={data}
+      frameQuery={themedFrameQuery}
+      iframeRef={iframeRef}
+      revision={`${frameInstance}-${frameRevision}`}
+    />
+  );
 
   if (fullMode) {
     // Maximize: render the page body as a fixed-position overlay on top of
@@ -517,7 +708,7 @@ export default function ArtifactPage() {
     // sits above the body, not overlapping — so iframe / JSON content gets
     // the full remaining viewport.
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div ref={pageVersion.scopeRef} className="fixed inset-0 z-50 flex flex-col bg-background">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate text-sm font-medium">{data.title}</span>
@@ -537,17 +728,20 @@ export default function ArtifactPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 gap-4">
+    <div ref={pageVersion.scopeRef} className="flex flex-1 flex-col min-h-0 gap-4">
       <PageHeader
-        // Below sm the actions take their own row under a full-width
-        // description; side by side they squeezed it to one word per line.
-        className="max-sm:flex-col max-sm:items-stretch"
+        // One row at every width: the summary truncates, the icon actions
+        // keep their size.
         title={data.title}
-        description={data.description ?? undefined}
+        description={
+          <PageHeaderSummary description={data.description} slug={pageRow?.slug ?? null} />
+        }
         action={
           <PageHeaderActions
             id={pageId!}
+            title={data.title}
             frameQuery={frameQuery}
+            themedFrameQuery={themedFrameQuery}
             authMode={data.authMode}
             favorite={pageRow?.favorite}
             favoriteDisabled={favoriteToggle.isPending}
@@ -556,8 +750,9 @@ export default function ArtifactPage() {
             }
             onExportPdf={handleExportPdf}
             feedback={
-              // HTML only (JSON pages render in the SPA), and not for password
-              // pages: the unlocked frame keeps the URL it was opened with.
+              // HTML only (JSON pages render in the SPA). Not offered for
+              // password pages yet, though their unlocked frame follows the
+              // frame query, so the toggle would reach it.
               data.contentType === "text/html" && data.authMode !== "password"
                 ? { on: feedbackOn, onToggle: toggleFeedback }
                 : undefined
@@ -565,8 +760,6 @@ export default function ArtifactPage() {
           />
         }
       />
-      <PageSlugLine id={pageId!} />
-      <RoomInspector key={pageId} pageId={pageId!} />
       {body}
       <FeedbackConfirmDialog bridge={feedbackBridge} />
     </div>
@@ -575,32 +768,41 @@ export default function ArtifactPage() {
 
 // ─── Header extras ─────────────────────────────────────────────────────────
 
-/**
- * Slug line shown right under the title. We pull the slug from the
- * bearer-authed `/api/pages/:id` lookup (the public `/p/:id.json` doesn't
- * expose slug — it's a creator-side concept). Renders nothing if the lookup
- * hasn't loaded yet.
- */
-function PageSlugLine({ id }: { id: string }) {
-  const { data } = usePage(id);
-  if (!data?.slug) return null;
+/** Icon-only header action: its label is both the tooltip and the accessible name. */
+function HeaderIconButton({
+  label,
+  tooltip,
+  className,
+  ...props
+}: ComponentProps<typeof Button> & { label: string; tooltip?: ReactNode }) {
   return (
-    <p className="font-mono text-xs text-muted-foreground -mt-2">
-      slug: <span className="text-foreground/70">{data.slug}</span>
-    </p>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          className={cn("h-7 w-7", className)}
+          {...props}
+        />
+      </TooltipTrigger>
+      <TooltipContent>{tooltip ?? label}</TooltipContent>
+    </Tooltip>
   );
 }
 
 /**
- * "Open external" link that pops `/p/:id` (the canonical API-served URL) in
- * a new tab. For password mode, opening the link triggers the browser's
- * native Basic-auth dialog; for authed mode it 401s unless the page-session
- * cookie still applies (works fine when the SPA is at the same origin as
- * the API; in cross-origin dev the cookie may not flow).
+ * The header's icon actions. "Open" pops `/p/:id` (the canonical API-served
+ * URL) in a new tab. For password mode, opening the link triggers the
+ * browser's native Basic-auth dialog; for authed mode it 401s unless the
+ * page-session cookie still applies (works fine when the SPA is at the same
+ * origin as the API; in cross-origin dev the cookie may not flow).
  */
 function PageHeaderActions({
   id,
+  title,
   frameQuery,
+  themedFrameQuery,
   authMode,
   favorite,
   favoriteDisabled,
@@ -609,7 +811,12 @@ function PageHeaderActions({
   feedback,
 }: {
   id: string;
+  /** The page's title: names the phone action sheet. */
+  title: string;
+  /** Forwarded page params, for the "Full" route. */
   frameQuery: string;
+  /** `frameQuery` plus the viewer theme, for the "Open" link. */
+  themedFrameQuery: string;
   authMode: PageMetadata["authMode"];
   favorite?: boolean;
   favoriteDisabled?: boolean;
@@ -618,48 +825,111 @@ function PageHeaderActions({
   /** Feedback-overlay toggle; omitted when the page cannot take feedback. */
   feedback?: { on: boolean; onToggle: () => void };
 }) {
-  // The share link carries the same forwarded params as the iframe, so
-  // "Open" keeps whatever filter the page is showing.
-  const href = getPageHtmlUrl(id) + frameQuery;
+  const [roomOpen, setRoomOpen] = useState(false);
+  // The share link carries the same query as the iframe, so "Open" keeps
+  // whatever filter, theme and mode the page is showing.
+  const href = getPageHtmlUrl(id) + themedFrameQuery;
+  const navigate = useNavigate();
+  const fullRoute = pageRoute(id, frameQuery, true);
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
-      {feedback ? (
-        <Button
-          variant={feedback.on ? "default" : "outline"}
-          size="sm"
-          aria-pressed={feedback.on}
-          title="Select elements on the page, comment on them, and send the comments to the swarm"
-          onClick={feedback.onToggle}
-        >
-          <MessageSquarePlus className="size-3.5" />
-          Feedback
-        </Button>
-      ) : null}
-      <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
-        <a href={href} target="_blank" rel="noreferrer">
-          <ExternalLink className="size-3.5" />
-          Open
-          {authMode === "password" ? (
-            <span className="text-muted-foreground">(password required)</span>
-          ) : null}
-        </a>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        title="Open a print-ready view and save as PDF"
-        onClick={onExportPdf}
+    <>
+      <PageActions
+        title={title}
+        // A phone keeps the star, plus the feedback toggle while it is on so
+        // one tap turns it off. Everything else sits in the sheet.
+        primary={
+          <>
+            <FavoriteButton
+              favorite={favorite}
+              disabled={favoriteDisabled}
+              onToggle={onToggleFavorite}
+              className="size-11 [&_svg]:size-5"
+            />
+            {feedback?.on ? (
+              <Button
+                size="icon"
+                className="size-11"
+                aria-label="Feedback"
+                aria-pressed
+                onClick={feedback.onToggle}
+              >
+                <MessageSquarePlus className="size-5" />
+              </Button>
+            ) : null}
+          </>
+        }
+        more={
+          <>
+            {feedback ? (
+              <ActionSheetItem
+                icon={MessageSquarePlus}
+                label={feedback.on ? "Stop feedback" : "Feedback"}
+                onSelect={feedback.onToggle}
+              />
+            ) : null}
+            <ActionSheetItem
+              icon={ExternalLink}
+              label={authMode === "password" ? "Open in a new tab (password)" : "Open in a new tab"}
+              onSelect={() => window.open(href, "_blank", "noreferrer")}
+            />
+            <ActionSheetItem icon={FileDown} label="Export PDF" onSelect={onExportPdf} />
+            <ActionSheetItem
+              icon={Database}
+              label="Saved room state"
+              onSelect={() => setRoomOpen(true)}
+            />
+            <ActionSheetItem
+              icon={Maximize2}
+              label="Full screen"
+              onSelect={() => void navigate(fullRoute)}
+            />
+          </>
+        }
       >
-        <Printer className="size-3.5" />
-        Export PDF
-      </Button>
-      <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
-        <Link to={pageRoute(id, frameQuery, true)}>
-          <Maximize2 className="size-3.5" />
-          Full
-        </Link>
-      </Button>
-    </div>
+        <div className="flex items-center gap-0.5">
+          <FavoriteButton
+            favorite={favorite}
+            disabled={favoriteDisabled}
+            onToggle={onToggleFavorite}
+          />
+          {feedback ? (
+            <HeaderIconButton
+              label="Feedback"
+              tooltip="Feedback: select elements on the page, comment on them, and send the comments to the swarm"
+              variant={feedback.on ? "default" : "ghost"}
+              aria-pressed={feedback.on}
+              onClick={feedback.onToggle}
+            >
+              <MessageSquarePlus className="size-4" />
+            </HeaderIconButton>
+          ) : null}
+          <HeaderIconButton
+            asChild
+            label="Open"
+            tooltip={
+              authMode === "password"
+                ? "Open in a new tab (password required)"
+                : "Open the API-served URL in a new tab"
+            }
+          >
+            <a href={href} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+            </a>
+          </HeaderIconButton>
+          <HeaderIconButton label="Export PDF" onClick={onExportPdf}>
+            <FileDown className="size-4" />
+          </HeaderIconButton>
+          <HeaderIconButton label="Saved room state" onClick={() => setRoomOpen(true)}>
+            <Database className="size-4" />
+          </HeaderIconButton>
+          <HeaderIconButton asChild label="Full screen">
+            <Link to={fullRoute}>
+              <Maximize2 className="size-4" />
+            </Link>
+          </HeaderIconButton>
+        </div>
+      </PageActions>
+      <RoomInspectorDialog key={id} pageId={id} open={roomOpen} onOpenChange={setRoomOpen} />
+    </>
   );
 }

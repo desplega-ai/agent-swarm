@@ -18,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { fingerprintApiKey, type IdentityActor } from "../be/users";
 import { getApiKey } from "../utils/api-key";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, isOperatorAuth, rejectGuest } from "./request-principal";
 import { jsonError } from "./utils";
 
 /**
@@ -41,16 +42,15 @@ function extractBearer(req: IncomingMessage): string | null {
  * the request when this returns null.
  */
 export function getOperatorActor(req: IncomingMessage, res: ServerResponse): IdentityActor | null {
+  if (rejectGuest(req, res)) return null;
   const auth = getRequestAuth(req);
-  if (auth?.kind === "user") {
-    return { kind: "user", id: auth.userId };
+  const userId = authUserId(auth);
+  if (userId) {
+    const tokenId = auth?.kind === "user" ? auth.tokenId : undefined;
+    return tokenId ? { kind: "user", id: userId, tokenId } : { kind: "user", id: userId };
   }
-  if (auth?.kind === "operator") {
+  if (isOperatorAuth(auth)) {
     return { kind: "operator", id: auth.fingerprint };
-  }
-  if (auth?.kind === "guest") {
-    jsonError(res, "Forbidden", 403);
-    return null;
   }
 
   const rawKey = extractBearer(req);

@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { markCodexChainLostFile } from "../../scripts/e2e/codex-chain-lost";
 import {
   buildNightlyReport,
   DEFAULT_PROVIDERS,
@@ -92,6 +96,56 @@ describe("nightly report", () => {
     expect(markdown).toContain("6/6 harness legs passed");
     expect(markdown).toContain("| claude | claude-model | PASS | 1 |");
     expect(markdown).not.toContain("### Warnings");
+  });
+
+  test("a codex chain the cache did not keep fails the nightly even when the task passed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nightly-chain-lost-"));
+    try {
+      const path = join(dir, "e2e-results.json");
+      await Bun.write(path, JSON.stringify(harnessResult([leg("codex")])));
+      const others = DEFAULT_PROVIDERS.filter((provider) => provider !== "codex");
+      const build = async () =>
+        buildNightlyReport({
+          ...base,
+          ref: "refs/heads/main",
+          results: [
+            contractResult(),
+            ...others.map((provider) => harnessResult([leg(provider)])),
+            (await Bun.file(path).json()) as E2eResult,
+          ],
+        });
+      expect((await build()).ok).toBe(true);
+
+      expect(await markCodexChainLostFile(path)).toBe(true);
+      const report = await build();
+      expect(report.ok).toBe(false);
+      const codex = report.harness.find((candidate) => candidate.provider === "codex");
+      expect(codex).toMatchObject({ status: "fail", failureKind: "auth-chain" });
+      expect(codex?.attempts.at(-1)).toMatchObject({ status: "fail", failureKind: "auth-chain" });
+      expect(nightlyMarkdown(report, [], DEFAULT_PROVIDERS)).toContain("## Nightly E2E: FAIL");
+      expect(await markCodexChainLostFile(join(dir, "missing.json"))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("off main, the codex leg is a SKIP row, not a missing leg", () => {
+    const others = DEFAULT_PROVIDERS.filter((provider) => provider !== "codex");
+    const results = [contractResult(), ...others.map((provider) => harnessResult([leg(provider)]))];
+    const offMain = buildNightlyReport({ ...base, results, ref: "refs/heads/fix/x" });
+    expect(offMain.ok).toBe(true);
+    expect(offMain.missingLegs).toEqual([]);
+    expect(offMain.skippedLegs).toEqual(["codex"]);
+    const markdown = nightlyMarkdown(offMain, [], DEFAULT_PROVIDERS);
+    expect(markdown).toContain("5/5 harness legs passed · 1 skipped");
+    expect(markdown).toContain("| codex | | SKIP | | | | | main only:");
+
+    for (const ref of ["refs/heads/main", undefined]) {
+      const report = buildNightlyReport({ ...base, results, ref });
+      expect(report.ok).toBe(false);
+      expect(report.missingLegs).toEqual(["codex"]);
+      expect(report.skippedLegs).toEqual([]);
+    }
   });
 
   test("keeps both Claude transports and fails if either leg is missing or fails", () => {

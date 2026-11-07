@@ -1,6 +1,6 @@
 import { buildCtx } from "./ctx";
 import { patchFetchWithEgressSubstitution } from "./egress-secrets";
-import type { SwarmConfigPayload } from "./executors/types";
+import { type SwarmConfigPayload, UNAWAITED_WORK_DRAIN_MS } from "./executors/types";
 import { isHostValidationEquivalent } from "./host-validated-args";
 import { ctxSignatureHintFor } from "./script-error-hints";
 import { SwarmConfig } from "./swarm-config";
@@ -116,8 +116,11 @@ try {
     agentFs: payload.agentFs,
   });
 
-  const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
-  await Bun.write(userModulePath, sourceText);
+  const sourceFile = requiredEnv("SWARM_SCRIPT_SOURCE_FILE");
+  if (sourceFile !== userModulePath) {
+    const sourceText = await Bun.file(sourceFile).text();
+    await Bun.write(userModulePath, sourceText);
+  }
 
   if (startedFile) await Bun.write(startedFile, "1");
 
@@ -164,6 +167,19 @@ try {
 
   const result = await mod.default(validatedArgs, ctx);
   await Bun.write(requiredEnv("SWARM_SCRIPT_RESULT_FILE"), JSON.stringify(result ?? null));
+  // The run settles once the entry function resolves. Bun would otherwise keep
+  // the process alive while any call the script did not await is pending (a
+  // nested script_run that lost a Promise.race, a fire-and-forget kv_set), so
+  // the executor kept waiting until that call settled or the wall-clock
+  // watchdog killed the run and discarded the result. The timer is unref'd:
+  // with nothing pending the process exits at once, as before. Un-awaited work
+  // gets this window to finish; whatever is still pending then is stopped.
+  setTimeout(() => {
+    console.error(
+      `[swarm-script] the script returned, but un-awaited calls were still pending ${UNAWAITED_WORK_DRAIN_MS} ms later; they were stopped. Await every call whose effect must land.`,
+    );
+    process.exit(0);
+  }, UNAWAITED_WORK_DRAIN_MS).unref();
 } catch (error) {
   await emitError(error);
   process.exit(1);

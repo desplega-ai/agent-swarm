@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Fake docker for the deploy tests (install.sh, deploy/one-box/bootstrap.sh).
+# It reads port mappings from ./docker-compose.yml and the override file the way
+# Compose and dockerd do, and keeps its state in $FAKE_DOCKER_STATE:
+#   calls     every invocation
+#   ports     published ports of the running stack, in `docker ps` form
+#   history   every port ever published, so a test can see a short-lived exposure
+#   ups       one line per `compose up`: the project network and its default address
+#   networks/ one file per network, holding its host_binding_ipv4 option
+# Like dockerd, a port without a host address goes to its network's
+# com.docker.network.bridge.host_binding_ipv4, else every interface. daemon.json
+# "ip" covers only the default bridge, never a Compose project network. Like
+# Compose before 2.31 (and any network without a config-hash label), an
+# existing network is reused with its old options.
+set -euo pipefail
+state="${FAKE_DOCKER_STATE:?FAKE_DOCKER_STATE is not set}"
+printf '%s\n' "$*" >>"$state/calls"
+mkdir -p "$state/networks"
+touch "$state/ports" "$state/history" "$state/ups"
+
+# AGENT_SWARM_BIND_ADDRESS as Compose sees it: the shell wins over .env.
+bind_address() {
+  if [ -n "${AGENT_SWARM_BIND_ADDRESS+x}" ]; then
+    printf '%s' "$AGENT_SWARM_BIND_ADDRESS"
+  elif [ -f .env ]; then
+    grep -E '^AGENT_SWARM_BIND_ADDRESS=' .env | tail -n 1 | cut -d= -f2- || true
+  fi
+}
+
+# docker-compose.yml plus the first override file Compose finds (compose-go
+# loads only one).
+compose_files() {
+  local f
+  echo docker-compose.yml
+  for f in compose.override.yml compose.override.yaml docker-compose.override.yml docker-compose.override.yaml; do
+    if [ -f "$f" ]; then
+      echo "$f"
+      return 0
+    fi
+  done
+}
+
+project_network() {
+  local p
+  p="$(printf '%s' "${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+  printf '%s_default' "${p#"${p%%[a-z0-9]*}"}"
+}
+
+compose_up() {
+  # shellcheck disable=SC2016 # the literal prefix the onboard generator writes
+  local prefix='${AGENT_SWARM_BIND_ADDRESS:+${AGENT_SWARM_BIND_ADDRESS:-}:}'
+  local addr net dip entry a b c f files=()
+  addr="$(bind_address)"
+  while IFS= read -r f; do files+=("$f"); done < <(compose_files)
+  net="$(project_network)"
+  if [ ! -f "$state/networks/$net" ]; then
+    sed -nE 's/^ *com\.docker\.network\.bridge\.host_binding_ipv4: *"?([^"]*)"? *$/\1/p' "${files[@]}" |
+      tail -n 1 >"$state/networks/$net"
+  fi
+  dip="$(cat "$state/networks/$net")"
+  dip="${dip:-0.0.0.0}"
+  printf '%s %s\n' "$net" "$dip" >>"$state/ups"
+  awk '/^ *ports: *$/ { p = 1; next }
+    p && /^ *- / { e = $0; sub(/^ *- */, "", e); gsub(/"/, "", e); print e; next }
+    { p = 0 }' "${files[@]}" |
+    while IFS= read -r entry; do
+      if [ "${entry#"$prefix"}" != "$entry" ]; then
+        entry="${entry#"$prefix"}"
+        [ -z "$addr" ] || entry="${addr}:${entry}"
+      fi
+      IFS=: read -r a b c <<<"$entry"
+      if [ -n "$c" ]; then
+        printf '%s:%s->%s/tcp\n' "$a" "$b" "$c"
+      else
+        printf '%s:%s->%s/tcp\n' "$dip" "$a" "$b"
+      fi
+    done >"$state/ports"
+  cat "$state/ports" >>"$state/history"
+}
+
+if [ "${1:-}" = compose ]; then
+  shift
+  verb=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env-file | -f | -p) shift 2 ;;
+      -*) shift ;;
+      *) verb="$1"; break ;;
+    esac
+  done
+  case "$verb" in
+    version) echo "Docker Compose version v2.30.0" ;;
+    up) compose_up ;;
+    ps) cat "$state/ports" ;;
+    stop) : >"$state/ports" ;;
+    down) : >"$state/ports"; rm -f "$state/networks/$(project_network)" ;;
+    *) ;;
+  esac
+  exit 0
+fi
+
+case "${1:-}" in
+  ps) cat "$state/ports" ;;
+  network)
+    # docker network inspect [--format <template>] <name>
+    [ "${2:-}" = inspect ] || exit 0
+    format="" name=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --format | -f) format="$2"; shift 2 ;;
+        *) name="$1"; shift ;;
+      esac
+    done
+    if [ ! -f "$state/networks/$name" ]; then
+      echo "Error response from daemon: network $name not found" >&2
+      exit 1
+    fi
+    if [ -n "$format" ]; then cat "$state/networks/$name"; else echo "[{\"Name\": \"$name\"}]"; fi
+    ;;
+  *) ;;
+esac

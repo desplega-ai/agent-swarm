@@ -6,7 +6,9 @@
 // A turn has one part, plus one more part per deferred wake-up: the lead
 // waits, then a `deferred` task runs and its output is the resumed answer.
 // Tasks belong to the part of their nearest opener above them (the person's
-// message or a wake-up). Each part shows:
+// message or a wake-up). "Above" follows the task that dispatched a task when
+// it is in the chain, else `parentTaskId`: a continuation's parent can be an
+// earlier worker task in another turn. Each part shows:
 //   - reply: the opener's answer.
 //   - workers: tasks of other agents, by agent, then by task type. A try that
 //     did not pass (failed, cancelled, superseded) and a later try of the same
@@ -23,6 +25,7 @@
 // Relative imports only: `bun:test` runs this from the repo root.
 
 import type { AgentTask, SessionApproval } from "../api/types";
+import { dispatchParentId } from "./dispatch-parent";
 import { TERMINAL_STATUSES } from "./task-activity";
 
 /** One unit of delegated work: the tries of one agent at one task type. */
@@ -90,10 +93,29 @@ function isRetryOf(task: AgentTask, parent: AgentTask | undefined): boolean {
   );
 }
 
-function kindOf(task: AgentTask, parent: AgentTask | undefined, isLead: boolean): Kind {
+/**
+ * Options for `buildTurns`. `personText` names more tasks a person wrote: a
+ * task it returns text for opens a turn whatever its source (a json-render
+ * app page sends its messages as `api` tasks). Tasks it returns null for keep
+ * the source rules.
+ */
+export interface BuildTurnsOptions {
+  personText?: (task: AgentTask) => string | null;
+}
+
+function isPersonTask(task: AgentTask, options: BuildTurnsOptions): boolean {
+  return PERSON_SOURCES.has(task.source) || (options.personText?.(task) ?? null) !== null;
+}
+
+function kindOf(
+  task: AgentTask,
+  parent: AgentTask | undefined,
+  isLead: boolean,
+  options: BuildTurnsOptions,
+): Kind {
   if (isRetryOf(task, parent)) return "continue";
   // A dashboard message with no picked user is still a person writing.
-  if (PERSON_SOURCES.has(task.source)) return "person";
+  if (isPersonTask(task, options)) return "person";
   if (task.taskType === "deferred") return isLead ? "wake" : "continue";
   // A worker's resume is the same work in a new session; its superseded try did not pass.
   if (!isLead && (task.taskType === "resume" || task.status === "superseded")) return "continue";
@@ -111,7 +133,7 @@ interface Draft extends TurnPart {
   byAgent: Map<string, TurnWorker>;
 }
 
-export function buildTurns(chain: AgentTask[]): SessionTurns {
+export function buildTurns(chain: AgentTask[], options: BuildTurnsOptions = {}): SessionTurns {
   const byId = new Map<string, AgentTask>();
   for (const task of chain) byId.set(task.id, task);
   const tasks = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -127,7 +149,7 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
   const kinds = new Map<string, Kind>();
   for (const task of tasks) {
     const parent = task.parentTaskId ? byId.get(task.parentTaskId) : undefined;
-    kinds.set(task.id, task === root ? "person" : kindOf(task, parent, isLead(task)));
+    kinds.set(task.id, task === root ? "person" : kindOf(task, parent, isLead(task), options));
   }
 
   const turns: DraftTurn[] = [];
@@ -151,7 +173,7 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
     if (kinds.get(task.id) !== "person" || (task !== root && !task.parentTaskId)) continue;
     const turn: DraftTurn = {
       id: task.id,
-      ...(task !== root || PERSON_SOURCES.has(task.source) ? { person: task } : {}),
+      ...(task !== root || isPersonTask(task, options) ? { person: task } : {}),
       parts: [],
     };
     turns.push(turn);
@@ -188,7 +210,8 @@ export function buildTurns(chain: AgentTask[]): SessionTurns {
       }
       path.push(node);
       if (path.length > tasks.length) break;
-      node = node.parentTaskId ? byId.get(node.parentTaskId) : undefined;
+      const above = dispatchParentId(node, (id) => byId.has(id));
+      node = above ? byId.get(above) : undefined;
     }
     for (const task of path) partOf.set(task.id, found);
     return found;
@@ -282,8 +305,6 @@ export interface WorkerSummary {
    * `cancelled`: the last try of a step was cancelled or superseded.
    */
   state: "working" | "waiting" | "done" | "failed" | "cancelled";
-  /** The agents of the open steps (`working` and `waiting`). */
-  activeAgentIds: Array<string | null>;
   /** Wall clock: the first try's start to the last try's end, or to now while work runs. */
   durationMs: number;
   /** Earlier tries of the steps that passed. */
@@ -315,7 +336,6 @@ export function workerSummary(part: TurnPart, now: number): WorkerSummary | null
     return {
       agentIds,
       state: running.length > 0 ? "working" : "waiting",
-      activeAgentIds: [...new Set(active.map((step) => step.agentId))],
       durationMs: Math.max(0, now - since),
       retries,
       failed,
@@ -327,7 +347,6 @@ export function workerSummary(part: TurnPart, now: number): WorkerSummary | null
   return {
     agentIds,
     state: failed > 0 ? "failed" : cancelled > 0 ? "cancelled" : "done",
-    activeAgentIds: [],
     durationMs: Math.max(0, end - start),
     retries,
     failed,
@@ -367,7 +386,93 @@ export function approvalsByPart(
   return out;
 }
 
+/**
+ * The approvals to show: every one seen in this view, in first-seen order.
+ * The session detail lists only pending approvals, so one resolved meanwhile
+ * would vanish; kept, its card shows the resolved state.
+ */
+export function keepSeenApprovals(
+  seen: SessionApproval[],
+  current: SessionApproval[],
+): SessionApproval[] {
+  const byId = new Map(current.map((approval) => [approval.id, approval]));
+  const seenIds = new Set(seen.map((approval) => approval.id));
+  return [
+    ...seen.map((approval) => byId.get(approval.id) ?? approval),
+    ...current.filter((approval) => !seenIds.has(approval.id)),
+  ];
+}
+
 /** `true` when the Handoffs toggle has rows to show. */
 export function hasHandoffs(turns: Turn[]): boolean {
   return turns.some((turn) => turn.parts.some((part) => part.internal.length > 0));
+}
+
+/**
+ * A task that ended in a deferral: `defer-task` sets `deferredAt`, and its
+ * output only says what the swarm waits for. With an output schema the output
+ * is the agent's JSON instead, so that reply is not folded into a wait line.
+ */
+export function isDeferral(task: AgentTask): boolean {
+  if (typeof task.deferredAt !== "string") return false;
+  const { who, by } = deferralText(task.output);
+  return who !== null || by !== null;
+}
+
+export interface DeferralText {
+  /** Who the swarm waits on. Null for a wake-up at a time only. */
+  who: string | null;
+  /** When it checks back at the latest: "17:50", "tomorrow 09:00", "Nov 2 09:00". */
+  by: string | null;
+}
+
+// `defer-task` writes "Waiting on <who>, or <when> at the latest" (with an em dash, U+2014,
+// where this comment has a comma) or "Checking back <when>".
+const WAITING_ON = /^Waiting on (.+?) \u2014 or (.+) at the latest$/;
+const CHECKING_BACK = /^Checking back (.+)$/;
+
+/** The parts of a deferral's text. Both null for an output in another shape (an outputSchema). */
+export function deferralText(output: string | undefined): DeferralText {
+  const text = output?.trim() ?? "";
+  const waiting = WAITING_ON.exec(text);
+  const when = waiting?.[2] ?? CHECKING_BACK.exec(text)?.[1] ?? null;
+  return {
+    who: waiting?.[1] ?? null,
+    by:
+      when
+        ?.replace(/^today at /, "")
+        .replace(/^on /, "")
+        .replace(" at ", " ") ?? null,
+  };
+}
+
+/** A part that only waits: its reply deferred, with no steps, later answer, or live work. */
+export function onlyWaits(part: TurnPart): boolean {
+  return isDeferral(part.reply) && part.workers.length === 0 && !part.result && !part.live;
+}
+
+export type PartRun = { kind: "part"; part: TurnPart } | { kind: "waits"; parts: TurnPart[] };
+
+/** A turn's parts in order, each run of two or more consecutive waiting parts folded into one. */
+export function foldWaits(
+  parts: TurnPart[],
+  waits: (part: TurnPart) => boolean = onlyWaits,
+): PartRun[] {
+  const runs: PartRun[] = [];
+  let run: TurnPart[] = [];
+  const flush = () => {
+    if (run.length > 1) runs.push({ kind: "waits", parts: run });
+    else for (const part of run) runs.push({ kind: "part", part });
+    run = [];
+  };
+  for (const part of parts) {
+    if (waits(part)) {
+      run.push(part);
+      continue;
+    }
+    flush();
+    runs.push({ kind: "part", part });
+  }
+  flush();
+  return runs;
 }

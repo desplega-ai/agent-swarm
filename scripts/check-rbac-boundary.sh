@@ -31,7 +31,9 @@
 #        src/tools/send-task.ts     — target-shape guard (task TO lead)
 #                                     and user-ingress Lead availability.
 #        src/http/poll.ts           — lead-vs-worker trigger routing, and
-#                                     the lead channel-monitoring flag import
+#                                     the lead channel-monitoring flag import,
+#                                     and which lead tasks carry a checklist
+#                                     nudge (payload shape, not access)
 #        src/http/agents.ts         — register response: a monitoring lead
 #                                     must use poll delivery (delivery shape)
 #   4. Principal-construction plumbing:
@@ -59,6 +61,7 @@ ALLOWED_PATTERNS=(
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   'src/http/poll.ts|^import \{ isLeadChannelMonitoringEnabled \} from "\.\./utils/lead-monitor-channels";$'
   'src/http/poll.ts|^ *isLeadChannelMonitoringEnabled\(\) &&$'
+  'src/http/poll.ts|if \(!agent\.isLead \|\| !userId \|\| !\["ui", "slack", "chat", "comb"\]\.includes\(task\.source \?\? ""\)\) \{'
   'src/http/agents.ts|^import \{ isLeadChannelMonitoringEnabled \} from "\.\./utils/lead-monitor-channels";$'
   'src/http/agents.ts|const pollRequired = result\.agent!\.isLead && isLeadChannelMonitoringEnabled\(\);'
   'src/http/kv.ts|let isLead = false;'

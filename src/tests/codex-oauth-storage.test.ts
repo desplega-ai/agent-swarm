@@ -361,6 +361,32 @@ describe("loadAllCodexOAuthSlots", () => {
     const result = await loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY);
     expect(result).toEqual([]);
   });
+
+  it("returns an empty pool in strict mode when the request succeeds", async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({ configs: [] }), { status: 200 });
+
+    const result = await loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY, { throwOnError: true });
+    expect(result).toEqual([]);
+  });
+
+  it("throws on HTTP error in strict mode", async () => {
+    globalThis.fetch = async () => new Response("Service unavailable", { status: 503 });
+
+    await expect(
+      loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY, { throwOnError: true }),
+    ).rejects.toThrow("HTTP 503");
+  });
+
+  it("preserves the network error in strict mode", async () => {
+    const networkError = new Error("Network error");
+    globalThis.fetch = async () => {
+      throw networkError;
+    };
+
+    await expect(
+      loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY, { throwOnError: true }),
+    ).rejects.toBe(networkError);
+  });
 });
 
 // ─── deleteCodexOAuth ─────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById, getDbClient, getTaskById } from "../be/db";
+import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
@@ -44,7 +45,7 @@ import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { rejectGuest } from "./request-principal";
+import { agentFirstPrincipal, rejectGuest } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -791,16 +792,7 @@ async function ingestPrincipal(
   req: IncomingMessage,
   agentIdHeader: string | undefined,
 ): Promise<RbacPrincipal> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  const agentId = auth?.kind === "agent" ? auth.agentId : agentIdHeader;
-  if (agentId) {
-    const agent = await getAgentById(agentId);
-    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
-  }
-  if (auth?.kind === "operator") return { kind: "operator" };
-  return { kind: "agent", agentId: "", isLead: false };
+  return agentFirstPrincipal(req, agentIdHeader, { unauthenticatedFallback: "anonymous-agent" });
 }
 
 /** Whose rows a memory list may show. `seesAll` lifts the own-or-swarm filter. */
@@ -1577,17 +1569,35 @@ const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
 
 const SEARCH_RETRIEVAL_TTL_DAYS = 90;
+/**
+ * Rows per purge statement. The purge yields the event loop between batches.
+ * A 2,000-row batch blocked the loop for 1.1 s in production; 500 keeps one
+ * batch near the 250 ms target.
+ */
+const SEARCH_RETRIEVAL_PURGE_BATCH = 500;
 
-async function purgeStaleSearchRetrievals(): Promise<number> {
+export async function purgeStaleSearchRetrievals(
+  batchSize = SEARCH_RETRIEVAL_PURGE_BATCH,
+): Promise<number> {
   try {
     const cutoff = new Date(
       Date.now() - SEARCH_RETRIEVAL_TTL_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
-    const result = await getDbClient().run(
-      "DELETE FROM memory_retrieval WHERE eventType = 'search' AND retrievedAt < ?",
-      [cutoff],
-    );
-    return result.changes;
+    let purged = 0;
+    for (;;) {
+      // `+eventType` keeps the planner on the retrievedAt range. Without
+      // sqlite_stat1 it prefers the eventType equality, which reads every
+      // search row to test its date, even when nothing is stale.
+      const result = await getDbClient().run(
+        `DELETE FROM memory_retrieval WHERE rowid IN (
+          SELECT rowid FROM memory_retrieval
+          WHERE +eventType = 'search' AND retrievedAt < ? LIMIT ?)`,
+        [cutoff, batchSize],
+      );
+      purged += result.changes;
+      if (result.changes < batchSize) return purged;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   } catch (err) {
     console.error("[memory-gc] Search retrieval purge failed:", (err as Error).message);
     return 0;
@@ -1611,19 +1621,34 @@ async function runMemoryGcTick(label: "Initial" | "Periodic"): Promise<void> {
   }
 }
 
-export async function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): Promise<void> {
+/** The first purge waits this long, so it does not compete with boot work. */
+const MEMORY_GC_INITIAL_DELAY_MS = 2 * 60 * 1000;
+let memoryGcInitialTimer: ReturnType<typeof setTimeout> | null = null;
+
+export async function startMemoryGc(
+  intervalMs = MEMORY_GC_INTERVAL_MS,
+  initialDelayMs = MEMORY_GC_INITIAL_DELAY_MS,
+): Promise<void> {
   if (memoryGcTimer) return;
 
-  // Run immediately on startup to clear any backlog
-  await runMemoryGcTick("Initial");
+  // Clear any backlog soon after startup, but off the boot path.
+  memoryGcInitialTimer = setTimeout(() => {
+    memoryGcInitialTimer = null;
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Initial"));
+  }, initialDelayMs);
+  if (typeof memoryGcInitialTimer?.unref === "function") memoryGcInitialTimer.unref();
 
   memoryGcTimer = setInterval(() => {
-    void runMemoryGcTick("Periodic");
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Periodic"));
   }, intervalMs);
   if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
 }
 
 export function stopMemoryGc(): void {
+  if (memoryGcInitialTimer) {
+    clearTimeout(memoryGcInitialTimer);
+    memoryGcInitialTimer = null;
+  }
   if (memoryGcTimer) {
     clearInterval(memoryGcTimer);
     memoryGcTimer = null;

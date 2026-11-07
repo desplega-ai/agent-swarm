@@ -5,11 +5,18 @@ import { useNavigate } from "react-router-dom";
 import { ALL_WORKFLOW_RUNS_PER_WORKFLOW } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useWorkflowsSavings } from "@/api/hooks/use-savings";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
-import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@/api/types";
+import type {
+  SavingsJobRow,
+  WorkflowRunStatus,
+  WorkflowRunSummary,
+  WorkflowSummary,
+} from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
@@ -34,7 +41,8 @@ import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/us
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatUsd } from "@/pages/usage/usage-format";
 
 function formatDuration(startedAt: string, finishedAt?: string): string {
   if (!finishedAt) return "—";
@@ -59,6 +67,14 @@ export default function WorkflowsPage() {
   const workflowFilter = readStringParam(searchParams, "workflow", "all");
 
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
+  const { data: savings } = useWorkflowsSavings();
+  // One request for the whole list, joined by workflow id.
+  const savingsById = useMemo(() => {
+    const m = new Map<string, SavingsJobRow>();
+    if (savings?.valid)
+      for (const row of savings.rows) if (row.workflowId) m.set(row.workflowId, row);
+    return m;
+  }, [savings]);
   const { data: status } = useStatusContext();
   const { data: agents } = useAgents();
   const { data: allRunsData, isLoading: runsLoading } = useAllWorkflowRuns();
@@ -110,6 +126,8 @@ export default function WorkflowsPage() {
   );
 
   // Workflows tab columns
+  const gridColumns = useDataGridColumns("workflows");
+  const runGridColumns = useDataGridColumns("workflow-runs");
   const workflowColumns = useMemo<ColDef<WorkflowSummary>[]>(
     () => [
       {
@@ -157,6 +175,7 @@ export default function WorkflowsPage() {
       ...(anyNeedsSetup
         ? [
             {
+              colId: "setup",
               headerName: "Setup",
               context: HIDE_WHEN_COMPACT,
               width: 190,
@@ -179,10 +198,30 @@ export default function WorkflowsPage() {
           ]
         : []),
       {
+        colId: "nodes",
         headerName: "Nodes",
         context: HIDE_WHEN_COMPACT,
         width: 100,
         valueGetter: (params) => params.data?.nodeCount ?? 0,
+      },
+      {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; workflows without a saving sort below every amount.
+        valueGetter: (params) =>
+          params.data ? (savingsById.get(params.data.id)?.savingUsd.p50 ?? null) : null,
+        cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
+          const row = params.data ? savingsById.get(params.data.id) : undefined;
+          if (!row) return <span className="text-muted-foreground">—</span>;
+          const range = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), ${row.substitutedRuns.toLocaleString("en-US")} of ${row.runs.toLocaleString("en-US")} runs${row.capApplied ? ", capped at 24 a day" : ""}${row.enabledOnlyRule ? ", only runs with an effect count" : ""}`;
+          return (
+            <span className="font-mono tabular-nums" title={range}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
+          );
+        },
       },
       {
         field: "enabled",
@@ -210,7 +249,7 @@ export default function WorkflowsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [anyNeedsSetup, favoriteToggle, handleToggleEnabled, status?.automations],
+    [anyNeedsSetup, favoriteToggle, handleToggleEnabled, savingsById, status?.automations],
   );
 
   const onWorkflowRowClicked = useCallback(
@@ -266,6 +305,7 @@ export default function WorkflowsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
       {
+        colId: "duration",
         headerName: "Duration",
         context: HIDE_WHEN_COMPACT,
         width: 120,
@@ -470,7 +510,14 @@ export default function WorkflowsPage() {
               )}
             </div>
           )}
-          <TabsList className="ml-auto shrink-0">
+          {isMobile ? null : (
+            <div className="ml-auto">
+              <DataGridColumnsMenu
+                state={activeTab === "workflows" ? gridColumns : runGridColumns}
+              />
+            </div>
+          )}
+          <TabsList className={cn("shrink-0", isMobile && "ml-auto")}>
             <TabsTrigger value="workflows">Workflows</TabsTrigger>
             <TabsTrigger value="runs">Runs</TabsTrigger>
           </TabsList>
@@ -525,6 +572,7 @@ export default function WorkflowsPage() {
             <DataGrid
               rowData={filteredWorkflowRows}
               columnDefs={workflowColumns}
+              columns={gridColumns}
               onRowClicked={onWorkflowRowClicked}
               loading={wfLoading}
               emptyMessage="No workflows match the current filters"
@@ -572,6 +620,7 @@ export default function WorkflowsPage() {
             <DataGrid
               rowData={filteredRuns}
               columnDefs={runColumns}
+              columns={runGridColumns}
               onRowClicked={onRunRowClicked}
               loading={runsLoading}
               emptyMessage="No workflow runs"

@@ -1,7 +1,10 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { isGroupKey } from "../assets/key.ts";
+import { sourceOfKey } from "../assets/source-key.ts";
 import {
   type Attributes,
   initOtel,
@@ -66,6 +69,7 @@ import {
   type DeliveryMode,
   isTerminalTaskStatus,
   type ModelTierOverrides,
+  type ProviderErrorClass,
   type ProviderName,
   parseWorkerModelTierOverrides,
   type ReasoningEffort,
@@ -85,14 +89,17 @@ import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
+  CredentialAllowlistError,
   type CredentialSelection,
   ModelWindowExhaustedError,
   normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
 import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
+import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -137,7 +144,8 @@ import {
 } from "./credential-wait.ts";
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
-  contentSha256,
+  bootIdentityBaselines,
+  fetchProfileSyncRejectionBanner,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
@@ -153,6 +161,7 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
+import { classifyProviderErrorOf } from "./provider-error-class.ts";
 import {
   RunnerPushDelivery,
   shouldRunDeliveryLoop,
@@ -209,13 +218,7 @@ function scheduleRunnerGc(reason: string): boolean {
   return true;
 }
 
-/** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
-export async function fetchRepoConfig(
-  apiUrl: string,
-  apiKey: string,
-  vcsRepo: string,
-  requireExactMatch = false,
-): Promise<{
+type RegisteredRepo = {
   id: string;
   url: string;
   name: string;
@@ -223,28 +226,35 @@ export async function fetchRepoConfig(
   defaultBranch: string;
   hooks?: { enabled: boolean } | null;
   guidelines?: RepoGuidelines | null;
-} | null> {
-  try {
-    const repoName = vcsRepoName(vcsRepo);
-    const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
+};
+
+/** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
+export async function fetchRepoConfig(
+  apiUrl: string,
+  apiKey: string,
+  vcsRepo: string,
+  requireExactMatch = false,
+): Promise<RegisteredRepo | null> {
+  const listRepos = async (name?: string): Promise<RegisteredRepo[] | null> => {
+    const query = name ? `?name=${encodeURIComponent(name)}` : "";
+    const resp = await fetch(`${apiUrl}/api/repos${query}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!resp.ok) return null;
-    const data = (await resp.json()) as {
-      repos: Array<{
-        id: string;
-        url: string;
-        name: string;
-        clonePath: string;
-        defaultBranch: string;
-        hooks?: { enabled: boolean } | null;
-        guidelines?: RepoGuidelines | null;
-      }>;
-    };
-    if (requireExactMatch) {
-      return data.repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ?? null;
-    }
-    return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
+    return ((await resp.json()) as { repos: RegisteredRepo[] }).repos;
+  };
+  try {
+    const named = await listRepos(vcsRepoName(vcsRepo));
+    if (!named) return null;
+    // An exact URL match wins, by name first, then across all registered repos (a repo
+    // registered under a display name, `frontend` for acme/web), as the API's vcsRepoId
+    // does. Only then does the loose legacy match run, so a same-named unrelated repo
+    // never shadows the task's repo.
+    const exact =
+      named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo)) ??
+      (await listRepos())?.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
+    if (exact || requireExactMatch) return exact ?? null;
+    return named.find((r) => r.url.includes(vcsRepo)) ?? named[0] ?? null;
   } catch {
     return null;
   }
@@ -549,8 +559,12 @@ export async function ensureRepoForTask(
 
     await installRepoHooksForTask(repoConfig, role);
 
-    const claudeMd = await readClaudeMd(clonePath, role);
-    const autoStashes = await listSwarmAutostashes(clonePath, role);
+    // Independent: a file read and a `git stash list` subprocess. The stash
+    // lister never rejects, so a failed CLAUDE.md read still reaches the catch.
+    const [claudeMd, autoStashes] = await Promise.all([
+      readClaudeMd(clonePath, role),
+      listSwarmAutostashes(clonePath, role),
+    ]);
     return { clonePath, claudeMd, warning, autoStashes };
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
@@ -907,6 +921,14 @@ export async function fetchResolvedEnv(
      * unset so an exhausted default model never blocks configuration loading.
      */
     enforceModelCapacity?: boolean;
+    /**
+     * The claimed profile's pooled-key allowlist (trigger `credentialAllowlist`).
+     * Forwarded to `resolveCredentialPools`, which throws
+     * `CredentialAllowlistError` when it matches no key.
+     */
+    credentialAllowlist?: Record<string, string[]>;
+    /** The profile that carries `credentialAllowlist`, for the error message. */
+    resolvedProfile?: string;
   },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
@@ -1034,6 +1056,8 @@ export async function fetchResolvedEnv(
   // runtime key and the opencode key splice only ever read the canonical
   // name. An explicit canonical value wins.
   normalizeProviderKeyAliases(env);
+  // GHES: a GITHUB_TOKEN row must not reach gh as a github.com token.
+  scopeGitHubTokenToEnterprise(env);
   // Rows admitted after boot and pool members live only in this env, never in
   // process.env, so the scrubber's env pass cannot see them. Register them
   // before any adapter can echo one into a log or failure reason.
@@ -1076,6 +1100,8 @@ export async function fetchResolvedEnv(
     model: effectiveModel,
     localBlocks: sessionContext?.localBlocks,
     enforceModelCapacity: sessionContext?.enforceModelCapacity,
+    allowedKeySuffixes: sessionContext?.credentialAllowlist,
+    allowlistProfile: sessionContext?.resolvedProfile,
   });
 
   return { env, credentialEnv, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
@@ -1226,6 +1252,8 @@ export async function provisionAgentFsAfterRegistration(opts: {
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
  * - SWARM_ORG_NAME — read per telemetry event for org identity.
  * - AGENT_FS_LINK_TARGET — read by the prompt builder for the file-link base.
+ * - APP_URL: read by the prompt builder for the file-link base (the dashboard
+ *   by default when set).
  *
  * CLAUDE_TRANSPORT stays in the per-session environment. Caching a scoped
  * value here would prevent deletion from restoring the configured default.
@@ -1246,6 +1274,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
   "AGENT_FS_LINK_TARGET",
+  "APP_URL",
+  // An explicit false keeps prompt file links on the live app (resolveAgentFsLinkBase).
+  "COMB_ENABLED",
   // Gate the public-ranking `ranking.usage` emit, so clearing the website or
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",
@@ -1357,6 +1388,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "read-messages": "💬 Reading messages",
   "request-human-input": "🙋 Requesting human input",
   "cancel-approval-request": "🚫 Cancelling approval request",
+  "submit-improvement": "💡 Drafting improvement",
   "cancel-task": "🚫 Cancelling task",
   "db-query": "🗃️ Querying database",
   "inject-learning": "🧠 Storing learning",
@@ -1384,6 +1416,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "slack-list-channels": "💬 Listing Slack channels",
   "slack-download-file": "📥 Downloading from Slack",
   "slack-upload-file": "📤 Uploading to Slack",
+  "slack-leave-thread": "💬 Leaving Slack thread",
   // Tracker
   "tracker-status": "📊 Checking tracker status",
   "tracker-sync-status": "📊 Syncing tracker status",
@@ -1660,7 +1693,7 @@ export async function handleStructuredOutputFallback(
       logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
     };
 
-    if (!taskData.outputSchema) {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       // No structured output required — extract last progress as context
       const lastProgressLog = (taskData.logs ?? [])
         .filter((l) => l.eventType === "task_progress")
@@ -1749,7 +1782,7 @@ async function validateProviderOutputIfNeeded(
     const taskData = (await taskRes.json()) as {
       outputSchema?: Record<string, unknown>;
     };
-    if (!taskData.outputSchema || typeof taskData.outputSchema !== "object") {
+    if (!isEffectiveOutputSchema(taskData.outputSchema)) {
       return { ok: true };
     }
 
@@ -2070,6 +2103,7 @@ export interface CodexOAuthCredentialInfo {
 export async function resolveCodexOAuthCredentialInfo(
   apiUrl?: string,
   apiKey?: string,
+  opts: { poolOnly?: boolean } = {},
 ): Promise<CodexOAuthCredentialInfo | null> {
   // Pool path: enumerate slots from the config store, pick one with rate-limit
   // awareness, materialise auth.json for the selected slot.
@@ -2077,11 +2111,14 @@ export async function resolveCodexOAuthCredentialInfo(
     try {
       const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
       if (slots.length > 0) {
+        const allSlotIndices = slots.map((s) => s.slot);
+        // The index-based API needs the slot-id range, including gaps.
+        const totalKeys = Math.max(...allSlotIndices) + 1;
         let availableIndices: number[] | undefined;
         let authFailureFence: number | undefined;
         try {
           const resp = await fetch(
-            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${slots.length}`,
+            `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${totalKeys}`,
             { headers: { Authorization: `Bearer ${apiKey}` } },
           );
           if (resp.ok) {
@@ -2091,9 +2128,12 @@ export async function resolveCodexOAuthCredentialInfo(
             };
             availableIndices = data.availableIndices;
             authFailureFence = data.authFailureFence;
-            if (availableIndices.length < slots.length) {
+            const availableSlots = allSlotIndices.filter((i) =>
+              availableIndices!.includes(i),
+            ).length;
+            if (availableSlots < slots.length) {
               console.log(
-                `[credentials] CODEX_OAUTH: ${availableIndices.length}/${slots.length} slots available (${slots.length - availableIndices.length} rate-limited)`,
+                `[credentials] CODEX_OAUTH: ${availableSlots}/${slots.length} slots available (${slots.length - availableSlots} rate-limited)`,
               );
             }
           }
@@ -2101,7 +2141,6 @@ export async function resolveCodexOAuthCredentialInfo(
           // Non-critical — fall through to random selection
         }
 
-        const allSlotIndices = slots.map((s) => s.slot);
         let selectedSlot: number;
         if (availableIndices && availableIndices.length > 0) {
           const eligible = allSlotIndices.filter((i) => availableIndices!.includes(i));
@@ -2117,9 +2156,12 @@ export async function resolveCodexOAuthCredentialInfo(
           // Pool slots are shared across concurrent tasks: never hand the
           // spawned Codex CLI a refresh token it could rotate outside the
           // `/api/oauth/refresh-locks` lock (see `credentialsToAuthJson`).
-          await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
-            includeRefreshToken: false,
-          });
+          // pi gets its credential from the adapter instead.
+          if (!opts.poolOnly) {
+            await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
+              includeRefreshToken: false,
+            });
+          }
           const authJson = credentialsToAuthJson(slotEntry.creds, {
             includeRefreshToken: false,
           });
@@ -2137,6 +2179,9 @@ export async function resolveCodexOAuthCredentialInfo(
       console.warn(`[credentials] Codex OAuth pool selection failed (non-fatal): ${err}`);
     }
   }
+
+  // pi subscription sessions run on a pool slot or not at all.
+  if (opts.poolOnly) return null;
 
   // Fallback: read existing auth.json (single-credential or pre-pool deploy).
   // NOT pool-backed — `authJsonToCredentialSelection`'s default `slot = 0` is
@@ -2288,18 +2333,97 @@ export async function reportKeyCompletionOutcome(opts: {
 }
 
 /**
+ * `adapter.createSession`, counting a Codex pool auth failure toward the bench
+ * before rethrowing. A session that fails to start never reaches the
+ * completion-time report, so without this a slot whose refresh is rejected at
+ * startup (pi on the ChatGPT subscription, codex's in-process revalidation)
+ * keeps being picked. Transient reasons are not counted
+ * (`isCodexAuthFailureReason`).
+ */
+export async function createSessionReportingAuthFailure(
+  adapter: { createSession(config: ProviderSessionConfig): Promise<ProviderSession> },
+  config: ProviderSessionConfig,
+  report:
+    | {
+        apiUrl: string;
+        apiKey: string;
+        credential: { keyType: string; keySuffix: string; keyIndex: number };
+        taskId: string;
+      }
+    | undefined,
+): Promise<ProviderSession> {
+  try {
+    return await adapter.createSession(config);
+  } catch (err) {
+    if (report) {
+      await reportKeyCompletionOutcome({
+        ...report,
+        exitCode: 1,
+        failureReason: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+}
+
+/**
  * Supersede a task via the API (for graceful shutdown / context-limit /
  * operator-triggered). Returns `{ ok: true, resumeTaskId }` on success.
  * On 5xx / network failure returns `{ ok: false }` so the caller can fall
  * back to the legacy `pauseTaskViaAPI` (handles partial-deploy windows where
  * the API is older than the worker).
  */
+/**
+ * Ask the API to move a task that hit a provider error to its next fallback
+ * profile (runbooks/model-tiers.md § Fallbacks on provider errors). Only a
+ * task claim gave a profile (`resolvedProfile`) can hop. `superseded`: the
+ * task is terminal and its resume runs the fallback, so the caller must not
+ * finish it. Otherwise the caller fails it as usual, led by `failureReason`
+ * when the API says why the chain ended. An older API rejects the reason
+ * (4xx) and the task fails as before.
+ */
+export async function requestProviderFallback(
+  config: ApiConfig,
+  role: string,
+  taskId: string,
+  input: {
+    resolvedProfile?: string;
+    errorClass: ProviderErrorClass | null;
+    failureReason?: string;
+  },
+): Promise<{ superseded: boolean; failureReason?: string }> {
+  if (!input.resolvedProfile || !input.errorClass) return { superseded: false };
+  const outcome = await supersedeTaskViaAPI(config, role, taskId, "provider_fallback", {
+    errorClass: input.errorClass,
+  });
+  if (!outcome.ok) return { superseded: false };
+  if (outcome.kind === "resumed") {
+    console.log(
+      `[${role}] Task ${taskId.slice(0, 8)} hit ${input.errorClass} on ${input.resolvedProfile}; resuming on the next fallback profile`,
+    );
+    return { superseded: true };
+  }
+  if (outcome.kind === "noFallback" && outcome.failureReason) {
+    return {
+      superseded: false,
+      failureReason: input.failureReason
+        ? `${outcome.failureReason}\n\n${input.failureReason}`
+        : outcome.failureReason,
+    };
+  }
+  return { superseded: false };
+}
+
 async function supersedeTaskViaAPI(
   config: ApiConfig,
   role: string,
   taskId: string,
-  reason: "graceful_shutdown" | "context_limits" | "manual_supersede",
-): Promise<{ ok: true; resumeTaskId: string | null; kind: string } | { ok: false }> {
+  reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "provider_fallback",
+  extra: { errorClass?: ProviderErrorClass } = {},
+): Promise<
+  | { ok: true; resumeTaskId: string | null; kind: string; failureReason?: string | null }
+  | { ok: false }
+> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
     "Content-Type": "application/json",
@@ -2312,13 +2436,14 @@ async function supersedeTaskViaAPI(
     const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, ...extra }),
     });
 
     if (response.ok) {
       const body = (await response.json().catch(() => null)) as {
         resumeTaskId?: string | null;
         kind?: string;
+        failureReason?: string | null;
       } | null;
       const resumeTaskId = body?.resumeTaskId ?? null;
       const kind = body?.kind ?? "resumed";
@@ -2327,7 +2452,7 @@ async function supersedeTaskViaAPI(
           resumeTaskId ? resumeTaskId.slice(0, 8) : "none"
         })`,
       );
-      return { ok: true, resumeTaskId, kind };
+      return { ok: true, resumeTaskId, kind, failureReason: body?.failureReason ?? null };
     }
 
     // 404 / 405 — the route doesn't exist on this API server. Happens during
@@ -2418,7 +2543,13 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     output?: string;
     status?: string;
     contextKey?: string;
+    /** Asset key; the lead's use-case note reads it. */
+    key?: string;
     requestedBy?: Trigger["requestedBy"];
+    threadParticipants?: Trigger["threadParticipants"];
+    /** The profile claim applied, and its pooled-key allowlist read again at fetch. */
+    resolvedProfile?: string;
+    credentialAllowlist?: Record<string, string[]>;
   }>
 > {
   const headers: Record<string, string> = {
@@ -2455,7 +2586,11 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         finishedAt?: string;
         output?: string;
         status?: string;
+        key?: string;
         requestedBy?: Trigger["requestedBy"];
+        threadParticipants?: Trigger["threadParticipants"];
+        resolvedProfile?: string;
+        credentialAllowlist?: Record<string, string[]>;
       }>;
     };
     return data.tasks || [];
@@ -2656,7 +2791,6 @@ export interface RunnerConfig {
 
 export interface RunnerOptions {
   prompt?: string;
-  yolo?: boolean;
   systemPrompt?: string;
   systemPromptFile?: string;
   logsDir?: string;
@@ -2711,6 +2845,11 @@ export interface RunningTask {
   harnessVariantMeta?: Record<string, unknown>;
   /** Resolved model used for the provider session, when configured */
   model?: string;
+  /**
+   * The profile claim applied (`task.resolvedProfile`). A provider error on a
+   * task with one asks the API for the next fallback profile.
+   */
+  resolvedProfile?: string;
   /**
    * Last non-empty assistant text captured from `message` events, shared by
    * reference with the `onEvent` closure. Fallback `providerOutput` when the
@@ -3059,7 +3198,11 @@ export async function detectVcsForTask(
       vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    } else if (
+      remoteUrl.includes("github.com") ||
+      remoteUrl.includes("github") ||
+      isGitHubUrl(remoteUrl)
+    ) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
@@ -3346,6 +3489,23 @@ interface Trigger {
     /** Structured communication preferences from `users.metadata.comms`. */
     comms?: { tone?: string; language?: string; verbosity?: string };
   };
+  /** One-shot setup nudge for the lead (server-picked open checklist item). */
+  checklistNudge?: ChecklistNudge;
+  /** People in a multi-person Slack thread (server: `buildTaskThreadParticipants`). */
+  threadParticipants?: {
+    total: number;
+    more: number;
+    people: Array<{
+      label: string;
+      trust: "internal" | "external" | "unknown";
+      starter?: boolean;
+      newest?: boolean;
+      asked?: boolean;
+      language?: string;
+      verbosity?: string;
+    }>;
+    starterProfile?: NonNullable<Trigger["requestedBy"]>;
+  };
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -3389,32 +3549,155 @@ function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
 }
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
+type ThreadParticipants = NonNullable<Trigger["threadParticipants"]>;
 
-export async function buildRequesterProfilePrompt(
-  requestedBy: RequesterProfile | undefined,
+/** `href` is absent when the API has no APP_URL: the nudge then carries no link. */
+export type ChecklistNudge = { itemId: string; kind: string; label: string; href?: string };
+
+/** The lead's one-shot setup suggestion, rendered into the task prompt only. */
+export async function buildChecklistNudgePrompt(
+  nudge: ChecklistNudge | undefined,
 ): Promise<string> {
-  const comms = requestedBy?.comms;
+  if (!nudge) return "";
+  const result = await resolveTemplateAsync("task.checklist.nudge", {
+    label: nudge.label,
+    href: nudge.href ?? "",
+    link_clause: nudge.href ? `, with the link ${nudge.href}` : "",
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/**
+ * The lead's use-case note: the task's key when it is a use-case group (the
+ * rule `create-schedule` and `create-page` use to inherit it). Task prompt only.
+ */
+export async function buildUseCasePrompt(role: string, key: string | undefined): Promise<string> {
+  if (role !== "lead" || !key || !isGroupKey(key) || sourceOfKey(key)) return "";
+  const result = await resolveTemplateAsync("task.use_case", { key });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/** Comms and notes lines of a profile block, or undefined when it has nothing to say. */
+function profileSections(
+  profile: RequesterProfile | undefined,
+): { role: string; comms: string; notes: string } | undefined {
+  const comms = profile?.comms;
   const commsParts = [
     comms?.tone ? `tone: ${comms.tone}` : undefined,
     comms?.language ? `language: ${comms.language}` : undefined,
     comms?.verbosity ? `verbosity: ${comms.verbosity}` : undefined,
   ].filter((part): part is string => Boolean(part));
-  if (!requestedBy?.role && !requestedBy?.notes && commsParts.length === 0) return "";
+  if (!profile?.role && !profile?.notes && commsParts.length === 0) return undefined;
+  const notes = profile?.notes?.trim();
+  return {
+    role: profile?.role ? ` (${profile.role})` : "",
+    comms:
+      commsParts.length > 0 ? `\nTheir communication preferences: ${commsParts.join(", ")}.` : "",
+    notes: notes ? `\nTheir stated notes for how you should respond and act:\n${notes}` : "",
+  };
+}
 
-  const commsSection =
-    commsParts.length > 0 ? `\nTheir communication preferences: ${commsParts.join(", ")}.` : "";
-  const notes = requestedBy?.notes?.trim();
-  const notesSection = notes
-    ? `\nTheir stated notes for how you should respond and act:\n${notes}`
-    : "";
+export async function buildRequesterProfilePrompt(
+  requestedBy: RequesterProfile | undefined,
+  inThread = false,
+): Promise<string> {
+  const sections = profileSections(requestedBy);
+  if (!sections) return "";
   const result = await resolveTemplateAsync("task.requester.profile", {
     requester_name: requestedBy?.name ?? "",
-    requester_role_suffix: requestedBy?.role ? ` (${requestedBy.role})` : "",
-    requester_comms_section: commsSection,
-    requester_notes_section: notesSection,
+    requester_role_suffix: sections.role,
+    requester_thread_suffix: inThread ? ", who sent the newest message in this thread" : "",
+    requester_comms_section: sections.comms,
+    requester_notes_section: sections.notes,
   });
 
   return result.skipped ? "" : result.text.trim();
+}
+
+export async function buildThreadStarterProfilePrompt(
+  starter: RequesterProfile | undefined,
+): Promise<string> {
+  const sections = profileSections(starter);
+  if (!starter || !sections) return "";
+  const result = await resolveTemplateAsync("task.thread.starter_profile", {
+    starter_name: starter.name,
+    starter_role_suffix: sections.role,
+    starter_comms_section: sections.comms,
+    starter_notes_section: sections.notes,
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+export async function buildUntrustedRequesterPrompt(requesterLabel: string): Promise<string> {
+  const result = await resolveTemplateAsync("task.thread.untrusted_requester", {
+    requester_label: requesterLabel,
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/** One line per listed person; a primary sender points at their profile block by name. */
+export async function buildThreadParticipantsPrompt(
+  thread: ThreadParticipants,
+  rendered: { requesterProfile: boolean; starterProfile: boolean },
+): Promise<string> {
+  const lines = thread.people.map((person) => {
+    const untrusted = person.trust !== "internal";
+    const roles = [
+      person.newest ? "newest sender" : undefined,
+      person.starter ? "started this work" : undefined,
+      !person.newest && !person.starter && person.asked ? "asked in this batch" : undefined,
+    ].filter(Boolean);
+    const notes = [
+      person.language ? `language: ${person.language}` : undefined,
+      person.verbosity ? `verbosity: ${person.verbosity}` : undefined,
+    ].filter(Boolean);
+    const profile =
+      !untrusted && person.newest && rendered.requesterProfile
+        ? "Profile: Requester Profile above."
+        : !untrusted && person.starter && rendered.starterProfile
+          ? "Profile: Thread starter profile above."
+          : !untrusted && notes.length > 0
+            ? `${notes.join("; ")}.`
+            : "no saved preferences.";
+    return roles.length > 0
+      ? `- ${person.label}: ${roles.join(", ")}. ${profile[0]!.toUpperCase()}${profile.slice(1)}`
+      : `- ${person.label}: ${profile}`;
+  });
+  if (thread.more > 0) lines.push(`- <${thread.more} more...>`);
+  const result = await resolveTemplateAsync("task.thread.participants", {
+    participant_count: String(thread.total),
+    participant_lines: lines.join("\n"),
+  });
+  if (result.skipped) return "";
+  if (!thread.people.some((person) => person.trust !== "internal")) return result.text.trim();
+  const untrusted = await resolveTemplateAsync("task.thread.untrusted_participants", {});
+  return untrusted.skipped ? result.text.trim() : `${result.text.trim()}\n${untrusted.text.trim()}`;
+}
+
+/**
+ * Requester-side blocks of the task prompt: the Requester Profile (or the
+ * untrusted-requester block), the thread starter's profile, and the
+ * participants list. Without thread participants this is the Requester
+ * Profile alone, unchanged.
+ */
+export async function buildRequesterPrompts(
+  requestedBy: RequesterProfile | undefined,
+  thread: ThreadParticipants | undefined,
+): Promise<string[]> {
+  const newest = thread?.people.find((person) => person.newest);
+  const untrustedRequester = !!newest && newest.trust !== "internal";
+  const head =
+    newest && untrustedRequester
+      ? await buildUntrustedRequesterPrompt(newest.label)
+      : await buildRequesterProfilePrompt(requestedBy, !!thread);
+  const starterProfile = await buildThreadStarterProfilePrompt(thread?.starterProfile);
+  const participants = thread
+    ? await buildThreadParticipantsPrompt(thread, {
+        requesterProfile: !untrustedRequester && !!head,
+        starterProfile: !!starterProfile,
+      })
+    : "";
+  return [head, starterProfile, participants];
 }
 
 /**
@@ -3434,6 +3717,10 @@ export function missingTaskDirWarning(
 /** Per-task context that rides in the task prompt, never the system prompt. */
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
+  checklistNudge?: ChecklistNudge;
+  /** The task's asset key; the lead gets a use-case note when it is a group key. */
+  taskKey?: string;
+  threadParticipants?: ThreadParticipants;
   /** Set when the task's `dir` does not exist and the session falls back. */
   cwdWarning?: string;
 };
@@ -3443,7 +3730,7 @@ export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArg
  * agent (profile, harness, deployment), so it is byte-identical across that
  * agent's sessions and the provider reads it from cache instead of re-writing
  * it. Everything that varies per task (repository block, scripts-only Slack
- * note, requester profile, cwd warning) is appended to the task prompt.
+ * note, use-case key, requester profile, checklist nudge, cwd warning) is appended to the task prompt.
  */
 export async function buildTaskSessionPrompts(input: {
   basePromptArgs: BasePromptArgs;
@@ -3465,7 +3752,9 @@ export async function buildTaskSessionPrompts(input: {
       repoContext: context.repoContext,
       slackContext: context.slackContext,
     }),
-    await buildRequesterProfilePrompt(context.requestedBy),
+    await buildUseCasePrompt(basePromptArgs.role, context.taskKey),
+    ...(await buildRequesterPrompts(context.requestedBy, context.threadParticipants)),
+    await buildChecklistNudgePrompt(context.checklistNudge),
     context.cwdWarning?.trim(),
   ]
     .filter((part): part is string => Boolean(part))
@@ -3761,12 +4050,13 @@ async function buildTaskOutputInstructions(
   hasMcp: boolean,
 ): Promise<string> {
   if (!hasMcp) return "";
-  const result =
-    outputSchema && typeof outputSchema === "object"
-      ? await resolveTemplateAsync("task.output.schema", {
-          schema: JSON.stringify(outputSchema, null, 2),
-        })
-      : await resolveTemplateAsync("task.output.generic", {});
+  // An empty `{}` schema means no schema; rendering it as a contract makes the
+  // worker complete with the literal output "{}".
+  const result = isEffectiveOutputSchema(outputSchema)
+    ? await resolveTemplateAsync("task.output.schema", {
+        schema: JSON.stringify(outputSchema, null, 2),
+      })
+    : await resolveTemplateAsync("task.output.generic", {});
   return result.text;
 }
 
@@ -4247,7 +4537,11 @@ export function implicitCloseActiveToolSpans(
   return closed;
 }
 
-async function spawnProviderProcess(
+/**
+ * Start a provider session for a task. The new-task and resumed-task paths of
+ * the poll loop both start here; exported so tests can drive that boundary.
+ */
+export async function spawnProviderProcess(
   adapter: Awaited<ReturnType<typeof createProviderAdapter>>,
   opts: {
     prompt: string;
@@ -4280,9 +4574,11 @@ async function spawnProviderProcess(
     localBlocks?: Map<string, number>;
     /** Prompt part sizes from buildTaskSessionPrompts, posted as the session's manifest. */
     compositionParts?: RequestCompositionPartInput[];
+    /** Claim-time profile (task.resolvedProfile) and its pooled-key allowlist. */
+    resolvedProfile?: string;
+    credentialAllowlist?: Record<string, string[]>;
   },
   logDir: string,
-  isYolo: boolean,
 ): Promise<RunningTask> {
   // Real task ID from DB (may be undefined for pool_tasks_available triggers)
   const realTaskId = opts.taskId;
@@ -4315,21 +4611,35 @@ async function spawnProviderProcess(
         modelTier: opts.modelTier,
         localBlocks: opts.localBlocks,
         enforceModelCapacity: true,
+        credentialAllowlist: opts.credentialAllowlist,
+        resolvedProfile: opts.resolvedProfile,
       },
     ));
   } catch (err) {
-    if (err instanceof ModelWindowExhaustedError && realTaskId) {
+    if (
+      (err instanceof ModelWindowExhaustedError || err instanceof CredentialAllowlistError) &&
+      realTaskId
+    ) {
       const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
-      await ensureTaskFinished(
-        { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
-        opts.role,
-        realTaskId,
-        1,
-        reason,
-        undefined,
-        opts.harnessProvider,
-      );
+      const apiConfig = { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId };
+      // No usable key for this profile right now: its fallback may have one.
+      const fallback = await requestProviderFallback(apiConfig, opts.role, realTaskId, {
+        resolvedProfile: opts.resolvedProfile,
+        errorClass: "pool_empty",
+        failureReason: reason,
+      });
+      if (!fallback.superseded) {
+        await ensureTaskFinished(
+          apiConfig,
+          opts.role,
+          realTaskId,
+          1,
+          fallback.failureReason ?? reason,
+          undefined,
+          opts.harnessProvider,
+        );
+      }
     }
     throw err;
   }
@@ -4451,6 +4761,25 @@ async function spawnProviderProcess(
         realTaskId,
       ).catch(() => {});
     }
+  } else if (adapter.name === "pi" && isChatgptSubscriptionModel(model)) {
+    // An `openai-codex/<id>` model runs on the same pool, with the same slot
+    // pick and usage bookkeeping. The adapter revalidates `codexSlot` through
+    // the refresh lock and hands the harness the access token only
+    // (`loadChatgptSubscriptionCredential`); no slot fails the session there.
+    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, {
+      poolOnly: true,
+    });
+    oauthSelection = oauthInfo?.selection;
+    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    if (oauthSelection && realTaskId) {
+      reportKeyUsage(
+        opts.apiUrl,
+        opts.apiKey,
+        oauthSelection.keyType,
+        oauthSelection,
+        realTaskId,
+      ).catch(() => {});
+    }
   }
 
   // Prompt-path skills can resolve inside createSession, before the event
@@ -4508,7 +4837,22 @@ async function spawnProviderProcess(
     withSpan(
       "worker.session.create",
       async (span) => {
-        const createdSession = await adapter.createSession(config);
+        const createdSession = await createSessionReportingAuthFailure(
+          adapter,
+          config,
+          oauthSelection && oauthIsPoolBacked && realTaskId
+            ? {
+                apiUrl: opts.apiUrl,
+                apiKey: opts.apiKey,
+                credential: {
+                  keyType: oauthSelection.keyType,
+                  keySuffix: oauthSelection.keySuffix,
+                  keyIndex: oauthSelection.index,
+                },
+                taskId: realTaskId,
+              }
+            : undefined,
+        );
         span.setAttribute("agentswarm.provider.session_id", createdSession.sessionId || "pending");
         return createdSession;
       },
@@ -4657,6 +5001,7 @@ async function spawnProviderProcess(
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
   const CONTEXT_THROTTLE_MS = 30_000;
+  let latestContextWindow: number | undefined;
 
   // Phase 10: accumulate per-turn output tokens across the session so progress
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
@@ -4915,6 +5260,14 @@ async function spawnProviderProcess(
           });
           break;
         case "context_usage": {
+          // Observe every live window, including events whose HTTP post is throttled.
+          if (
+            event.contextTotalTokens != null &&
+            Number.isFinite(event.contextTotalTokens) &&
+            event.contextTotalTokens > 0
+          ) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           const now2 = Date.now();
           if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
             lastContextPostTime = now2;
@@ -4951,6 +5304,9 @@ async function spawnProviderProcess(
           break;
         }
         case "compaction": {
+          if (Number.isFinite(event.contextTotalTokens) && event.contextTotalTokens > 0) {
+            latestContextWindow = event.contextTotalTokens;
+          }
           // Always record compaction events (no throttle)
           telemetry.compaction("triggered", {
             compactTrigger: event.compactTrigger,
@@ -5061,15 +5417,9 @@ async function spawnProviderProcess(
           const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
           await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
 
-          if (!isYolo) {
-            console.error(
-              `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}.`,
-            );
-          } else {
-            console.warn(
-              `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. YOLO mode - continuing...`,
-            );
-          }
+          console.error(
+            `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. Continuing to poll for work.`,
+          );
         }
 
         // Retain cost data for the concurrent final API writes.
@@ -5126,7 +5476,10 @@ async function spawnProviderProcess(
               sessionId: opts.runnerSessionId,
               cumulativeInputTokens: result.cost.inputTokens ?? 0,
               cumulativeOutputTokens: result.cost.outputTokens ?? 0,
-              contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+              contextTotalTokens: getContextWindowSize(
+                result.cost.model || "default",
+                latestContextWindow,
+              ),
             }),
           }).catch(() => {});
         }
@@ -5234,6 +5587,7 @@ async function spawnProviderProcess(
     harnessProvider: opts.harnessProvider,
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
+    resolvedProfile: opts.resolvedProfile,
     assistantText: assistantTextHolder,
     finalProgress: finalProgressHolder,
     lastCost: lastCostHolder,
@@ -5376,8 +5730,11 @@ export async function reconcileActiveTasks(
   const now = opts.now ?? Date.now;
   const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
 
-  for (const [taskId, task] of state.activeTasks) {
-    if (task.result !== null) continue;
+  // Each task touches only its own entry (plus an add to the shared
+  // cancelledSignaled set), and both API reads swallow their errors, so the
+  // per-task checks run together. The fan-out is bounded by maxConcurrent.
+  const reconcileOne = async (taskId: string, task: RunningTask): Promise<void> => {
+    if (task.result !== null) return;
 
     if (
       !opts.cancelledSignaled.has(taskId) &&
@@ -5427,7 +5784,9 @@ export async function reconcileActiveTasks(
         failureReason: "runner exited without result: provider session did not settle after abort",
       };
     }
-  }
+  };
+
+  await Promise.all(Array.from(state.activeTasks, ([taskId, task]) => reconcileOne(taskId, task)));
 }
 
 /** Fetch whether the server holds a task as cancelled. Throws on network failure. */
@@ -5469,6 +5828,7 @@ export async function checkCompletedProcesses(
     harnessVariant?: string;
     harnessVariantMeta?: Record<string, unknown>;
     model?: string;
+    resolvedProfile?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
     finalProgress?: RunningTask["finalProgress"];
@@ -5495,6 +5855,7 @@ export async function checkCompletedProcesses(
         harnessVariant: task.harnessVariant,
         harnessVariantMeta: task.harnessVariantMeta,
         model: task.model,
+        resolvedProfile: task.resolvedProfile,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
         finalProgress: task.finalProgress,
@@ -5520,6 +5881,7 @@ export async function checkCompletedProcesses(
         harnessVariant,
         harnessVariantMeta,
         model,
+        resolvedProfile,
         durationMs,
         assistantText,
         finalProgress,
@@ -5625,13 +5987,28 @@ export async function checkCompletedProcesses(
                 codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
                 modelWindowBlocks: state.modelWindowBlocks,
               },
-              () =>
-                ensureTaskFinished(
+              async () => {
+                // A provider error on a profile task: the API resumes it on
+                // the next fallback profile, or says why none is left.
+                const fallback = await requestProviderFallback(apiConfig, role, taskId, {
+                  resolvedProfile,
+                  failureReason,
+                  errorClass: resolvedProfile
+                    ? classifyProviderErrorOf(
+                        result,
+                        failureReason,
+                        model,
+                        state.codexCreditsExhaustedCooldownMs,
+                      )
+                    : null,
+                });
+                if (fallback.superseded) return;
+                await ensureTaskFinished(
                   apiConfig,
                   role,
                   taskId,
                   result.exitCode,
-                  failureReason,
+                  fallback.failureReason ?? failureReason,
                   // Runner-buffered last assistant text is a harness-agnostic fallback
                   // for adapters that never populate `ProviderResult.output` (Codex
                   // today, any future adapter). Empty buffer -> `undefined`, byte
@@ -5641,7 +6018,8 @@ export async function checkCompletedProcesses(
                   bridgeFailureDiagnostics,
                   finalProgress?.value,
                   deadline,
-                ),
+                );
+              },
             );
 
             const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
@@ -5777,6 +6155,38 @@ export async function checkCompletedProcesses(
 
 const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+async function saveGeneratedProfile({
+  apiUrl,
+  apiKey,
+  agentId,
+  role,
+  profileUpdate,
+}: {
+  apiUrl: string;
+  apiKey: string;
+  agentId: string;
+  role: string;
+  profileUpdate: Record<string, string>;
+}): Promise<void> {
+  try {
+    const response = await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(profileUpdate),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+    console.log(`[${role}] Generated and saved default identity templates`);
+  } catch (err) {
+    console.warn(scrubSecrets(`[${role}] Could not save generated templates to server: ${err}`));
+  }
+}
+
 async function fetchTemplate(
   templateId: string,
   registryUrl: string,
@@ -5850,7 +6260,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   await mkdir(logDir, { recursive: true });
 
   const prompt = opts.prompt || defaultPrompt;
-  const isYolo = opts.yolo || process.env.YOLO === "true";
 
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
@@ -6066,7 +6475,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   console.log(`[${role}] Agent ID: ${agentId}`);
   console.log(`[${role}] Session ID: ${sessionId}`);
   console.log(`[${role}] Log directory: ${logDir}`);
-  console.log(`[${role}] YOLO mode: ${isYolo ? "enabled" : "disabled"}`);
   console.log(`[${role}] Prompt: ${prompt}`);
   console.log(`[${role}] API URL: ${apiUrl}`);
   console.log(`[${role}] Swarm URL: ${apiUrl}`);
@@ -6629,30 +7037,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (!agentClaudeMd) agentClaudeMd = generateDefaultClaudeMd(agentInfo);
 
         // Push generated templates to server
-        try {
-          const profileUpdate: Record<string, string> = {};
-          if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
-          if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
-          if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
-          if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
-          if (!profile.setupScript && agentSetupScript)
-            profileUpdate.setupScript = agentSetupScript;
-          if (!profile.heartbeatMd && agentHeartbeatMd)
-            profileUpdate.heartbeatMd = agentHeartbeatMd;
+        const profileUpdate: Record<string, string> = {};
+        if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
+        if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
+        if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
+        if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
+        if (!profile.setupScript && agentSetupScript) profileUpdate.setupScript = agentSetupScript;
+        if (!profile.heartbeatMd && agentHeartbeatMd) profileUpdate.heartbeatMd = agentHeartbeatMd;
 
-          await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "X-Agent-ID": agentId,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(profileUpdate),
-          });
-          console.log(`[${role}] Generated and saved default identity templates`);
-        } catch {
-          console.warn(`[${role}] Could not save generated templates to server`);
-        }
+        await saveGeneratedProfile({ apiUrl, apiKey, agentId, role, profileUpdate });
       }
 
       // Fetch installed MCP servers for system prompt
@@ -6776,12 +7169,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // are skipped, which prevents clobbering DB-side edits made by Lead via
   // update-profile during the running session.
   try {
-    const baselines: Record<string, string> = {};
-    if (agentSoulMd) baselines.soulMd = contentSha256(agentSoulMd);
-    if (agentIdentityMd) baselines.identityMd = contentSha256(agentIdentityMd);
-    if (agentToolsMd) baselines.toolsMd = contentSha256(agentToolsMd);
-    if (agentHeartbeatMd) baselines.heartbeatMd = contentSha256(agentHeartbeatMd);
-    if (agentClaudeMd) baselines.claudeMd = contentSha256(agentClaudeMd);
+    // start-up.sh is not rewritten here when it exists: the entrypoint composed
+    // it from the DB at container start, so its agent-managed section is the base.
+    const setupFile = Bun.file("/workspace/start-up.sh");
+    const baselines = bootIdentityBaselines(
+      {
+        soulMd: agentSoulMd,
+        identityMd: agentIdentityMd,
+        toolsMd: agentToolsMd,
+        heartbeatMd: agentHeartbeatMd,
+        claudeMd: agentClaudeMd,
+      },
+      (await setupFile.exists()) ? await setupFile.text() : undefined,
+      agentId,
+    );
     await writeIdentityBaselines(baselines);
     console.log(`[${role}] Recorded identity file baselines for session-end sync`);
   } catch {
@@ -6944,7 +7345,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           prompt: resumePrompt,
           trigger: "task_resumed",
           resumedTaskId: task.id,
-          yolo: isYolo,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
@@ -7002,6 +7402,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 }
               : undefined,
             requestedBy: task.requestedBy,
+            taskKey: task.key,
+            threadParticipants: task.threadParticipants,
             cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
           },
         });
@@ -7052,9 +7454,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: (task as { contextKey?: string }).contextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: resumeSession.parts,
+              resolvedProfile: task.resolvedProfile,
+              credentialAllowlist: task.credentialAllowlist,
             },
             logDir,
-            isYolo,
           );
         } catch (spawnErr) {
           const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
@@ -7352,27 +7755,69 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           { hasMcp: adapter.traits.hasMcp },
         );
 
+        const memoryTask =
+          (trigger.type === "task_assigned" || trigger.type === "task_offered") &&
+          trigger.task &&
+          typeof trigger.task === "object" &&
+          "task" in trigger.task
+            ? (trigger.task as { task: string; id?: string; contextKey?: string })
+            : null;
+        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const isResumeTask = taskObj?.taskType === "resume";
+        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+
+        // The prompt enrichment below needs several API reads that do not
+        // depend on each other. Issue them together; each helper resolves
+        // null/"" on failure, and the results are applied in the original
+        // order, so the composed prompt is unchanged.
+        const [
+          memoryContext,
+          contextPreamble,
+          profileSyncBanner,
+          parentSession,
+          repoConfig,
+          isFirstKickoff,
+        ] = await Promise.all([
+          memoryTask?.task
+            ? fetchRelevantMemories(
+                apiUrl,
+                apiKey,
+                agentId,
+                memoryTask.task,
+                memoryTask.id,
+                memoryTask.contextKey,
+              )
+            : null,
+          taskObj?.parentTaskId && apiUrl
+            ? isResumeTask
+              ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          fetchProfileSyncRejectionBanner({
+            ...apiConfig,
+            claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
+          }),
+          taskObj?.parentTaskId
+            ? fetchProviderSessionInfo(apiUrl, apiKey, taskObj.parentTaskId)
+            : null,
+          taskVcsRepo && apiUrl ? fetchRepoConfig(apiUrl, apiKey, taskVcsRepo) : null,
+          // First kickoff = a genuinely new root task: not a continuation
+          // task-type, and not parent-linked to a still-active task (Slack
+          // follow-ups / sibling-awareness wire parentTaskId with no
+          // reserved taskType). See isFirstKickoffTask() for the full
+          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
+          taskVcsRepo && apiUrl
+            ? isFirstKickoffTask(taskObj, (parentTaskId) =>
+                fetchTaskStatus(apiUrl, apiKey, parentTaskId),
+              )
+            : false,
+        ]);
+
         // Enrich prompt with relevant memories from past sessions
-        if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
-          const task =
-            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-              ? (trigger.task as { task: string; id?: string; contextKey?: string })
-              : null;
-          if (task?.task) {
-            const memoryContext = await fetchRelevantMemories(
-              apiUrl,
-              apiKey,
-              agentId,
-              task.task,
-              task.id,
-              task.contextKey,
-            );
-            if (memoryContext) {
-              triggerPrompt += memoryContext;
-              taskMemoryChars = memoryContext.length;
-              console.log(`[${role}] Injected relevant memories into task prompt`);
-            }
-          }
+        if (memoryContext) {
+          triggerPrompt += memoryContext;
+          taskMemoryChars = memoryContext.length;
+          console.log(`[${role}] Injected relevant memories into task prompt`);
         }
 
         // Universal context preamble: inject for all providers when task is a follow-up.
@@ -7380,12 +7825,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // acts as a bounded safety net for resumable ones (claude/codex).
         // For taskType="resume" (created by supersedeTaskViaAPI), use the
         // larger resume preamble that includes a session-log tool-call summary.
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
         if (taskObj?.parentTaskId && apiUrl) {
-          const isResumeTask = taskObj.taskType === "resume";
-          const contextPreamble = isResumeTask
-            ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-            : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
           if (contextPreamble) {
             triggerPrompt = prependContextPreamble(triggerPrompt, contextPreamble);
             console.log(
@@ -7396,23 +7836,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(triggerPrompt, {
-          ...apiConfig,
-          claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
-        });
-        triggerPrompt = triggerWithSyncWarning.prompt;
-        if (triggerWithSyncWarning.injected) {
+        if (profileSyncBanner) {
+          triggerPrompt = prependContextPreamble(triggerPrompt, profileSyncBanner);
           console.warn(`[${role}] Injected persisted profile sync rejection warning`);
         }
 
         // Resolve provider-aware resume for child tasks with parentTaskId.
         let resumeSessionId: string | undefined;
         if (taskObj?.parentTaskId) {
-          const parentSession = await fetchProviderSessionInfo(
-            apiUrl,
-            apiKey,
-            taskObj.parentTaskId,
-          );
           if (parentSession?.sessionId) {
             const resumeResolution = resolveResumeSession(state.harnessProvider, [
               {
@@ -7449,9 +7880,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
         let currentRepoContext: RepoContext | undefined;
-        const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
         if (taskVcsRepo && apiUrl) {
-          const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
           // Fall back to convention-based config if repo is not registered
           const effectiveConfig = repoConfig ?? {
             url: taskVcsRepo,
@@ -7459,14 +7888,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          // First kickoff = a genuinely new root task: not a continuation
-          // task-type, and not parent-linked to a still-active task (Slack
-          // follow-ups / sibling-awareness wire parentTaskId with no
-          // reserved taskType). See isFirstKickoffTask() for the full
-          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
-          const isFirstKickoff = await isFirstKickoffTask(taskObj, (parentTaskId) =>
-            fetchTaskStatus(apiUrl, apiKey, parentTaskId),
-          );
           const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,
@@ -7517,33 +7938,34 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // probe short-circuits when nothing changed. Skipped for
         // `claude-managed`. Read state.harnessProvider live so an adapter
         // swap mid-loop honors the new provider.
-        if (state.harnessProvider !== "claude-managed") {
-          const skillResult = await refreshSkillsIfChanged(
-            { apiUrl, swarmUrl, apiKey, agentId, role },
-            lastSkillHash,
-          );
-          if (skillResult.changed && skillResult.summary) {
-            agentSkillsSummary = skillResult.summary;
-            console.log(
-              `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
-            );
-          }
-        }
-
+        //
         // Refresh prompt inputs per task without rewriting files shared with
         // active sessions. A failed or bounded-out /me read keeps the cache.
-        const identityResult = await refreshIdentityIfChanged(
-          { apiUrl, apiKey, agentId, role },
-          {
-            soulMd: agentSoulMd,
-            identityMd: agentIdentityMd,
-            toolsMd: agentToolsMd,
-            claudeMd: agentClaudeMd,
-            heartbeatMd: agentHeartbeatMd,
-            name: agentProfileName,
-            description: agentDescription,
-          },
-        );
+        // Neither refresh reads the other's output and neither throws, so the
+        // two reads run together.
+        const [skillResult, identityResult] = await Promise.all([
+          state.harnessProvider !== "claude-managed"
+            ? refreshSkillsIfChanged({ apiUrl, swarmUrl, apiKey, agentId, role }, lastSkillHash)
+            : null,
+          refreshIdentityIfChanged(
+            { apiUrl, apiKey, agentId, role },
+            {
+              soulMd: agentSoulMd,
+              identityMd: agentIdentityMd,
+              toolsMd: agentToolsMd,
+              claudeMd: agentClaudeMd,
+              heartbeatMd: agentHeartbeatMd,
+              name: agentProfileName,
+              description: agentDescription,
+            },
+          ),
+        ]);
+        if (skillResult?.changed && skillResult.summary) {
+          agentSkillsSummary = skillResult.summary;
+          console.log(
+            `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
+          );
+        }
         if (identityResult.changed) {
           agentSoulMd = identityResult.fields.soulMd;
           agentIdentityMd = identityResult.fields.identityMd;
@@ -7568,6 +7990,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             repoContext: currentRepoContext,
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
+            checklistNudge: trigger.checklistNudge,
+            taskKey: (trigger.task as { key?: string } | undefined)?.key,
+            threadParticipants: trigger.threadParticipants,
             cwdWarning,
           },
         });
@@ -7603,7 +8028,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           timestamp: new Date().toISOString(),
           prompt: triggerPrompt,
           trigger: trigger.type,
-          yolo: isYolo,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
@@ -7661,9 +8085,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: taskContextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: taskSession.parts,
+              resolvedProfile: (trigger.task as { resolvedProfile?: string } | undefined)
+                ?.resolvedProfile,
+              credentialAllowlist: (
+                trigger.task as { credentialAllowlist?: Record<string, string[]> } | undefined
+              )?.credentialAllowlist,
             },
             logDir,
-            isYolo,
           );
         } catch (spawnErr) {
           const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);

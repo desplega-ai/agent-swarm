@@ -24,7 +24,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin for non-credentialed requests only (`credentials: "omit"` for bearer clients). Cookie-authenticated responses still require an allowlisted origin; this flag never grants credentials to unlisted origins. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
-| `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
+| `APP_URL` | — | Dashboard URL for Slack message links, and the default base of the file links that agents give people. A saved global config value reaches workers at their next poll. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
 | `SWARM_DASHBOARD_URL` | Falls back to `APP_URL` | Optional override for the dashboard base URL used to build the "View in Agent Swarm" link posted back to a Linear `AgentSession`. |
 | `TRUST_BODY_REQUESTED_BY_USER_ID` | `true` (unset/on) | When on (default), the server may honor a body-supplied `requestedByUserId` on `POST /api/tasks` (validated against a real user row) if no authenticated/owned-task identity is available — this keeps UI/API task attribution working under a shared operator key. Set to `false` in multi-tenant deployments where callers of the shared key are not all equally trusted, restoring the strict anti-spoofing behavior (body field ignored for operator/global-key callers). |
 | `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
@@ -42,6 +42,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `ASSET_KEY_AUDIT_DISABLE_STARTUP_HARD_FAIL` | `false` | Temporary recovery switch. When `true`, the startup asset-namespace audit logs structural key failures instead of aborting the server. Repair the data and remove the switch before normal operation; mapping-drift warnings never abort startup. See [Asset Namespaces](/docs/guides/asset-namespaces#audit-and-rollout). |
 | `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |
 | `SYSTEM_ONE_DEFAULT_PROVIDER` | `typesafe` | Decision host for a `system-one-decision` node or `system-one-decide` call that names no `provider`: `typesafe`, `openrouter`, `cloudflare`, `laya`, or `openai`. Read at each decision; a stored global value wins over the environment. See [SystemOne Decision](/docs/concepts/workflows#systemone-decision). |
+| `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` | `cloudflare` | Extraction host for a `system-one-extraction` node that names no `provider`. Only `cloudflare` is accepted. Read at each extraction. A stored global value takes precedence over the environment. See [SystemOne Extraction](/docs/concepts/workflows#systemone-extraction). |
 | `SCRIPT_EXECUTOR` | `native` | How the API server runs scripts. `native` spawns a sandboxed `bun` subprocess per run. `quickjs` (experimental) runs scripts in QuickJS (WASM) inside a pool of worker threads, with ~1 ms per-run overhead (against ~10 ms for `native` on Linux) and a smaller API surface. See [Scripts runtime § Executors](/docs/guides/scripts-runtime#executors). |
 | `SCRIPT_QUICKJS_POOL_SIZE` | `4` | Maximum QuickJS worker threads, an integer from 1 to 32. Read when the shared pool is first created; restart the API after changes. More workers trade memory for concurrent throughput. Separate from `SCRIPT_RUN_CONCURRENCY_CAP`. |
 | `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `quickjs` executor only: `true` lets scripts fetch private, loopback, link-local and metadata addresses. Default `false` refuses them after DNS resolution and on every redirect hop. The `native` executor does not enforce it yet. See [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy). |
@@ -55,6 +56,11 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
 | `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
+| `FOLLOW_UP_GATE_MODE` | `off` | Follow-up gate for scheduled runs. `off` registers nothing. `shadow` runs the verifier script after each gated run's follow-up is created and records a `task_follow_up_gate_shadow` agent log row; the follow-up is never skipped or delayed. Config writes reject any other value. See [UI configuration](/docs/ui/configuration). |
+| `FOLLOW_UP_GATE_SCHEDULE_IDS` | — | Comma-separated schedule UUIDs whose runs the follow-up gate evaluates. Empty evaluates nothing. |
+| `FOLLOW_UP_GATE_VERIFIER_SCRIPT` | — | Name of the global script the follow-up gate runs as the Lead with `{ taskId }` (60-second timeout). |
+| `TASK_AUTO_TITLE_ENABLED` | `true` | Gives every new task a short display title generated by the cheapest configured model (OpenRouter, Anthropic, OpenAI, Codex OAuth, then the `claude` CLI). A title a person sets is never replaced. Set to `false` to turn it off. See [UI configuration](/docs/ui/configuration). |
+| `TASK_AUTO_TITLE_MODEL` | — | Pins the task-title model: `provider/model-id` (provider `openrouter`, `anthropic`, `openai` or `openai-codex`) or a `claude -p` alias such as `haiku`. Tried first; the built-in order stays the fallback. |
 | `SCRIPT_RUN_CONCURRENCY_CAP` | `10` | Maximum number of concurrently active script runs the API server allows. New run requests are rejected with HTTP 429 once the cap is reached. |
 | `SCRIPT_RUN_SUPERVISOR_DISABLE` | `false` | When `true`, disables the background script-run supervisor (subprocess spawn, periodic reconcile, and abort-on-limit) — durable script runs will never be started or reconciled. |
 | `SCRIPT_WORKFLOW_DEBUG` | `false` | When `true`, logs verbose debug output (auth override flag, resolved API key length) each time the script-run supervisor spawns a durable script-workflow subprocess. |
@@ -65,12 +71,12 @@ Complete reference for all environment variables used by Agent Swarm.
 | `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. Azure / Microsoft Foundry: `https://<resource>.services.ai.azure.com/openai/v1` (see [Embedding endpoints](/docs/architecture/memory#embedding-endpoints)). |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. On Azure, the embedding deployment name. |
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
-| `EMBEDDING_QUERY_PREFIX` | — | Text added before each search query, used verbatim. nomic-embed models need `search_query: ` (with the trailing space). Unset sends queries as they are. Changing it on an install with stored memories needs a re-embed. |
-| `EMBEDDING_DOCUMENT_PREFIX` | — | Text added before each stored document, used verbatim. nomic-embed models need `search_document: ` (with the trailing space). Unset sends documents as they are. Changing it on an install with stored memories needs a re-embed. |
+| `EMBEDDING_QUERY_PREFIX` | — | Text added before each search query, used verbatim. nomic-embed models need `search_query: ` (with the trailing space). Unset sends queries as they are. A change applies from the next search; stored vectors stay. |
+| `EMBEDDING_DOCUMENT_PREFIX` | — | Text added before each stored document, used verbatim. nomic-embed models need `search_document: ` (with the trailing space). Unset sends documents as they are. A change re-embeds stored memories and scripts in the background. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `1` (on) | Hybrid memory retrieval blends vector similarity with a full-text pass before reranking. Set to `0` or `false` to use vector-only search. |
 | `MEMORY_GRAPH_EXPANSION` | `1` (on) | Expands search candidates with 1-hop memory-link neighbors (resolved `[[wikilink]]` targets) before reranking. Neighbors are damped (`parentRawSimilarity × strength × 0.7`), capped at 5 per search, respect the caller's scope/source/lead ACL, and carry `retrievalSource: "graph"` so `GET /api/memory/usefulness` can measure the arm's citation rate. Set to `0` or `false` to disable expansion. |
-| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
+| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. The store-progress learning duplicate check ignores it and uses its own 0.80 threshold. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
@@ -210,6 +216,17 @@ See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes an
 
 See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation and cost tracking.
 
+**fx** (`HARNESS_PROVIDER=fx`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | One of the three | — | OpenRouter key, for `openrouter/<vendor>/<id>` models (the tier defaults) |
+| `OPENAI_API_KEY` | One of the three | — | OpenAI key, for bare model ids such as `gpt-5-mini` |
+| `AI_GATEWAY_API_KEY` | One of the three | — | Vercel AI Gateway key, for `vercel/<vendor>/<id>` models |
+| `FX_BINARY` | No | `fx` on `PATH` | Path to another trusted fx executable |
+
+The adapter sets `FX_PROVIDER`, `FX_PERMISSION_MODE=full-access`, `FX_AUTO_UPGRADE=0` and `FX_NO_OPEN_BROWSER=1` on each fx process; do not set them on the worker. `ANTHROPIC_API_KEY` and `NAN_API_KEY` do not work with fx. See [Provider Auth: fx](/docs/guides/provider-auth/fx) for routing, steering and cost tracking.
+
 **opencode** (`HARNESS_PROVIDER=opencode`):
 
 | Variable | Required | Default | Description |
@@ -272,12 +289,11 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | `90` | Positive-integer deadline for `docker-entrypoint.sh` to reach `${MCP_BASE_URL}/health` before provider-specific setup. This is bootstrap-only: set it in the worker/lead container environment rather than only in `swarm_config`. |
 | `SESSION_ID` | No | Auto-generated | Log folder name |
 | `LOG_DIR` | No | `/logs` | Base directory for session `.jsonl` log files (`<LOG_DIR>/<sessionId>/<timestamp>-<taskId8>.jsonl`) |
-| `YOLO` | No | `false` | Continue on errors |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
-| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to turn context-mode off for local Claude Code, Codex, and opencode workers. Drops the `ctx_*` MCP server and disables the installed Claude Code and Codex context-mode plugins for the session, so their hooks (SessionStart guidance, tool tips, WebFetch redirect) do not run either. |
+| `CONTEXT_MODE_DISABLED` | No | — | **Deprecated, ignored.** context-mode is no longer shipped or wired in, so this flag does nothing. Workers that still set it boot normally; you can remove it. The Claude Code and Codex adapters always turn off a context-mode plugin left over from an older image. |
 | `SCRIPTS_ONLY_MCP` | No | `false` | Experimental code-mode. Set alongside the API server value so worker prompts explain the reduced eight-tool MCP surface; all other swarm operations remain available through `script-run` and the scripts SDK. |
-| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
+| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | — | **Deprecated, ignored.** Tuned the removed context-mode plugin. Workers no longer read or forward it. |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |
 | `CONTEXT_BOUND_NOTE_TOKENS` | No | `0` (off) | Context size (input + cache read + cache write tokens of the latest main-thread request) at which a worker session gets a one-time note to finish the current step and complete or defer. A positive integer turns it on; can be set per agent via `set-config`. See [Configuration](/docs/ui/configuration) |
 | `CONTEXT_PREAMBLE_RESUME_MAX_TOKENS` | No | `4000` | Token budget for the resume-task preamble (2x the regular budget — carries the original task brief plus a tool-call summary so the resumed agent doesn't redo completed work) |
@@ -307,6 +323,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_TOKEN` | — | GitHub token for git operations |
 | `GITHUB_EMAIL` | `worker-agent@desplega.ai` | Git commit email |
 | `GITHUB_NAME` | `Worker Agent` | Git commit name |
+| `GITHUB_URL` | `https://github.com` | GitHub Enterprise Server host for git, `gh` and API calls; must match the API server |
 
 ## Slack Integration
 
@@ -317,19 +334,23 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
+| `SLACK_ENTERPRISE_INSTALL` | Set to `true` when `SLACK_BOT_TOKEN` comes from an org-wide Enterprise Grid install (`is_enterprise_install` from `oauth.v2.access`). The swarm then accepts deliveries for its enterprise's org-wide install instead of its workspace (default: `false`). See [Slack: Workspace guard](/docs/integrations/slack#workspace-guard) |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |
 | `SLACK_WORK_OBJECTS_ENABLED` | Set to `true` to populate task Work Object flexpanes (default: `false`). Apply the updated Slack manifest, reinstall the app, and enable Work Object Previews. See [Slack setup](/docs/integrations/slack#task-work-objects). |
 | `SLACK_RENDER_V2_DELEGATION` | Set to `true` to defer an ask's conclusion card until its whole closure (delegated tasks, children, follow-ups) settles, post child result cards, and gate the checkmark reaction on the closure instead of the ask alone. Requires `SLACK_RENDER_V2=true` (default: `false`) |
+| `SLACK_TASK_WATCHER_INTERVAL_MS` | Milliseconds between Slack task watcher ticks (default: `10000`). Under `SLACK_RENDER_V2` each tick is the full reconcile; a task status change or progress update renders its own thread within about a second. Inbound mentions do not wait on it. Read at startup |
 | `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |
 | `SLACK_CONCLUSION_TIMEOUT_MIN` | Idle minutes before a closure concludes with unfinished work and a `warning` reaction (default: `240`) |
 | `SLACK_TREE_STALL_MIN` | Minutes without a task update before the thread tree shows a stalled glyph for that task (default: `15`) |
+| `SLACK_REACTION_SKIPPED` | Reaction that replaces the ack reactions when every linked task ended `skipped`, or a `pre.task.create` extension blocked the task (default: `mute`). See [Slack: Acceptance reactions](/docs/integrations/slack#acceptance-reactions) |
 | `SLACK_STATUS_ICON_COMPLETED` | "Done" glyph in thread text: task tree, thread header and completed outcome cards. Bare name or `:name:`, rendered as `:name:`. Unset or invalid keeps ✅. A name the workspace lacks shows as literal `:name:`. See [Slack: Acceptance reactions](/docs/integrations/slack#acceptance-reactions) |
 | `SLACK_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains |
 | `SLACK_ALLOWED_USER_IDS` | Comma-separated user IDs to always allow |
 | `ADDITIVE_SLACK` | Set to `true` to enable non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | Debounce window for thread buffer in ms (default: `10000`) |
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | Set to `true` to require @mention for thread follow-up routing (default: `false`) |
+| `SLACK_THREAD_WAKE_ON_ANY_MESSAGE` | Set to `true` to treat thread replies that @mention another user (and not the bot) as follow-ups instead of skipping them (default: `false`). See [Slack: Thread follow-up routing](/docs/integrations/slack#thread-follow-up-routing) |
 | `LEAD_MONITOR_CHANNELS` | Set to `true` to have the lead agent additionally poll monitored Slack channels for non-mention activity (not just @mentions/DMs), throttled to once per 60s per poll cycle |
 | `LEAD_MONITOR_CHANNEL_IDS` | Comma-separated Slack channel IDs allowlist restricting `LEAD_MONITOR_CHANNELS` activity monitoring to specific channels. Unset monitors every channel the bot is a member of |
 | `SLACK_BLOCK_EXTERNAL_CHANNELS` | Set to `true` to keep the bot out of external Slack Connect channels: no tasks from them, no writes to them, and the bot leaves on join or share (default: `false`). Read on every event, so a change in global config applies without a restart. See [Slack: External channels](/docs/integrations/slack#external-slack-connect-channels) |
@@ -347,6 +368,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
+| `GITHUB_URL` | GitHub Enterprise Server web base, e.g. `https://ghe.example.com` (default `https://github.com`). Set on the API and every worker. Deployment env only. See [GitHub Enterprise Server](/docs/integrations/github#github-enterprise-server) |
+| `GITHUB_API_URL` | GitHub REST base override (default derived from `GITHUB_URL`, `<GITHUB_URL>/api/v3` on GHES). Deployment env only |
 
 ## GitLab Integration
 
@@ -454,7 +477,7 @@ A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integratio
 4. Enable "Agent session events" in webhook settings
 5. Set Webhook URL to your `/api/trackers/linear/webhook` endpoint
 6. Copy Client ID, Client Secret, and Webhook Signing Secret
-7. Start the server, then visit `/api/trackers/linear/authorize` to complete OAuth
+7. Start the server, then click **Connect to Linear** in the dashboard (or open the URL from `GET /api/trackers/linear/authorize?format=json`, which requires the swarm API key) to complete OAuth
 
 With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback`
 
@@ -475,7 +498,7 @@ With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/tra
 3. Set the callback URL to your `/api/trackers/jira/callback` endpoint
 4. Copy the Client ID and Client Secret
 5. Generate a webhook token (`openssl rand -hex 32`) and set `JIRA_WEBHOOK_TOKEN`
-6. Start the server, then visit `/api/trackers/jira/authorize` to complete OAuth
+6. Start the server, then click **Authorize** in the dashboard (or open the URL from `GET /api/trackers/jira/authorize?format=json`, which requires the swarm API key) to complete OAuth
 7. Register the dynamic webhook via `POST /api/trackers/jira/webhook-register` (admin, requires the swarm API key)
 
 See the [Jira Integration guide](/docs/integrations/jira) for the full walkthrough, webhook lifecycle, and known limitations.
@@ -536,11 +559,11 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 | Variable | Description |
 |----------|-------------|
 | `AGENT_FS_API_URL` | Agent-fs API URL. When unset, the server uses `local-fs`; when set as env or global swarm config, it enables the persistent shared filesystem provider |
-| `AGENT_FS_LIVE_URL` | Agent-fs live host used to build shareable file links (`<AGENT_FS_LIVE_URL>/file/~/<org_id>/<drive_id>/<file_path>`). Falls back to the public `https://live.agent-fs.dev` host when unset; self-hosted agent-fs operators should override it |
-| `AGENT_FS_PUBLIC_URL` | Agent-fs URL that browsers use for [Comb](/docs/ui/comb). Defaults to `AGENT_FS_API_URL`; set it when the API reaches agent-fs on an internal hostname (e.g. `http://agent-fs:7433` in Docker Compose, where the browser needs `http://localhost:7433`). Must be an http(s) URL with no query string or fragment |
-| `AGENT_FS_LINK_TARGET` | Where people-facing file links point: task attachment links and the links agents give people. `dashboard` uses `APP_URL/file/~/<org>/<drive>/<path>` (attachments also need Comb on; workers need `APP_URL` in their own environment), `live` uses `AGENT_FS_LIVE_URL`. Unset or blank keeps the automatic choice. See [Links to agent-fs files](/docs/ui/comb#links-to-agent-fs-files) |
-| `AGENT_FS_PROXY` | `true` makes the API serve agent-fs (at `AGENT_FS_API_URL`) at `/agentfs/*`, plus agent-fs's public `/share/*` and `/site/*` pages (default `false`). Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. Only `Authorization: Bearer af_...` credentials reach agent-fs. `POST /agentfs/auth/register` needs a swarm credential (the operator key, or a user token for the user's own email) and is limited to 5 per minute per IP. Read per request. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api) |
-| `COMB_ENABLED` | Turns on [Comb](/docs/ui/comb), the agent-fs review space in the dashboard (default `false`). No effect until `AGENT_FS_API_URL` is set. Saving it in swarm config reloads the API; the dashboard picks it up within one status poll (30 seconds at most) |
+| `AGENT_FS_LIVE_URL` | Agent-fs live host used to build shareable file links (`<AGENT_FS_LIVE_URL>/file/~/<org_id>/<drive_id>/<file_path>`). Falls back to the public `https://live.agent-fs.dev` host when unset; self-hosted agent-fs operators should override it. Its origin is also the only `return_to` that "Continue with your swarm" (`POST /api/fs/continue`) sends a key to |
+| `AGENT_FS_PUBLIC_URL` | Agent-fs URL that browsers use directly for [Comb](/docs/ui/comb). Unset, browsers go through the API proxy at `<public API URL>/agentfs` (or `AGENT_FS_API_URL` itself with `AGENT_FS_PROXY=false`). Must be an http(s) URL with no query string or fragment |
+| `AGENT_FS_LINK_TARGET` | Where people-facing file links point: task attachment links and the links agents give people. `dashboard` uses `APP_URL/file/~/<org>/<drive>/<path>` (attachments also need Comb on), `live` uses `AGENT_FS_LIVE_URL`. Unset or blank means `dashboard` when `APP_URL` is set and `COMB_ENABLED` is not `false`, else `live`. An explicit `COMB_ENABLED=false` also keeps agent links on `live` with `dashboard`. A live link carries `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set. See [Links to agent-fs files](/docs/ui/comb#links-to-agent-fs-files) |
+| `AGENT_FS_PROXY` | `true` makes the API serve agent-fs (at `AGENT_FS_API_URL`) at `/agentfs/*`, plus agent-fs's public `/share/*` and `/site/*` pages (default: on when `AGENT_FS_API_URL` is set, else off; `false` turns it off). Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. Only `Authorization: Bearer af_...` credentials reach agent-fs. `POST /agentfs/auth/register` needs a swarm credential (the operator key, or a user token for the user's own email) and is limited to 5 per minute per IP. Read per request. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api) |
+| `COMB_ENABLED` | Controls [Comb](/docs/ui/comb), the agent-fs review space in the dashboard. Unset: on when `AGENT_FS_API_URL` is set and `AGENT_FS_PUBLIC_URL` or `AGENT_FS_PROXY` gives the browser an agent-fs address. `true` turns it on, `false` turns it off. No effect until `AGENT_FS_API_URL` is set. Saving it in swarm config reloads the API; the dashboard picks it up within one status poll (30 seconds at most) |
 | `API_AGENT_FS_API_KEY` | API-owned bootstrap/service API key for agent-fs. Used only by the API server to seed the swarm org/drive and invite/register agents |
 | `AGENT_FS_API_KEY` | Per-agent API key for agent-fs CLI/MCP access. Generated by the API server and stored as an agent-scoped secret; workers should not share the API bootstrap key |
 | `AGENT_FS_SHARED_ORG_ID` | Shared org ID for the swarm's agent-fs organization. Auto-created by the lead on first boot |
@@ -609,6 +632,7 @@ NaN and Helmcode cap concurrency per key (NaN: 60 RPM, 7 concurrent requests in 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. Events carry an org ID, the org name and the admin's email domain, and a pseudonymous user reference (never an email address); see [Identity context](/docs/reference/telemetry#identity-context) |
+| `IMPROVEMENTS_ENABLED` | `true` | Kill switch for product improvements sent to Desplega (the `submit-improvement` MCP tool, `POST /api/improvements` and the header lightbulb). Set to `false` to turn drafting and sending off. A send carries the text, the approver's email and the install id; see [Improvements](/docs/ui/configuration#improvements) |
 | `DESPLEGA_TELEMETRY_ENV` | Auto-detected | Explicit telemetry environment tag. Overrides `NODE_ENV=test` and automatic `development` detection for git checkouts; shipped installs default to `production`. |
 | `PUBLIC_RANKING_ENABLED` | `false` | Opt-in to the public install ranking. Set by **Get ranked** in Settings → Configuration → Branding rather than by hand. While telemetry is on and `SWARM_ORG_NAME` and `SWARM_ORG_WEBSITE` are set, workers send `ranking.usage` token counts after each session; see [Public ranking](/docs/reference/telemetry#public-ranking) |
 | `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
@@ -627,6 +651,7 @@ OpenTelemetry traces and OTLP metrics are disabled unless `OTEL_EXPORTER_OTLP_EN
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
 | `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
 | `OTEL_EXPORT_API_LOGS` | OFF | When set to `1`/`true` on the API, also exports its console output as OTLP log records to the same endpoint as traces, scrubbed of secrets. Read at startup. |
+| `EVENT_LOOP_STALL_WARN_MS` | `1000` | Event-loop stall threshold in milliseconds. When a probe tick lags past it, the API logs the stalled request path and the slowest SQL statements recorded during the stall (scrubbed, params never logged). Read on every tick, so a config reload applies without a restart. |
 
 ## Business-Use Instrumentation
 

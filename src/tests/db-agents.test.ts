@@ -77,6 +77,7 @@ test("unmoved profile and idle-worker callers share agent mapping defaults", asy
     credStatus: null,
     harnessProvider: null,
     avatar: null,
+    slackIcon: null,
   });
   const updated = await db.updateAgentProfile(agent.id, {
     role: "coder",
@@ -88,4 +89,16 @@ test("unmoved profile and idle-worker callers share agent mapping defaults", asy
     .getDbClient()
     .run("UPDATE agents SET avatar = ? WHERE id = ?", ["invalid json", agent.id]);
   expect((await db.getAgentById(agent.id))?.avatar).toBeNull();
+});
+
+test("slackIcon is set, kept when omitted, reset by null, and parsed safely", async () => {
+  const agent = await db.createAgent(worker);
+  const owl = { type: "emoji" as const, emoji: ":owl:" };
+  expect((await db.updateAgentProfile(agent.id, { slackIcon: owl }))?.slackIcon).toEqual(owl);
+  expect((await db.updateAgentProfile(agent.id, { role: "coder" }))?.slackIcon).toEqual(owl);
+  expect((await db.updateAgentProfile(agent.id, { slackIcon: null }))?.slackIcon).toBeNull();
+  await db
+    .getDbClient()
+    .run("UPDATE agents SET slack_icon = ? WHERE id = ?", ["invalid json", agent.id]);
+  expect((await db.getAgentById(agent.id))?.slackIcon).toBeNull();
 });

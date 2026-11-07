@@ -1047,6 +1047,88 @@ ${serveFakeAcpAgent("FakeCopilot")}
     expect(env.AGENT_MODEL).toBe("custom-model");
   });
 
+  test.each([
+    ["number", 1],
+    ["boolean", false],
+    ["null", null],
+    ["object", { key: "ALLOWED_TOKEN" }],
+    ["nested array", ["ALLOWED_TOKEN"]],
+  ])("custom target rejects a JSON env-key array containing a %s", (_name, entry) => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: JSON.stringify(["ALLOWED_TOKEN", entry]),
+        ALLOWED_TOKEN: "allowed",
+      },
+    });
+    const resolveEnv = () => resolveAcpTarget(config).env(config);
+
+    expect(resolveEnv).toThrow(AcpTargetResolutionError);
+    expect(resolveEnv).toThrow("ACP_TARGET_ENV_KEYS");
+  });
+
+  test("custom target preserves literal keys in an all-string JSON env-key array", () => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: JSON.stringify(["ALLOWED_TOKEN", " SPACED_KEY ", "", "ALLOWED_TOKEN"]),
+        ALLOWED_TOKEN: "allowed",
+        " SPACED_KEY ": "literal",
+        "": "empty-key",
+        BLOCKED_TOKEN: "blocked",
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+
+    expect(env.ALLOWED_TOKEN).toBe("allowed");
+    expect(env[" SPACED_KEY "]).toBe("literal");
+    expect(env[""]).toBe("empty-key");
+    expect(env.SPACED_KEY).toBeUndefined();
+    expect(env.BLOCKED_TOKEN).toBeUndefined();
+  });
+
+  test("custom target trims comma-separated env keys and ignores empty segments", () => {
+    const config = baseConfig({
+      env: {
+        ACP_TARGET_ENV_KEYS: " ALLOWED_TOKEN , , SECOND_TOKEN, ALLOWED_TOKEN , ",
+        ALLOWED_TOKEN: "allowed",
+        SECOND_TOKEN: "second",
+        BLOCKED_TOKEN: "blocked",
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+
+    expect(env.ALLOWED_TOKEN).toBe("allowed");
+    expect(env.SECOND_TOKEN).toBe("second");
+    expect(env.BLOCKED_TOKEN).toBeUndefined();
+  });
+
+  test.each([
+    undefined,
+    "",
+    "   ",
+    "[]",
+  ])("custom target forwards no extra env keys for an empty list (%j)", (value) => {
+    const config = baseConfig({
+      env: { ACP_TARGET_ENV_KEYS: value, ALLOWED_TOKEN: "allowed" },
+    });
+
+    expect(resolveAcpTarget(config).env(config).ALLOWED_TOKEN).toBeUndefined();
+  });
+
+  test.each([
+    '["ALLOWED_TOKEN"',
+    '"ALLOWED_TOKEN"',
+    "123",
+    "true",
+    "null",
+    '{"key":"value"}',
+  ])("custom target keeps the text fallback for non-array or invalid JSON (%s)", (value) => {
+    const config = baseConfig({
+      env: { ACP_TARGET_ENV_KEYS: value, [value]: "allowed" },
+    });
+
+    expect(resolveAcpTarget(config).env(config)[value]).toBe("allowed");
+  });
+
   test("configured options are nonfatal when absent or rejected", async () => {
     const advertised = [
       {
@@ -1177,6 +1259,85 @@ ${serveFakeAcpAgent("FakeCopilot")}
   test("toAcpMcpServers skips entries with neither command nor url", () => {
     expect(toAcpMcpServers({ broken: { foo: "bar" } })).toEqual([]);
     expect(toAcpMcpServers(null)).toEqual([]);
+  });
+
+  test("a target without the opt-in hooks keeps its session/new payload, MCP URL and no steering", async () => {
+    const cwd = makeTempDir();
+    const agentPath = join(cwd, "fake-acp-hooks-off.ts");
+    const captureFile = join(cwd, "session-new.json");
+    await Bun.write(
+      agentPath,
+      `
+import { Readable, Writable } from "node:stream";
+import { PROTOCOL_VERSION, agent, methods, ndJsonStream } from "${ACP_SDK_PATH}";
+class FakeAgent {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    // Advertises every capability the opt-in hooks key off; a target without
+    // the hooks must ignore them.
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      agentCapabilities: {
+        loadSession: true,
+        mcpCapabilities: { http: true, sse: false },
+        sessionCapabilities: { resume: {}, systemPrompt: {} },
+        _meta: { fx: { steering: true } },
+      },
+      agentInfo: { name: "fake", version: "9.9.9" },
+    };
+  }
+  async newSession(params) {
+    await Bun.write(${JSON.stringify(captureFile)}, JSON.stringify(params));
+    return { sessionId: "hooks-off-1" };
+  }
+  async prompt() { return { stopReason: "end_turn" }; }
+  async cancel() {}
+}
+${serveFakeAcpAgent("FakeAgent")}
+`,
+    );
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
+      "hooks-off-token",
+      "aseph_hooksofftoken1234567890",
+    );
+    // A reachable, plain-HTTP, non-loopback URL: only requiresSecureMcpUrl rewrites it.
+    const publicStyleUrl = apiUrl.replace("127.0.0.1", "0.0.0.0");
+    try {
+      const adapter = new ACPAdapter();
+      const session = await adapter.createSession(
+        baseConfig({
+          cwd,
+          apiUrl: publicStyleUrl,
+          resumeSessionId: "ignored-without-a-resume-hook",
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET_COMMAND: "bun",
+            ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          },
+        }),
+      );
+      const events: ProviderEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      await session.waitForCompletion();
+
+      expect(session.sessionId).toBe("hooks-off-1");
+      expect(session.deliverSteering).toBeUndefined();
+      expect(await adapter.canResume("hooks-off-1")).toBe(false);
+      const params = JSON.parse(await Bun.file(captureFile).text());
+      expect(Object.keys(params).sort()).toEqual(["cwd", "mcpServers"]);
+      expect(params.mcpServers.map((server: { url: string }) => server.url)).toEqual([
+        `${publicStyleUrl}/mcp`,
+      ]);
+      // Every ACP target records the agent's own version on session_init.
+      expect(events.find((event) => event.type === "session_init")).toMatchObject({
+        sessionId: "hooks-off-1",
+        provider: "acp",
+        harnessVariantMeta: { version: "9.9.9" },
+      });
+    } finally {
+      await closeTokenStub();
+    }
   });
 
   test("completes before the revoke response and logs a failed revocation", async () => {

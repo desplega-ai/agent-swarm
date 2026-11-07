@@ -18,6 +18,8 @@
     "open-oncall",
     "pr-review",
     "linear-delivery-loop",
+    "slack-reply-gate",
+    "small-company-workflows",
     "---Hot patterns---",
     "patterns"
   ]

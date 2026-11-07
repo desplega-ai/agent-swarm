@@ -47,7 +47,12 @@ rate by hand should also update this file.
     Shortnames (`opus`, `sonnet`, `haiku`) ALSO get rows keyed by the current
     default full id (e.g. `opus → claude-opus-4-7`). Pi-mono uses the same
     shortname forms, so they're projected under `provider='pi'` as well.
-  - OpenAI models → rows under `provider='codex'`.
+  - OpenAI models → rows under `provider='codex'`, and `provider='pi'` for
+    the ChatGPT subscription route. Pricing accepts `openai-codex/<id>`;
+    `session_costs.model` and its per-model breakdown store the bare OpenAI
+    `<id>` so pi and Codex share one rollup key. Migration 271 normalizes
+    historical subscription rows. Task configuration, latest-model reports,
+    and session logs keep the route prefix for credential selection and debugging.
   - OpenRouter models → rows under `provider='opencode'`, `provider='pi'` and
     `provider='dsh'` (dsh strips `openrouter/` at lookup). These are
     OpenRouter's model-level list price, the cheapest endpoint's rate, so they
@@ -78,6 +83,14 @@ rate by hand should also update this file.
     what xAI billed (`_meta.usage.costUsdTicks`), which wins over these rows
     as for amp. OpenRouter models also project under `provider='grok'` for
     `openrouter/<id>` models, which report no USD.
+  - fx (`provider='fx'`) reports tokens and no USD, so every fx row is
+    priced from the table (`costSource: "pricing-table"`). The lookup strips
+    the routing prefix (`src/be/pricing-normalize.ts`): an
+    `openrouter/<vendor>/<id>` model prices at OpenRouter's `<vendor>/<id>`
+    rate, a `vercel/<vendor>/<id>` model at the AI Gateway `<vendor>/<id>`
+    rate, a bare id at OpenAI's rate. fx reports no cache split, so every
+    input token prices at the uncached rate, and its counts exclude
+    sub-agent and helper-model calls: the figure is an estimate.
   - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
     `provider='cursor'`. Cursor bills the vendor's API rates and reports the
     vendor's own id. The adapter subtracts cache reads and writes from SDK
@@ -131,6 +144,16 @@ on our account (re-checked 2026-10-05), so these rows are an estimate from
 list prices. They do not include plan discounts, included usage, or the $0.25
 per million Cursor Token Rate that Teams and Enterprise plans add to
 third-party (not Composer) requests.
+
+## Usage recording
+
+Context snapshots use the running harness's latest positive finite window
+before the catalog's API maximum. The runner retains this value for completion
+even when a progress post was throttled; Codex also retains it across native
+notifications that omit the window. Pi reasoning usage is an informational
+subset of output tokens and is not charged again.
+An adapter-side completion without prior context updates resolves its window
+from the result model's catalog entry, independently of the runner snapshot.
 
 ## Manual overrides
 

@@ -323,6 +323,11 @@ export function dialPrice(
       : setting.harness === "codex"
         ? `openai/${setting.model}`
         : setting.model;
-  const cost = findKnownModel(id, catalog ?? undefined)?.cost;
+  // A bare dsh id is priced from the `deepseek` section it was picked from
+  // (`deepseekDirectModel`), which no other provider has to list.
+  const cost =
+    setting.harness === "dsh" && !setting.model.includes("/")
+      ? deepseekCatalogModels(catalog)[setting.model]?.cost
+      : findKnownModel(id, catalog ?? undefined)?.cost;
   return cost && (cost.input != null || cost.output != null) ? cost : null;
 }

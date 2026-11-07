@@ -210,6 +210,24 @@ describe("the live catalog wins over the bundled snapshot", () => {
     ).toBe(false);
   });
 
+  test("dialPrice prices the DeepSeek direct pick from the deepseek section", () => {
+    // The live catalog may list no provider with the bare id (`deepseek-flash`):
+    // the dial picks it from the deepseek section, so it is priced from there.
+    const tiers = tierRows();
+    const noDeepseek = live({ openai: { "gpt-9-test": { cost: { input: 1, output: 2 } } } });
+    for (const catalog of [undefined, noDeepseek]) {
+      for (const level of DIAL_LEVELS) {
+        const setting = dialSetting("dsh", level, { openrouter: false, tiers, catalog });
+        expect(setting).not.toBeNull();
+        expect(dialPrice(setting as NonNullable<typeof setting>, catalog)).not.toBeNull();
+      }
+    }
+    const priced = live({ deepseek: { "deepseek-flash": { cost: { input: 3, output: 4 } } } });
+    const cheap = dialSetting("dsh", "cheap", { openrouter: false, tiers, catalog: priced });
+    expect(cheap?.model).toBe("deepseek-flash");
+    expect(dialPrice(cheap as NonNullable<typeof cheap>, priced)).toEqual({ input: 3, output: 4 });
+  });
+
   test("dialPrice reads the live price", () => {
     const priced = live({ anthropic: { "claude-opus-5-5": { cost: { input: 1, output: 2 } } } });
     const setting = dialSetting("claude", "optimal", { openrouter: false, tiers: tierRows() });

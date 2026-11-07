@@ -5,6 +5,51 @@ import { parseSkillContent } from "../be/skill-parser";
 // ─── Valid Parsing ──────────────────────────────────────────────────────────
 
 describe("parseSkillContent — valid inputs", () => {
+  test.each([">", "|", ">-", "|-", ">+", "|+"])("parses ponytail block description %s", (style) => {
+    const lines = [
+      "Lazy senior dev mode: the smallest change that fully solves the task, and a",
+      "reply a busy human understands in one read. Use on any coding task (writing,",
+      "fixing, refactoring, reviewing, choosing dependencies) and when the user says",
+      '"ponytail", "be lazy", "simplest solution", "yagni", or complains about',
+      "over-engineering or bloat. Levels: lite, full (default), ultra.",
+    ];
+    const content = `---
+name: ponytail
+description: ${style}
+${lines.map((line) => `  ${line}`).join("\n")}
+argument-hint: "[lite|full|ultra|off]"
+license: MIT
+---
+# Ponytail`;
+
+    const result = parseSkillContent(content);
+    const separator = style.startsWith(">") ? " " : "\n";
+    expect(result.description).toBe(lines.join(separator) + (style.endsWith("-") ? "" : "\n"));
+    expect(result.name).toBe("ponytail");
+    expect(result.body).toBe("# Ponytail");
+  });
+
+  for (const style of ["|", ">", "|-", ">-", "|+", ">+"]) {
+    test.each([0, 2])(`preserves following metadata with ${style} at indentation %i`, (indent) => {
+      const padding = " ".repeat(indent);
+      const result = parseSkillContent(
+        `---\n${padding}name: test\n${padding}description: ${style}\n${padding}  Hello\n${padding}    model: part of the description\n\n${padding}model: opus\n${padding}effort: high\n---\nBody`,
+      );
+      const ending = style.endsWith("-") ? "" : style.endsWith("+") ? "\n\n" : "\n";
+      expect(result.description).toBe(`Hello\n  model: part of the description${ending}`);
+      expect(result.model).toBe("opus");
+      expect(result.effort).toBe("high");
+    });
+
+    test.each([false, true])(`honors ${style} trailing blank lines, last field: %s`, (last) => {
+      const result = parseSkillContent(
+        `---\nname: test\ndescription: ${style}\n  Hello\n  world\n\n\n${last ? "" : "model: opus\n"}---\nBody`,
+      );
+      const ending = style.endsWith("-") ? "" : style.endsWith("+") ? "\n\n\n" : "\n";
+      expect(result.description).toBe(`Hello${style.startsWith(">") ? " " : "\n"}world${ending}`);
+    });
+  }
+
   test("parses minimal frontmatter with body", () => {
     const content = `---
 name: my-skill

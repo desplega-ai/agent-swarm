@@ -1,4 +1,10 @@
-export { getSlackApp, initSlackApp, startSlackApp, stopSlackApp } from "./app";
+export {
+  getSlackApp,
+  initSlackApp,
+  startSlackApp,
+  stopSlackApp,
+  stopSlackAppUnderLifecycleLock,
+} from "./app";
 export type {
   DownloadFileOptions,
   DownloadFileResult,

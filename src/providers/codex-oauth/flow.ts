@@ -103,8 +103,9 @@ export async function exchangeAuthorizationCode(
   verifier: string,
   redirectUri: string = REDIRECT_URI,
   signal?: AbortSignal,
+  tokenUrl: string = TOKEN_URL,
 ): Promise<TokenResult> {
-  const response = await _fetchHolder.current(TOKEN_URL, {
+  const response = await _fetchHolder.current(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -150,14 +151,19 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
+      // The endpoint may echo the submitted refresh token: redact before the
+      // text reaches a log, the thrown error or a task's failure reason.
+      const text = redactTokens(await response.text().catch(() => ""), [refreshToken]);
       console.error("[codex-oauth] Token refresh failed:", response.status, text);
       return { type: "failed", status: response.status, error: text.slice(0, 300) };
     }
 
     const json = (await response.json()) as Record<string, unknown>;
     if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
-      console.error("[codex-oauth] Token refresh response missing fields:", json);
+      console.error(
+        "[codex-oauth] Token refresh response missing fields; got keys:",
+        Object.keys(json).join(", "),
+      );
       return { type: "failed" };
     }
 
@@ -168,9 +174,25 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
       expires: Date.now() + (json.expires_in as number) * 1000,
     };
   } catch (error) {
-    console.error("[codex-oauth] Token refresh error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[codex-oauth] Token refresh error:", redactTokens(message, [refreshToken]));
     return { type: "failed" };
   }
+}
+
+/**
+ * `text` with every given token, raw or URL/JSON-encoded, replaced by a
+ * marker, then run through `scrubSecrets`. For error text from an endpoint
+ * that was sent those tokens and may echo them back.
+ */
+export function redactTokens(text: string, tokens: readonly (string | undefined)[]): string {
+  let out = text;
+  for (const token of tokens) {
+    if (!token) continue;
+    const forms = new Set([token, encodeURIComponent(token), JSON.stringify(token).slice(1, -1)]);
+    for (const form of forms) out = out.split(form).join("[REDACTED:codex_oauth_token]");
+  }
+  return scrubSecrets(out);
 }
 
 export function getAccountId(accessToken: string): string | null {

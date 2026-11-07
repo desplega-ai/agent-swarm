@@ -7,7 +7,8 @@
  *   - a `latest:<provider>/<family>` alias that is valid grammar and resolves to a catalog model;
  *   - a catalog id, bare (`claude-opus-5-5`, `gpt-5.6-sol`) or provider-qualified
  *     (`openrouter/deepseek/deepseek-v4.1-flash`, `amazon-bedrock/...`);
- *   - a Claude CLI shortname (`opus`, `sonnet`, ...), which the CLI resolves itself.
+ *   - a Claude CLI shortname (`opus`, `sonnet`, ...), which the CLI resolves itself;
+ *   - a ChatGPT subscription id `openai-codex/<id>` whose `<id>` is in the `openai` section.
  *
  * Escape hatch: `allowCustomModel: true` on the call (tools, REST bodies, workflow node
  * config, the agent runtime PATCH). Custom ids skip the check and are stored as given, for
@@ -23,7 +24,9 @@
  */
 import {
   buildClaudeShortnameMap,
+  chatgptSubscriptionModelId,
   type HarnessCatalogSections,
+  harnessCatalogSection,
   harnessModelMismatch,
   isAlias,
   type ModelsDevCatalog,
@@ -55,6 +58,8 @@ function hasModel(catalog: CatalogSections, provider: string, modelId: string): 
 export function isKnownCatalogModel(model: string, catalog: CatalogSections): boolean {
   const id = model.trim().replace(CONTEXT_SUFFIX_RE, "");
   if (!id) return false;
+  const subscriptionId = chatgptSubscriptionModelId(id);
+  if (subscriptionId) return hasModel(catalog, "openai", subscriptionId);
   const slash = id.indexOf("/");
   if (slash > 0) {
     const provider = id.slice(0, slash);
@@ -69,6 +74,18 @@ export function isKnownCatalogModel(model: string, catalog: CatalogSections): bo
   }
   const anthropic = catalog.anthropic?.models as ModelsDevCatalog[string]["models"] | undefined;
   return Object.hasOwn(buildClaudeShortnameMap(anthropic), id);
+}
+
+/**
+ * The catalog id a Claude CLI shortname stands for (`opus` -> `claude-opus-5-5`), else `model`
+ * unchanged. `harnessModelMismatch` lets a bare name no section lists pass, so on a harness that
+ * does not run the shortname it must be spelled as its id to be judged like the id.
+ */
+function claudeShortnameToCatalogId(model: string, catalog: CatalogSections): string {
+  const anthropic = catalog.anthropic?.models as ModelsDevCatalog[string]["models"] | undefined;
+  const shortnames = buildClaudeShortnameMap(anthropic);
+  const bare = model.replace(CONTEXT_SUFFIX_RE, "");
+  return Object.hasOwn(shortnames, bare) ? (shortnames[bare] as string) : model;
 }
 
 export interface ExplicitModelCheck {
@@ -138,8 +155,13 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
   const { providers } = await loadModelsCatalog();
   const catalog = providers as CatalogSections;
   if (check.harnessProvider) {
+    // The Claude harnesses run a shortname themselves; every other harness judges the id behind it.
+    const harnessModel =
+      harnessCatalogSection(check.harnessProvider) === "anthropic"
+        ? model
+        : claudeShortnameToCatalogId(model, catalog);
     const mismatch = harnessModelMismatch(
-      model,
+      harnessModel,
       check.harnessProvider,
       catalog as HarnessCatalogSections,
       { agentId: check.agentId, agentName: check.agentName },

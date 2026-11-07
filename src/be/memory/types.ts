@@ -15,6 +15,19 @@ export interface EmbedOptions {
   kind?: EmbeddingInputKind;
 }
 
+/**
+ * The settings that decide which vector a stored document gets. Two vectors
+ * compare only when both come from the same space. The API key is not part of
+ * it (a rotated key embeds the same way), and neither is the query prefix (it
+ * changes query vectors only, never stored ones).
+ */
+export interface EmbeddingSpace {
+  baseUrl: string;
+  model: string;
+  dimensions: number;
+  documentPrefix: string;
+}
+
 export interface EmbeddingProvider {
   readonly name: string;
   readonly dimensions: number;
@@ -22,6 +35,8 @@ export interface EmbeddingProvider {
   embedBatch(texts: string[], opts?: EmbedOptions): Promise<(Float32Array | null)[]>;
   /** True when the provider has a usable API key — no network call. */
   isConfigured(): boolean;
+  /** The space its document vectors live in. Without it, no space change is tracked. */
+  space?(): EmbeddingSpace;
 }
 
 // ============================================================================
@@ -57,6 +72,8 @@ export interface MemoryStore {
   deleteBySourcePath(sourcePath: string, agentId: string): Promise<number>;
   purgeExpired(): Promise<number>;
   updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void>;
+  /** Drop a row's vector, so vector search skips it until the backfill embeds it again. */
+  clearEmbedding(id: string): Promise<void>;
   /**
    * Redact a row in place (boot retro-sweep). Writes only if the row still
    * holds `before`; keeps FTS in sync and drops the embedding when the
@@ -133,8 +150,31 @@ export interface MemorySearchOptions {
   isLead?: boolean;
   includeExpired?: boolean;
   queryText?: string;
-  /** Keep only memories whose `key` starts with this string. Applied inside each SQL arm, before top-K. */
+  /**
+   * Keep only memories whose `key` starts with this string. The vector arm
+   * applies it after the sqlite-vec KNN (capped at 4096 rows), so a prefix
+   * whose rows all rank below that cap returns nothing; pass `exhaustive`
+   * when a miss is not acceptable.
+   */
   keyPrefix?: string;
+  /**
+   * Score eligible rows' stored embeddings instead of the vector index's
+   * top-K, so rows outside `keyPrefix` can never hide a match. Bounded: it
+   * scores at most EXHAUSTIVE_SEARCH_MAX_ROWS eligible rows, newest
+   * `updatedAt` first, so it is exact only while the eligible set fits the
+   * cap; past it, older rows are not scored and the search logs
+   * `capped=true`. With sqlite-vec, SQLite ranks the capped set
+   * (`vec_distance_cosine`); without it, JS scores the same set reading only
+   * id and embedding. Either way only the top `limit` full rows are loaded.
+   * Ignores `queryText`.
+   */
+  exhaustive?: boolean;
+  /**
+   * Raw-cosine floor for this call, replacing MEMORY_MIN_SIMILARITY. Honored by
+   * the exhaustive, vector and brute-force paths (raw cosine); the FTS and
+   * hybrid paths score differently and ignore it.
+   */
+  minSimilarity?: number;
 }
 
 /**

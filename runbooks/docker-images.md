@@ -21,13 +21,13 @@ CI tracks uncompressed amd64 sizes over time via the **ci-metrics** swarm script
 ```
 prek, builder            pinned prek binary + compiled agent-swarm binary
 worker-base              minimal apt set + bun + ALL four harness CLIs +
-                         context-mode CLI + npx-skills installs + base
+                         npx-skills installs + base
                          /opt/global-deps (wts, agent-fs) + settings/ENVs
 ├─ worker-slim (target)  worker-base + leaf block. CI + E2E image.
 └─ worker-full-base      + dev toolchain, glab, Playwright libs + chromium,
                          postgres/redis servers, /opt/global-deps-full
                          (agent-browser, playwright, sentry-cli, localtunnel,
-                         claude-bridge), context-mode claude+codex PLUGINS
+                         claude-bridge)
    └─ worker-full        worker-full-base + leaf block. Default; MUST stay the
       (target, LAST)     last stage so untargeted builds produce it.
 ```
@@ -38,17 +38,27 @@ Placement rules:
 - New heavy tool? Decide slim-vs-full deliberately: `worker-base` if the entrypoint or a harness needs it to boot, `worker-full-base` otherwise. If a tool is full-only and the entrypoint references it, guard the entrypoint with `command -v` (see the glab / postgres / redis guards in `docker-entrypoint.sh`).
 - Full-only npm globals go in `/opt/global-deps-full` (separate staging dir) — never extend the base `/opt/global-deps` from `worker-full-base`, that rewrites its node_modules into a duplicate layer.
 
+### Worker boot helpers
+
+API readiness and provider-binary verification are standalone Bun modules:
+`src/commands/entrypoint-api-readiness.ts` and
+`src/commands/entrypoint-provider-binary.ts`. Both leaf stages copy them to
+`/usr/local/lib/agent-swarm/`; the shell entrypoint calls them with
+`/usr/local/bin/bun` from `worker-base`, independent of the worker's writable
+PATH entries. They need no npm packages or compiled CLI initialization. Keep
+these code-dependent COPYs in both leaf blocks. Custom worker images ship the
+helpers and shell entrypoint together.
+
 ## Skills: `npx skills`, not plugin marketplaces
 
 Only the CLI-coupled `agent-fs` skill (worker-base) is installed by a pinned
 `npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` run,
 then mirrored into the pi/codex/opencode/.agents trees by the leaf block. The
 general skill catalog, including vendored ai-toolbox skills, is DB-seeded from
-`templates/skills/`. The ONLY remaining marketplace plugins are context-mode
-for Claude + Codex (they ship the ctx_* hooks, which a skills-only installer
-can't provide).
+`templates/skills/`. The image installs no marketplace plugins.
 
 - Pin every source to a tag/SHA — unpinned `npx skills add` resolves the default branch at build time.
+- A marketplace plugin follows the same rule: pin it (`claude plugin marketplace add <owner/repo>#<tag>`, `codex plugin marketplace add <owner/repo> --ref <tag>`). An unpinned add once baked an upstream release that required Node >=24.15.0; on the image's Node 22 its hook denied every Bash call (NODE_TOO_OLD).
 - Don't `|| true`-guard the skills RUN; keep the `test -e .../SKILL.md` asserts (upstream bug: global installs occasionally skip the `~/.claude/skills` link — vercel-labs/skills#851).
 - Adding a plugin via `claude plugin install` again? It runs `bun install` under the hood — `rm -rf /home/worker/.bun/install/cache` in the SAME RUN (this was once an 880 MB layer), and expect the plugin cache to hold a full repo clone (the old agent-fs plugin was 778 MB for one skill — prefer `npx skills`).
 

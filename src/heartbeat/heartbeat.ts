@@ -51,6 +51,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { withLoopPath } from "../be/event-loop-lag";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
 import {
   countActiveRuntimeInstancesForAgent,
@@ -76,7 +77,12 @@ import {
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
-import { type AgentTask, SUPERSEDED_WORKFLOW_TASK_REASON, TERMINAL_TASK_STATUSES } from "../types";
+import {
+  type AgentTask,
+  OPEN_TASK_STATUSES,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
+  TERMINAL_TASK_STATUSES,
+} from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
@@ -110,6 +116,17 @@ const SKIP_AUTO_RESUME_TYPES = new Set([
 // ============================================================================
 
 /**
+ * Parse HEARTBEAT_INTERVAL_MS: a positive integer, or the 90-second default.
+ *
+ * `Number("Infinity")` is truthy, so `Number(value) || 90_000` let a non-finite
+ * interval through to `setInterval` (#2714).
+ */
+export function parseHeartbeatIntervalMs(raw: string | undefined): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : 90_000;
+}
+
+/**
  * Default heartbeat interval: 90 seconds.
  *
  * Every value in this block is read DYNAMICALLY (a getter, not a module-load
@@ -118,12 +135,17 @@ const SKIP_AUTO_RESUME_TYPES = new Set([
  * silently ignored — even across a restart. Keep these as functions.
  */
 function defaultIntervalMs(): number {
-  return Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
+  return parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS);
 }
 
-/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
+/**
+ * Stall threshold: tasks with fresh worker heartbeat but no task update for
+ * this many minutes. A positive integer, or 30: `Number(value) || 30` kept a
+ * negative threshold, which flagged every recently updated task (#2835).
+ */
 function stallThresholdMinutes(): number {
-  return Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+  const value = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN);
+  return Number.isInteger(value) && value > 0 ? value : 30;
 }
 
 /** Stall threshold: tasks with no active session (worker clearly dead) */
@@ -152,9 +174,14 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
  */
 const DRAFT_TASK_TIMEOUT_MINUTES = Number(process.env.HEARTBEAT_DRAFT_TASK_TIMEOUT_MIN) || 5;
 
-/** Max crash-recovery resume generations before failing for lead triage */
+/**
+ * Max crash-recovery resume generations before failing for lead triage: a
+ * positive integer, or 3. `Number(value) || 3` kept a negative limit, which
+ * exhausted the budget before the first resume (#2834).
+ */
 export function maxResumeGenerations(): number {
-  return Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
+  const value = Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS);
+  return Number.isInteger(value) && value > 0 ? value : 3;
 }
 
 export const RESUME_BUDGET_EXHAUSTED_REASON = "resume_budget_exhausted";
@@ -1800,14 +1827,16 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
-  // Dedup: skip if lead already has an active heartbeat-checklist task
+  // Dedup: skip if lead already has an active heartbeat-checklist task.
+  // Unary + keeps agentId/taskType off their indexes, so the seek runs on
+  // status over the few open tasks instead of every past checklist task.
   const existing = await getDbClient().get<{ id: string }>(
     `SELECT id FROM agent_tasks
-       WHERE agentId = ?
-         AND taskType = 'heartbeat-checklist'
-         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
+       WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
+         AND +agentId = ?
+         AND +taskType = 'heartbeat-checklist'
        LIMIT 1`,
-    [lead.id, ...TERMINAL_TASK_STATUSES],
+    [...OPEN_TASK_STATUSES, lead.id],
   );
   if (existing) return;
 
@@ -2024,8 +2053,8 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   // `finally` but has no `catch`, so a throw anywhere inside it escapes as an
   // unhandled rejection unless it is caught here.
   setTimeout(() => {
-    runRebootSweep()
-      .then(() => runHeartbeatSweep())
+    withLoopPath("heartbeat.boot-sweep", () => runRebootSweep())
+      .then(() => withLoopPath("heartbeat.sweep", () => runHeartbeatSweep()))
       .catch((err) =>
         console.error(
           "[Heartbeat] boot sweep failed:",
@@ -2035,7 +2064,7 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   }, 5000);
 
   heartbeatInterval = setInterval(() => {
-    runHeartbeatSweep().catch((err) =>
+    withLoopPath("heartbeat.sweep", () => runHeartbeatSweep()).catch((err) =>
       console.error(
         "[Heartbeat] sweep failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),
@@ -2156,7 +2185,7 @@ export function startHeartbeatChecklist(intervalMs = heartbeatChecklistIntervalM
 
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
-    checkHeartbeatChecklist().catch((err) =>
+    withLoopPath("heartbeat.checklist", () => checkHeartbeatChecklist()).catch((err) =>
       console.error(
         "[Heartbeat] checklist check failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),
