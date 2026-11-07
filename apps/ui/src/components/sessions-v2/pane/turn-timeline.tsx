@@ -99,6 +99,7 @@ export function TurnTimeline({
     seen.current = { rootTaskId, approvals: shown };
     return approvalsByPart(turns, shown);
   }, [rootTaskId, turns, approvals]);
+  const pendingIds = useMemo(() => new Set(approvals.map((approval) => approval.id)), [approvals]);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
   const blocks = useStepBlocks(rootTaskId, showHandoffs);
@@ -161,6 +162,7 @@ export function TurnTimeline({
                 card={run.part === turn.parts[0] && !turn.person}
                 summary={workerSummary(run.part, now)}
                 approvals={placed.get(run.part.id) ?? []}
+                pendingIds={pendingIds}
                 showHandoffs={showHandoffs}
                 open={blocks.isOpen(run.part.id)}
                 onToggle={() => toggle(run.part.id)}
@@ -174,7 +176,7 @@ export function TurnTimeline({
         </Fragment>
       ))}
       {placed.get(null)?.map((approval) => (
-        <ApprovalLine key={approval.id} approval={approval} />
+        <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
       {rest.length > 0 ? (
         <section aria-label="Other tasks" className="flex min-w-0 flex-col">
@@ -193,6 +195,7 @@ function PartView({
   card,
   summary,
   approvals,
+  pendingIds,
   showHandoffs,
   open,
   onToggle,
@@ -205,6 +208,8 @@ function PartView({
   card: boolean;
   summary: WorkerSummary | null;
   approvals: SessionApproval[];
+  /** Approval ids still in the session detail's pending list. */
+  pendingIds: Set<string>;
   showHandoffs: boolean;
   open: boolean;
   onToggle: () => void;
@@ -273,7 +278,7 @@ function PartView({
       {/* The lead works again: a live line under the latest answer, never in its place. */}
       {part.live ? <ChainOfThought taskId={part.live.id} status={part.live.status} /> : null}
       {approvals.map((approval) => (
-        <ApprovalLine key={approval.id} approval={approval} />
+        <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
     </div>
   );

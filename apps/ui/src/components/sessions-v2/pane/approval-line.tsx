@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CircleCheck, CircleSlash, CircleX, Hourglass } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  useLiveApprovalRequest,
   useRespondToApprovalRequest,
+  useSessionApprovalRequest,
 } from "@/api/hooks/use-approval-requests";
 import { useWhoami } from "@/api/hooks/use-whoami";
 import type { ApprovalRequest, SessionApproval } from "@/api/types";
@@ -31,11 +31,24 @@ const RESOLVED: Record<
 /**
  * An approval in the session (plan D6): the swarm waits on a person. When the
  * viewer may answer it (`canAnswerInline`), the form renders under the card;
- * otherwise only `Review ->` opens the full page. The card follows the
- * request's live status, so it turns resolved after an answer here or anywhere.
+ * otherwise only `Review ->` opens the full page. The card turns resolved
+ * after an answer here, or once the session detail drops the request.
  */
-export function ApprovalLine({ approval }: { approval: SessionApproval }) {
-  const { data: request } = useLiveApprovalRequest(approval.id);
+export function ApprovalLine({
+  approval,
+  pending,
+}: {
+  approval: SessionApproval;
+  /** Still in the session detail's pending list. `false` once it resolved anywhere. */
+  pending: boolean;
+}) {
+  const { data: request, refetch } = useSessionApprovalRequest(approval.id);
+  // The session detail polls; refetch once when the request leaves its pending list.
+  const wasPending = useRef(pending);
+  useEffect(() => {
+    if (wasPending.current && !pending) void refetch();
+    wasPending.current = pending;
+  }, [pending, refetch]);
   const respond = useRespondToApprovalRequest();
   const queryClient = useQueryClient();
   const { user } = useCurrentUser();
