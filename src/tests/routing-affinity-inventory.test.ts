@@ -22,6 +22,28 @@ type InventoryEntry = {
  */
 const EXPECTED_INVENTORY: InventoryEntry[] = [
   {
+    file: "src/http/tasks.ts",
+    owner: "handleTasks",
+    syntax: "PropertyAssignment",
+    count: 1,
+    kind: "producer",
+    dispatchProof: {
+      file: "src/tests/human-thread-routing.test.ts",
+      text: "human REST reply after Coder and Reviewer work reaches Lead without worker requirements",
+    },
+  },
+  {
+    file: "src/slack/inbound-files.ts",
+    owner: "createSlackTaskWithFiles",
+    syntax: "PropertyAssignment",
+    count: 1,
+    kind: "producer",
+    dispatchProof: {
+      file: "src/tests/human-thread-routing.test.ts",
+      text: "Slack human ingress after worker work reaches Lead without worker requirements",
+    },
+  },
+  {
     file: "src/be/db.ts",
     owner: "createTaskExtended",
     syntax: "Assignment",
