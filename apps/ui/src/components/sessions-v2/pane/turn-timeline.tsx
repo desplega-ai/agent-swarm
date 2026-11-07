@@ -1,6 +1,6 @@
 import { MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { ChainOfThought } from "@/components/sessions/chain-of-thought";
@@ -16,6 +16,7 @@ import {
   buildTurns,
   foldWaits,
   isDeferral,
+  keepSeenApprovals,
   onlyWaits,
   partSteps,
   type TurnPart,
@@ -88,7 +89,16 @@ export function TurnTimeline({
     () => buildTurns(chain, { personText: requestText }),
     [chain, requestText],
   );
-  const placed = useMemo(() => approvalsByPart(turns, approvals), [turns, approvals]);
+  const seen = useRef<{ rootTaskId: string; approvals: SessionApproval[] }>({
+    rootTaskId,
+    approvals: [],
+  });
+  const placed = useMemo(() => {
+    const before = seen.current.rootTaskId === rootTaskId ? seen.current.approvals : [];
+    const shown = keepSeenApprovals(before, approvals);
+    seen.current = { rootTaskId, approvals: shown };
+    return approvalsByPart(turns, shown);
+  }, [rootTaskId, turns, approvals]);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
   const blocks = useStepBlocks(rootTaskId, showHandoffs);
