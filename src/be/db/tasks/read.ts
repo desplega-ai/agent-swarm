@@ -6,20 +6,25 @@ import type {
   AgentTaskStatus,
   AgentTaskSummary,
   AgentTaskTimelineItem,
+  FallbackHop,
   FollowUpConfig,
   ProviderName,
   ReasoningEffort,
   RoutingAffinity,
   RoutingReason,
   RoutingSource,
+  TaskSlackParticipants,
 } from "../../../types";
 import {
+  FallbackHopSchema,
   FollowUpConfigSchema,
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  TaskSlackParticipantsSchema,
   TERMINAL_TASK_STATUSES,
 } from "../../../types";
+import { normalizeOutputSchema } from "../../../utils/output-schema";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getAgentById } from "../agents";
@@ -67,6 +72,7 @@ export type AgentTaskRow = {
   slackThreadTs: string | null;
   slackTriggerMessageTs: string | null;
   slackUserId: string | null;
+  slackParticipants?: string | null;
   slackReplySent: number;
   slackProgressMessageTs: string | null;
   slackTreeRootMessageTs: string | null;
@@ -86,6 +92,7 @@ export type AgentTaskRow = {
   mentionChannelId: string | null;
   dir: string | null;
   parentTaskId: string | null;
+  dispatchedByTaskId?: string | null;
   claudeSessionId: string | null;
   model: string | null;
   modelTier: string | null;
@@ -96,6 +103,7 @@ export type AgentTaskRow = {
   modelAlias?: string | null;
   profile?: string | null;
   resolvedProfile?: string | null;
+  fallbackHops?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -161,6 +169,8 @@ type AgentTaskSummaryRow = Pick<
   | "modelAlias"
   | "effort"
   | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -241,7 +251,7 @@ const LIST_COLUMNS = {
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
-    agent_tasks.resolvedEffort,
+    agent_tasks.resolvedEffort, agent_tasks.profile, agent_tasks.resolvedProfile,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -251,6 +261,35 @@ const LIST_COLUMNS = {
 } as const;
 
 type TaskListFields = keyof typeof LIST_COLUMNS;
+
+/** The stored hop list; entries that do not parse are dropped, none reads as unset. */
+function parseFallbackHops(value: string | null | undefined): FallbackHop[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return undefined;
+    const hops = parsed.flatMap((entry) => {
+      const hop = FallbackHopSchema.safeParse(entry);
+      return hop.success ? [hop.data] : [];
+    });
+    return hops.length > 0 ? hops : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The stored participants; a value that does not parse reads as unset. */
+function parseSlackParticipants(
+  value: string | null | undefined,
+): TaskSlackParticipants | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = TaskSlackParticipantsSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
   let followUpConfig: FollowUpConfig | undefined;
@@ -322,6 +361,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackTriggerMessageTs: row.slackTriggerMessageTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
+    slackParticipants: parseSlackParticipants(row.slackParticipants),
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
     slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
@@ -342,6 +382,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     mentionChannelId: row.mentionChannelId ?? undefined,
     dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
+    dispatchedByTaskId: row.dispatchedByTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
@@ -356,10 +397,15 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
       : undefined,
     profile: row.profile ?? undefined,
     resolvedProfile: row.resolvedProfile ?? undefined,
+    fallbackHops: parseFallbackHops(row.fallbackHops),
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
-    outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    // A stored '{}' (legacy rows, defer-task resumes that copied it) means no
+    // schema: expose it as absent so no harness or validator treats it as one.
+    outputSchema: row.outputSchema
+      ? normalizeOutputSchema(JSON.parse(row.outputSchema))
+      : undefined,
     followUpConfig,
     contextKey: row.contextKey ?? undefined,
     compactionCount: row.compactionCount ?? undefined,
@@ -425,6 +471,8 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     resolvedEffort: ReasoningEffortSchema.safeParse(row.resolvedEffort).success
       ? (row.resolvedEffort as ReasoningEffort)
       : undefined,
+    profile: row.profile ?? undefined,
+    resolvedProfile: row.resolvedProfile ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     progress: row.progress ?? undefined,
@@ -595,7 +643,7 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
     `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'resume'
-         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        LIMIT 1`,
     [parentId],
   );
@@ -691,7 +739,7 @@ export async function hasNonTerminalRerouteDecisionChild(parentId: string): Prom
     `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'reroute-decision'
-         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        LIMIT 1`,
     [parentId],
   );
@@ -706,6 +754,26 @@ export async function getTasksByAgentId(
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
     [agentId, ...(readable?.params ?? [])],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
+ * Tasks that one of `taskIds` dispatched (send-task) and that are not in
+ * `taskIds`. A continuation keeps parentTaskId on an earlier task, so the
+ * task that sent it does not reach it by the parentTaskId walk.
+ */
+export async function getTasksDispatchedFrom(taskIds: string[]): Promise<AgentTask[]> {
+  if (taskIds.length === 0) return [];
+  const ids = JSON.stringify(taskIds);
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.*,
+       (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
+     FROM agent_tasks t
+     WHERE t.dispatchedByTaskId IN (SELECT value FROM json_each(?))
+       AND t.id NOT IN (SELECT value FROM json_each(?))
+     ORDER BY t.createdAt, t.rowid`,
+    [ids, ids],
   );
   return rows.map(rowToAgentTask);
 }
@@ -759,7 +827,7 @@ export async function findTaskByVcs(
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY createdAt DESC
        LIMIT 1`,
     [vcsRepo, vcsNumber, vcsProvider],
@@ -782,7 +850,7 @@ export async function findActiveTasksByVcs(
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ? AND ${providerClause}
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY createdAt DESC`,
     [vcsRepo, vcsNumber, vcsProvider],
   );
@@ -1580,13 +1648,50 @@ export async function getInProgressSlackTasks(): Promise<AgentTask[]> {
   return rows.map(rowToAgentTask);
 }
 
-export async function getSlackTasksMissingTree(): Promise<AgentTask[]> {
+/** How far back the missing-tree sweep looks for Slack tasks without a tree. */
+const SLACK_MISSING_TREE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Slack tasks (created since render-v2 activation) whose thread has no tree
+ * row yet.
+ *
+ * The full sweep reads only tasks updated in the last 24 h. The bound is on
+ * lastUpdatedAt, not createdAt: a task that waits in backlog/unassigned for
+ * days gets a fresh lastUpdatedAt when it leaves that status, so it re-enters
+ * the window exactly when it starts to need a tree. idx_agent_tasks_slack_last_updated
+ * makes the bound a range seek and also serves the ORDER BY. INDEXED BY:
+ * without ANALYZE statistics the planner otherwise picks a wider index.
+ *
+ * `thread` scopes the query to one thread (event-driven render). It seeks the
+ * thread through idx_agent_tasks_slack_thread_cover and has no time window,
+ * so an old task in that thread is never skipped.
+ */
+export async function getSlackTasksMissingTree(
+  options: { now?: Date; thread?: { channelId: string; threadTs: string } } = {},
+): Promise<AgentTask[]> {
+  const thread = options.thread;
+  const since = new Date(
+    (options.now ?? new Date()).getTime() - SLACK_MISSING_TREE_WINDOW_MS,
+  ).toISOString();
+  const scope = thread
+    ? {
+        index: "idx_agent_tasks_slack_thread_cover",
+        sql: "AND task.slackChannelId = ? AND task.slackThreadTs = ?",
+        params: [thread.channelId, thread.threadTs],
+      }
+    : {
+        index: "idx_agent_tasks_slack_last_updated",
+        sql: "AND task.lastUpdatedAt >= ?",
+        params: [since],
+      };
   const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT task.* FROM agent_tasks task
-       JOIN slack_render_v2_state state ON state.id = 1
-       WHERE task.source = 'slack'
+    `SELECT task.* FROM slack_render_v2_state state
+       CROSS JOIN agent_tasks task INDEXED BY ${scope.index}
+       WHERE state.id = 1
+       AND task.source = 'slack'
        AND task.slackChannelId IS NOT NULL
        AND task.slackThreadTs IS NOT NULL
+       ${scope.sql}
        AND task.createdAt >= state.activated_at
        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
        AND NOT EXISTS (
@@ -1604,6 +1709,7 @@ export async function getSlackTasksMissingTree(): Promise<AgentTask[]> {
        )
        ORDER BY task.lastUpdatedAt DESC
        LIMIT 200`,
+    scope.params,
   );
   return rows.map(rowToAgentTask);
 }
@@ -1683,7 +1789,7 @@ export async function findExistingLinearTrackerContextWork(
      SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND id NOT IN (SELECT id FROM lineage)
-       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
     [...lineageParams, contextKey],
@@ -1713,14 +1819,28 @@ export async function findExistingLinearTrackerContextWork(
   return null;
 }
 
-export async function getLatestTaskByContextKey(contextKey: string): Promise<AgentTask | null> {
+/**
+ * Latest task on a contextKey. `requestedByUserId` keeps only that user's
+ * tasks; `notRequestedByUserId` keeps only tasks of anyone else, including
+ * tasks with no requester.
+ */
+export async function getLatestTaskByContextKey(
+  contextKey: string,
+  options: { requestedByUserId?: string; notRequestedByUserId?: string } = {},
+): Promise<AgentTask | null> {
   if (!contextKey) return null;
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       ${options.requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
+       ${options.notRequestedByUserId !== undefined ? "AND requestedByUserId IS NOT ?" : ""}
        ORDER BY createdAt DESC
        LIMIT 1`,
-    [contextKey],
+    [
+      contextKey,
+      ...(options.requestedByUserId !== undefined ? [options.requestedByUserId] : []),
+      ...(options.notRequestedByUserId !== undefined ? [options.notRequestedByUserId] : []),
+    ],
   );
   return row ? rowToAgentTask(row) : null;
 }
@@ -1862,19 +1982,62 @@ export async function getAgentWorkingOnContextKey(
   return null;
 }
 
+/**
+ * Latest task whose contextKey starts with `prefix` (a half-open key range, so
+ * the contextKey index serves it). The Chat SDK keys a Slack or Discord task by
+ * `<channel>:<thread>`, while a slash command only knows the channel: the
+ * prefix finds the tasks of every thread in it. `activeOnly` narrows to
+ * `in_progress` and `pending`; `source` narrows as in the exact-key twins;
+ * `requestedByUserId` keeps only that user's tasks.
+ */
+export async function getLatestTaskByContextKeyPrefix(
+  prefix: string,
+  options: { activeOnly?: boolean; source?: string; requestedByUserId?: string } = {},
+): Promise<AgentTask | null> {
+  if (!prefix) return null;
+  const upper = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  const source = options.source ?? null;
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE contextKey >= ? AND contextKey < ?
+       AND ${contextKeySourceSql()}
+       ${options.activeOnly ? "AND status IN ('in_progress', 'pending')" : ""}
+       ${options.requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [
+      prefix,
+      upper,
+      source,
+      source,
+      source,
+      ...(options.requestedByUserId !== undefined ? [options.requestedByUserId] : []),
+    ],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 /** Latest `in_progress` or `pending` task on a contextKey (dependency chaining). */
 export async function getLatestActiveTaskByContextKey(
   contextKey: string,
   source?: string,
+  requestedByUserId?: string,
 ): Promise<AgentTask | null> {
   const row = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND ${contextKeySourceSql()}
        AND status IN ('in_progress', 'pending')
+       ${requestedByUserId !== undefined ? "AND requestedByUserId = ?" : ""}
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    [contextKey, source ?? null, source ?? null, source ?? null],
+    [
+      contextKey,
+      source ?? null,
+      source ?? null,
+      source ?? null,
+      ...(requestedByUserId !== undefined ? [requestedByUserId] : []),
+    ],
   );
 
   return row ? rowToAgentTask(row) : null;
@@ -1905,6 +2068,22 @@ export async function getLatestLeadTaskByContextKey(
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.
  */
+/** The oldest task in a Slack thread: who started the swarm's work there. */
+export async function getFirstTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       ORDER BY createdAt ASC
+       LIMIT 1`,
+    [channelId, threadTs],
+  );
+  return row ? rowToAgentTask(row) : null;
+}
+
 export async function getMostRecentTaskInThread(
   channelId: string,
   threadTs: string,

@@ -66,6 +66,12 @@ const RESERVED_KEYS = new Set([
   "CORS_ALLOW_ANY_ORIGIN",
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
   "CHAT_SDK_API_URL_OVERRIDES",
+  // Test knobs that redirect credential or telemetry traffic. Deployment env only: a
+  // config writer must not be able to point the Codex device login or the telemetry
+  // relay at a host of their choosing.
+  "CODEX_OAUTH_DEVICE_BASE_URL",
+  "DESPLEGA_TELEMETRY_ENDPOINT",
+  "CLOUDFLARE_API_BASE_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -400,6 +406,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
     }
   },
+  COMPANY_EMAIL_DOMAINS: (value) =>
+    typeof value === "string" &&
+    value
+      .split(",")
+      .map((domain) => domain.trim())
+      .every((domain) => domain === "" || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain))
+      ? null
+      : "Invalid COMPANY_EMAIL_DOMAINS (expected comma-separated domains, e.g. example.com,example.dev)",
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
@@ -442,6 +456,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
+  ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
@@ -548,8 +563,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "OTEL_TRACE_POLL",
     "OTEL_EXPORT_API_LOGS",
     "ANONYMIZED_TELEMETRY",
+    "IMPROVEMENTS_ENABLED",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_QUERY_WORKER_POOL_ENABLED",
     "CLAUDE_TRUST_PRESEED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
@@ -568,6 +585,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_REACTION_STEERED",
     "SLACK_REACTION_COMPLETED",
     "SLACK_REACTION_FAILED",
+    "SLACK_REACTION_SKIPPED",
     "SLACK_STATUS_ICON_COMPLETED",
   ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive
@@ -590,6 +608,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SCRIPT_RUN_CONCURRENCY_CAP",
       "WORKER_API_READY_TIMEOUT_SECONDS",
       "DB_QUERY_HTTP_BUDGET_MS",
+      "EVENT_LOOP_STALL_WARN_MS",
       "DB_QUERY_HTTP_MAX_ROWS",
       "DB_QUERY_MCP_BUDGET_MS",
       "DB_QUERY_MCP_MAX_ROWS",
@@ -597,6 +616,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "SLACK_CONCLUSION_SETTLE_SEC",
       "SLACK_CONCLUSION_TIMEOUT_MIN",
       "SLACK_TREE_STALL_MIN",
+      "SLACK_TASK_WATCHER_INTERVAL_MS",
     ],
     1,
   ),

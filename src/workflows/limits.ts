@@ -4,5 +4,6 @@ const DEFAULT_MAX_STEPS_PER_RUN = 500;
 // workflow modules before `loadGlobalConfigsIntoEnv()` hydrates `swarm_config`
 // into `process.env`. A function also lets config reloads take effect live.
 export function getMaxWorkflowStepsPerRun(): number {
-  return Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || DEFAULT_MAX_STEPS_PER_RUN;
+  const value = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_STEPS_PER_RUN;
 }

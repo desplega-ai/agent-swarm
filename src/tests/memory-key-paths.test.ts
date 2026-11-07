@@ -566,6 +566,63 @@ describe("/longterm is the curated tier", () => {
     expect(await keysOf(ids)).toEqual(ids.map(() => longKey));
   });
 
+  test("a memory curated while a 501-row purge yields keeps its row and its search index", async () => {
+    // 501 single-chunk documents: two purge batches of 500 and 1.
+    const memories = await store.storeBatch(
+      Array.from({ length: 501 }, (_, n) => ({
+        agentId: worker,
+        scope: "swarm" as AgentMemoryScope,
+        name: `expiring note ${n}`,
+        content: `expiring task completion note ${n}`,
+        source: "task_completion" as const,
+      })),
+    );
+    const ids = memories.map((memory) => memory.id);
+    await getDbClient().run(
+      `UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    // The purge reads candidates in this order, so this id lands in batch 2.
+    const ordered = await getDbClient().query<{ id: string }>(
+      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
+    );
+    expect(ordered.length).toBeGreaterThan(500);
+    const curatedId = ordered[500]!.id;
+    const ftsRows = async () =>
+      (
+        await getDbClient().get<{ n: number }>(
+          "SELECT COUNT(*) AS n FROM memory_fts WHERE memory_id = ?",
+          [curatedId],
+        )
+      )?.n ?? 0;
+    expect(await ftsRows()).toBeGreaterThan(0);
+
+    // Curate the memory exactly in the yield between batch 1 and batch 2.
+    const realSetImmediate = globalThis.setImmediate;
+    let curated: Promise<unknown> | undefined;
+    globalThis.setImmediate = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      globalThis.setImmediate = realSetImmediate;
+      curated = editTool(worker, { memoryId: curatedId, newKey: longKey, intent: "curate" });
+      return realSetImmediate(() => {
+        void curated!.finally(() => callback(...args));
+      });
+    }) as typeof setImmediate;
+    try {
+      await store.purgeExpired();
+    } finally {
+      globalThis.setImmediate = realSetImmediate;
+    }
+
+    expect(curated).toBeDefined();
+    expect(
+      ((await curated) as { structuredContent: { success: boolean } }).structuredContent.success,
+    ).toBe(true);
+    expect(await keysOf([curatedId])).toEqual([longKey]);
+    expect(await ftsRows()).toBeGreaterThan(0);
+    const others = ids.filter((id) => id !== curatedId);
+    expect(await keysOf(others.slice(0, 3))).toEqual(["(missing)", "(missing)", "(missing)"]);
+  }, 60_000);
+
   test("control: the same memory left outside /longterm is purged once expired", async () => {
     const [memory] = await seedTaskCompletion(1, "/inbox/task-note");
     await getDbClient().run(

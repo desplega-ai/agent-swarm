@@ -5,8 +5,13 @@ import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
+import { useSchedulesSavings } from "@/api/hooks/use-savings";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTaskSummary, ScheduledTaskTargetType } from "@/api/types";
+import type {
+  SavingsScheduleRow,
+  ScheduledTaskSummary,
+  ScheduledTaskTargetType,
+} from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
@@ -15,7 +20,8 @@ import {
   ScheduleTargetFields,
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
@@ -52,6 +58,7 @@ import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
+import { formatUsd } from "@/pages/usage/usage-format";
 
 interface ScheduleFormData extends ScheduleTargetFormValue {
   name: string;
@@ -393,6 +400,15 @@ export default function SchedulesPage() {
     [updateSchedule],
   );
 
+  const { data: savings } = useSchedulesSavings();
+  // One request for the whole list, joined by schedule id.
+  const savingsBySchedule = useMemo(() => {
+    const m = new Map<string, SavingsScheduleRow>();
+    if (savings?.valid) for (const row of savings.rows) m.set(row.scheduleId, row);
+    return m;
+  }, [savings]);
+
+  const gridColumns = useDataGridColumns("schedules");
   const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
     () => [
       {
@@ -453,6 +469,7 @@ export default function SchedulesPage() {
         ),
       },
       {
+        colId: "setup",
         headerName: "Setup",
         context: HIDE_WHEN_COMPACT,
         width: 190,
@@ -473,6 +490,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "schedule",
         headerName: "Schedule",
         context: HIDE_WHEN_COMPACT,
         width: 250,
@@ -519,6 +537,7 @@ export default function SchedulesPage() {
         },
       },
       {
+        colId: "model",
         headerName: "Model",
         context: HIDE_WHEN_COMPACT,
         width: 150,
@@ -558,6 +577,37 @@ export default function SchedulesPage() {
               </TooltipTrigger>
               <TooltipContent>{formatUTCTime(params.value)}</TooltipContent>
             </Tooltip>
+          );
+        },
+      },
+      {
+        colId: "saved30d",
+        headerName: "Saved (30d)",
+        context: HIDE_WHEN_COMPACT,
+        width: 130,
+        // Sorts by the p50; schedules without a saving sort below every amount.
+        valueGetter: (params) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          return row?.basis === "modelled" ? row.savingUsd.p50 : null;
+        },
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
+          const row = params.data ? savingsBySchedule.get(params.data.id) : undefined;
+          if (!row) return <span className="text-muted-foreground">—</span>;
+          if (row.basis === "measured") {
+            return (
+              <span
+                className="font-mono tabular-nums text-muted-foreground"
+                title={`Already agent work: ${formatUsd(row.actualUsd)} spent on ${row.runs.toLocaleString("en-US")} tasks, no saving to model`}
+              >
+                {formatUsd(row.actualUsd)}
+              </span>
+            );
+          }
+          const title = `${formatUsd(row.savingUsd.p10)} to ${formatUsd(row.savingUsd.p90)} (80% range), the saving of the target ${row.kind === "workflow" ? "workflow" : "script"}, shared with any other schedule of it`;
+          return (
+            <span className="font-mono tabular-nums" title={title}>
+              {formatUsd(row.savingUsd.p50)}
+            </span>
           );
         },
       },
@@ -604,7 +654,7 @@ export default function SchedulesPage() {
         },
       },
     ],
-    [agentMap, favoriteToggle, handleToggleEnabled, status?.automations],
+    [agentMap, favoriteToggle, handleToggleEnabled, savingsBySchedule, status?.automations],
   );
 
   const onRowClicked = useCallback(
@@ -661,8 +711,17 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
+        {isMobile ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
         {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setDialogOpen(true)}>
+        <Button
+          size="sm"
+          className={isMobile ? "ml-auto" : undefined}
+          onClick={() => setDialogOpen(true)}
+        >
           <Plus className="h-4 w-4" />
           New schedule
         </Button>
@@ -724,6 +783,7 @@ export default function SchedulesPage() {
         <DataGrid
           rowData={searchedRows}
           columnDefs={columnDefs}
+          columns={gridColumns}
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No scheduled tasks"

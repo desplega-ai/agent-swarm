@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { classifyProviderErrorOf } from "../commands/provider-error-class";
 import { renderContextBoundNote } from "../prompts/context-bound-note";
 import type {
   AgentMessageItem,
@@ -579,10 +580,10 @@ describe("Codex app-server session", () => {
     expect(snapshots).toHaveLength(2);
     expect(snapshots[0]).toMatchObject({ contextUsedTokens: 51_000, contextTotalTokens: 258_400 });
     expect(snapshots[0]?.contextPercent).toBeCloseTo((51_000 / 258_400) * 100, 6);
-    // A null window falls back to the models.dev window for the model.
+    // Missing updates retain the last window the running harness reported.
     expect(snapshots[1]).toMatchObject({
       contextUsedTokens: 61_000,
-      contextTotalTokens: 1_050_000,
+      contextTotalTokens: 258_400,
     });
   });
 
@@ -1622,21 +1623,9 @@ describe("computeCodexCostUsd", () => {
 describe("buildCodexConfig", () => {
   // Save and restore the global fetch so we don't leak mocks between tests.
   const originalFetch = globalThis.fetch;
-  // These tests assert the EXACT set of mcp_servers keys, which is only the
-  // installed-server merge logic. Disable the always-on context-mode entry so
-  // those exact-key assertions stay valid; a dedicated block below verifies
-  // the context-mode + features behavior. Save/restore the env to avoid leaks.
-  let prevContextModeDisabled: string | undefined;
-
-  beforeEach(() => {
-    prevContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
-    process.env.CONTEXT_MODE_DISABLED = "true";
-  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    if (prevContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
-    else process.env.CONTEXT_MODE_DISABLED = prevContextModeDisabled;
   });
 
   // Helper: build a ProviderSessionConfig pointed at a mock endpoint.
@@ -1936,12 +1925,12 @@ describe("buildCodexConfig", () => {
   });
 });
 
-// ─── Phase 3: buildCodexConfig — context-mode MCP + hook feature flags ───────
+// ─── buildCodexConfig — removed context-mode + hook feature flags ────────────
 
-describe("buildCodexConfig — context-mode + features", () => {
+describe("buildCodexConfig — legacy context-mode + features", () => {
   const originalFetch = globalThis.fetch;
-  // Explicitly own CONTEXT_MODE_DISABLED here. Save the ambient value up front
-  // and restore it after every test so we never leak the mutation to siblings.
+  // Own CONTEXT_MODE_DISABLED: the deprecated flag must be a no-op. Restore
+  // the ambient value after every test so we never leak the mutation.
   let prevContextModeDisabled: string | undefined;
 
   beforeEach(() => {
@@ -1979,48 +1968,29 @@ describe("buildCodexConfig — context-mode + features", () => {
     };
   }
 
-  test("includes the 'context-mode' mcp_servers entry by default", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
-
-    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "context-mode"]);
-    expect(mcp["context-mode"]?.command).toBe("context-mode");
-    expect(mcp["context-mode"]?.enabled).toBe(true);
-    expect(mcp["context-mode"]?.startup_timeout_sec).toBe(30);
-    expect(mcp["context-mode"]?.tool_timeout_sec).toBe(120);
-  });
-
+  // context-mode is removed: no value of the deprecated flag, from either env
+  // source, adds its MCP server, and a stale install of the plugin (older
+  // images) is always turned off so its own MCP server, skills and hooks
+  // never load.
   test.each([
-    "true",
-    "1",
-    "TRUE",
-  ])("excludes the 'context-mode' entry when CONTEXT_MODE_DISABLED=%s", async (value) => {
-    process.env.CONTEXT_MODE_DISABLED = value;
+    [undefined, undefined],
+    ["true", undefined],
+    ["false", undefined],
+    [undefined, "true"],
+    ["true", "false"],
+  ])("CONTEXT_MODE_DISABLED process=%s config=%s is a no-op", async (procValue, envValue) => {
+    if (procValue === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = procValue;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+    const merged = await buildCodexConfig(
+      cfg(envValue === undefined ? {} : { env: { CONTEXT_MODE_DISABLED: envValue } }),
+      "gpt-5.4",
+      () => {},
+    );
     const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
 
     expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
-    expect(mcp["context-mode"]).toBeUndefined();
-  });
-
-  test("CONTEXT_MODE_DISABLED also turns the installed context-mode plugin off", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-
-    // The plugin registers its own MCP server, skills and hooks.
     expect(merged.plugins).toEqual({ "context-mode@context-mode": { enabled: false } });
-  });
-
-  test("leaves the installed context-mode plugin alone by default", async () => {
-    delete process.env.CONTEXT_MODE_DISABLED;
-    globalThis.fetch = stubFetch({ servers: [], total: 0 });
-    const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
-
-    expect(merged.plugins).toBeUndefined();
   });
 
   test("disables apps and enables hooks", async () => {
@@ -2651,6 +2621,16 @@ describe("CodexSession — rate-limit error preservation", () => {
     expect(result.failureReason).toBe("unexpected network failure");
     expect(result.isError).toBe(true);
     expect(result.rateLimitResetAt).toBeUndefined();
+  });
+
+  test("an unexpected throw is a harness error: a 503 in its text never moves the task to a fallback profile", async () => {
+    const { result } = await runSessionWithThrowingThread(
+      [{ type: "thread.started", thread_id: "thread-mcp-503" }, { type: "turn.started" }],
+      new Error("MCP error -32000: HTTP 503 Service Unavailable"),
+      testConfig({ logFile: join(tmpLogDir, "mcp-503.log"), cwd: "" }),
+    );
+    expect(result.errorOrigin).toBe("harness");
+    expect(classifyProviderErrorOf(result, result.failureReason, "gpt-6.1-sol")).toBeNull();
   });
 });
 

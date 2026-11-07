@@ -1026,6 +1026,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "DB_QUERY_WORKER_POOL_ENABLED",
+        label: "Query worker pool",
+        description:
+          "Reuse long-lived child processes for bounded db-query instead of spawning one per query (saves roughly 65 ms per call). On by default; turn it off to spawn a fresh child per query. Only applies while bounded execution is on.",
+        kind: "boolean",
+        defaultValue: "true",
+      },
+      {
         key: "DB_QUERY_HTTP_BUDGET_MS",
         label: "HTTP query budget",
         description:
@@ -1138,6 +1146,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_TASK_WATCHER_INTERVAL_MS",
+        label: "Task watcher interval",
+        description:
+          "Time between Slack task watcher ticks. Under the v2 renderer each tick is the full reconcile; task events render their own thread in between. Inbound mentions do not wait on it.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "10000",
+        placeholder: "10000",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "SLACK_CONCLUSION_SETTLE_SEC",
         label: "Conclusion settle window",
         description:
@@ -1222,6 +1242,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
         kind: "string",
         defaultValue: "x",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_SKIPPED",
+        label: "Skipped-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "mute",
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
@@ -1490,6 +1519,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "COMPANY_EMAIL_DOMAINS",
+        label: "Company email domains",
+        description:
+          "Comma-separated email domains of your company. Slack thread participants with one of these emails count as internal and get a member user row; other people are external and untrusted. Unset falls back to SLACK_ALLOWED_EMAIL_DOMAINS; with both unset no users are auto-created.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#company-email-domains`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:
@@ -1513,6 +1551,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "days",
         defaultValue: "30",
         placeholder: "30",
+      },
+      {
+        key: "BOOT_SCRUB_MODE",
+        label: "Secret redaction of stored rows",
+        description:
+          "When a release adds secret-redaction rules, backfill re-scrubs stored rows in the background, paced by load and resumable across restarts. forward-only applies the rules to new writes only and leaves stored rows alone; switching back to backfill sweeps what was skipped. Stopping a running backfill takes effect at once; starting one takes effect after a restart.",
+        kind: "enum",
+        options: ["backfill", "forward-only"],
+        defaultValue: "backfill",
+        restartRequired: true,
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
@@ -1760,12 +1808,31 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "EVENT_LOOP_STALL_WARN_MS",
+        label: "Event-loop stall warning",
+        description:
+          "Log one [event-loop] stall line when a single macrotask blocks the API event loop for at least this long. The line names the entry point (HTTP route, MCP tool, timer) and its slowest database statements. Applies without a restart.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "1000",
+        placeholder: "1000",
+      },
+      {
         key: "ANONYMIZED_TELEMETRY",
         label: "Anonymized telemetry",
         description:
           "Send anonymized usage telemetry to help improve Agent Swarm. Set to false to opt out. Turning it on applies without a restart.",
         kind: "boolean",
         defaultValue: "true",
+      },
+      {
+        key: "IMPROVEMENTS_ENABLED",
+        label: "Improvements",
+        description:
+          "Let people and agents draft product improvements for the Agent Swarm team. Agents can only draft; nothing is sent until a person approves it. Only the text, the approver's email (required) and the install id are sent. Drafts wait for approval in the lightbulb popover in the header. Set to false to turn drafting and sending off.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}ui/configuration#improvements`,
       },
     ],
   },

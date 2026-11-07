@@ -36,17 +36,23 @@ describe("purgeStaleSearchRetrievals", () => {
     await insertRetrieval("stale-get", "get", 120);
 
     const run = spyOn(getDbClient(), "run");
+    const immediate = spyOn(globalThis, "setImmediate");
     let purged: number;
     let calls: (typeof run.mock.calls)[number][];
+    let yields: number;
     try {
       purged = await purgeStaleSearchRetrievals(2);
       calls = [...run.mock.calls];
+      yields = immediate.mock.calls.length;
     } finally {
       run.mockRestore();
+      immediate.mockRestore();
     }
     expect(purged).toBe(5);
     // Batches of 2: 2 + 2 + 1, and the short batch ends the loop.
     expect(calls).toHaveLength(3);
+    // One macrotask yield between each pair of batches, none after the last.
+    expect(yields).toBe(2);
 
     const left = await getDbClient().query<{ id: string }>(
       "SELECT id FROM memory_retrieval ORDER BY id",
@@ -63,6 +69,19 @@ describe("purgeStaleSearchRetrievals", () => {
       .join("\n");
     expect(plan).toContain("USING INDEX idx_memret_retrieved_at (retrievedAt<?)");
     expect(plan).not.toContain("idx_memret_event_type");
+  });
+
+  test("default batch is 500 rows per statement", async () => {
+    for (let i = 0; i < 501; i++) await insertRetrieval(`bulk-${i}`, "search", 120);
+    const run = spyOn(getDbClient(), "run");
+    let calls: (typeof run.mock.calls)[number][];
+    try {
+      expect(await purgeStaleSearchRetrievals()).toBe(501);
+      calls = [...run.mock.calls];
+    } finally {
+      run.mockRestore();
+    }
+    expect(calls.map(([, params]) => (params as unknown[])[1])).toEqual([500, 500]);
   });
 });
 

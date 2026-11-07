@@ -85,6 +85,7 @@ import {
   registerModelCatalogOverlayUpsertTool,
   registerModelCatalogRefreshTool,
 } from "./tools/model-catalog";
+import { registerCheckModelProfileTool } from "./tools/model-profiles/check-model-profile";
 import { registerListModelProfilesTool } from "./tools/model-profiles/list-model-profiles";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
@@ -173,6 +174,7 @@ import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerSteerTaskTool } from "./tools/steer-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
+import { registerSubmitImprovementTool } from "./tools/submit-improvement";
 // Swarm config tools
 import {
   registerDeleteConfigTool,
@@ -491,10 +493,12 @@ export async function createServer(
     registerGetMetricsTool(server);
     registerSendTaskTool(server);
     registerListModelProfilesTool(server);
+    registerCheckModelProfileTool(server);
     registerGetTaskDetailsTool(server);
     registerStoreProgressTool(server);
     registerMyAgentInfoTool(server);
     registerCancelTaskTool(server);
+    registerSubmitImprovementTool(server);
 
     // User identity tools
     registerResolveUserTool(server);

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.7.7",
+    "version": "2.8.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -153,7 +153,8 @@
               "completed",
               "failed",
               "cancelled",
-              "superseded"
+              "superseded",
+              "skipped"
             ]
           },
           "source": {
@@ -278,6 +279,54 @@
           "slackUserId": {
             "type": "string"
           },
+          "slackParticipants": {
+            "type": "object",
+            "properties": {
+              "people": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slackUserId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "enum": [
+                        "internal",
+                        "external",
+                        "unknown"
+                      ]
+                    },
+                    "starter": {
+                      "type": "boolean"
+                    },
+                    "newest": {
+                      "type": "boolean"
+                    },
+                    "asked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slackUserId",
+                    "trust"
+                  ]
+                }
+              },
+              "more": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "people",
+              "more"
+            ]
+          },
           "slackReplySent": {
             "type": "boolean",
             "default": false
@@ -343,6 +392,9 @@
           "parentTaskId": {
             "type": "string"
           },
+          "dispatchedByTaskId": {
+            "type": "string"
+          },
           "claudeSessionId": {
             "type": "string"
           },
@@ -394,6 +446,60 @@
           },
           "resolvedProfile": {
             "type": "string"
+          },
+          "fallbackHops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string"
+                },
+                "errorClass": {
+                  "type": "string",
+                  "enum": [
+                    "rate_limit",
+                    "model_window",
+                    "seat",
+                    "credits",
+                    "overloaded",
+                    "server_error",
+                    "auth",
+                    "pool_empty"
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                },
+                "skipped": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "profile": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "profile",
+                      "reason"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "profile",
+                "errorClass",
+                "at"
+              ]
+            }
           },
           "scheduleId": {
             "type": "string"
@@ -1249,6 +1355,54 @@
                   "type",
                   "icon"
                 ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
               }
             ]
           },
@@ -1277,6 +1431,74 @@
           "status",
           "createdAt",
           "lastUpdatedAt"
+        ]
+      },
+      "ProfileCheckResult": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "check": {
+                        "type": "string",
+                        "enum": [
+                          "harness",
+                          "model",
+                          "harness-credentials",
+                          "credential-allowlist"
+                        ]
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "pass",
+                          "warn",
+                          "fail",
+                          "unverified"
+                        ]
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "check",
+                      "state"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "ok",
+                "checks"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agentId",
+          "ok",
+          "profiles"
         ]
       },
       "SwarmConfig": {
@@ -3091,7 +3313,8 @@
               "script",
               "slack",
               "api",
-              "chat"
+              "chat",
+              "app-page"
             ]
           },
           "senderLabel": {
@@ -3719,6 +3942,7 @@
           "url",
           "name",
           "clonePath",
+          "hooks",
           "createdAt",
           "lastUpdatedAt"
         ]
@@ -3731,9 +3955,7 @@
             "default": false
           }
         },
-        "default": {
-          "enabled": false
-        }
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -7497,6 +7719,82 @@
                           "description": {
                             "type": "string"
                           },
+                          "icon": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "lucide"
+                                    ]
+                                  },
+                                  "icon": {
+                                    "type": "string",
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9-]+$"
+                                  },
+                                  "color": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "icon"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "url"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "maxLength": 2048,
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "url"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent-fs"
+                                    ]
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 2,
+                                    "maxLength": 1024
+                                  },
+                                  "orgId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "driveId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "path"
+                                ]
+                              }
+                            ]
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -10123,6 +10421,32 @@
                   "parentTaskId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "followUp": {
+                    "type": "boolean"
+                  },
+                  "requestedByUserId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "session": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "user",
+                          "shared"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "key"
+                    ]
                   }
                 }
               }
@@ -10185,7 +10509,8 @@
                             "completed",
                             "failed",
                             "cancelled",
-                            "superseded"
+                            "superseded",
+                            "skipped"
                           ]
                         }
                       },
@@ -11239,7 +11564,7 @@
       },
       "patch": {
         "summary": "Update an agent's runtime harness and default model",
-        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
+        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist, run on `harness_provider` and pass the profile check (`GET /api/agents/{id}/profile-check`) against it, and it cannot be sent with `model`. A failing check is a 400 `{ error, check }`; a passing one returns the result as `profileCheck`. Sending `model`, or changing the model or effort override by any path, clears the default profile.",
         "tags": [
           "Agents"
         ],
@@ -11406,7 +11731,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated agent row",
+            "description": "Updated agent row. `profileCheck` is set when the body set `profile`, so warnings show.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11435,6 +11760,9 @@
                             "max",
                             "available"
                           ]
+                        },
+                        "profileCheck": {
+                          "$ref": "#/components/schemas/ProfileCheckResult"
                         }
                       },
                       "required": [
@@ -11447,7 +11775,7 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error, or `{ error, check }` when the profile check fails",
             "content": {
               "application/json": {
                 "schema": {
@@ -11968,6 +12296,54 @@
                         ]
                       },
                       {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
+                        ]
+                      },
+                      {
                         "type": "null"
                       }
                     ]
@@ -12123,7 +12499,7 @@
             }
           },
           "404": {
-            "description": "Agent not found",
+            "description": "Agent not found, or changedByAgentId names no agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -12519,6 +12895,61 @@
           },
           "404": {
             "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/profile-check": {
+      "get": {
+        "summary": "Check whether an agent can run a model profile",
+        "description": "Read-only. Judges the profile's harness, model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; `ok` is false only when a row fails. Never returns a secret value.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "profile",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileCheckResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or profile not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -13731,7 +14162,8 @@
                           "type": "string"
                         },
                         "required": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "default": true
                         },
                         "description": {
                           "type": "string"
@@ -22659,7 +23091,7 @@
     "/api/fs/members/invite": {
       "post": {
         "summary": "Invite an external member into the agent-fs shared org",
-        "description": "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+        "description": "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.",
         "tags": [
           "FS"
         ],
@@ -22717,7 +23149,7 @@
                         "added",
                         "pending"
                       ],
-                      "description": "already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept."
+                      "description": "already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account)."
                     },
                     "inviteId": {
                       "type": "string",
@@ -22730,6 +23162,10 @@
                     "acceptUrl": {
                       "type": "string",
                       "description": "Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured."
+                    },
+                    "token": {
+                      "type": "string",
+                      "description": "Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept."
                     }
                   },
                   "required": [
@@ -28206,6 +28642,27 @@
                               "null"
                             ]
                           },
+                          "credentials": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "additionalProperties": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 5,
+                                "maxLength": 5
+                              },
+                              "minItems": 1
+                            }
+                          },
+                          "fallbacks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -28222,6 +28679,8 @@
                           "allowCustomModel",
                           "description",
                           "seededFrom",
+                          "credentials",
+                          "fallbacks",
                           "createdAt",
                           "lastUpdatedAt"
                         ]
@@ -28239,7 +28698,7 @@
       },
       "post": {
         "summary": "Create a model profile",
-        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).",
+        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28304,6 +28763,29 @@
                       "null"
                     ],
                     "maxLength": 500
+                  },
+                  "credentials": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 5,
+                        "maxLength": 5
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "fallbacks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "maxItems": 10
                   }
                 },
                 "required": [
@@ -28379,6 +28861,27 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -28395,6 +28898,8 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -28520,6 +29025,27 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -28536,6 +29062,8 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -28557,7 +29085,7 @@
       },
       "patch": {
         "summary": "Update a model profile",
-        "description": "Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).",
+        "description": "Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28610,6 +29138,29 @@
                       "null"
                     ],
                     "maxLength": 500
+                  },
+                  "credentials": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 5,
+                        "maxLength": 5
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "fallbacks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "maxItems": 10
                   }
                 }
               }
@@ -28680,6 +29231,27 @@
                         "null"
                       ]
                     },
+                    "credentials": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 5,
+                          "maxLength": 5
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "fallbacks": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -28696,6 +29268,8 @@
                     "allowCustomModel",
                     "description",
                     "seededFrom",
+                    "credentials",
+                    "fallbacks",
                     "createdAt",
                     "lastUpdatedAt"
                   ]
@@ -28737,7 +29311,7 @@
       },
       "delete": {
         "summary": "Delete a model profile",
-        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -28814,7 +29388,7 @@
     "/api/models-catalog": {
       "get": {
         "summary": "Get the live model catalog for the picker-reachable providers",
-        "description": "Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
+        "description": "Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
         "tags": [
           "Pricing"
         ],
@@ -29949,6 +30523,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -30426,6 +31010,7 @@
     "/api/mcp-oauth/{mcpServerId}": {
       "delete": {
         "summary": "Revoke and delete the OAuth token for an MCP server",
+        "description": "Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.",
         "tags": [
           "MCP OAuth"
         ],
@@ -33981,7 +34566,7 @@
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
-        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
         "tags": [
           "Tasks"
         ],
@@ -34163,6 +34748,19 @@
             "required": false,
             "name": "includeTotal",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ],
+              "description": "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way."
+            },
+            "required": false,
+            "description": "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
+            "name": "scope",
+            "in": "query"
           }
         ],
         "responses": {
@@ -34226,7 +34824,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "source": {
@@ -34331,6 +34930,12 @@
                                   "max"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
+                              "resolvedProfile": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -34426,7 +35031,8 @@
                                   "completed",
                                   "failed",
                                   "cancelled",
-                                  "superseded"
+                                  "superseded",
+                                  "skipped"
                                 ]
                               },
                               "createdAt": {
@@ -34548,6 +35154,11 @@
                   "dir": {
                     "type": "string"
                   },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400."
+                  },
                   "parentTaskId": {
                     "type": "string"
                   },
@@ -34642,7 +35253,7 @@
             }
           },
           "400": {
-            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
             "content": {
               "application/json": {
                 "schema": {
@@ -35049,7 +35660,8 @@
                       "script",
                       "slack",
                       "api",
-                      "chat"
+                      "chat",
+                      "app-page"
                     ]
                   },
                   "requestedByUserId": {
@@ -35797,7 +36409,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "source": {
@@ -35901,6 +36514,12 @@
                               "xhigh",
                               "max"
                             ]
+                          },
+                          "profile": {
+                            "type": "string"
+                          },
+                          "resolvedProfile": {
+                            "type": "string"
                           },
                           "provider": {
                             "type": "string",
@@ -36083,7 +36702,8 @@
     },
     "/api/tasks/{id}/finish": {
       "post": {
-        "summary": "Mark task as completed or failed (runner endpoint)",
+        "summary": "Mark task as completed, failed, or skipped (runner endpoint)",
+        "description": "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
         "tags": [
           "Tasks"
         ],
@@ -36112,7 +36732,8 @@
                     "type": "string",
                     "enum": [
                       "completed",
-                      "failed"
+                      "failed",
+                      "skipped"
                     ]
                   },
                   "output": {
@@ -36195,7 +36816,7 @@
             }
           },
           "400": {
-            "description": "Invalid status",
+            "description": "Invalid status, or a skip without a reason",
             "content": {
               "application/json": {
                 "schema": {
@@ -36328,6 +36949,99 @@
                                 "required": [
                                   "name"
                                 ]
+                              },
+                              "threadParticipants": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "more": {
+                                    "type": "integer"
+                                  },
+                                  "people": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "trust": {
+                                          "type": "string",
+                                          "enum": [
+                                            "internal",
+                                            "external",
+                                            "unknown"
+                                          ]
+                                        },
+                                        "starter": {
+                                          "type": "boolean"
+                                        },
+                                        "newest": {
+                                          "type": "boolean"
+                                        },
+                                        "asked": {
+                                          "type": "boolean"
+                                        },
+                                        "language": {
+                                          "type": "string"
+                                        },
+                                        "verbosity": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "label",
+                                        "trust"
+                                      ]
+                                    }
+                                  },
+                                  "starterProfile": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "email": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "notes": {
+                                        "type": "string"
+                                      },
+                                      "comms": {
+                                        "$ref": "#/components/schemas/UserCommsPrefs"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "more",
+                                  "people"
+                                ]
+                              },
+                              "credentialAllowlist": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 5,
+                                    "maxLength": 5
+                                  },
+                                  "minItems": 1
+                                }
                               }
                             },
                             "required": [
@@ -36511,7 +37225,7 @@
     "/api/tasks/{id}/supersede": {
       "post": {
         "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
-        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
         "tags": [
           "Tasks"
         ],
@@ -36542,7 +37256,21 @@
                       "graceful_shutdown",
                       "context_limits",
                       "manual_supersede",
-                      "crash_recovery"
+                      "crash_recovery",
+                      "provider_fallback"
+                    ]
+                  },
+                  "errorClass": {
+                    "type": "string",
+                    "enum": [
+                      "rate_limit",
+                      "model_window",
+                      "seat",
+                      "credits",
+                      "overloaded",
+                      "server_error",
+                      "auth",
+                      "pool_empty"
                     ]
                   }
                 },
@@ -36572,7 +37300,8 @@
                       "enum": [
                         "alreadyFinished",
                         "workflow-failed",
-                        "resumed"
+                        "resumed",
+                        "noFallback"
                       ]
                     },
                     "task": {
@@ -36605,7 +37334,14 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
+                      ]
+                    },
+                    "failureReason": {
+                      "type": [
+                        "string",
+                        "null"
                       ]
                     }
                   },
@@ -39089,6 +39825,87 @@
                               "required": [
                                 "name"
                               ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
+                              ]
                             }
                           },
                           "required": [
@@ -39145,6 +39962,18 @@
                                           "name"
                                         ]
                                       }
+                                    },
+                                    "credentialAllowlist": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 5,
+                                          "maxLength": 5
+                                        },
+                                        "minItems": 1
+                                      }
                                     }
                                   },
                                   "required": [
@@ -39178,6 +40007,87 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "threadParticipants": {
+                              "type": "object",
+                              "properties": {
+                                "total": {
+                                  "type": "integer"
+                                },
+                                "more": {
+                                  "type": "integer"
+                                },
+                                "people": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "trust": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal",
+                                          "external",
+                                          "unknown"
+                                        ]
+                                      },
+                                      "starter": {
+                                        "type": "boolean"
+                                      },
+                                      "newest": {
+                                        "type": "boolean"
+                                      },
+                                      "asked": {
+                                        "type": "boolean"
+                                      },
+                                      "language": {
+                                        "type": "string"
+                                      },
+                                      "verbosity": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "label",
+                                      "trust"
+                                    ]
+                                  }
+                                },
+                                "starterProfile": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "email": {
+                                      "type": "string"
+                                    },
+                                    "role": {
+                                      "type": "string"
+                                    },
+                                    "notes": {
+                                      "type": "string"
+                                    },
+                                    "comms": {
+                                      "$ref": "#/components/schemas/UserCommsPrefs"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "total",
+                                "more",
+                                "people"
                               ]
                             }
                           },
@@ -41160,6 +42070,9 @@
                       "ultra"
                     ]
                   },
+                  "profile": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -41337,6 +42250,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -41703,6 +42619,9 @@
                                   "ultra"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -41894,6 +42813,9 @@
                                   "smart",
                                   "ultra"
                                 ]
+                              },
+                              "profile": {
+                                "type": "string"
                               },
                               "scheduleType": {
                                 "type": "string",
@@ -42129,6 +43051,9 @@
                             "smart",
                             "ultra"
                           ]
+                        },
+                        "profile": {
+                          "type": "string"
                         },
                         "scheduleType": {
                           "type": "string",
@@ -42380,6 +43305,9 @@
                         "ultra"
                       ]
                     },
+                    "profile": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -42573,6 +43501,12 @@
                       null
                     ]
                   },
+                  "profile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -42752,6 +43686,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -42977,6 +43914,12 @@
                       null
                     ]
                   },
+                  "profile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -43156,6 +44099,9 @@
                         "smart",
                         "ultra"
                       ]
+                    },
+                    "profile": {
+                      "type": "string"
                     },
                     "scheduleType": {
                       "type": "string",
@@ -49077,6 +50023,7 @@
       "post": {
         "operationId": "script_runs_internal_step_create",
         "summary": "Write a script run journal step",
+        "description": "Write-once per stepKey; a replay keeps the first journal entry and still answers 201.",
         "tags": [
           "Script Runs"
         ],
@@ -49543,7 +50490,8 @@
                         "completed",
                         "failed",
                         "cancelled",
-                        "superseded"
+                        "superseded",
+                        "skipped"
                       ]
                     }
                   },
@@ -50804,6 +51752,1910 @@
         }
       }
     },
+    "/api/savings/jobs": {
+      "get": {
+        "summary": "Estimated automation savings per workflow or script",
+        "description": "What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scriptName",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scheduleId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "workflow",
+                "script",
+                "schedule"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "false"
+            },
+            "required": false,
+            "name": "components",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Savings rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "computedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not-computed",
+                        "no-runs",
+                        "target-missing",
+                        null
+                      ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "workflow",
+                                  "script-scheduled",
+                                  "script-agent-invoked"
+                                ]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "scriptName": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "modelled"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": [
+                                  "target-job"
+                                ]
+                              },
+                              "enabledOnlyRule": {
+                                "type": "boolean"
+                              },
+                              "runs": {
+                                "type": "integer"
+                              },
+                              "substitutedRuns": {
+                                "type": "integer"
+                              },
+                              "effectRuns": {
+                                "type": "integer"
+                              },
+                              "enabledOnlyRuns": {
+                                "type": "integer"
+                              },
+                              "capApplied": {
+                                "type": "boolean"
+                              },
+                              "opsPerRun": {
+                                "type": "number"
+                              },
+                              "measuredUsd": {
+                                "type": "number",
+                                "description": "Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost."
+                              },
+                              "estimatedLlmUsd": {
+                                "type": "number",
+                                "description": "LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this."
+                              },
+                              "agentOnlyUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "savingUsd": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "actualHours": {
+                                "type": "number",
+                                "description": "Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active."
+                              },
+                              "agentOnlyHours": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "hoursSaved": {
+                                "type": "object",
+                                "properties": {
+                                  "p10": {
+                                    "type": "number"
+                                  },
+                                  "p50": {
+                                    "type": "number"
+                                  },
+                                  "p90": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "p10",
+                                  "p50",
+                                  "p90"
+                                ]
+                              },
+                              "agentOnlyUsdPerRun": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name",
+                              "basis",
+                              "enabledOnlyRule",
+                              "runs",
+                              "substitutedRuns",
+                              "effectRuns",
+                              "enabledOnlyRuns",
+                              "capApplied",
+                              "opsPerRun",
+                              "measuredUsd",
+                              "estimatedLlmUsd",
+                              "actualUsd",
+                              "agentOnlyUsd",
+                              "savingUsd",
+                              "actualHours",
+                              "agentOnlyHours",
+                              "hoursSaved",
+                              "agentOnlyUsdPerRun"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-task-schedule"
+                                ]
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "scheduleName": {
+                                "type": "string"
+                              },
+                              "scheduleEnabled": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "measured"
+                                ]
+                              },
+                              "runs": {
+                                "type": "integer",
+                                "description": "Agent tasks the schedule created in the window."
+                              },
+                              "actualUsd": {
+                                "type": "number",
+                                "description": "Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule."
+                              },
+                              "actualHours": {
+                                "type": "number"
+                              },
+                              "savingUsd": {
+                                "type": "null"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "scheduleId",
+                              "scheduleName",
+                              "scheduleEnabled",
+                              "name",
+                              "basis",
+                              "runs",
+                              "actualUsd",
+                              "actualHours",
+                              "savingUsd"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "workflow",
+                              "script",
+                              "task"
+                            ]
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "scriptName": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "linkKind": {
+                            "type": "string",
+                            "enum": [
+                              "sub-workflow",
+                              "step-workflow",
+                              "step-script",
+                              "step-task",
+                              "descendant-task"
+                            ]
+                          },
+                          "depth": {
+                            "type": "integer"
+                          },
+                          "runs": {
+                            "type": "number",
+                            "description": "Runs (tasks for a task component) in this tree. Fractional below the first level."
+                          },
+                          "actualUsd": {
+                            "type": "number"
+                          },
+                          "agentOnlyUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "savingUsd": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "hoursSaved": {
+                            "type": "object",
+                            "properties": {
+                              "p10": {
+                                "type": "number"
+                              },
+                              "p50": {
+                                "type": "number"
+                              },
+                              "p90": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "p10",
+                              "p50",
+                              "p90"
+                            ]
+                          },
+                          "inOwnRow": {
+                            "type": "boolean",
+                            "description": "True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`."
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "name",
+                          "linkKind",
+                          "depth",
+                          "runs",
+                          "actualUsd",
+                          "agentOnlyUsd",
+                          "savingUsd",
+                          "hoursSaved",
+                          "inOwnRow"
+                        ]
+                      }
+                    },
+                    "withComponents": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "calibrationSource",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "boundaryEstimated",
+                    "rows",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow, script or schedule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/daily": {
+      "get": {
+        "summary": "Daily automation savings of a workflow, a script or the fleet",
+        "description": "The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "scriptName",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily savings points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "computedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not-computed",
+                        "no-runs",
+                        "target-missing",
+                        null
+                      ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
+                    "points": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "day": {
+                            "type": "string"
+                          },
+                          "savingUsd": {
+                            "type": "number"
+                          },
+                          "actualUsd": {
+                            "type": "number",
+                            "description": "Scaled estimate: the day's measured and estimated spend times the window's substituted share."
+                          },
+                          "measuredUsd": {
+                            "type": "number",
+                            "description": "The day's measured spend, not scaled."
+                          },
+                          "estimatedLlmUsd": {
+                            "type": "number",
+                            "description": "The day's LLM spend estimated from tokens and output size, not measured."
+                          }
+                        },
+                        "required": [
+                          "day",
+                          "savingUsd",
+                          "actualUsd",
+                          "measuredUsd",
+                          "estimatedLlmUsd"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "calibrationSource",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "boundaryEstimated",
+                    "points"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Both workflowId and scriptName, or an unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow or script not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/summary": {
+      "get": {
+        "summary": "Fleet automation savings",
+        "description": "What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7",
+                "30",
+                "90"
+              ],
+              "default": "30"
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "smol",
+                "regular",
+                "smart",
+                "ultra"
+              ],
+              "default": "smart"
+            },
+            "required": false,
+            "name": "tier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet savings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "smol",
+                        "regular",
+                        "smart",
+                        "ultra"
+                      ]
+                    },
+                    "calibrationModel": {
+                      "type": "string"
+                    },
+                    "calibratedAt": {
+                      "type": "string"
+                    },
+                    "calibrationSource": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "computedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "valid": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not-computed",
+                        "no-runs",
+                        "target-missing",
+                        null
+                      ]
+                    },
+                    "boundaryEstimated": {
+                      "type": "boolean",
+                      "description": "The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead."
+                    },
+                    "total": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "runs": {
+                          "type": "integer"
+                        },
+                        "substitutedRuns": {
+                          "type": "integer"
+                        },
+                        "enabledOnlyRuns": {
+                          "type": "integer"
+                        },
+                        "measuredUsd": {
+                          "type": "number"
+                        },
+                        "estimatedLlmUsd": {
+                          "type": "number"
+                        },
+                        "actualUsd": {
+                          "type": "number"
+                        },
+                        "agentOnlyUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "savingUsd": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        },
+                        "actualHours": {
+                          "type": "number"
+                        },
+                        "hoursSaved": {
+                          "type": "object",
+                          "properties": {
+                            "p10": {
+                              "type": "number"
+                            },
+                            "p50": {
+                              "type": "number"
+                            },
+                            "p90": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "p10",
+                            "p50",
+                            "p90"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "runs",
+                        "substitutedRuns",
+                        "enabledOnlyRuns",
+                        "measuredUsd",
+                        "estimatedLlmUsd",
+                        "actualUsd",
+                        "agentOnlyUsd",
+                        "savingUsd",
+                        "actualHours",
+                        "hoursSaved"
+                      ]
+                    },
+                    "byKind": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "workflows": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "scheduledScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        },
+                        "agentInvokedScripts": {
+                          "type": "object",
+                          "properties": {
+                            "jobs": {
+                              "type": "integer"
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "substitutedRuns": {
+                              "type": "integer"
+                            },
+                            "savingUsd": {
+                              "type": "number",
+                              "description": "p50"
+                            },
+                            "hoursSaved": {
+                              "type": "number",
+                              "description": "p50"
+                            }
+                          },
+                          "required": [
+                            "jobs",
+                            "runs",
+                            "substitutedRuns",
+                            "savingUsd",
+                            "hoursSaved"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workflows",
+                        "scheduledScripts",
+                        "agentInvokedScripts"
+                      ]
+                    },
+                    "fleetLlmUsd": {
+                      "type": "number",
+                      "description": "Measured session spend of the whole swarm in the window, as on the usage page."
+                    },
+                    "selfOptimizationRatio": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "`(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total."
+                    },
+                    "excluded": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "enabledOnlyRuns": {
+                          "type": "integer",
+                          "description": "Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs."
+                        }
+                      },
+                      "required": [
+                        "enabledOnlyRuns"
+                      ]
+                    },
+                    "assumptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "tier",
+                    "calibrationModel",
+                    "calibratedAt",
+                    "calibrationSource",
+                    "computedAt",
+                    "valid",
+                    "reason",
+                    "boundaryEstimated",
+                    "total",
+                    "byKind",
+                    "fleetLlmUsd",
+                    "selfOptimizationRatio",
+                    "excluded",
+                    "assumptions"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown days or tier value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/savings/calibration": {
+      "get": {
+        "summary": "The savings curve in use",
+        "description": "Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The active calibration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "shipped",
+                        "deployment"
+                      ]
+                    },
+                    "active": {
+                      "type": "object",
+                      "properties": {
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "curve": {
+                          "type": "object",
+                          "properties": {
+                            "smol": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "regular": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "smart": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "ultra": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "smol",
+                            "regular",
+                            "smart",
+                            "ultra"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "calibratedAt",
+                        "model",
+                        "curve"
+                      ]
+                    },
+                    "stored": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "window": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string"
+                            },
+                            "end": {
+                              "type": "string"
+                            },
+                            "sessions": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end",
+                            "sessions"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "valid",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "active",
+                    "stored"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Derive the savings curve from this deployment's sessions",
+        "description": "Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.",
+        "tags": [
+          "Savings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90,
+                    "default": 30
+                  },
+                  "end": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "End of the window (ISO 8601); default now."
+                  },
+                  "apply": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The derived curve, or why there is none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "days": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "days"
+                      ]
+                    },
+                    "sessions": {
+                      "type": "integer",
+                      "description": "Opus sessions of 1 to 61 turns used."
+                    },
+                    "refusals": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Why no curve was derived, or why a derived one was not applied."
+                    },
+                    "calibration": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "calibratedAt": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "curve": {
+                          "type": "object",
+                          "properties": {
+                            "smol": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "regular": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "smart": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            },
+                            "ultra": {
+                              "type": "object",
+                              "properties": {
+                                "usd": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                },
+                                "hrs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "usd",
+                                "hrs"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "smol",
+                            "regular",
+                            "smart",
+                            "ultra"
+                          ]
+                        },
+                        "window": {
+                          "type": "object",
+                          "properties": {
+                            "start": {
+                              "type": "string"
+                            },
+                            "end": {
+                              "type": "string"
+                            },
+                            "sessions": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "start",
+                            "end",
+                            "sessions"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "calibratedAt",
+                        "model",
+                        "curve"
+                      ],
+                      "description": "The derived curve; null when refused."
+                    },
+                    "speed": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    },
+                    "repriceMatch": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "meanRatio": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Derived smart-tier mean cost over the shipped one."
+                    },
+                    "gaps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "key": {
+                            "type": "string",
+                            "enum": [
+                              "usd",
+                              "hrs"
+                            ]
+                          },
+                          "median": {
+                            "type": "number",
+                            "description": "Median absolute deviation from the shipped curve, as a fraction."
+                          },
+                          "max": {
+                            "type": "number"
+                          },
+                          "over5pct": {
+                            "type": "integer",
+                            "description": "Turn counts more than 5% from the shipped curve."
+                          },
+                          "points": {
+                            "type": "integer"
+                          },
+                          "weighted": {
+                            "type": "number",
+                            "description": "Session-weighted mean of derived over shipped; 1 means the same price."
+                          }
+                        },
+                        "required": [
+                          "tier",
+                          "key",
+                          "median",
+                          "max",
+                          "over5pct",
+                          "points",
+                          "weighted"
+                        ]
+                      }
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "sessions",
+                    "refusals",
+                    "calibration",
+                    "speed",
+                    "repriceMatch",
+                    "meanRatio",
+                    "gaps",
+                    "applied"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid days, end or apply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`apply` without permission to write config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "A session query ran past its time budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another calibration run is in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The run passed its 120 s deadline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions/tokens": {
       "post": {
         "summary": "Mint an ephemeral task or runtime token",
@@ -51382,12 +54234,13 @@
               "enum": [
                 "mine",
                 "shared",
-                "tree"
+                "tree",
+                "all"
               ],
-              "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope."
+              "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree."
             },
             "required": false,
-            "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope.",
+            "description": "mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree.",
             "name": "scope",
             "in": "query"
           },
@@ -51487,7 +54340,8 @@
                                       "completed",
                                       "failed",
                                       "cancelled",
-                                      "superseded"
+                                      "superseded",
+                                      "skipped"
                                     ]
                                   },
                                   "source": {
@@ -51649,7 +54503,8 @@
                               "completed",
                               "failed",
                               "cancelled",
-                              "superseded"
+                              "superseded",
+                              "skipped"
                             ]
                           },
                           "readState": {
@@ -52385,7 +55240,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`",
+            "description": "Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56955,6 +59810,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A server with this name already exists in the same scope and owner (mcp_server_name_taken)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -58202,6 +61067,9 @@
                                   "ultra"
                                 ]
                               },
+                              "profile": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -58385,6 +61253,9 @@
                                   "smart",
                                   "ultra"
                                 ]
+                              },
+                              "profile": {
+                                "type": "string"
                               },
                               "scheduleType": {
                                 "type": "string",
@@ -58886,9 +61757,14 @@
     },
     "/api/trackers/jira/authorize": {
       "get": {
-        "summary": "Redirect to Atlassian OAuth consent screen",
+        "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -58898,11 +61774,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Atlassian OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",
@@ -59569,9 +62485,14 @@
     },
     "/api/trackers/linear/authorize": {
       "get": {
-        "summary": "Redirect to Linear OAuth consent screen",
+        "summary": "Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL",
         "tags": [
           "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -59581,11 +62502,51 @@
             "required": false,
             "name": "redirect",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "redirect",
+                "json"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
           }
         ],
         "responses": {
+          "200": {
+            "description": "Consent URL (format=json), for clients that navigate themselves",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizeUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "authorizeUrl"
+                  ]
+                }
+              }
+            }
+          },
           "302": {
             "description": "Redirect to Linear OAuth"
+          },
+          "403": {
+            "description": "Caller lacks oauth-authorization.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "500": {
             "description": "Failed to generate authorization URL",
@@ -59927,6 +62888,855 @@
         }
       }
     },
+    "/api/improvements": {
+      "get": {
+        "summary": "List product improvements",
+        "description": "Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvements and the switch state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "improvements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending_approval",
+                              "sending",
+                              "sent",
+                              "failed",
+                              "discarded"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "mcp",
+                              "api",
+                              "ui"
+                            ]
+                          },
+                          "requestedByAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "approvedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "approvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sentAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "proxyStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "proxyId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "proxyError": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "leakHints": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "text",
+                          "email",
+                          "status",
+                          "source",
+                          "requestedByAgentId",
+                          "approvedBy",
+                          "approvedAt",
+                          "sentAt",
+                          "proxyStatus",
+                          "proxyId",
+                          "proxyError",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "improvements"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Draft a product improvement, or send one as a person",
+        "description": "Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email"
+                  },
+                  "sendNow": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "ui",
+                      "api"
+                    ]
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A person's `sendNow` was approved and sent (see `status`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Draft stored as `pending_approval`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text or email, or `sendNow` without an email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not draft improvements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/improvements/{id}/approve": {
+      "post": {
+        "summary": "Approve and send a drafted improvement",
+        "description": "Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email",
+                    "description": "The approver's email, sent with the text."
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved. `status` is `sent`, or `failed` with the proxy status and error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is an agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already sent, sending or discarded, or improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/improvements/{id}/discard": {
+      "post": {
+        "summary": "Discard a drafted improvement",
+        "description": "A person may discard any pending or failed improvement. An agent may discard only a draft it requested.",
+        "tags": [
+          "Improvements"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "improvement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_approval",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "discarded"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "mcp",
+                            "api",
+                            "ui"
+                          ]
+                        },
+                        "requestedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sentAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyStatus": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "proxyId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "proxyError": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "leakHints": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text",
+                        "email",
+                        "status",
+                        "source",
+                        "requestedByAgentId",
+                        "approvedBy",
+                        "approvedAt",
+                        "sentAt",
+                        "proxyStatus",
+                        "proxyId",
+                        "proxyError",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "improvement"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is an agent that did not request this draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already sent or discarded, or improvements are turned off",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fleet-benchmark": {
       "get": {
         "summary": "Compare this swarm with similar swarms",
@@ -60217,7 +64027,7 @@
       "put": {
         "operationId": "users_setRbacRoles",
         "summary": "Set a user's RBAC roles",
-        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.",
+        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.",
         "tags": [
           "Users"
         ],
@@ -60282,7 +64092,7 @@
             }
           },
           "403": {
-            "description": "Not allowed to change roles",
+            "description": "Not allowed to change roles, or adding an operator-only role with a user token",
             "content": {
               "application/json": {
                 "schema": {
@@ -60374,6 +64184,9 @@
                         "verbs",
                         "roles"
                       ]
+                    },
+                    "sessionReadAll": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -60819,6 +64632,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A user with this email already exists (user_exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -61139,6 +64962,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -61622,6 +65455,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User not found",
             "content": {
@@ -61861,6 +65704,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62147,6 +66000,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
             "content": {
               "application/json": {
                 "schema": {
@@ -62839,6 +66702,16 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Target or source user not found",
             "content": {
@@ -63051,7 +66924,7 @@
             }
           },
           "400": {
-            "description": "Validation error or PK collision",
+            "description": "Validation error",
             "content": {
               "application/json": {
                 "schema": {
@@ -63070,8 +66943,28 @@
               }
             }
           },
+          "403": {
+            "description": "Target holds an operator-granted role (auditor) and the caller is not the operator key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The (kind, externalId) identity is already linked (identity_taken)",
             "content": {
               "application/json": {
                 "schema": {
@@ -65629,6 +69522,7 @@
     "/api/workflow-runs/{id}/retry": {
       "post": {
         "summary": "Retry a failed workflow run",
+        "description": "Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
         "tags": [
           "Workflows"
         ],
@@ -65671,6 +69565,16 @@
           },
           "400": {
             "description": "Cannot retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
             "content": {
               "application/json": {
                 "schema": {

@@ -425,11 +425,14 @@ const retryWorkflowRunRoute = route({
   path: "/api/workflow-runs/{id}/retry",
   pattern: ["api", "workflow-runs", null, "retry"],
   summary: "Retry a failed workflow run",
+  description:
+    "Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Retry started", schema: SuccessResponseSchema },
     400: { description: "Cannot retry" },
+    404: { description: "Run not found" },
   },
 });
 
@@ -674,7 +677,9 @@ export async function handleWorkflows(
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
     }
-    const modelErrors = await workflowModelErrors(parsed.body.definition);
+    const modelErrors = await workflowModelErrors(parsed.body.definition, {
+      vcsRepo: parsed.body.vcsRepo,
+    });
     if (modelErrors.length > 0) {
       jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
       return true;
@@ -788,13 +793,12 @@ export async function handleWorkflows(
         res.end();
         return true;
       }
-      jsonError(
-        res,
-        result.reason === "patch"
-          ? result.errors.join("; ")
-          : `Invalid definition: ${result.errors.join("; ")}`,
-        400,
-      );
+      // The only patch operation here is one update, so a patch error means the node is absent.
+      if (result.reason === "patch") {
+        jsonError(res, result.errors.join("; "), 404);
+        return true;
+      }
+      jsonError(res, `Invalid definition: ${result.errors.join("; ")}`, 400);
       return true;
     }
     patchWorkflowNodeRoute.respond(res, 200, await withSaveWarnings(result.workflow));
@@ -881,7 +885,16 @@ export async function handleWorkflows(
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
         return true;
       }
-      const modelErrors = await workflowModelErrors(body.definition);
+    }
+    // A stored definition moving to another repo is judged again: its static
+    // profiles now check against that repo's credential pool.
+    const repoChanged =
+      body.vcsRepo !== undefined && (body.vcsRepo ?? null) !== (existing.vcsRepo ?? null);
+    const judged = body.definition ?? (repoChanged ? existing.definition : undefined);
+    if (judged) {
+      const modelErrors = await workflowModelErrors(judged, {
+        vcsRepo: body.vcsRepo === undefined ? existing.vcsRepo : body.vcsRepo,
+      });
       if (modelErrors.length > 0) {
         jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
         return true;
@@ -1114,6 +1127,10 @@ export async function handleWorkflows(
   if (retryWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await retryWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!(await getWorkflowRunSummary(parsed.params.id))) {
+      jsonError(res, `Workflow run not found: ${parsed.params.id}`, 404);
+      return true;
+    }
     try {
       await retryFailedRun(parsed.params.id, getExecutorRegistry());
     } catch (err) {

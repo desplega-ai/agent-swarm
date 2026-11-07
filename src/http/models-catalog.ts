@@ -117,7 +117,7 @@ const getCatalog = route({
   pattern: ["api", "models-catalog"],
   summary: "Get the live model catalog for the picker-reachable providers",
   description:
-    "Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
+    "Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
   tags: ["Pricing"],
   responses: {
     200: {

@@ -1,7 +1,7 @@
 import {
   getDbClient,
   getRetryableSteps,
-  getWorkflow,
+  getRunWorkflow,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   updateWorkflowRun,
@@ -44,7 +44,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           const run = await getWorkflowRun(step.runId);
           if (!run) continue;
 
-          const workflow = await getWorkflow(run.workflowId);
+          const workflow = await getRunWorkflow(run);
           if (!workflow) continue;
 
           // A foreach child goes back to its fan-out's queue: the driver

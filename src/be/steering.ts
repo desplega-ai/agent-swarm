@@ -71,9 +71,22 @@ export interface RequestSteeringArgs {
   slack?: TaskSteerEvent["slack"];
 }
 
+/**
+ * The harness a steer is delivered through. An agent or task with no provider
+ * set runs the default `claude` harness. `requestSteering` and the advertised
+ * `supportedSteerModes` both read this, so the composer's label always matches
+ * what a send does.
+ */
+function resolveSteerProvider(
+  task: Pick<AgentTask, "provider">,
+  agent: Pick<Agent, "provider" | "harnessProvider"> | null,
+): ProviderName {
+  return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
+}
+
 async function providerForTask(task: AgentTask): Promise<ProviderName> {
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
-  return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
+  return resolveSteerProvider(task, agent);
 }
 
 export interface TaskSteeringFields {
@@ -83,11 +96,16 @@ export interface TaskSteeringFields {
 
 type SteeringAgent = Pick<Agent, "isLead" | "provider" | "harnessProvider">;
 
+function supportedModesForTask(task: AgentTask, provider: ProviderName): SteerMode[] {
+  return provider === "claude" && task.providerMeta?.transport === "sdk"
+    ? ["steer", "queue"]
+    : PROVIDER_STEER_CAPABILITIES[provider];
+}
+
 function steeringFieldsFor(task: AgentTask, agent: SteeringAgent | null): TaskSteeringFields {
-  const provider = agent?.harnessProvider ?? agent?.provider ?? task.provider;
   return {
     isLeadTask: agent?.isLead ?? false,
-    supportedSteerModes: provider ? PROVIDER_STEER_CAPABILITIES[provider] : [],
+    supportedSteerModes: supportedModesForTask(task, resolveSteerProvider(task, agent)),
   };
 }
 
@@ -138,6 +156,17 @@ export async function getTaskSteeringFieldsForTasks(
 }
 
 /**
+ * The task source of a promoted steer. `AgentTaskSource` has no `script` or
+ * `app-page`: a script steer becomes an `api` task and an app-page steer (a
+ * person on a json-render page) a `ui` task.
+ */
+function promotedTaskSource(source: SteeringSource): AgentTask["source"] {
+  if (source === "script") return "api";
+  if (source === "app-page") return "ui";
+  return source;
+}
+
+/**
  * Convert an undeliverable steering message into a normal follow-up task.
  * Step 2 reuses this seam for pending rows discovered during terminal sweeps.
  */
@@ -150,7 +179,7 @@ export async function promoteSteeringToTask(
     routingReason: task.agentId ? "continuity" : undefined,
     routingSource: task.agentId ? "engine_default" : undefined,
     creatorAgentId: message.createdByAgentId,
-    source: message.source === "script" ? "api" : message.source,
+    source: promotedTaskSource(message.source),
     taskType: "follow-up",
     parentTaskId: task.id,
     requestedByUserId: message.createdByUserId,
@@ -339,7 +368,7 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
   const currentTask = await getTaskById(args.taskId);
   if (!currentTask) throw new SteeringRequestError("Task not found", 404);
   const provider = await providerForTask(currentTask);
-  const supportedModes = PROVIDER_STEER_CAPABILITIES[provider];
+  const supportedModes = supportedModesForTask(currentTask, provider);
 
   if (onUnsupported === "fail" && !supportedModes.includes(requestedMode)) {
     const supported = supportedModes.length > 0 ? supportedModes.join(", ") : "none";

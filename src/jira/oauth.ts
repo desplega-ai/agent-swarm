@@ -19,7 +19,10 @@ export async function getJiraOAuthConfig(): Promise<OAuthProviderConfig | null> 
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
-export async function getJiraAuthorizationUrl(finalRedirect?: string): Promise<string | null> {
+export async function getJiraAuthorizationUrl(
+  finalRedirect?: string,
+  userId?: string | null,
+): Promise<string | null> {
   const config = await getJiraOAuthConfig();
   if (!config) return null;
   // flow='tracker' so the unified state-keyed callback runs the tracker
@@ -29,6 +32,9 @@ export async function getJiraAuthorizationUrl(finalRedirect?: string): Promise<s
     flow: "tracker",
     label: "default",
     ...(finalRedirect ? { finalRedirect } : {}),
+    // The initiating user, recorded on the pending row and then on the
+    // authorization (connectedByUserId), same as the generic authorize-url route.
+    ...(userId ? { userId } : {}),
   });
   return result.url;
 }

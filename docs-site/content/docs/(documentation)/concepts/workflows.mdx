@@ -7,6 +7,8 @@ Agent Swarm includes a **workflow automation engine** that lets you define multi
 
 Bundled workflows declare the parameters and integrations they require. If one is enabled before setup is complete, it reports `needs_setup` with exactly what is missing in the dashboard and refuses to trigger until setup is complete. Operator-created workflows remain unaffected unless they opt into the same `params`, `requiredParams`, and `requires` metadata.
 
+If you are deciding which workflows a small team should run and where the human gate belongs, [Small tech team operating model](/docs/guides/small-tech-team-operating-model) covers the ownership boundary and the staged rollout.
+
 ## Core Concepts
 
 A workflow consists of:
@@ -672,6 +674,8 @@ Interpolation sources available in node config:
 ### Version History
 
 Every workflow update creates a snapshot in the version history table, recording the previous definition. This provides an audit trail and enables rollback.
+
+An update affects only runs that start after it. Each run keeps the definition it started with until it finishes, including after a resume, a retry, or a server restart. To run an edited workflow, trigger a new run; retrying a failed run re-runs it on its original definition.
 
 ## MCP Tools
 

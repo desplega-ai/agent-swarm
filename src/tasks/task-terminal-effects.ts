@@ -31,6 +31,8 @@ export async function runTaskTerminalEffects(args: {
   failureReason?: string;
   agentId?: string;
   persistMemory?: boolean;
+  /** Passed through to `createWorkerTaskFollowUp`; see `store-progress`. */
+  chainedTaskId?: string;
 }): Promise<void> {
   const { task, status, agentId, persistMemory } = args;
   const taskId = task.id;
@@ -160,6 +162,8 @@ export async function runTaskTerminalEffects(args: {
         status,
         output: safeOutput,
         failureReason: safeFailureReason,
+        chainedTaskId: args.chainedTaskId,
+        completingAgentId: agentId,
       });
       if (followUp) {
         console.log(

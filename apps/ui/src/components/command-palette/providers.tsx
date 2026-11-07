@@ -34,6 +34,7 @@ import type {
   WorkflowSummary,
 } from "@/api/types";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import { combPath } from "@/lib/comb/paths";
 import type { SnippetPart } from "@/lib/comb/search";
 import { keepPreviousWithin, paletteSearchKey } from "@/lib/command-palette/identity";
@@ -111,11 +112,12 @@ function apiSearch<T>(
 ): SearchProvider["useSearch"] {
   return function useApiSearch(query, limit) {
     const queryKey = paletteSearchKey(getConfig(), id, query, limit);
-    const result = useQuery({
+    const placeholderData = useWithinAllUsersScope<T[]>(keepPreviousWithin(queryKey[1]));
+    const result = useQuery<T[], Error, PaletteResult[], typeof queryKey>({
       queryKey,
       queryFn: ({ signal }) => fetchRows(query, limit, signal),
       select: (rows) => rows.map(toResult),
-      placeholderData: keepPreviousWithin(queryKey[1]),
+      placeholderData,
       staleTime: STALE_MS,
       refetchInterval: false,
       refetchOnWindowFocus: false,

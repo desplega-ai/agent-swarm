@@ -45,6 +45,7 @@ export function QuestionFlow({
   onSubmit,
   onChange,
   foldAnswered,
+  submitLabel,
 }: {
   questions: ApprovalQuestion[];
   /** Pre-filled answers (for example a website from the email domain). Read on mount. */
@@ -62,6 +63,8 @@ export function QuestionFlow({
   onChange?: (values: QuestionFlowValues) => void;
   /** Fold answered cards to one line. Approvals does this above 5 questions. */
   foldAnswered?: boolean;
+  /** The submit button text. Unset, it reads "Submit" (or "Submit · reject"). */
+  submitLabel?: string;
 }) {
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
@@ -316,6 +319,7 @@ export function QuestionFlow({
                 error={error}
                 onSubmit={handleSubmit}
                 onDiscard={() => {}}
+                label={submitLabel}
               />
             </>
           )}

@@ -1077,6 +1077,8 @@ export class PiMonoSession implements ProviderSession {
    * surface it directly.
    */
   private prevOutputTokens = 0;
+  /** Pi SessionStats omits reasoning; assistant events report it as an output subset. */
+  private reasoningOutputTokens = 0;
   /**
    * Terminal error message captured from structured pi-coding-agent events.
    *
@@ -1206,8 +1208,13 @@ export class PiMonoSession implements ProviderSession {
           role?: string;
           stopReason?: string;
           errorMessage?: string;
+          usage?: { reasoning?: number };
         };
         if (endMsg.role === "assistant") {
+          const reasoning = endMsg.usage?.reasoning;
+          if (typeof reasoning === "number" && Number.isFinite(reasoning) && reasoning >= 0) {
+            this.reasoningOutputTokens += reasoning;
+          }
           const turn = describeAssistantTurn(event.message);
           this.lastAssistantTurn = turn;
           // Ahead of the turn's text and tool lines: the chip rides on the
@@ -1459,11 +1466,11 @@ export class PiMonoSession implements ProviderSession {
           appliedReasoningEffort: this.appliedReasoningEffort,
         };
       }
-      // Defense-in-depth: AWS SDK failures surface as structured events (handled
-      // above in runSession), not thrown exceptions, so this catch is for genuine
-      // unexpected throws (MCP / transport / etc). Still classify in case an AWS
-      // signature or a rejected subscription login ever reaches here, so the
-      // red box fires like sibling adapters.
+      // Provider failures (AWS SDK, a rejected subscription login) arrive as
+      // structured events (the terminalError path above), so a throw here is
+      // MCP, transport or the harness itself. Classify it only for the red
+      // box: an MCP "HTTP 401 Unauthorized" reads like a rejected login but
+      // says nothing about the provider, so the origin stays "harness".
       const classifiedError = this.classifyFailure(errorMessage);
       if (classifiedError) {
         this.emit({
@@ -1481,6 +1488,7 @@ export class PiMonoSession implements ProviderSession {
         cost,
         isError: true,
         errorCategory: classifiedError?.category,
+        errorOrigin: "harness",
         failureReason: scrubSecrets(classifiedError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };
@@ -1601,6 +1609,7 @@ export class PiMonoSession implements ProviderSession {
       totalCostUsd: stats.cost || 0,
       inputTokens: stats.tokens.input,
       outputTokens: stats.tokens.output,
+      reasoningOutputTokens: this.reasoningOutputTokens,
       cacheReadTokens: stats.tokens.cacheRead,
       cacheWriteTokens: stats.tokens.cacheWrite,
       // Phase 7: real wallclock duration; pi-ai SessionStats doesn't carry

@@ -112,11 +112,6 @@ export function useJiraTrackerStatus() {
   });
 }
 
-/** Absolute authorize URL — callers open it in a new tab via `window.open`. */
-export function buildJiraAuthorizeUrl(): string {
-  return `${getBaseUrl()}/api/trackers/jira/authorize`;
-}
-
 /**
  * Mutation hook for `DELETE /api/trackers/jira/disconnect`. On success, the
  * status query is invalidated so the card immediately reflects the

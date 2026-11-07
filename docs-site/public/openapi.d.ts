@@ -747,6 +747,23 @@ export interface paths {
                                 id: string;
                                 name: string;
                                 description?: string;
+                                icon?: {
+                                    /** @enum {string} */
+                                    type: "lucide";
+                                    icon: string;
+                                    color?: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "url";
+                                    /** Format: uri */
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "agent-fs";
+                                    path: string;
+                                    orgId?: string;
+                                    driveId?: string;
+                                };
                                 createdAt: string;
                                 updatedAt: string;
                             }[];
@@ -1958,6 +1975,13 @@ export interface paths {
                             [key: string]: unknown;
                         };
                         parentTaskId?: string;
+                        followUp?: boolean;
+                        requestedByUserId?: string;
+                        session?: {
+                            key: string;
+                            /** @enum {string} */
+                            scope?: "user" | "shared";
+                        };
                     };
                 };
             };
@@ -1979,7 +2003,7 @@ export interface paths {
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
-                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                         } | {
                             ok: boolean;
                             result: {
@@ -2500,7 +2524,7 @@ export interface paths {
         head?: never;
         /**
          * Update an agent's runtime harness and default model
-         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist and run on `harness_provider`, and it cannot be sent with `model`. Sending `model`, or changing the model or effort override by any path, clears the default profile.
+         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support. `profile` sets the agent's default model profile (same tri-state): it must exist, run on `harness_provider` and pass the profile check (`GET /api/agents/{id}/profile-check`) against it, and it cannot be sent with `model`. A failing check is a 400 `{ error, check }`; a passing one returns the result as `profileCheck`. Sending `model`, or changing the model or effort override by any path, clears the default profile.
          */
         patch: {
             parameters: {
@@ -2543,7 +2567,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Updated agent row */
+                /** @description Updated agent row. `profileCheck` is set when the body set `profile`, so warnings show. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2555,10 +2579,11 @@ export interface paths {
                                 max: number;
                                 available: number;
                             };
+                            profileCheck?: components["schemas"]["ProfileCheckResult"];
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or `{ error, check }` when the profile check fails */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2869,6 +2894,17 @@ export interface paths {
                             type: "lucide";
                             icon: string;
                             color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
                         } | null;
                         slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
                         changeSource?: string;
@@ -2921,7 +2957,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Agent not found */
+                /** @description Agent not found, or changedByAgentId names no agent */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -3145,6 +3181,58 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/profile-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check whether an agent can run a model profile
+         * @description Read-only. Judges the profile's harness, model, the agent's credential report and the profile's credential allowlist. Each row is pass, warn, fail or unverified; `ok` is false only when a row fails. Never returns a secret value.
+         */
+        get: {
+            parameters: {
+                query: {
+                    profile: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The check result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProfileCheckResult"];
+                    };
+                };
+                /** @description Agent or profile not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -4044,6 +4132,7 @@ export interface paths {
                             /** @enum {string} */
                             type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
                             label?: string;
+                            /** @default true */
                             required?: boolean;
                             description?: string;
                             placeholder?: string;
@@ -7874,7 +7963,7 @@ export interface paths {
         put?: never;
         /**
          * Invite an external member into the agent-fs shared org
-         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email with an agent-fs account is added directly (status added). An email without one gets a pending invite (status pending) with an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee. No keys are returned; the invitee obtains their own key via agent-fs registration.
+         * @description The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. An email already in the org gets the grant directly (status added). Any other email gets a pending invite (status pending) with its accept token, and an acceptUrl when agent-fs returns one; agent-fs sends no email, so the caller must hand the link to the invitee, or accept with the invitee's own key. No keys are returned; the invitee obtains their own key via agent-fs registration.
          */
         post: {
             parameters: {
@@ -7908,7 +7997,7 @@ export interface paths {
                             /** @description False only when the email already holds the requested role. */
                             invited: boolean;
                             /**
-                             * @description already_member: no change. added: an existing agent-fs account joined the org. pending: the email has no account, so agent-fs created an invite the person must accept.
+                             * @description already_member: no change. added: the email was already in the org and holds the role now. pending: agent-fs created an invite the person must accept (agent-fs >= 0.18.19 does this for every email not yet in the org, with or without an account).
                              * @enum {string}
                              */
                             status: "already_member" | "added" | "pending";
@@ -7918,6 +8007,8 @@ export interface paths {
                             expiresAt?: string;
                             /** @description Link the invitee opens to accept (status pending). agent-fs sends no email, so hand it to the person. Absent when agent-fs has no app URL configured. */
                             acceptUrl?: string;
+                            /** @description Accept token (status pending). Only the invited account can redeem it, with its own key: agent-fs POST /invites/{token}/accept. */
+                            token?: string;
                         };
                     };
                 };
@@ -11100,6 +11191,10 @@ export interface paths {
                                 allowCustomModel: boolean;
                                 description: string | null;
                                 seededFrom: string | null;
+                                credentials: {
+                                    [key: string]: string[];
+                                } | null;
+                                fallbacks: string[];
                                 createdAt: string;
                                 lastUpdatedAt: string;
                             }[];
@@ -11111,7 +11206,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -11132,6 +11227,10 @@ export interface paths {
                         /** @default false */
                         allowCustomModel?: boolean;
                         description?: string | null;
+                        credentials?: {
+                            [key: string]: string[];
+                        } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11153,6 +11252,10 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11229,6 +11332,10 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11249,7 +11356,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -11307,7 +11414,7 @@ export interface paths {
         head?: never;
         /**
          * Update a model profile
-         * @description Changes the model, effort, custom-model flag or description; the name and harness are fixed. Omit a field to keep it; `effort: null` clears it. Applies to tasks claimed after the change. Operator only (the shared API key).
+         * @description Changes the model, effort, custom-model flag, description, credential allowlist or fallbacks; the name and harness are fixed. Omit a field to keep it; `effort: null` and `credentials: null` clear it, and `fallbacks: []` empties the list. Applies to tasks claimed after the change. Operator only (the shared API key).
          */
         patch: {
             parameters: {
@@ -11326,6 +11433,10 @@ export interface paths {
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         allowCustomModel?: boolean;
                         description?: string | null;
+                        credentials?: {
+                            [key: string]: string[];
+                        } | null;
+                        fallbacks?: string[];
                     };
                 };
             };
@@ -11347,6 +11458,10 @@ export interface paths {
                             allowCustomModel: boolean;
                             description: string | null;
                             seededFrom: string | null;
+                            credentials: {
+                                [key: string]: string[];
+                            } | null;
+                            fallbacks: string[];
                             createdAt: string;
                             lastUpdatedAt: string;
                         };
@@ -11392,7 +11507,7 @@ export interface paths {
         };
         /**
          * Get the live model catalog for the picker-reachable providers
-         * @description Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
+         * @description Slim projection of the models.dev payload (the vendored models.dev snapshot, or the live fetch once one succeeds) plus the OpenAI-compatible registry providers; see the `providers` field for the live list. Refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.
          */
         get: {
             parameters: {
@@ -11971,6 +12086,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Metadata discovery failed: the protected-resource or authorization-server metadata could not be fetched or was refused by the egress guard */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -12297,7 +12421,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke and delete the OAuth token for an MCP server */
+        /**
+         * Revoke and delete the OAuth token for an MCP server
+         * @description Idempotent: the connection row is kept with status revoked (its tokens are cleared) and the server returns to static auth, so a repeat call answers 200 and /status keeps returning the revoked token object.
+         */
         delete: {
             parameters: {
                 query?: {
@@ -13779,7 +13906,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
          */
         get: {
             parameters: {
@@ -13804,6 +13931,8 @@ export interface paths {
                     offset?: number | null;
                     fields?: "full" | "slim" | "timeline";
                     includeTotal?: "true" | "false";
+                    /** @description all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way. */
+                    scope?: "all";
                 };
                 header?: never;
                 path?: never;
@@ -13828,7 +13957,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -13856,6 +13985,8 @@ export interface paths {
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -13876,7 +14007,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -13924,6 +14055,8 @@ export interface paths {
                         dependsOn?: string[];
                         offeredTo?: string;
                         dir?: string;
+                        /** @description A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400. */
+                        vcsRepo?: string;
                         parentTaskId?: string;
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
@@ -13956,7 +14089,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -14235,7 +14368,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
                     };
                 };
@@ -14760,7 +14893,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -14788,6 +14921,8 @@ export interface paths {
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                                profile?: string;
+                                resolvedProfile?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -14908,7 +15043,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark task as completed or failed (runner endpoint) */
+        /**
+         * Mark task as completed, failed, or skipped (runner endpoint)
+         * @description `skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -14922,7 +15060,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        status: "completed" | "failed";
+                        status: "completed" | "failed" | "skipped";
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
@@ -14951,7 +15089,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid status */
+                /** @description Invalid status, or a skip without a reason */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15036,6 +15174,31 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
+                                credentialAllowlist?: {
+                                    [key: string]: string[];
                                 };
                             })[];
                         };
@@ -15200,7 +15363,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -15215,7 +15378,9 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery";
+                        reason: "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback";
+                        /** @enum {string} */
+                        errorClass?: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
                     };
                 };
             };
@@ -15230,11 +15395,12 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                             /** @enum {string} */
-                            kind: "alreadyFinished" | "workflow-failed" | "resumed";
+                            kind: "alreadyFinished" | "workflow-failed" | "resumed" | "noFallback";
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
-                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            failureReason?: string | null;
                         };
                     };
                 };
@@ -16803,6 +16969,28 @@ export interface paths {
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
                                 };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
+                                };
                             } | {
                                 /** @enum {string} */
                                 type: "task_assigned";
@@ -16816,6 +17004,9 @@ export interface paths {
                                         mimeType?: string;
                                         sizeBytes?: number;
                                     }[];
+                                    credentialAllowlist?: {
+                                        [key: string]: string[];
+                                    };
                                 };
                                 requestedBy?: {
                                     id?: string;
@@ -16824,6 +17015,28 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                threadParticipants?: {
+                                    total: number;
+                                    more: number;
+                                    people: {
+                                        label: string;
+                                        /** @enum {string} */
+                                        trust: "internal" | "external" | "unknown";
+                                        starter?: boolean;
+                                        newest?: boolean;
+                                        asked?: boolean;
+                                        language?: string;
+                                        verbosity?: string;
+                                    }[];
+                                    starterProfile?: {
+                                        id?: string;
+                                        name: string;
+                                        email?: string;
+                                        role?: string;
+                                        notes?: string;
+                                        comms?: components["schemas"]["UserCommsPrefs"];
+                                    };
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
@@ -18006,6 +18219,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -18072,6 +18286,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -18135,6 +18350,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        profile?: string;
                         allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
@@ -18200,6 +18416,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -18322,6 +18539,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -18444,6 +18662,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -18515,6 +18734,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        profile?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -18577,6 +18797,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -18716,6 +18937,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        profile?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -18778,6 +19000,7 @@ export interface paths {
                             model?: string;
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
+                            profile?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -19219,7 +19442,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write a script run journal step */
+        /**
+         * Write a script run journal step
+         * @description Write-once per stepKey; a replay keeps the first journal entry and still answers 201.
+         */
         post: operations["script_runs_internal_step_create"];
         delete?: never;
         options?: never;
@@ -19888,6 +20114,669 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/savings/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimated automation savings per workflow or script
+         * @description What the workflows' or scripts' runs in the window would have cost as agent tasks, minus what they cost, read from the hourly savings rollup. With `workflowId` and `components=true`, also returns the workflow's components (child workflow runs, nested script runs and tasks its runs caused, recursively) priced as on their own rows, and `withComponents`, own runs plus those; lists and schedule reads reject `components=true`. `measuredUsd` is the measured spend and `estimatedLlmUsd` the LLM spend estimated where none was recorded; `actualUsd` is their sum scaled to the substituted share of runs, the estimate the saving subtracts. Modelled at the chosen tier, with an 80% range (p10 to p90). Pass `workflowId` for one workflow, `scriptName` for one script, or `kind=workflow` / `kind=script` for every workflow or script with runs. Scheduled scripts are priced as standalone agent tasks; other scripts as the extra turns they add to the calling agent's session. Scripts record no LLM spend, so their spend fields are 0. Pass `scheduleId` for one schedule, or `kind=schedule` for every schedule: a workflow or script target returns the target's row (`scope: target-job`, with `scheduleId`), because runs carry no schedule link, so schedules of one target show the same row, and `total` is null for schedule reads; an agent-task target returns a measured row (`basis` measured) with the recorded cost of its tasks and `savingUsd: null`. A disabled schedule is priced from its target's runs and flagged by `scheduleEnabled`. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    scheduleId?: string;
+                    kind?: "workflow" | "script" | "schedule";
+                    components?: "true" | "false";
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Savings rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            rows: ({
+                                /** @enum {string} */
+                                kind: "workflow" | "script-scheduled" | "script-agent-invoked";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "modelled";
+                                scheduleId?: string;
+                                scheduleName?: string;
+                                scheduleEnabled?: boolean;
+                                /** @enum {string} */
+                                scope?: "target-job";
+                                enabledOnlyRule: boolean;
+                                runs: number;
+                                substitutedRuns: number;
+                                effectRuns: number;
+                                enabledOnlyRuns: number;
+                                capApplied: boolean;
+                                opsPerRun: number;
+                                /** @description Measured spend of every run in the window: agent tasks, their reviews, recorded LLM cost. */
+                                measuredUsd: number;
+                                /** @description LLM spend estimated from tokens and output size, not measured. 0 when the runs recorded their LLM cost. */
+                                estimatedLlmUsd: number;
+                                /** @description Scaled estimate, not a measurement: `measuredUsd + estimatedLlmUsd` times `substitutedRuns / runs`. The saving subtracts this. */
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description Scaled estimate: measured hours times `substitutedRuns / runs`. Always 0 for scripts, which keep no agent active. */
+                                actualHours: number;
+                                agentOnlyHours: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                agentOnlyUsdPerRun: number;
+                            } | {
+                                /** @enum {string} */
+                                kind: "agent-task-schedule";
+                                scheduleId: string;
+                                scheduleName: string;
+                                scheduleEnabled: boolean;
+                                name: string;
+                                /** @enum {string} */
+                                basis: "measured";
+                                /** @description Agent tasks the schedule created in the window. */
+                                runs: number;
+                                /** @description Recorded cost of those tasks. A floor: review tasks and follow-ups are not linked to the schedule. */
+                                actualUsd: number;
+                                actualHours: number;
+                                savingUsd: null;
+                            })[];
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            components?: {
+                                /** @enum {string} */
+                                kind: "workflow" | "script" | "task";
+                                workflowId?: string;
+                                scriptName?: string;
+                                name: string;
+                                /** @enum {string} */
+                                linkKind: "sub-workflow" | "step-workflow" | "step-script" | "step-task" | "descendant-task";
+                                depth: number;
+                                /** @description Runs (tasks for a task component) in this tree. Fractional below the first level. */
+                                runs: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                /** @description True for unowned tasks: their spend is already in the workflow's own row, on both sides, and adds nothing to `withComponents`. */
+                                inOwnRow: boolean;
+                            }[];
+                            withComponents?: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Not exactly one of workflowId, scriptName, scheduleId and kind, `components=true` without workflowId, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow, script or schedule not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily automation savings of a workflow, a script or the fleet
+         * @description The p50 saving, measured spend, estimated LLM spend and scaled actual cost per UTC day of the window, from the hourly savings rollup. With `workflowId` or `scriptName` the points add up to the window figures of `GET /api/savings/jobs` for the same target; with neither they cover every workflow and script and add up to `GET /api/savings/summary`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    workflowId?: string;
+                    scriptName?: string;
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Daily savings points */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            points: {
+                                day: string;
+                                savingUsd: number;
+                                /** @description Scaled estimate: the day's measured and estimated spend times the window's substituted share. */
+                                actualUsd: number;
+                                /** @description The day's measured spend, not scaled. */
+                                measuredUsd: number;
+                                /** @description The day's LLM spend estimated from tokens and output size, not measured. */
+                                estimatedLlmUsd: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Both workflowId and scriptName, or an unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Workflow or script not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet automation savings
+         * @description What every workflow and script run in the window would have cost as agent tasks, minus what they cost, from the hourly savings rollup at the chosen tier, with the fleet's 80% range. Adds the swarm's measured session spend over the same window, the self-optimization ratio, the runs left out and the model's assumptions. `valid` is false until the rollup has computed every day of the window, and when there were no runs.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    days?: "7" | "30" | "90";
+                    tier?: "smol" | "regular" | "smart" | "ultra";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Fleet savings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @enum {string} */
+                            tier: "smol" | "regular" | "smart" | "ultra";
+                            calibrationModel: string;
+                            calibratedAt: string;
+                            /** @enum {string} */
+                            calibrationSource: "shipped" | "deployment";
+                            computedAt: string | null;
+                            valid: boolean;
+                            /** @enum {string|null} */
+                            reason: "not-computed" | "no-runs" | "target-missing" | null;
+                            /** @description The window is rolling, so its first UTC day is partial and its runs are scanned live. True when that scan could not run (too many runs, or a busy database) and the day's bucket was scaled to the part inside the window instead. */
+                            boundaryEstimated: boolean;
+                            total: {
+                                runs: number;
+                                substitutedRuns: number;
+                                enabledOnlyRuns: number;
+                                measuredUsd: number;
+                                estimatedLlmUsd: number;
+                                actualUsd: number;
+                                agentOnlyUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                savingUsd: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                                actualHours: number;
+                                hoursSaved: {
+                                    p10: number;
+                                    p50: number;
+                                    p90: number;
+                                };
+                            } | null;
+                            byKind: {
+                                workflows: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                scheduledScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                                agentInvokedScripts: {
+                                    jobs: number;
+                                    runs: number;
+                                    substitutedRuns: number;
+                                    /** @description p50 */
+                                    savingUsd: number;
+                                    /** @description p50 */
+                                    hoursSaved: number;
+                                };
+                            } | null;
+                            /** @description Measured session spend of the whole swarm in the window, as on the usage page. */
+                            fleetLlmUsd: number;
+                            /** @description `(fleetLlmUsd + savingUsd.p50) / fleetLlmUsd`: what the swarm would have spent without its automations, per dollar it spent. Null without spend or without a valid total. */
+                            selfOptimizationRatio: number | null;
+                            excluded: {
+                                /** @description Runs that are not substituted: router events and API runs with no effect, polls above the hourly cap, skipped and cancelled runs. */
+                                enabledOnlyRuns: number;
+                            } | null;
+                            assumptions: string[];
+                        };
+                    };
+                };
+                /** @description An unknown days or tier value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/savings/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The savings curve in use
+         * @description Which curve prices the savings endpoints: the one shipped with the release, or one derived from this deployment's sessions and stored by `POST /api/savings/calibration`. Reports the stored row's metadata (a malformed row is reported as invalid and ignored by the savings endpoints).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The active calibration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            source: "shipped" | "deployment";
+                            active: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                            };
+                            stored: {
+                                valid: boolean;
+                                updatedAt: string;
+                                calibratedAt?: string;
+                                model?: string;
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Derive the savings curve from this deployment's sessions
+         * @description Reads the window's opus sessions through the bounded query executor, derives the per-tier cost and hours curve, and compares it to the shipped one. Read-only unless `apply` is true, which also requires `config.write.any`: then the curve is stored in the global `SAVINGS_CURVE_CALIBRATION` config row and the savings endpoints use it within seconds. Nothing is stored when the data cannot support a curve or the derived mean cost is more than 3x or less than a third of the shipped one. One run at a time; a run past 120 s is abandoned with 504.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default 30 */
+                        days?: number;
+                        /**
+                         * Format: date-time
+                         * @description End of the window (ISO 8601); default now.
+                         */
+                        end?: string;
+                        /** @default false */
+                        apply?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description The derived curve, or why there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            window: {
+                                start: string;
+                                end: string;
+                                days: number;
+                            };
+                            /** @description Opus sessions of 1 to 61 turns used. */
+                            sessions: number;
+                            /** @description Why no curve was derived, or why a derived one was not applied. */
+                            refusals: string[];
+                            /** @description The derived curve; null when refused. */
+                            calibration: {
+                                calibratedAt: string;
+                                model: string;
+                                curve: {
+                                    smol: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    regular: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    smart: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                    ultra: {
+                                        usd: number[];
+                                        hrs: number[];
+                                    };
+                                };
+                                window?: {
+                                    start: string;
+                                    end: string;
+                                    sessions: number;
+                                };
+                            } | null;
+                            speed: {
+                                [key: string]: number;
+                            } | null;
+                            repriceMatch: number | null;
+                            /** @description Derived smart-tier mean cost over the shipped one. */
+                            meanRatio: number | null;
+                            gaps: {
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                /** @enum {string} */
+                                key: "usd" | "hrs";
+                                /** @description Median absolute deviation from the shipped curve, as a fraction. */
+                                median: number;
+                                max: number;
+                                /** @description Turn counts more than 5% from the shipped curve. */
+                                over5pct: number;
+                                points: number;
+                                /** @description Session-weighted mean of derived over shipped; 1 means the same price. */
+                                weighted: number;
+                            }[];
+                            applied: boolean;
+                        };
+                    };
+                };
+                /** @description Invalid days, end or apply */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description `apply` without permission to write config */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A session query ran past its time budget */
+                408: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Another calibration run is in progress */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The run passed its 120 s deadline */
+                504: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/tokens": {
         parameters: {
             query?: never;
@@ -20094,8 +20983,8 @@ export interface paths {
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
-                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. */
-                    scope?: "mine" | "shared" | "tree";
+                    /** @description mine: owned sessions. shared: sessions shared with me. tree: Sessions that GET /api/session-tree counts: mine plus shared with me, no ownerless roots. A bypass actor sees every root with tree scope. all: every user's sessions, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way, also for tree. */
+                    scope?: "mine" | "shared" | "tree" | "all";
                     /** @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged. */
                     show?: "mine" | "all";
                     /** @description Comma-separated root sources to leave out, e.g. `slack,chat`. Older sessions v2 clients send this; `showSource` replaces it. */
@@ -20127,7 +21016,7 @@ export interface paths {
                                     task: string;
                                     title?: string;
                                     /** @enum {string} */
-                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                     /**
                                      * @default mcp
                                      * @enum {string}
@@ -20166,7 +21055,7 @@ export interface paths {
                                 chainTaskCount: number;
                                 lastActivityAt: string;
                                 /** @enum {string} */
-                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                                 /** @enum {string} */
                                 readState?: "unread" | "read" | "later" | "done";
                                 snoozeUntil?: string | null;
@@ -20556,7 +21445,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner` */
+                /** @description Root task + chain (ordered by createdAt), plus the caller's `access` and the session `owner`. The chain also holds tasks a chain task dispatched (`dispatchedByTaskId`) that sit elsewhere: in the same session, or in another session the caller can read. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -22315,6 +23204,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A server with this name already exists in the same scope and owner (mcp_server_name_taken) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -22916,6 +23814,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -22980,6 +23879,7 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                profile?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -23296,11 +24196,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Atlassian OAuth consent screen */
+        /** Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23308,12 +24209,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Atlassian OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -23795,11 +24716,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Redirect to Linear OAuth consent screen */
+        /** Start the Linear OAuth flow (admin): redirect to the consent screen, or return its URL */
         get: {
             parameters: {
                 query?: {
                     redirect?: string;
+                    format?: "redirect" | "json";
                 };
                 header?: never;
                 path?: never;
@@ -23807,12 +24729,32 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Consent URL (format=json), for clients that navigate themselves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            authorizeUrl: string;
+                        };
+                    };
+                };
                 /** @description Redirect to Linear OAuth */
                 302: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller lacks oauth-authorization.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Failed to generate authorization URL */
                 500: {
@@ -24127,6 +25069,376 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/improvements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List product improvements
+         * @description Lists improvements newest first, with `enabled` for the `IMPROVEMENTS_ENABLED` switch: every pending and failed row, plus the newest 100 other rows. Pending and failed rows carry `leakHints` for the approver.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Improvements and the switch state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            improvements: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Draft a product improvement, or send one as a person
+         * @description Stores the text, scrubbed of known secrets, as `pending_approval`. An agent caller always gets a pending draft. A person (user token, or the shared key with no agent identity) may pass `sendNow: true` to approve and send in one call, unless scrubbing changed the text: then it stays pending so they can review it. `sendNow` needs a valid `email` (400 without one); a draft does not. Only `install_id` (always), `text` and `email` are sent to desplega.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        text: string;
+                        /** Format: email */
+                        email?: string;
+                        sendNow?: boolean;
+                        /** @enum {string} */
+                        source?: "ui" | "api";
+                    };
+                };
+            };
+            responses: {
+                /** @description A person's `sendNow` was approved and sent (see `status`) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Draft stored as `pending_approval` */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid text or email, or `sendNow` without an email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller may not draft improvements */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve and send a drafted improvement
+         * @description Only a person may approve: a user token, or the shared key with no agent identity (recorded as `operator`). `approvedBy` is taken from the credential, never the body. `email` is required and is sent with the text and the install id. The stored text is sent as is; to change it, discard and draft again. A failed send can be approved again. There is no automatic retry.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: email
+                         * @description The approver's email, sent with the text.
+                         */
+                        email: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Approved. `status` is `sent`, or `failed` with the proxy status and error. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Missing or invalid email */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is an agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent, sending or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/improvements/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a drafted improvement
+         * @description A person may discard any pending or failed improvement. An agent may discard only a draft it requested.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Discarded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            improvement: {
+                                id: string;
+                                text: string;
+                                email: string | null;
+                                /** @enum {string} */
+                                status: "pending_approval" | "sending" | "sent" | "failed" | "discarded";
+                                /** @enum {string} */
+                                source: "mcp" | "api" | "ui";
+                                requestedByAgentId: string | null;
+                                approvedBy: string | null;
+                                approvedAt: string | null;
+                                sentAt: string | null;
+                                proxyStatus: number | null;
+                                proxyId: string | null;
+                                proxyError: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Substrings that look install-specific (agent, repo, host, org or user email). Pending and failed rows only. They warn; they never block. */
+                                leakHints?: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Caller is an agent that did not request this draft */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already sent or discarded, or improvements are turned off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet-benchmark": {
         parameters: {
             query?: never;
@@ -24243,7 +25555,7 @@ export interface paths {
         get: operations["users_getRbacRoles"];
         /**
          * Set a user's RBAC roles
-         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin.
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
          */
         put: operations["users_setRbacRoles"];
         post?: never;
@@ -24285,6 +25597,7 @@ export interface paths {
                                 verbs: string[];
                                 roles: string[];
                             };
+                            sessionReadAll?: boolean;
                         };
                     };
                 };
@@ -24457,6 +25770,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description A user with this email already exists (user_exists) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -24600,6 +25922,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -24797,6 +26128,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
                     headers: {
@@ -24886,6 +26226,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25046,6 +26395,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -25500,6 +26858,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Target or source user not found */
                 404: {
                     headers: {
@@ -25637,7 +27004,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error or PK collision */
+                /** @description Validation error */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -25655,8 +27022,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Target holds an operator-granted role (auditor) and the caller is not the operator key */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description User not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The (kind, externalId) identity is already linked (identity_taken) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -27242,7 +28627,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry a failed workflow run */
+        /**
+         * Retry a failed workflow run
+         * @description Retries on the definition the run started with; to use an edited workflow, trigger a new run.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -27268,6 +28656,15 @@ export interface paths {
                 };
                 /** @description Cannot retry */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Run not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -27855,7 +29252,7 @@ export interface components {
             task: string;
             title?: string;
             /** @enum {string} */
-            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
             /**
              * @default mcp
              * @enum {string}
@@ -27898,6 +29295,18 @@ export interface components {
             slackThreadTs?: string;
             slackTriggerMessageTs?: string;
             slackUserId?: string;
+            slackParticipants?: {
+                people: {
+                    slackUserId: string;
+                    userId?: string;
+                    /** @enum {string} */
+                    trust: "internal" | "external" | "unknown";
+                    starter?: boolean;
+                    newest?: boolean;
+                    asked?: boolean;
+                }[];
+                more: number;
+            };
             /** @default false */
             slackReplySent: boolean;
             slackProgressMessageTs?: string;
@@ -27919,6 +29328,7 @@ export interface components {
             mentionChannelId?: string;
             dir?: string;
             parentTaskId?: string;
+            dispatchedByTaskId?: string;
             claudeSessionId?: string;
             model?: string;
             /** @enum {string} */
@@ -27932,6 +29342,17 @@ export interface components {
             resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             profile?: string;
             resolvedProfile?: string;
+            fallbackHops?: {
+                from: string;
+                profile: string;
+                /** @enum {string} */
+                errorClass: "rate_limit" | "model_window" | "seat" | "credits" | "overloaded" | "server_error" | "auth" | "pool_empty";
+                at: string;
+                skipped?: {
+                    profile: string;
+                    reason: string;
+                }[];
+            }[];
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
@@ -28141,12 +29562,38 @@ export interface components {
                 type: "lucide";
                 icon: string;
                 color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
             };
             slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        ProfileCheckResult: {
+            agentId: string;
+            ok: boolean;
+            profiles: {
+                name: string;
+                ok: boolean;
+                checks: {
+                    /** @enum {string} */
+                    check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
+                    /** @enum {string} */
+                    state: "pass" | "warn" | "fail" | "unverified";
+                    detail?: string;
+                }[];
+            }[];
         };
         SwarmConfig: {
             /** Format: uuid */
@@ -28594,7 +30041,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";
@@ -28744,16 +30191,12 @@ export interface components {
             defaultBranch: string;
             /** @default true */
             autoClone: boolean;
-            hooks?: components["schemas"]["RepoHooks"];
+            hooks: components["schemas"]["RepoHooks"];
             guidelines?: components["schemas"]["RepoGuidelines"];
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /**
-         * @default {
-         *       "enabled": false
-         *     }
-         */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -32349,7 +33792,7 @@ export interface operations {
                     "application/json": {
                         taskId: string;
                         /** @enum {string} */
-                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
                     };
                 };
             };
@@ -33372,7 +34815,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Not allowed to change roles */
+            /** @description Not allowed to change roles, or adding an operator-only role with a user token */
             403: {
                 headers: {
                     [name: string]: unknown;

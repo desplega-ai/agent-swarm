@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   cancelTask,
@@ -28,7 +28,9 @@ import {
 import {
   codeLevelTriage,
   getBootEpochMs,
+  getBootTriageFindings,
   getRebootAffectedTasks,
+  parseHeartbeatIntervalMs,
   preflightGate,
   runHeartbeatSweep,
   runRebootSweep,
@@ -386,6 +388,61 @@ describe("Heartbeat Triage", () => {
       // Task should NOT be failed
       const updated = await getTaskById(task.id);
       expect(updated?.status).toBe("in_progress");
+    });
+
+    describe("HEARTBEAT_STALL_THRESHOLD_MIN", () => {
+      const originalThreshold = process.env.HEARTBEAT_STALL_THRESHOLD_MIN;
+
+      afterAll(() => {
+        if (originalThreshold === undefined) delete process.env.HEARTBEAT_STALL_THRESHOLD_MIN;
+        else process.env.HEARTBEAT_STALL_THRESHOLD_MIN = originalThreshold;
+      });
+
+      /** In-progress task with a fresh worker session, last updated `ageMin` minutes ago. */
+      async function taskWithFreshSession(ageMin: number) {
+        const agent = await createAgent({ name: "alive-worker", isLead: false, status: "busy" });
+        const task = await createTaskExtended(`Task updated ${ageMin} min ago`, {
+          agentId: agent.id,
+        });
+        await startTask(task.id);
+        await insertActiveSession({
+          agentId: agent.id,
+          taskId: task.id,
+          triggerType: "task_assigned",
+        });
+        const updatedAt = new Date(Date.now() - ageMin * 60 * 1000).toISOString();
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          updatedAt,
+          task.id,
+        ]);
+        return task;
+      }
+
+      for (const invalid of ["-1", "0", "NaN", "Infinity", "-Infinity", "1.5"]) {
+        test(`falls back to 30 minutes when set to ${invalid}`, async () => {
+          process.env.HEARTBEAT_STALL_THRESHOLD_MIN = invalid;
+          // 10 min: past the 5 min candidate scan, well inside the 30 min default.
+          const recent = await taskWithFreshSession(10);
+          const stalled = await taskWithFreshSession(45);
+
+          const findings = await codeLevelTriage();
+
+          expect(findings.stalledTasks.map((t) => t.id)).toEqual([stalled.id]);
+          expect((await getTaskById(recent.id))?.status).toBe("in_progress");
+          expect((await getBootTriageFindings()).stalled).toBe(1);
+        });
+      }
+
+      test("keeps a positive configured threshold", async () => {
+        process.env.HEARTBEAT_STALL_THRESHOLD_MIN = "10";
+        await taskWithFreshSession(7);
+        const stalled = await taskWithFreshSession(15);
+
+        const findings = await codeLevelTriage();
+
+        expect(findings.stalledTasks.map((t) => t.id)).toEqual([stalled.id]);
+        expect((await getBootTriageFindings()).stalled).toBe(1);
+      });
     });
 
     test("auto-assigns pool tasks to idle workers", async () => {
@@ -1482,6 +1539,32 @@ describe("Heartbeat Triage", () => {
       stopHeartbeat();
       // Should not throw when called again
       stopHeartbeat();
+    });
+
+    test("HEARTBEAT_INTERVAL_MS falls back to 90s unless it is a positive integer", () => {
+      for (const raw of ["Infinity", "-Infinity", "NaN", "0", "-5", "1.5", ""]) {
+        expect(parseHeartbeatIntervalMs(raw)).toBe(90_000);
+      }
+      expect(parseHeartbeatIntervalMs(undefined)).toBe(90_000);
+      expect(parseHeartbeatIntervalMs("1500")).toBe(1500);
+    });
+
+    test("startHeartbeat schedules the sanitized env interval", () => {
+      const previous = process.env.HEARTBEAT_INTERVAL_MS;
+      const log = spyOn(console, "log");
+      try {
+        process.env.HEARTBEAT_INTERVAL_MS = "Infinity";
+        startHeartbeat();
+        const started = log.mock.calls.some((call) =>
+          String(call[0]).includes("Starting with 90000ms"),
+        );
+        expect(started).toBe(true);
+      } finally {
+        stopHeartbeat();
+        log.mockRestore();
+        if (previous === undefined) delete process.env.HEARTBEAT_INTERVAL_MS;
+        else process.env.HEARTBEAT_INTERVAL_MS = previous;
+      }
     });
   });
 });

@@ -284,7 +284,53 @@ describe("fetchResolvedEnv", () => {
           true,
         ),
       ).toBeNull();
-      expect(requestedNames.every((name) => name === "fixture")).toBe(true);
+      // A name miss falls back to the unfiltered list (no `name`); every filtered call is normalized.
+      expect(
+        requestedNames.filter((name) => name !== null).every((name) => name === "fixture"),
+      ).toBe(true);
+    } finally {
+      api.stop(true);
+    }
+  });
+
+  test("finds a repo registered under a display name by its URL", async () => {
+    // `frontend` is acme/web; `web` is an unrelated repo that wins the name lookup.
+    const frontend = {
+      id: crypto.randomUUID(),
+      url: "https://github.com/acme/web.git",
+      name: "frontend",
+    };
+    const web = {
+      id: crypto.randomUUID(),
+      url: "https://github.com/other/service.git",
+      name: "web",
+    };
+    const gitlab = {
+      id: crypto.randomUUID(),
+      url: "https://gitlab.com/acme/web.git",
+      name: "web-gitlab",
+    };
+    const repos = [frontend, gitlab, web];
+    const api = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const name = new URL(req.url).searchParams.get("name");
+        return Response.json({ repos: repos.filter((r) => name === null || r.name === name) });
+      },
+    });
+    try {
+      for (const exact of [true, false]) {
+        const find = async (vcsRepo: string) =>
+          (await fetchRepoConfig(api.url.toString(), "k", vcsRepo, exact))?.id;
+        // A stored repo URL picks its own host, never the same-named `web` row.
+        expect(await find("https://github.com/acme/web")).toBe(frontend.id);
+        expect(await find("https://gitlab.com/acme/web")).toBe(gitlab.id);
+        // Existing shorthand references keep resolving.
+        expect(await find("other/service")).toBe(web.id);
+      }
+      expect(
+        await fetchRepoConfig(api.url.toString(), "k", "https://example.com/acme/web", true),
+      ).toBeNull();
     } finally {
       api.stop(true);
     }

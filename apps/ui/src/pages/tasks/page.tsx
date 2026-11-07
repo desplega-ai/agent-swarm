@@ -8,6 +8,7 @@ import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask } from "@/api/types";
+import { AllUsersToggle } from "@/components/shared/all-users-toggle";
 import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListPager } from "@/components/shared/list-pager";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
@@ -209,6 +210,7 @@ export default function TasksPage() {
       ...(data.dependsOn.length > 0 && { dependsOn: data.dependsOn }),
       ...(data.modelTier && { modelTier: data.modelTier }),
       ...(data.effort && { effort: data.effort }),
+      ...(data.vcsRepo && { vcsRepo: data.vcsRepo }),
       // Phase 3: attribute the task to the current identity. `source` is left
       // unset so the server's "api" default applies.
       ...(currentUserId && { requestedByUserId: currentUserId }),
@@ -315,6 +317,7 @@ export default function TasksPage() {
                 { value: "failed", label: "Failed" },
                 { value: "cancelled", label: "Cancelled" },
                 { value: "superseded", label: "Superseded" },
+                { value: "skipped", label: "Skipped" },
               ]}
             />
           </FilterField>
@@ -388,6 +391,7 @@ export default function TasksPage() {
           </Button>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <AllUsersToggle />
           {isMobile ? null : (
             <fieldset
               className="m-0 flex items-center rounded-md border p-0"

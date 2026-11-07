@@ -26,13 +26,18 @@
  * re-included on every save (wholesale replace!), and clearing it back to
  * "App default" sends an explicit `$theme: null` — the only nullable value
  * the server accepts, because a schema-less app 400s an empty body.
+ *
+ * The ICON section is the exception: it edits the app itself (`definition.icon`
+ * via `PATCH /api/apps/:id`, `app.manage`), so everyone sees it. It saves on
+ * its own buttons, not the footer Save.
  */
 
-import { AlertCircle, Settings2 } from "lucide-react";
+import { AlertCircle, LayoutGrid, Settings2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AppApiError } from "@/api/client";
-import { useAppUserConfig, useSaveAppUserConfig } from "@/api/hooks/use-apps";
-import type { AppUserConfigField, AppUserConfigValue } from "@/api/types";
+import { useAppUserConfig, usePatchApp, useSaveAppUserConfig } from "@/api/hooks/use-apps";
+import type { AppIcon, AppUserConfigField, AppUserConfigValue } from "@/api/types";
+import { MediaIconField } from "@/components/shared/media-icon-field";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,6 +144,8 @@ export interface AppSettingsDrawerProps {
   appName: string;
   /** The definition's own `theme`, for the "App default" option label. */
   appDefaultTheme?: string;
+  /** The app's stored icon (`definition.icon`), edited by the Icon section. */
+  appIcon?: AppIcon | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -147,11 +154,13 @@ export function AppSettingsDrawer({
   appId,
   appName,
   appDefaultTheme,
+  appIcon,
   open,
   onOpenChange,
 }: AppSettingsDrawerProps) {
   const { data, isLoading, error: loadError } = useAppUserConfig(appId, { enabled: open });
   const save = useSaveAppUserConfig(appId);
+  const patchApp = usePatchApp(appId);
   // `null` = "follow the server". Set on the first edit and dropped again on
   // close / successful save, so a reopened drawer always shows stored truth
   // without an effect re-seeding it.
@@ -234,8 +243,8 @@ export function AppSettingsDrawer({
         <SheetHeader className="border-b border-border pr-12">
           <SheetTitle className="text-sm font-medium">Settings</SheetTitle>
           <SheetDescription className="text-xs">
-            Your own preferences for {appName}. Only you see them, and they survive a definition
-            rollback.
+            The icon of {appName}, and your own preferences for it. Only you see the preferences,
+            and they survive a definition rollback.
           </SheetDescription>
         </SheetHeader>
 
@@ -250,6 +259,19 @@ export function AppSettingsDrawer({
               {generalError}
             </AlertCallout>
           )}
+          {/* Icon: app-wide (PATCH, app.manage), saved on its own buttons, not the footer Save. */}
+          <SettingsRow label="Icon" helper="Everyone sees the app with this icon.">
+            <MediaIconField
+              value={appIcon}
+              fallback={LayoutGrid}
+              uploadPrefix={`/apps/${appId}/icon`}
+              onSave={async (icon) => {
+                // A merge patch: `null` removes the icon, an object replaces it whole.
+                await patchApp.mutateAsync({ definition: { icon } });
+              }}
+            />
+          </SettingsRow>
+
           {isLoading && !data && <p className="text-xs text-muted-foreground">Loading…</p>}
 
           {/* Appearance — offered on every app; rides the reserved $theme key. */}

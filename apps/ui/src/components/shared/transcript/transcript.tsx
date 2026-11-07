@@ -156,7 +156,11 @@ export interface TranscriptProps {
   fold?: TranscriptFold | null;
   /** When the live run started: the "Working for" timer counts from it. */
   workingSince?: string;
-  /** Shown while a live run has no rows yet ("Thinking…"). */
+  /**
+   * Shown while a live run has no rows yet ("Thinking…"), and, until it
+   * starts working (no `workingSince`), under its rows too: a queued task's
+   * lifecycle rows ("Created") do not say it is still waiting.
+   */
   waitingLabel?: string;
   /** The page's scroller: a live run follows its bottom, with a "Jump to latest" button. */
   scroller?: HTMLElement | null;
@@ -219,7 +223,7 @@ export function Transcript({
       {later?.map((row) => (
         <TranscriptRowView key={row.id} row={row} live={false} />
       ))}
-      {running && rows.length === 0 && waitingLabel ? (
+      {running && waitingLabel && (rows.length === 0 || !workingSince) ? (
         <Trace aria-live="polite">
           <div>
             <TraceLine status="running" className="text-xs">
@@ -375,6 +379,7 @@ const RESUME_REASONS: Record<string, string> = {
   context_limits: "a full context window",
   manual_supersede: "a manual restart",
   crash_recovery: "a crash",
+  provider_fallback: "a provider error",
 };
 
 function resumeLabel(tags: readonly string[] | undefined): string {

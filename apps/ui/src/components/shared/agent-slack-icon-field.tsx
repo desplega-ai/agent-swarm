@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSlackAppIcon } from "@/api/hooks/use-integrations-meta";
 import type { Agent, AgentSlackIcon } from "@/api/types";
+import { ImageWithFallback } from "@/components/shared/image-with-fallback";
 import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,8 +41,6 @@ function SlackIconPreview({
   appIconUrl: string | null | undefined;
   onBrokenImage: () => void;
 }) {
-  // An app avatar that fails to load falls back to the badge.
-  const [failedAppSrc, setFailedAppSrc] = useState<string | null>(null);
   if (icon.type === "emoji") {
     const glyph = slackEmojiGlyph(icon.emoji);
     if (glyph) {
@@ -62,20 +61,28 @@ function SlackIconPreview({
       </Tooltip>
     );
   }
-  const src = icon.type === "url" ? icon.url : appIconUrl;
-  if (!src || (icon.type === "app" && src === failedAppSrc)) {
+  const badge = (
+    <Badge variant="outline" size="tag">
+      Slack app
+    </Badge>
+  );
+  // A broken link is the caller's to report; an app avatar that fails to load falls back to the badge.
+  if (icon.type === "url") {
     return (
-      <Badge variant="outline" size="tag">
-        Slack app
-      </Badge>
+      <ImageWithFallback
+        src={icon.url}
+        alt=""
+        fallback={badge}
+        onError={onBrokenImage}
+        className="size-5 rounded-sm object-cover"
+      />
     );
   }
   return (
-    <img
-      src={src}
-      alt={icon.type === "app" ? "Slack app icon" : ""}
-      referrerPolicy="no-referrer"
-      onError={icon.type === "url" ? onBrokenImage : () => setFailedAppSrc(src)}
+    <ImageWithFallback
+      src={appIconUrl}
+      alt="Slack app icon"
+      fallback={badge}
       className="size-5 rounded-sm object-cover"
     />
   );

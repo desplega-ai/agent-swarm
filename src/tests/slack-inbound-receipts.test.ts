@@ -42,6 +42,11 @@ import {
   resetSlackInboundCountersForTests,
   slackInboundOutcomeMiddleware,
 } from "../slack/inbound-dispatch";
+import {
+  getSlackWorkspaceIdentity,
+  resetSlackWorkspaceGuardForTests,
+  setSlackWorkspaceIdentitySource,
+} from "../slack/workspace-guard";
 
 const TEST_DB_PATH = "./test-slack-inbound-receipts.sqlite";
 const testGlobals = globalThis as typeof globalThis & {
@@ -68,7 +73,14 @@ let channelMessage: Handler;
 let followUpSubmit: Handler;
 const resolveSlackUserIdSpy = spyOn(slackEnrichModule, "resolveSlackUserId");
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The workspace guard fails closed without this swarm's identity.
+  setSlackWorkspaceIdentitySource(async () => ({
+    teamId: "T_TEST",
+    enterpriseId: null,
+    isEnterpriseInstall: false,
+  }));
+  await getSlackWorkspaceIdentity();
   closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
@@ -91,6 +103,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  resetSlackWorkspaceGuardForTests();
   resolveSlackUserIdSpy.mockRestore();
   for (const [key, value] of Object.entries(previousEnv)) {
     if (value === undefined) delete process.env[key];
@@ -135,12 +148,18 @@ function messageEnvelope(eventId: string, ts: string, text = "<@U_SWARM_BOT> ple
   };
 }
 
+/** A delivery for the swarm's own workspace (see the identity set in beforeAll). */
+const OWN_BODY = {
+  type: "event_callback",
+  authorizations: [{ team_id: "T_TEST", enterprise_id: null, is_enterprise_install: false }],
+};
+
 /** Mirrors Bolt: the global outcome middleware wraps the listener; Bolt's
  * error handler swallows what the middleware rethrows. */
 async function runThroughBolt(listener: () => Promise<void>): Promise<void> {
   const middleware = slackInboundOutcomeMiddleware();
   try {
-    await middleware({ next: listener } as unknown as AnyMiddlewareArgs & {
+    await middleware({ next: listener, body: OWN_BODY } as unknown as AnyMiddlewareArgs & {
       next: () => Promise<void>;
     });
   } catch {
@@ -687,6 +706,7 @@ describe("Socket Mode ingress is unchanged", () => {
     const boom = new Error("listener exploded");
     await expect(
       middleware({
+        body: OWN_BODY,
         next: async () => {
           noteSlackInboundSideEffect("task_created");
           throw boom;

@@ -744,6 +744,48 @@ describe("real server shapes", () => {
   });
 });
 
+describe("delegations sit under the turn that dispatched them", () => {
+  // A Slack thread: each lead turn sends the researcher a continuation of its
+  // previous task (parentTaskId = that task), and the third turn also sends a
+  // coder. parentTaskId alone puts every researcher task in the first turn.
+  const worker = (id: string, ago: number, agentId: string, taskType: string) =>
+    task({ id, createdAt: at(ago), agentId, isLeadTask: false, taskType });
+  const chain = [
+    task({ id: "t1", createdAt: at(60), source: "slack", requestedByUserId: "taras" }),
+    { ...worker("r1", 59, "researcher", "research"), parentTaskId: "t1", dispatchedByTaskId: "t1" },
+    task({ id: "t2", createdAt: at(40), source: "slack", parentTaskId: "t1" }),
+    { ...worker("r2", 39, "researcher", "research"), parentTaskId: "r1", dispatchedByTaskId: "t2" },
+    task({ id: "t3", createdAt: at(20), source: "slack", parentTaskId: "t2" }),
+    { ...worker("r3", 19, "researcher", "research"), parentTaskId: "r2", dispatchedByTaskId: "t3" },
+    { ...worker("c3", 18, "coder", "implement"), parentTaskId: "t3", dispatchedByTaskId: "t3" },
+  ];
+
+  test("each turn shows the work it sent, continuations included", () => {
+    const model = buildTurns(chain);
+    expect(model.turns.map((turn) => stepShape(turn.parts[0]))).toEqual([
+      ["researcher:research:1"],
+      ["researcher:research:1"],
+      ["researcher:research:1", "coder:implement:1"],
+    ]);
+    expect(placedIds(model).length).toBe(chain.length);
+  });
+
+  test("rows without the column, or with a dispatcher outside the chain, follow parentTaskId", () => {
+    const old = chain.map(({ dispatchedByTaskId: _drop, ...t }) => t as AgentTask);
+    expect(buildTurns(old).turns.map((turn) => stepShape(turn.parts[0]))).toEqual([
+      ["researcher:research:1", "researcher:research:1", "researcher:research:1"],
+      [],
+      ["coder:implement:1"],
+    ]);
+    const foreign = chain.map((t) =>
+      t.dispatchedByTaskId ? { ...t, dispatchedByTaskId: "elsewhere" } : t,
+    );
+    expect(buildTurns(foreign).turns.map((turn) => stepShape(turn.parts[0]))).toEqual(
+      buildTurns(old).turns.map((turn) => stepShape(turn.parts[0])),
+    );
+  });
+});
+
 describe("approvalsByPart", () => {
   test("an approval sits in the part that asked, also when a handoff asked", () => {
     const { turns } = buildTurns(SB1);
@@ -883,5 +925,36 @@ describe("deferrals", () => {
     const json = task({ id: "j", output: '{"status":"pending","pr":12}', ...deferred });
     expect(isDeferral(json)).toBe(false);
     expect(isDeferral(task({ id: "k", output: waiting("Lead", "15:03"), ...deferred }))).toBe(true);
+  });
+});
+
+describe("personText (an app page's messages)", () => {
+  // An app page sends each message as an `api` task whose prompt carries it.
+  const appTask = (id: string, createdAt: string, message: string, parentTaskId?: string) =>
+    task({ id, createdAt, source: "api", task: `prompt\n[msg] ${message}`, parentTaskId });
+  const personText = (t: AgentTask) =>
+    t.source === "api" ? (/^\[msg\] (.*)$/m.exec(t.task)?.[1] ?? null) : null;
+
+  test("without it, api tasks never open a turn", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain);
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(turns[0]?.person).toBeUndefined();
+  });
+
+  test("a task it names opens a turn, the root included", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.person?.id)).toEqual(["a", "b"]);
+  });
+
+  test("a task it returns null for keeps the source rules", () => {
+    const chain = [
+      appTask("a", at(10), "hi"),
+      task({ id: "w", createdAt: at(8), parentTaskId: "a", agentId: "worker", isLeadTask: false }),
+    ];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(partSteps(turns[0]!.parts[0]!).map((step) => step.tries[0]?.id)).toEqual(["w"]);
   });
 });

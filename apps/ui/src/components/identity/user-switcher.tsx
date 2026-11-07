@@ -36,7 +36,7 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { cn } from "@/lib/utils";
 
-function userInitials(name: string): string {
+export function userInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return (name.slice(0, 2) || "?").toUpperCase();

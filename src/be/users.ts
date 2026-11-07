@@ -41,6 +41,11 @@ import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 export type IdentityActor = {
   kind: "system" | "operator" | "user";
   id: string;
+  /**
+   * For a user actor: the `user_tokens` row the request authenticated with.
+   * Unset for a page session. Not recorded in events.
+   */
+  tokenId?: string;
 };
 
 function actorString(actor: IdentityActor): string {
@@ -213,15 +218,17 @@ function rowToEvent(row: IdentityEventRow): IdentityEvent {
 }
 
 /**
- * Paginated event timeline for a user. `limit` is hard-capped at 200; `before`
- * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
- * passing back the last event's `createdAt`.
+ * Paginated event timeline for a user. `limit` is hard-capped at 200 and a
+ * limit of 0 returns no events (negatives clamp to 0); `before` is a cursor on
+ * `createdAt` (ISO string) so the caller can keep paging by passing back the
+ * last event's `createdAt`.
  */
 export async function listUserEvents(
   userId: string,
   opts: { limit?: number; before?: string } = {},
 ): Promise<IdentityEvent[]> {
-  const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+  const limit = Math.max(0, Math.min(opts.limit ?? 50, 200));
+  if (limit === 0) return [];
   const before = opts.before;
   const client = getDbClient();
   if (before) {
@@ -514,11 +521,50 @@ export async function revokeToken(tokenId: string, actor: IdentityActor): Promis
 }
 
 /**
+ * Revoke every live MCP token of a user and spend every unspent connector and
+ * invite code for it, with one `token_revoked` event per token. Joins the
+ * caller's transaction when there is one.
+ */
+export async function revokeAllUserCredentials(
+  userId: string,
+  actor: IdentityActor,
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    const now = new Date().toISOString();
+    const live = await tx.query<{ id: string; label: string | null; tokenPreview: string }>(
+      "SELECT id, label, tokenPreview FROM user_tokens WHERE userId = ? AND revokedAt IS NULL",
+      [userId],
+    );
+    for (const token of live) {
+      await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [now, token.id]);
+      await recordIdentityEvent(
+        userId,
+        "token_revoked",
+        actor,
+        { tokenId: token.id, label: token.label, preview: token.tokenPreview },
+        null,
+      );
+    }
+    await tx.run("UPDATE connector_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL", [
+      now,
+      userId,
+    ]);
+  });
+}
+
+/**
  * Resolve a plaintext token to its owning user. Returns null if the token
  * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
  * People page can surface "last seen".
  */
 export async function resolveUserByToken(plaintext: string): Promise<User | null> {
+  return (await resolveUserToken(plaintext))?.user ?? null;
+}
+
+/** Like `resolveUserByToken`, plus the id of the `user_tokens` row that matched. */
+export async function resolveUserToken(
+  plaintext: string,
+): Promise<{ user: User | null; tokenId: string } | null> {
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
 
@@ -539,7 +585,20 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
     // Never let a `lastUsedAt` update failure leak to the caller.
   }
 
-  return findUserById(row.userId);
+  return { user: await findUserById(row.userId), tokenId: row.id };
+}
+
+/**
+ * Whether `tokenId` is an unrevoked token of `userId`. Run it inside the
+ * write transaction it guards: `setUserRoles` revokes tokens under the same
+ * write lock.
+ */
+export async function isLiveUserToken(tokenId: string, userId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    "SELECT 1 AS found FROM user_tokens WHERE id = ? AND userId = ? AND revokedAt IS NULL",
+    [tokenId, userId],
+  );
+  return row != null;
 }
 
 // ---------------------------------------------------------------------------
@@ -628,8 +687,28 @@ export async function mintRuntimeToken(
 export async function mintScriptRunToken(
   agentId: string,
   ttlMs: number,
+  provenance: { sourceStepId?: string; sourceScriptRunId?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
-  return await insertSessionToken(agentId, null, null, ttlMs, null, undefined, null, null, true);
+  const token = await insertSessionToken(
+    agentId,
+    null,
+    null,
+    ttlMs,
+    null,
+    undefined,
+    null,
+    null,
+    true,
+  );
+  // Recorded before the plaintext leaves this function, so no request can
+  // present the token without its provenance.
+  if (provenance.sourceStepId || provenance.sourceScriptRunId) {
+    await getDbClient().run(
+      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ? WHERE id = ?",
+      [provenance.sourceStepId ?? null, provenance.sourceScriptRunId ?? null, token.tokenId],
+    );
+  }
+  return token;
 }
 
 /** Whether a session token was minted by `mintScriptRunToken`. */
@@ -897,6 +976,8 @@ export async function resolveSessionToken(
       taskId: string | null;
       runtimeId: string | null;
       expiresAt: string;
+      sourceStepId?: string | null;
+      sourceScriptRunId?: string | null;
     }
   | null
 > {
@@ -913,9 +994,11 @@ export async function resolveSessionToken(
     placement: string | null;
     expiresAt: string;
     revokedAt: string | null;
+    sourceStepId: string | null;
+    sourceScriptRunId: string | null;
   }>(
     `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
      WHERE s.tokenHash = ?`,
     [hash],
   );
@@ -952,6 +1035,9 @@ export async function resolveSessionToken(
     taskId: row.taskId,
     runtimeId: row.runtimeId,
     expiresAt: row.expiresAt,
+    ...(row.sourceStepId || row.sourceScriptRunId
+      ? { sourceStepId: row.sourceStepId, sourceScriptRunId: row.sourceScriptRunId }
+      : {}),
   };
 }
 

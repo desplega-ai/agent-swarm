@@ -89,7 +89,10 @@ export class SwarmScriptExecutor extends BaseExecutor<
       };
     }
 
-    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getRunWorkflow({
+      id: meta.runId,
+      workflowId: meta.workflowId,
+    });
     // Never `trigger.agentId`: trigger data is caller-supplied, so reading the
     // principal from it let any agent run a creator-less workflow's scripts as
     // the lead. The run row carries the server-stamped starting agent.
@@ -126,25 +129,29 @@ export class SwarmScriptExecutor extends BaseExecutor<
     const credentials = await buildScriptCredentialBindingsWithFailures({
       agentId: agentId ?? undefined,
     });
-    const output = await runScriptWithRunCredential({
-      source: resolved.source,
-      args: config.args,
-      fsMode: "none",
-      executor: resolved.script.executor,
-      agentId: agentId ?? "workflow",
-      mcpBaseUrl: getMcpBaseUrl(),
-      egressSecrets: credentials.egressSecrets,
-      failedBindings: credentials.failedBindings,
-      userConfig: credentials.userConfig,
-      agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
-      timeoutMs: config.timeoutMs,
-      // The step watchdog aborts this when the node budget runs out, which
-      // kills the script process: a step reported as timed out must not go
-      // on to perform the script's side effects.
-      signal: meta.signal,
-    });
+    const output = await runScriptWithRunCredential(
+      {
+        source: resolved.source,
+        args: config.args,
+        fsMode: "none",
+        executor: resolved.script.executor,
+        agentId: agentId ?? "workflow",
+        mcpBaseUrl: getMcpBaseUrl(),
+        egressSecrets: credentials.egressSecrets,
+        failedBindings: credentials.failedBindings,
+        userConfig: credentials.userConfig,
+        agentFs: credentials.agentFs,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
+        timeoutMs: config.timeoutMs,
+        // The step watchdog aborts this when the node budget runs out, which
+        // kills the script process: a step reported as timed out must not go
+        // on to perform the script's side effects.
+        signal: meta.signal,
+      },
+      // Rows the script creates through its token point back at this step.
+      { sourceStepId: meta.stepId },
+    );
     if (output.exitCode === 0 && !output.error && !output.runtimeError) {
       await touchScratchScriptLastUsed(resolved.script.id);
     } else if (resolved.script.isScratch && runStartTouch) {

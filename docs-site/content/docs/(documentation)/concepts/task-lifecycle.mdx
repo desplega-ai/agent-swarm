@@ -36,6 +36,7 @@ stateDiagram-v2
 | `completed` | Task finished successfully |
 | `failed` | Task could not be completed |
 | `cancelled` | Task was cancelled by the lead or creator |
+| `skipped` | The agent decided the work was not its to handle, such as a Slack thread message addressed to someone else. Set with `store-progress` status `skipped` and a one-line `failureReason`. Posts nothing to Slack and creates no lead follow-up. |
 
 ## Task Creation
 
@@ -91,7 +92,7 @@ send-task(
 )
 ```
 
-A task with dependencies won't be offered or claimable until all dependencies are completed. If an upstream task fails, is cancelled, or is superseded, its dependents are now cascade-failed with a descriptive reason instead of staying blocked forever.
+A task with dependencies won't be offered or claimable until all dependencies are completed or skipped. If an upstream task fails, is cancelled, or is superseded, its dependents are now cascade-failed with a descriptive reason instead of staying blocked forever.
 
 ## Task Properties
 
@@ -103,9 +104,11 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
 | `dependsOn` | Array of task IDs that must complete first; non-success terminal parents cascade-fail their dependents |
 | `parentTaskId` | For follow-up continuity — child tasks inherit a bounded prior-task context preamble rebuilt from the task chain, so continuity survives restarts and works the same across every harness |
+| `outputSchema` | Optional JSON Schema the final `output` must match. An empty schema (`{}`) means no schema: the task runs free-text and does not inherit the parent's schema |
 | `followUpConfig` | Optional control over the lead follow-up created when this task completes or fails. Useful for long-running flows that need custom completion instructions or no follow-up at all |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
-| `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
+| `model` | Concrete provider-specific model override. Wins over `modelTier` when both are present. |
+| `modelTier` | Portable model intent: `smol`, `regular`, `smart`, `ultra`. Without either override, the assignee uses its harness-specific default. See the [model-tier reference](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/model-tiers.md) for resolution precedence and defaults. |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
 | `contextKey` | Uniform ingress-scoped key populated automatically at every ingress site. See [Context Keys](#context-keys) below |
 | `requiredCapabilities` | Optional (`send-task`/`task-action create`) — capabilities a candidate agent must have for task routing. See [Routing Affinity](#routing-affinity) below |
@@ -161,6 +164,24 @@ For automatic or recurring tasks (schedules, heartbeat, monitors, digests), comp
 
 For longer waits, use [defer-task](/docs/concepts/scheduling#deferring-until-another-task-finishes) to complete the current task and book a continuation. Delegated tasks create a lead follow-up on completion or failure by default. A settlement that wakes a `defer-task` wait for the same agent skips that follow-up; see [scheduling](/docs/concepts/scheduling#deferring-until-another-task-finishes). The default lead prompt reserves inline polling for essential results expected within about a minute; that path sets `followUpConfig.disabled: true` to avoid an extra follow-up and defers if the wait runs longer.
 
+### Chained completions
+
+Some flows hand a result straight to a new task. A reviewer that requests changes, for example, creates the fix task itself. The lead follow-up for that review only confirms a chain that already runs. To skip it, complete with `chainedTaskId` set to the child task:
+
+```
+store-progress(taskId: "...", status: "completed", output: "CHAINED: fix task ...", chainedTaskId: "<child task id>")
+```
+
+The engine accepts the handoff only when the child:
+
+- exists and has the completing task as its `parentTaskId`;
+- was created by the agent that completes the task;
+- is live: `pending`, `offered`, `reviewing`, `in_progress` or `paused`.
+
+When it is accepted, no lead follow-up is created and nothing is posted for one. The completing task gets a `task_follow_up_suppressed` log entry with reason `chained_task_live` and the child's id, so the task tree and audits still show the handoff. The creator's `followUpConfig.onCompleted` text is not delivered; the entry records `droppedOnCompleted: true` when it existed.
+
+When any check fails, the normal follow-up is created and names the rejected id and the reason. It is created even when the completion wakes a `defer-task` wait for the lead, because the wake-up task does not carry the rejection. The completion itself never fails because of `chainedTaskId`. The field is ignored for `failed`, `cancelled` and `skipped`: a failure always wakes the lead. `followUpConfig.disabled` still wins: a disabled follow-up stays disabled.
+
 ### Terminal result consistency
 
 Task results use first-call-wins semantics across both `store-progress` and `POST /api/tasks/{id}/finish`. An identical repeat is treated as an idempotent no-op. A later write that would change `output` or `failureReason` is rejected instead of silently reporting success (`store-progress` returns an error result and the REST finish endpoint returns HTTP 409), which makes competing agent and runner results visible while preserving the original `finishedAt` and completion side effects.
@@ -190,7 +211,7 @@ Stalled task detection uses the heartbeat's code-level triage: if a task has bee
 
 When the heartbeat classifies a task as crashed (its worker has gone unresponsive), or when a worker is paused during graceful shutdown and needs a follow-up resume, the recovery task is **pinned back to the original agent** instead of being released to the role-blind unassigned pool. Agent IDs are stable across a restart and the original agent row survives, so the resume is reclaimed when that same agent comes back — and no wrong-specialization worker can pick it up in the meantime.
 
-If the agent never returns, the resume stays `pending`. After `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default ~10 minutes, measured from crash detection) a heartbeat reaper concludes the agent is gone and escalates: it creates a Lead-owned `task.reroute.decision` follow-up. The Lead then re-delegates the work to an explicitly chosen agent via `send-task` — the work is never returned to the pool. A resume that has already been retried up to `HEARTBEAT_MAX_RESUME_GENERATIONS` times is failed instead of escalated, to bound a flapping task.
+If the agent never returns, the resume stays `pending`. After `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 minutes, measured from when the resume is created: crash detection for a crash resume, the supersede at shutdown for a graceful one) a heartbeat reaper concludes the agent is gone and escalates: it creates a Lead-owned `task.reroute.decision` follow-up. The Lead then re-delegates the work to an explicitly chosen agent via `send-task` — the work is never returned to the pool. A resume that has already been retried up to `HEARTBEAT_MAX_RESUME_GENERATIONS` times is failed instead of escalated, to bound a flapping task.
 
 <Callout type="info">
   Three environment variables gate this behavior:
@@ -222,4 +243,5 @@ Tasks without a `routingAffinity` are completely unaffected — the pool behaves
 - [Scheduled Tasks](/docs/concepts/scheduling) — Automate recurring task creation
 - [Architecture Overview](/docs/architecture/overview) — How the task system fits into the overall architecture
 - [Deployment Guide](/docs/guides/deployment) — Graceful shutdown and task resume in production
+- [Worker Recovery](/docs/guides/worker-recovery-decision) — What happens to running work when a worker stops
 - [Tasks API Reference](/docs/api-reference/tasks) — REST API endpoints for creating, querying, and managing tasks

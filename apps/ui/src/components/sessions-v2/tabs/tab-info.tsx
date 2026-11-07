@@ -18,7 +18,7 @@ import { useUsers } from "@/api/hooks/use-users";
 import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { groupCrumb, groupLabel, sourceOfGroupKey } from "@/lib/session-groups";
+import { groupCrumb, groupLabel, resourceOfGroupKey, sourceOfGroupKey } from "@/lib/session-groups";
 import {
   GROUP_TAB,
   isSessionTab,
@@ -104,7 +104,9 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
       title,
       tip: `All sessions in ${crumb}`,
       icon: section?.icon ?? Hash,
-      source: (!section && view && sourceOfGroupKey(view)) || undefined,
+      source:
+        (!section && view && (sourceOfGroupKey(view) ?? resourceOfGroupKey(view)?.kind)) ||
+        undefined,
       unread: false,
       activity: null,
     };

@@ -319,6 +319,7 @@ export const AgentTaskStatusSchema = z.enum([
   "failed",
   "cancelled", // Task was cancelled by lead or creator
   "superseded", // Original terminated, replaced by a follow-up "resume" task
+  "skipped", // Agent declined: the work was not its to handle (e.g. a Slack thread message addressed to someone else)
 ]);
 
 /**
@@ -337,7 +338,13 @@ export const AgentTaskStatusSchema = z.enum([
  *   - `status = CASE WHEN status IN ('completed'` — setProgress guard
  * and update every site.
  */
-export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "superseded"] as const;
+export const TERMINAL_TASK_STATUSES = [
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "skipped",
+] as const;
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
 
 export function isTerminalTaskStatus(status: string): status is TerminalTaskStatus {
@@ -459,6 +466,16 @@ export const ModelProfileNameSchema = z
   .trim()
   .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/, "lowercase letters, digits, '.', '_' or '-', max 100");
 
+/**
+ * The pooled keys a profile may use, per credential var: the last 5
+ * characters of each allowed key. A var with no entry keeps its whole pool.
+ */
+export const ModelProfileCredentialsSchema = z.record(
+  z.string(),
+  z.array(z.string().length(5)).min(1),
+);
+export type ModelProfileCredentials = z.infer<typeof ModelProfileCredentialsSchema>;
+
 export const ModelProfileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -469,10 +486,80 @@ export const ModelProfileSchema = z.object({
   description: z.string().nullable(),
   /** `tier:<tier>` (boot seed), `agent-config` (made from an agent's MODEL_OVERRIDE), or null. */
   seededFrom: z.string().nullable(),
+  /** Pooled-key allowlist (column `credentialAllowlist`); null uses the whole pool. */
+  credentials: ModelProfileCredentialsSchema.nullable(),
+  /**
+   * Profiles on the same harness to hop to, in order, when a provider error
+   * (rate limit, seat, overload, auth, empty pool) ends a task running on
+   * this one. Empty: the task fails as before.
+   */
+  fallbacks: z.array(z.string()),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
 });
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
+
+/**
+ * Why a provider session ended in a way another profile may survive. Set by
+ * the worker's classifier (`src/commands/provider-error-class.ts`); never a
+ * task failure, tool error, context overflow, cancellation or budget refusal.
+ */
+export const ProviderErrorClassSchema = z.enum([
+  "rate_limit",
+  "model_window",
+  "seat",
+  "credits",
+  "overloaded",
+  "server_error",
+  "auth",
+  "pool_empty",
+]);
+export type ProviderErrorClass = z.infer<typeof ProviderErrorClassSchema>;
+
+/**
+ * One same-agent fallback hop: the task left `from` on `errorClass` and its
+ * resume runs `profile`. `skipped` lists the fallbacks passed over because
+ * they failed the profile check on the agent.
+ */
+export const FallbackHopSchema = z.object({
+  from: z.string(),
+  profile: z.string(),
+  errorClass: ProviderErrorClassSchema,
+  at: z.string(),
+  skipped: z.array(z.object({ profile: z.string(), reason: z.string() })).optional(),
+});
+export type FallbackHop = z.infer<typeof FallbackHopSchema>;
+
+/** One check's verdict: only `fail` blocks; `unverified` means nothing to judge yet. */
+export const ProfileCheckStateSchema = z.enum(["pass", "warn", "fail", "unverified"]);
+export type ProfileCheckState = z.infer<typeof ProfileCheckStateSchema>;
+
+export const ProfileCheckRowSchema = z.object({
+  check: z.enum(["harness", "model", "harness-credentials", "credential-allowlist"]),
+  state: ProfileCheckStateSchema,
+  /** Why, in words. Names vars and key suffixes, never a secret value. */
+  detail: z.string().optional(),
+});
+export type ProfileCheckRow = z.infer<typeof ProfileCheckRowSchema>;
+
+/**
+ * Whether an agent can run a profile. `profiles[0]` is the primary; `ok` is
+ * true when it has no `fail` row.
+ */
+export const ProfileCheckResultSchema = z
+  .object({
+    agentId: z.string(),
+    ok: z.boolean(),
+    profiles: z.array(
+      z.object({
+        name: z.string(),
+        ok: z.boolean(),
+        checks: z.array(ProfileCheckRowSchema),
+      }),
+    ),
+  })
+  .openapi("ProfileCheckResult");
+export type ProfileCheckResult = z.infer<typeof ProfileCheckResultSchema>;
 
 // ============================================================================
 // Session sharing
@@ -528,7 +615,16 @@ export const SteeringStatusSchema = z.enum([
 ]);
 export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 
-export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api", "chat"]);
+/** `app-page`: a steer sent from a json-render app page (the `SessionThread` component). */
+export const SteeringSourceSchema = z.enum([
+  "ui",
+  "mcp",
+  "script",
+  "slack",
+  "api",
+  "chat",
+  "app-page",
+]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
 export const SteeringMessageSchema = z
@@ -664,6 +760,34 @@ export const RoutingAffinitySchema = z
   .openapi("RoutingAffinity");
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
 
+// People in a multi-person Slack thread, captured when the task is created.
+// `trust`: internal (company domain or audience override), external (other
+// domain, other Slack team), unknown (no email). External and unknown are
+// untrusted: their messages are information, never instructions.
+export const SlackParticipantTrustSchema = z.enum(["internal", "external", "unknown"]);
+export type SlackParticipantTrust = z.infer<typeof SlackParticipantTrustSchema>;
+
+export const TaskSlackParticipantSchema = z.object({
+  slackUserId: z.string(),
+  userId: z.string().optional(),
+  trust: SlackParticipantTrustSchema,
+  /** Sent the first task in this thread (who started the swarm's work). */
+  starter: z.boolean().optional(),
+  /** Sent the message that triggered this task. */
+  newest: z.boolean().optional(),
+  /** Sent a message in the batch that triggered this task. */
+  asked: z.boolean().optional(),
+});
+export type TaskSlackParticipant = z.infer<typeof TaskSlackParticipantSchema>;
+
+export const TaskSlackParticipantsSchema = z.object({
+  /** At most the cap, primary senders first. */
+  people: z.array(TaskSlackParticipantSchema),
+  /** Humans past the cap, rendered as `<N more...>`. */
+  more: z.number().int().min(0),
+});
+export type TaskSlackParticipants = z.infer<typeof TaskSlackParticipantsSchema>;
+
 export const AgentTaskSchema = z
   .object({
     id: z.uuid(),
@@ -718,6 +842,7 @@ export const AgentTaskSchema = z
     slackThreadTs: z.string().optional(),
     slackTriggerMessageTs: z.string().optional(),
     slackUserId: z.string().optional(),
+    slackParticipants: TaskSlackParticipantsSchema.optional(),
     slackReplySent: z.boolean().default(false),
     slackProgressMessageTs: z.string().optional(),
     slackTreeRootMessageTs: z.string().optional(),
@@ -753,11 +878,14 @@ export const AgentTaskSchema = z
     // Session attachment (optional). z.string(), not z.uuid(): accepted
     // verbatim from the create-task body (see dependsOn note above).
     parentTaskId: z.string().optional(),
+    // The task whose session called send-task to create this one. Unlike
+    // parentTaskId (context continuity), this is where the dispatch happened.
+    dispatchedByTaskId: z.string().optional(),
     claudeSessionId: z.string().optional(),
 
     // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
     // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
-    // Prefer modelTier for portable task intent; model is a concrete override
+    // Prefer `profile` (below) for named intent; model is a concrete override
     // interpreted by the claiming worker's harness and never switches provider.
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
@@ -777,6 +905,9 @@ export const AgentTaskSchema = z
     // the agent's default). Unset when no profile applied.
     profile: z.string().optional(),
     resolvedProfile: z.string().optional(),
+    // Provider-error fallback hops so far, oldest first; carried by every
+    // resume of the same work. Unset when the work never hopped.
+    fallbackHops: z.array(FallbackHopSchema).optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -879,6 +1010,8 @@ export const CreateTaskOptionsSchema = z.object({
   /** Exact Slack message that directly triggered this task; never inherited. */
   slackTriggerMessageTs: z.string().optional(),
   slackUserId: z.string().optional(),
+  /** People in the Slack thread; inherited by children like `slackUserId`. */
+  slackParticipants: TaskSlackParticipantsSchema.optional(),
   /**
    * Opt out of the residual Slack/contextKey normalization (see the
    * "Residual-mismatch guard" comment near the INSERT in src/be/db.ts): a
@@ -909,10 +1042,14 @@ export const CreateTaskOptionsSchema = z.object({
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
   profile: z.string().optional(),
+  /** Internal: the fallback hops a resume carries over (`createResumeFollowUp`). */
+  fallbackHops: z.array(FallbackHopSchema).optional(),
   scheduleId: z.string().optional(),
   workflowRunId: z.string().optional(),
   workflowRunStepId: z.string().optional(),
   sourceTaskId: z.string().optional(),
+  /** Persisted as `dispatchedByTaskId`: the caller's task when send-task created this one. */
+  dispatchedByTaskId: z.string().optional(),
   /**
    * Optional JSON Schema the agent's final output must conform to.
    *
@@ -1254,24 +1391,80 @@ export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
 
-// Discriminated union so future avatar types (emoji, image, ...) can be added
-// with zero migrations — just a new zod branch + a UI renderer branch. Server
-// validates shape only; the UI owns the curated icon catalog and deterministic
-// fallback, so an unrecognized/hand-set icon name can never break rendering.
-export const AgentAvatarSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("lucide"),
-    icon: z
+// An https image link, shared by Slack icons and media icons so the rules
+// can't drift: https only, at most 2048 characters, no embedded credentials.
+export const HttpsImageUrlSchema = z
+  .url({ protocol: /^https$/, error: "Must be an https:// URL" })
+  .max(2048)
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return !parsed.username && !parsed.password;
+    } catch {
+      return false;
+    }
+  }, "URL must be valid and contain no credentials");
+
+// Server validates shape only; the UI owns the curated icon catalog and
+// deterministic fallback, so an unrecognized/hand-set icon name can never
+// break rendering.
+export const LucideIconSchema = z.object({
+  type: z.literal("lucide"),
+  icon: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .max(64),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+});
+
+export const UrlIconSchema = z.object({
+  type: z.literal("url"),
+  url: HttpsImageUrlSchema,
+});
+
+// Same addressing as the agent-fs task attachment ref: an absolute path, plus
+// both `orgId` and `driveId` for a specific drive, or neither for the swarm
+// drive. A single ID is never mixed with the swarm defaults.
+export const AgentFsIconSchema = z
+  .object({
+    type: z.literal("agent-fs"),
+    path: z
       .string()
-      .regex(/^[a-z0-9-]+$/)
-      .max(64),
-    color: z
-      .string()
-      .regex(/^#[0-9a-fA-F]{6}$/)
-      .optional(),
-  }),
+      .min(2)
+      .max(1024)
+      .refine((value) => value.startsWith("/"), "Path must be absolute (start with /)")
+      .refine((value) => !value.split("/").includes(".."), 'Path must not contain ".." segments'),
+    orgId: z.string().min(1).optional(),
+    driveId: z.string().min(1).optional(),
+  })
+  .refine(
+    (value) => (value.orgId === undefined) === (value.driveId === undefined),
+    "Pass both orgId and driveId, or neither for the swarm drive",
+  );
+
+// Discriminated union so future icon types can be added with zero migrations:
+// a new zod branch plus a UI renderer branch. Images that can't load fall back
+// to a lucide glyph in the dashboard.
+export const MediaIconSchema = z.discriminatedUnion("type", [
+  LucideIconSchema,
+  UrlIconSchema,
+  AgentFsIconSchema,
 ]);
-export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
+export type MediaIcon = z.infer<typeof MediaIconSchema>;
+
+// Agent avatars accept the same shapes as app icons.
+export const AgentAvatarSchema = MediaIconSchema;
+export type AgentAvatar = MediaIcon;
+
+/**
+ * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https
+ * image link, or an image in agent-fs.
+ */
+export const AppIconSchema = MediaIconSchema;
+export type AppIcon = MediaIcon;
 
 // Separate from `avatar` so an agent can keep its lucide disc and still post
 // to Slack with its own emoji or image.
@@ -1286,17 +1479,7 @@ export const AgentSlackIconSchema = z
     }),
     z.object({
       type: z.literal("url"),
-      url: z
-        .url({ protocol: /^https$/ })
-        .max(2048)
-        .refine((value) => {
-          try {
-            const parsed = new URL(value);
-            return !parsed.username && !parsed.password;
-          } catch {
-            return false;
-          }
-        }, "URL must be valid and contain no credentials"),
+      url: HttpsImageUrlSchema,
     }),
     // No icon override: Slack shows the app's own avatar.
     z.object({ type: z.literal("app") }),
@@ -1369,7 +1552,8 @@ export const AgentSchema = z
       .nullable()
       .optional(),
 
-    // Custom avatar (icon + color). Null/missing = fall back to the
+    // Custom avatar: a lucide glyph, an https image link, or an agent-fs image.
+    // Null/missing = fall back to the
     // deterministic hash-derived icon and color (see apps/ui/src/lib/agent-icon.ts
     // and agent-color.ts). Migration 119 adds the column.
     avatar: z
@@ -1724,6 +1908,7 @@ export const ResumeReasonSchema = z.enum([
   "context_limits", // Provider session approaching context-window limits (Phase 6)
   "manual_supersede", // Operator-triggered (e.g. dashboard button)
   "crash_recovery", // Heartbeat sweep detected dead/stalled worker (DES-523)
+  "provider_fallback", // Provider error; the resume runs the next fallback profile
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 
@@ -1953,6 +2138,8 @@ export const ScheduledTaskSchema = z
     lastErrorMessage: z.string().optional(),
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
+    /** Model profile copied onto every fired task; exclusive with model/modelTier. */
+    profile: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     targetType: ScheduledTaskTargetTypeSchema.default("agent-task"),
     workflowId: z.uuid().optional(),
@@ -2075,7 +2262,9 @@ export const SwarmRepoSchema = z
     clonePath: z.string().min(1),
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
-    hooks: RepoHooksSchema.optional().default({ enabled: false }),
+    hooks: RepoHooksSchema.describe(
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+    ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
@@ -2912,6 +3101,8 @@ export type AgentTaskSummary = Pick<
   | "modelAlias"
   | "effort"
   | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
   | "provider"
   | "requestedByUserId"
   | "progress"

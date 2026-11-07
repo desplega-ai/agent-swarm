@@ -113,7 +113,9 @@ jobs:
 
   report:
     needs: test
-    if: always()
+    # `test` runs only on the upstream repo. On a fork it is skipped, so no
+    # blob report exists and the merge step would fail falsely.
+    if: always() && needs.test.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -242,7 +244,7 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
-          npm i -g @desplega.ai/agent-fs@0.18.14
+          npm i -g @desplega.ai/agent-fs@0.18.22
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \
             --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \

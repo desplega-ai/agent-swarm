@@ -19,6 +19,7 @@ import {
   getPendingSteeringForTask,
   getSteeringMessageById,
   getSteeringMessagesForTask,
+  getSwarmRepos,
   getTaskAttachments,
   getTaskById,
   getTaskLineage,
@@ -30,6 +31,7 @@ import {
   recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
+  skipTask,
   supersedeTask,
   TASK_LINEAGE_LIMITS,
   updateAgentStatusFromCapacity,
@@ -38,7 +40,12 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
-import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
+import {
+  getModelProfileByName,
+  hasUnreadableCredentialAllowlist,
+  modelProfileRefError,
+  taskProfileError,
+} from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
@@ -55,8 +62,13 @@ import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rb
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
-import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
+import {
+  createResumeFollowUp,
+  createWorkerTaskFollowUp,
+  nextFallback,
+} from "../tasks/worker-follow-up";
 import {
   AgentLogSchema,
   type AgentTask,
@@ -66,9 +78,12 @@ import {
   type AgentTaskStatus,
   AgentTaskStatusSchema,
   AssetKeySchema,
+  type FallbackHop,
   isTerminalTaskStatus,
+  ModelProfileCredentialsSchema,
   ModelTierSchema,
   OnUnsupportedSchema,
+  ProviderErrorClassSchema,
   ProviderNameSchema,
   ReasoningEffortSchema,
   ResumeReasonSchema,
@@ -84,6 +99,8 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
+import { readsRepoSecrets } from "./config";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
@@ -91,7 +108,12 @@ import {
   rejectGuest,
   requestPrincipal,
 } from "./request-principal";
-import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
+import {
+  buildTaskRequestedBy,
+  buildTaskThreadParticipants,
+  TaskRequestedBySchema,
+  TaskThreadParticipantsSchema,
+} from "./requested-by";
 import { bodyTask, route } from "./route-def";
 import {
   canReadSession,
@@ -104,6 +126,7 @@ import {
   SESSION_WRITE_DENIED,
   sessionAccessFor,
 } from "./session-access";
+import { resolveTaskRequester } from "./task-requester";
 import { jsonError, parseBody } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -138,6 +161,8 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   modelAlias: true,
   effort: true,
   resolvedEffort: true,
+  profile: true,
+  resolvedProfile: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -216,10 +241,12 @@ const FinishTaskConflictSchema = z.object({
 
 const SupersedeTaskResponseSchema = z.object({
   success: z.literal(true),
-  kind: z.enum(["alreadyFinished", "workflow-failed", "resumed"]),
+  kind: z.enum(["alreadyFinished", "workflow-failed", "resumed", "noFallback"]),
   task: AgentTaskSchema.nullable(),
   resumeTaskId: z.string().nullable(),
   resumeTaskStatus: AgentTaskStatusSchema.optional(),
+  /** `noFallback` only: why the chain ended, to lead the worker's failure reason. */
+  failureReason: z.string().nullable().optional(),
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -234,7 +261,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Every shape gives a user caller only tasks of sessions they can read, unless `scope=all` applies. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -275,6 +302,12 @@ const listTasks = route({
     fields: z.enum(["full", "slim", "timeline"]).optional(),
     /** `true` adds `total`, a filtered COUNT(*) that pagers need. Omitted by default. */
     includeTotal: z.enum(["true", "false"]).optional(),
+    scope: z
+      .enum(["all"])
+      .optional()
+      .describe(
+        "all: every user's tasks, read-only, for a user whose role lists session.read.all (the built-in auditor role; the grant-all admin role alone does not count); ignored for anyone else. The X-Swarm-Session-Scope: all header opts in the same way.",
+      ),
   }),
   responses: {
     200: {
@@ -313,6 +346,14 @@ const createTask = route({
       dependsOn: z.array(z.string()).optional(),
       offeredTo: z.string().optional(),
       dir: z.string().optional(),
+      vcsRepo: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "A registered repo (`swarm_repos`), as `owner/repo` or its URL. The worker clones or refreshes it and loads its `CLAUDE.md`. Stored as the registered repo's URL; an unregistered or ambiguous repo is a 400.",
+        ),
       parentTaskId: z.string().optional(),
       key: AssetKeySchema.optional(),
       source: AgentTaskSourceSchema.optional(),
@@ -356,7 +397,7 @@ const createTask = route({
     201: { description: "Task created", schema: AgentTaskSchema },
     400: {
       description:
-        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
     },
     403: {
       description:
@@ -655,11 +696,13 @@ const finishTask = route({
   path: "/api/tasks/{id}/finish",
   pattern: ["api", "tasks", null, "finish"],
   session: { taskParam: "id" },
-  summary: "Mark task as completed or failed (runner endpoint)",
+  summary: "Mark task as completed, failed, or skipped (runner endpoint)",
+  description:
+    "`skipped` ends a task that is not the caller's to handle. It needs a one-line reason in `failureReason` (or `output`), keeps `output` empty, posts nothing, and creates no follow-up.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    status: z.enum(["completed", "failed"]),
+    status: z.enum(["completed", "failed", "skipped"]),
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
@@ -669,7 +712,7 @@ const finishTask = route({
   auth: { apiKey: true, agentId: true },
   responses: {
     200: { description: "Task finished", schema: FinishTaskSuccessSchema },
-    400: { description: "Invalid status" },
+    400: { description: "Invalid status, or a skip without a reason" },
     403: { description: "Not assigned to this agent" },
     404: { description: "Task not found" },
     409: {
@@ -696,6 +739,10 @@ const listPausedTasks = route({
             // Same requester projection a fresh task_assigned trigger carries,
             // so a resumed session gets the same requester-profile prompt.
             requestedBy: TaskRequestedBySchema.optional(),
+            threadParticipants: TaskThreadParticipantsSchema.optional(),
+            // The claimed profile's pooled-key allowlist, read again from the
+            // profile, so the recovery spawn picks keys as the claim did.
+            credentialAllowlist: ModelProfileCredentialsSchema.optional(),
           }),
         ),
       }),
@@ -744,10 +791,15 @@ const supersedeTaskRoute = route({
   session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
-    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies.',
+    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.',
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({ reason: ResumeReasonSchema }),
+  body: z
+    .object({ reason: ResumeReasonSchema, errorClass: ProviderErrorClassSchema.optional() })
+    .refine((body) => (body.reason === "provider_fallback") === (body.errorClass !== undefined), {
+      message: "`errorClass` is required with `reason: provider_fallback` and only allowed with it",
+      path: ["errorClass"],
+    }),
   auth: { apiKey: true, agentId: true },
   responses: {
     200: {
@@ -899,43 +951,7 @@ async function deniesForeignContext(req: IncomingMessage, contextKey: string): P
   return false;
 }
 
-/**
- * Requester for a new task. Prefer trusted server-side identity: an
- * authenticated request user, or the caller's own ownership-gated task context
- * (`X-Source-Task-Id` / ambient current task), the upstream #939 anti-spoofing
- * behavior.
- *
- * TRUST_BODY_REQUESTED_BY_USER_ID (default ON) accepts a body-supplied
- * `requestedByUserId` as a last resort, only when the caller could not be
- * bound to a user (shared operator key), and only after validating it names a
- * real user. Typical single-tenant deployments share ONE operator key, so
- * without this the UI and API callers can never attribute tasks. Set
- * TRUST_BODY_REQUESTED_BY_USER_ID=false anywhere holders of the shared/global
- * key are NOT all equally trusted: with it on, any such caller can attribute
- * a task to any user.
- *
- * Pass `trustedUserId` when the caller already resolved it.
- */
-export async function resolveTaskRequester(
-  req: IncomingMessage,
-  myAgentId: string | undefined,
-  bodyUserId: string | undefined,
-  trustedUserId?: string | null,
-): Promise<string | undefined> {
-  const trusted =
-    trustedUserId === undefined ? await resolveHttpAuditUserId(req, myAgentId) : trustedUserId;
-  if (trusted) return trusted;
-  if (process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "false" || !bodyUserId) return undefined;
-  // A worker on the shared key is not the operator: its X-Agent-ID names it, so the body
-  // hint is dropped like it is when the worker has a requester of its own.
-  const mayAssign = can({
-    principal: await resolveTaskWritePrincipal(req, myAgentId),
-    verb: "task.requester.assign",
-    resource: { kind: "none" },
-    source: "http",
-  }).allow;
-  return mayAssign ? (await findUserById(bodyUserId))?.id : undefined;
-}
+export { resolveTaskRequester };
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -993,7 +1009,9 @@ export async function handleTasks(
 
     // Every shape carries task text, so a user sees only sessions they can
     // read, and `total` counts the same rows.
-    const actor = await resolveSessionActor(req, myAgentId);
+    const actor = await resolveSessionActor(req, myAgentId, {
+      allUsers: parsed.query.scope === "all",
+    });
     const filters = {
       status,
       agentId: parsed.query.agentId || undefined,
@@ -1014,7 +1032,7 @@ export async function handleTasks(
       orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
-      readableBy: actor.kind === "user" ? { userId: actor.userId } : undefined,
+      readableBy: readableByFor(actor),
     };
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
@@ -1071,16 +1089,25 @@ export async function handleTasks(
       jsonError(res, modelError, 400);
       return true;
     }
-    const profileError = await taskProfileError({
-      profile: parsed.body.profile,
-      ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
-      agentId: defaultAgentId,
-    });
-    if (profileError) {
-      jsonError(res, profileError, 400);
-      return true;
+    // Store the registered repo's URL, not its `owner/repo` path: the path can name
+    // repos on two hosts, and a display-named repo has no name hit. The worker and
+    // the profile check match a qualified URL only by equality, so they load this repo.
+    let vcsRepo: string | undefined;
+    if (parsed.body.vcsRepo) {
+      const requested = parsed.body.vcsRepo;
+      const [repo, ...others] = (await getSwarmRepos()).filter((r) =>
+        vcsRepoUrlMatches(r.url, requested),
+      );
+      if (!repo) {
+        jsonError(res, `Unknown repo "${requested}": register it in Repos first.`, 400);
+        return true;
+      }
+      if (others.length > 0) {
+        jsonError(res, `Repo "${requested}" matches several registered repos: pass its URL.`, 400);
+        return true;
+      }
+      vcsRepo = normalizeVcsRepo(repo.url);
     }
-
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
@@ -1113,6 +1140,18 @@ export async function handleTasks(
       (await deniesForeignContext(req, parsed.body.contextKey))
     ) {
       jsonError(res, "You don't have access to the tasks in this context.", 403);
+      return true;
+    }
+    // The task's repo (else the parent's, inherited in createTaskExtended) is the one
+    // the worker loads config from, so the profile check judges the same pool.
+    const profileError = await taskProfileError({
+      profile: parsed.body.profile,
+      ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
+      agentId: defaultAgentId,
+      vcsRepo: vcsRepo ?? parentTask?.vcsRepo,
+    });
+    if (profileError) {
+      jsonError(res, profileError, 400);
       return true;
     }
     let assetKey: string | undefined;
@@ -1156,6 +1195,7 @@ export async function handleTasks(
           dependsOn: parsed.body.dependsOn || undefined,
           offeredTo: parsed.body.offeredTo || undefined,
           dir: parsed.body.dir || undefined,
+          vcsRepo,
           parentTaskId: parsed.body.parentTaskId || undefined,
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",
@@ -1791,7 +1831,23 @@ export async function handleTasks(
           return { error: "Task is assigned to another agent", status: 403 };
         }
 
-        const terminalResultGuard = await guardTerminalTaskResultWrite(task, parsed.body);
+        const skipReason =
+          parsed.body.status === "skipped"
+            ? skipReasonFrom(parsed.body.failureReason, parsed.body.output)
+            : undefined;
+        if (parsed.body.status === "skipped" && !skipReason) {
+          return {
+            error: 'Status "skipped" needs a one-line reason in failureReason',
+            status: 400,
+          };
+        }
+
+        const terminalResultGuard = await guardTerminalTaskResultWrite(
+          task,
+          parsed.body.status === "skipped"
+            ? { status: "skipped", failureReason: skipReason, force: parsed.body.force }
+            : parsed.body,
+        );
         if (terminalResultGuard.handled) {
           const { handled: _handled, ...guardResult } = terminalResultGuard;
           return { ...guardResult, alreadyFinished: true };
@@ -1815,6 +1871,12 @@ export async function handleTasks(
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
+          }
+          updatedTask = result;
+        } else if (parsed.body.status === "skipped") {
+          const result = await skipTask(parsed.params.id, skipReason!);
+          if (!result) {
+            return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
@@ -1849,7 +1911,9 @@ export async function handleTasks(
       return true;
     }
 
-    if (result.task && isFreshFinishResult(result)) {
+    if (result.task && isFreshFinishResult(result) && parsed.body.status === "skipped") {
+      finalizeSkippedTaskReaction(result.task, "tasks.finish");
+    } else if (result.task && isFreshFinishResult(result)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
 
       ensure({
@@ -1874,7 +1938,7 @@ export async function handleTasks(
       try {
         const followUp = await createWorkerTaskFollowUp({
           task: result.task,
-          status: parsed.body.status,
+          status: finishEventId,
           output: parsed.body.output,
           failureReason: parsed.body.failureReason,
         });
@@ -1914,14 +1978,28 @@ export async function handleTasks(
     const tasks = await Promise.all(
       pausedTasks.map(async (task) => {
         const requestedBy = await buildTaskRequestedBy(task);
+        const threadParticipants = await buildTaskThreadParticipants(task);
+        const profile = task.resolvedProfile
+          ? await getModelProfileByName(task.resolvedProfile)
+          : null;
+        // Without an allowlist the recovery spawn picks from the whole pool, so
+        // the task stays paused until the profile's credentials are set again.
+        if (profile && hasUnreadableCredentialAllowlist(profile)) {
+          console.warn(
+            `[paused-tasks] holding task ${task.id}: profile "${profile.name}" has an unreadable credential allowlist`,
+          );
+          return null;
+        }
         return {
           ...task,
           attachments: await getTaskAttachments(task.id),
           ...(requestedBy && { requestedBy }),
+          ...(threadParticipants && { threadParticipants }),
+          ...(profile?.credentials && { credentialAllowlist: profile.credentials }),
         };
       }),
     );
-    listPausedTasks.respond(res, 200, { tasks });
+    listPausedTasks.respond(res, 200, { tasks: tasks.filter((task) => task !== null) });
     return true;
   }
 
@@ -2105,11 +2183,41 @@ export async function handleTasks(
       return true;
     }
 
+    // Provider error: pick the next fallback before touching the task. No
+    // pick (or a workflow step, whose engine owns retries) leaves it running,
+    // and the worker fails it with the real error, as without fallbacks.
+    let fallback: { profile: string; hop: FallbackHop } | undefined;
+    if (parsed.body.reason === "provider_fallback" && parsed.body.errorClass) {
+      const pick =
+        task.workflowRunStepId == null
+          ? await nextFallback(task, parsed.body.errorClass, {
+              includeRepoSecrets: readsRepoSecrets(
+                getRequestAuth(req),
+                task.agentId ? await getAgentById(task.agentId) : null,
+              ),
+            })
+          : ({ kind: "none", message: null } as const);
+      if (pick.kind === "none") {
+        supersedeTaskRoute.respond(res, 200, {
+          success: true,
+          kind: "noFallback",
+          task,
+          resumeTaskId: null,
+          failureReason: pick.message,
+        });
+        return true;
+      }
+      fallback = { profile: pick.profile, hop: pick.hop };
+    }
+
     // Workflow-step tasks: fail back to the engine instead of superseding.
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      if (task.agentId) {
+        await updateAgentStatusFromCapacity(task.agentId);
+      }
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",
@@ -2152,10 +2260,16 @@ export async function handleTasks(
       return true;
     }
 
+    // Cancel and finish recompute the agent status; a superseded task frees its slot too.
+    if (task.agentId) {
+      await updateAgentStatusFromCapacity(task.agentId);
+    }
+
     // Parent is now superseded. Create the resume child.
     const followUp = await createResumeFollowUp({
       parentId: parsed.params.id,
       reason: parsed.body.reason,
+      fallback,
     });
 
     // `workflow-skip` is unreachable here (workflow-step path branched above).

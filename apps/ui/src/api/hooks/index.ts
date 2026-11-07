@@ -111,6 +111,7 @@ export {
   useUpdateMetric,
 } from "./use-metric-definitions";
 export { useMetrics } from "./use-metrics";
+export { useModelProfileCheck, useModelProfiles } from "./use-model-profiles";
 export { useModelTiers } from "./use-model-tiers";
 export { useModelsCatalog } from "./use-models-catalog";
 export type { PromptTemplateFilters } from "./use-prompt-templates";

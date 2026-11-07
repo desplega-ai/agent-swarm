@@ -81,8 +81,9 @@ export const DEFERRED_TOOLS = new Set([
   "model-catalog-refresh",
   "model-catalog-overlay-upsert",
 
-  // Model profiles (1)
+  // Model profiles (2)
   "list-model-profiles",
+  "check-model-profile",
 
   // Repos (1)
   "update-repo",
@@ -154,6 +155,9 @@ export const DEFERRED_TOOLS = new Set([
   // Approval Requests (2)
   "request-human-input",
   "cancel-approval-request",
+
+  // Improvements (1)
+  "submit-improvement",
 
   // Decisions (1)
   "system-one-decide",

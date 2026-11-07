@@ -104,9 +104,10 @@ agent-swarm claude -- --resume
 
 Run Claude in headless loop mode as a worker agent.
 
+Failed tasks are logged, and the runner continues polling for work.
+
 ```bash
 agent-swarm worker
-agent-swarm worker --yolo
 agent-swarm worker -m "Custom prompt"
 agent-swarm worker --system-prompt "You are a Python specialist"
 ```
@@ -114,7 +115,6 @@ agent-swarm worker --system-prompt "You are a Python specialist"
 | Option | Description |
 |--------|-------------|
 | `-m, --msg <prompt>` | Custom prompt (default: `/agent-swarm:start-worker`) |
-| `--yolo` | Continue on errors instead of stopping |
 | `--system-prompt <text>` | Custom system prompt (appended to Claude) |
 | `--system-prompt-file <path>` | Read system prompt from file |
 | `-- <args...>` | Additional arguments to pass to Claude CLI |
@@ -125,7 +125,6 @@ Run Claude as lead agent in headless loop mode. Same options as `worker`.
 
 ```bash
 agent-swarm lead
-agent-swarm lead --yolo
 ```
 
 ### controller

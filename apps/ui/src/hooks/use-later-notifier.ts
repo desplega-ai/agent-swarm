@@ -7,11 +7,7 @@ import { SESSION_TREE_KEY } from "@/api/hooks/use-session-tree";
 import { useSessions } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import {
-  SESSIONS_TOAST_POSITION,
-  SESSIONS_V2_MIN_VERSION,
-  sidebarListParams,
-} from "@/lib/sessions-v2";
+import { SESSIONS_V2_MIN_VERSION, sidebarListParams } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 
 /** `setTimeout` takes at most 2^31 - 1 ms. A later wake re-arms after a day. */
@@ -117,7 +113,6 @@ function alertWake(rows: SessionListItem[], open: (id: string) => void): void {
     }
   }
   toast(message, {
-    position: SESSIONS_TOAST_POSITION,
     duration: 8000,
     action: { label: "Open", onClick: () => open(first.root.id) },
   });

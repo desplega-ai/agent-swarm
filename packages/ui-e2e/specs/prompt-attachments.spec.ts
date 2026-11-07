@@ -110,11 +110,43 @@ test("prompt attachment links open viewers and keep downloads separate", async (
     await expect(link.locator(".lucide-external-link")).toBeVisible();
     await expect(link.locator("button")).toHaveCount(0);
   }
-  const popupPromise = page.waitForEvent("popup");
-  await prompt.getByRole("link", { name: "Open HOL check-level scorecard in a new tab" }).click();
-  const popup = await popupPromise;
-  await expect(popup.getByRole("heading", { name: "File viewer" })).toBeVisible();
-  await popup.close();
+  const scorecard = prompt.getByRole("link", {
+    name: "Open HOL check-level scorecard in a new tab",
+  });
+  // A plain click on an agent-fs file opens the in-page preview, not a tab.
+  await scorecard.click();
+  const preview = page.getByTestId("link-preview-panel");
+  await expect(preview.getByText("/reports/hol-scorecard.md", { exact: true })).toBeVisible();
+  await expect(preview.getByText("Preview needs agent-fs")).toBeVisible();
+  const previewPopupPromise = page.waitForEvent("popup");
+  await preview.getByRole("link", { name: "Open in new tab" }).click();
+  const previewPopup = await previewPopupPromise;
+  await expect(previewPopup.getByRole("heading", { name: "File viewer" })).toBeVisible();
+  await previewPopup.close();
+  await preview.getByRole("button", { name: "Close preview" }).click();
+  await expect(preview).toHaveCount(0);
+  // A modifier click keeps the browser's link behavior: the app leaves the
+  // event alone and opens no preview. Headless Chromium opens no tab for it,
+  // so a window listener (after React's root listener) records the event and
+  // then cancels the navigation.
+  await page.evaluate(() => {
+    window.addEventListener(
+      "click",
+      (event) => {
+        (window as unknown as { modifierClickPrevented?: boolean }).modifierClickPrevented =
+          event.defaultPrevented;
+        event.preventDefault();
+      },
+      { once: true },
+    );
+  });
+  await scorecard.click({ modifiers: ["ControlOrMeta"] });
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { modifierClickPrevented?: boolean }).modifierClickPrevented,
+    ),
+  ).toBe(false);
+  await expect(preview).toHaveCount(0);
   expect(rawRequests.filter((id) => id !== "image")).toEqual([]);
 
   for (const name of ["HOL check-level scorecard", "Local archive", "Unscoped file"]) {

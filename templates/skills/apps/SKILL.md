@@ -137,6 +137,15 @@ An optional top-level `"theme"` sets the preset the dashboard applies to the app
 
 Viewers can override the preset per app from the app's settings drawer; the override rides the reserved `$theme` key of the user-config values (accepted on every app, even without a declared `userConfig` schema, and never visible at `/user/...`). A present override always beats the definition's `theme` — even an unrecognized one, which degrades to the dashboard theme — so treat `theme` as the app's default styling, not a guarantee.
 
+An optional top-level `"icon"` sets the app's icon on the dashboard Apps page. It takes one of three shapes:
+
+- `{ "type": "lucide", "icon": "<kebab-case lucide name>", "color": "#RRGGBB" }` (`color` optional). The dashboard looks the name up in its curated icon catalog and shows a generic grid icon for an unknown name.
+- `{ "type": "url", "url": "https://..." }`: an https image link, at most 2048 characters, no credentials.
+- `{ "type": "agent-fs", "path": "/apps/<appId>/icon.png" }`: an image on the swarm's agent-fs drive. Add both `orgId` and `driveId` for another drive; never just one.
+
+The server validates shape only. The dashboard shows the grid glyph while an image loads, when it fails to load, and when the viewer has no agent-fs connected, so omitting `icon` is always safe. `app-patch` replaces `icon` whole, so switching shapes leaves no keys from the old one.
+
+
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
 When a schema patch reports stale page/query bindings, repair them in that same patch. Page elements are atomic: replace the complete `pages.<page>.elements.<id>` declaration, removing any reference to a hidden or deleted column, instead of sending only the changed nested prop. This is also the repair move for older apps whose stored page already references an undeclared column; full-definition validation otherwise blocks every patch.
@@ -165,6 +174,8 @@ When a schema patch reports stale page/query bindings, repair them in that same 
   "theme": "ember"
 }
 ```
+
+Optional top-level `layout: "sidebar"` turns on the app shell (see Pages, routes, and page trees). Without it every page renders on the plain canvas, exactly as before.
 
 Model, reusable-element, element-prop, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 0-10 models and at most 20 reusable elements; each declared model has 1-40 columns. Zero-model apps are valid for pure UI utilities as long as their pages and reusable elements validate.
 
@@ -471,11 +482,58 @@ Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, pa
 
 Drawer variant: declare a route param on the containing page, set the Drawer `props.param` to that literal param name, and use the same `app.navigate` shape targeting that page with the row id assigned to the Drawer's param. The Drawer then opens from route state without a separate action contract.
 
+App shell (`layout: "sidebar"` at the top level of the definition): every page renders inside a left sidebar that lists the app's pages and a sticky page header. Per page:
+
+- `title`: the sidebar label and the header heading (defaults to the page name).
+- `icon`: one catalog icon name (the list under Component catalog) before the sidebar label; unknown names are rejected.
+- `description`: one line under the header title (at most 280 characters).
+- `headerActions`: the key of one element of this page, rendered in the header's actions slot (right side), e.g. a Refresh `Button` with `on.press: [{ "action": "app.refresh" }]` or a row `Stack` of buttons. It is a second root: it must exist in the page's `elements` and must NOT also be reachable from `root`. It shares the page's state and actions.
+- `nav: false`: leave the page out of the sidebar. Pages with a `required` param never list (they cannot open without it); open them with `app.navigate`.
+
+The sidebar lists pages in definition order and marks the current one. Below 768px it folds into a menu button at the left of the header. Crumbs back to the default page show in the header only on pages the sidebar does not list. The shell renders in every view mode: inside the bordered canvas (default view, under the dashboard header that names the app), under the slim bar in `?mode=full`, and as the whole viewport in `?mode=chromeless`, where the sidebar also shows the app name (it is the only navigation inside an iframe). `headerActions` and `nav` without `layout: "sidebar"` are rejected; `icon` and `description` are accepted and unused.
+
+```json
+{
+  "layout": "sidebar",
+  "defaultPage": "overview",
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "icon": "activity",
+      "description": "Deploys and spend, last 14 days.",
+      "headerActions": "refresh",
+      "root": "root",
+      "elements": {
+        "root": { "type": "Stack", "props": {}, "children": ["spend"] },
+        "spend": {
+          "type": "Chart",
+          "props": {
+            "kind": "area",
+            "data": { "$state": "/queries/days/data" },
+            "loading": { "$state": "/queries/days/loading" },
+            "x": "date",
+            "xType": "time",
+            "format": "currency",
+            "series": [{ "key": "spend", "label": "Spend" }]
+          }
+        },
+        "refresh": {
+          "type": "Button",
+          "props": { "label": "Refresh", "icon": "refresh-cw", "variant": "outline", "size": "sm" },
+          "on": { "press": [{ "action": "app.refresh" }] }
+        }
+      }
+    },
+    "settings": { "title": "Settings", "icon": "pencil", "root": "root", "elements": { "root": { "type": "Text", "props": { "content": "…" } } } }
+  }
+}
+```
+
 Param `kind` is `string` by default, or `number` / `boolean`; `required` defaults to false. The names `mode`, `apiUrl`, `apiKey`, `email`, and `name` are reserved. `/apps/<id>` renders `defaultPage`; `/apps/<id>/p/<page>?issueId=42` is the shareable deep link for another page. Browser navigation is client-side, so app state and polled data stay warm across page changes.
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, Section, and Drawer). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 34)
+## Component catalog (all 35)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -494,13 +552,14 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Card` | none | `title`, `description`; has the `default` child slot. |
 | `Heading` | `text` | `level: "h1", "h2", or "h3"`. |
 | `Text` | `content` | `tone: "default" or "muted"`. |
-| `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. |
+| `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip (icon plus short label), like agent output in a session; `[text](url)` keeps its text. |
 | `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
 | `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
 | `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
-| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). |
+| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. |
+| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", or "bar"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. Wrap it in a `Card` for a title. |
 | `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon), `actionLabel` (a button inside the callout that emits `press`; wire it with `on.press`). |
 | `Badge` | `text` | `text` is string or number; `tone`; `icon` replaces the dot; `variant: "tag"` (default uppercase chip), `"status"` (sentence-case pill), `"count"` (numeric pill), or `"beta"` (the BETA tag); `status` (a lifecycle value renders the dashboard status chip); `hint` (tooltip; the beta tag's explanation). |
 | `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
@@ -512,7 +571,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Spinner` | none | `variant: "ring", "ellipsis", or "bars"` (default: the dashboard spinner), `size: "sm" or "md"`, `label` (visible text and accessible name). |
 | `AvatarStack` | `users` | `users` are display names (initials avatars); `max` (default 4) before a `+N` count. Hover lists every name. |
 | `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
-| `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
+| `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below); has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
@@ -521,17 +580,30 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
+| `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
+| `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, format?: "<template>", onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", hint?: string, popover?: { title?, fields, trigger? }, href?: "<row field>", linkLabel?: "<template>", max?: number, format?: "<template>", onChange?: chain, filter?: "values" or "text" or false, muted?: string[] }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `checkbox`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
   - `status`: lifecycle values (`pending`, `in_progress`, `running`, `completed`, `failed`, `cancelled`, `paused`, `reviewing`, ...) render the dashboard status chip with its icon; other values use `tones` like `badge`.
-  - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: an http(s) URL opening in a new tab (other values render as text).
-  - `switch`: a toggle. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the switch is read-only.
-  - Numbers, durations and progress right-align by default. `truncate: "middle"` keeps both ends of ids and paths. `icon` shows in the header; `tooltip` names a row field shown on hover.
+  - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: a smart link (see Smart links, tooltips and popovers below); any other http(s) URL opens in a new tab and other values render as text.
+  - `switch` / `checkbox`: a toggle or a checkbox bound to a boolean column. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the control is read-only. Each toggle is a model write, so to pick rows for a bulk action use `selectable` (below), not a boolean column.
+  - Numbers, durations and progress right-align by default. `truncate: "middle"` keeps both ends of ids and paths. `icon` shows in the header; `tooltip` names a row field shown in a styled tooltip on the cell (when the cell is plain text that gets cut off, the tooltip shows its full text without any config).
   - `format`: a `{{field}}` template that combines several row fields into one cell, e.g. `"{{name}} ({{status}})"`. Placeholder names match `[\w.]+` (letters, digits, `_` and `.`; no hyphens or spaces). Each placeholder reads that row field as-is (a dotted name such as `{{owner.name}}` is a literal column name, not a nested path); a missing or null field becomes an empty string and an object or array becomes a JSON preview cut to 120 characters. The whole cell is capped at 500 characters. A templated column ignores `kind`, shows the same text in the phone list, and sorts by the composed text. `search` and `filters` still read the column's `key`.
+  - `muted: ["none", "no"]`: those cell values (matched case-insensitively) render as a quiet `—` instead of a pill or text, for columns that are mostly `none` / `no`. The value stays in the data, in the filter list, as a hover title and for screen readers; the phone list leaves it out. Not applied to `switch` / `checkbox` cells.
+- `selectable` + `id`: a leading pinned checkbox column. The header checkbox selects every row left after `search` / `filters` (checked, unchecked or indeterminate; clicking it again clears those rows), and shift-click selects a range in the order shown. The selection is client state at `{ "$state": "/ui/<id>/selected" }`, an array of row ids (the `rowId` field, default `id`, as strings). It is never a model write and is not shared with other viewers. `id` is a literal like `SearchInput.id`, and the validator requires it with `selectable` or `bulkActions`. Selected rows that disappear from the data drop out of the selection.
+- `bulkActions[]`: `{ label, variant?, icon?, confirm?, actions }`, the `rowActions` shape without `placement`; a non-empty list implies `selectable`. A bar under the table shows `N selected`, the buttons and Clear while the selection is non-empty. Chains have no `$row`; pass the ids with `{ "$state": "/ui/<id>/selected" }`, e.g. `{ "action": "app.action", "params": { "name": "enqueue", "input": { "prs": { "$state": "/ui/prTable/selected" } } } }`. Confirm rules match `rowActions`; the dialog always adds the selection size (`Applies to 3 selected rows.`). The selection is locked while the chain runs. It clears (only the rows the chain acted on) once every step succeeded, waiting for a task-backed `app.action` to finish; a failed `app.mutate` or a failed task stops the chain and keeps the selection for a retry.
+- `filterable: true` + `id`: built-in column filters. Each filterable column gets a filter button in its header: `badge`, `status`, `enum`, `boolean`, `user` and `agent` columns open a checkbox list of the distinct values with row counts (the counts follow the other active filters, so a second tick shows what it adds); a column with no kind (or `text` / `string`) opens a contains-text field; numbers, dates, links and `format` columns get none. `columns[].filter` overrides per column: `"values"` or `"text"` (works without `filterable`, and is how a `format` column opts in), or `false` to opt out. Active filters show as removable pills above the table with Clear all. The state is client state at `{ "$state": "/ui/<id>/filters" }`, an object with one entry per column (`/ui/<id>/filters/<column>`): a string array for a list, a string for text; other elements can read it. It composes with `search` and `filters`: a row must pass all three. Below 768px the header menus become one Filters button above the card list. `id` is required (the validator checks it).
+- `clearState`: state paths the Table's Clear filters button and the pills' Clear all also reset, e.g. `["/ui/prSearch/value"]` for the `SearchInput` feeding `search`. Only `/ui/<id>/...` paths of controls on the page. Without it, those controls keep their value and the no-match state only offers Clear filters for the built-in filters.
+- Loading and errors: the first load (no rows yet) shows a skeleton shaped like the table, with its header labels. `loading` (`/queries/<name>/loading`) is the first load only. Bind `refreshing` to `{ "$state": "/queries/<name>/fetching" }` (true during any fetch, including the 5s poll and `app.refresh`) and a refetch with rows showing runs a slim bar along the top edge, on phones too, and never dims, covers or blanks a row. A failed query shows the error callout with a Retry button; `onRetry` is the chain it runs (default `[{ "action": "app.refresh" }]`, which re-runs every query on the page). With rows already loaded the callout sits above the stale rows; with none, it is the whole state (no empty message). A search or filter that hides every row shows "No rows match" with a Clear filters button; with header filters the table stays in place (header and open filter input included) and the button sits under it.
+- Smart links, tooltips and popovers (Table, DetailList, CardGrid, Markdown):
+  - A `link` cell (Table `kind: "link"`, DetailList and CardGrid `kind: "link"`) shows a chip with an icon and a short label when its value is a GitHub PR, issue, commit or repo URL (`agent-swarm#2605`, `agent-swarm@a1b2c3d`, `owner/repo`), the GitHub shorthand `owner/repo#N` or `owner/repo@sha`, a dashboard task, agent, session, app, page or workflow URL (shown by its name once the dashboard knows it, else `Task 1f6feea0`), or an agent-fs file. GitHub links open in a new tab; dashboard links stay in the app. Any other http(s) URL is a plain external link, and any other value is text. Only `github.com` links are GitHub links.
+  - `href: "<row field>"` (Table column, DetailList or CardGrid field) takes the URL from another row field, so a cell can show one field and link with another: `{ "key": "number", "label": "PR", "format": "{{repo}}#{{number}}", "href": "url" }` shows `agent-swarm#2605` as a PR chip. With `href` the cell's own text (or `format`) is the label. `linkLabel: "<template>"` (same `{{field}}` rules as `format`) sets the label instead, e.g. `"Lead review"` on a `kind: "link"` column.
+  - `hint: "<text>"` on a column adds a header tooltip. A header cut off by the column width also shows its full label in the tooltip, with no config.
+  - `popover: { title?: "<template>", fields: [...], trigger?: "hover" | "click" }` on a Table column opens a popover from the cell that lists up to 12 fields of the row, in the DetailList field shape (`{ key, label?, kind?, tones?, href?, linkLabel? }`, any DetailList kind). It opens on hover or keyboard focus by default and lets the pointer move into it; `trigger: "click"` toggles it from the cell; on a cell with its own controls (link, copy, switch) it opens from a separate Details button beside the content. In the phone list, link columns render as chips under the row and each popover column gets a Details button that opens on tap. Use it for detail that does not fit a column, such as a merge reason or CI status. `key` and `href` must name model columns.
 - `onRowClick`: action chain with `$row` / `$rowIndex`, run when a row is clicked (or Enter on a focused cell). Pair it with `app.navigate` that sets a Drawer param, and bind `selectedId` to `{ "$state": "/route/params/<param>" }` so the open row stays highlighted. `rowId` names the id field (default `id`).
-- Phones (below 768px): the table renders as a card list. `mobileFields: { title, subtitle?, meta?: string or string[], status? }` picks the columns; by default the first text column is the title and the first `status`/`badge` column the chip. `mobile: "scroll"` keeps the grid; it is the default when the table has `rowActions` but no `onRowClick`.
+- Phones (below 768px): the table renders as a card list. `mobileFields: { title, subtitle?, meta?: string or string[], status? }` picks the columns; by default the first text column is the title and the first `status`/`badge` column the chip. `mobile: "scroll"` keeps the grid; it is the default when the table has `rowActions` but no `onRowClick`. With `selectable`, each phone card gets a checkbox beside it and a Select all row sits above the list. An editable `checkbox` / `switch` column (one with `onChange`) becomes a real control beside the card, not a line of text.
 - `emptyState: { icon?, title, body? }` replaces the plain empty message. A search or filter that hides every row shows its own "No rows match" state.
 - `pagination`: boolean; defaults to auto-enabling past 200 rows (set `false` to force one scroll region). `density: "compact"` tightens row height for dense readouts.
 - `rowActions[]`: `{ label, variant?, icon?, placement?: "inline" or "menu", confirm?, actions }`. `placement: "menu"` moves the action into the row's More menu. Variants add `destructive-outline` to the Button variants. `destructive` and `destructive-outline` confirm by default; customize with `{ "title": ..., "description": ..., "confirmLabel": ... }`, or use a bare `confirm` string as the dialog description (use `confirm: false` only for a reversible action).
@@ -560,6 +632,35 @@ Tree details:
 - Each row shows `key — type`. Clicking a row writes its key to `/ui/<id>/value`, and the row bound to that path renders selected; read the selection with `{ "$state": "/ui/<id>/value" }`. The Tree never writes `null`: when the selected key leaves the doc (a refetch, an edit) the stored key stays and no row renders selected. Selection and collapse are keyed by node key, so a key reachable through two parents selects and collapses in both places.
 - Rows scroll inside `maxHeight` (default `480px`). Set `fill: true` inside a `fill` Stack or Split pane to grow to that height instead and scroll within it (ignores `maxHeight`).
 
+SchemaForm details:
+
+- `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
+- Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
+- Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
+
+SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
+
+- `sessionKey` names the session, a plain token (`^[A-Za-z0-9_-]{1,128}$`): a literal such as `"main"`, or a `$state` binding to a token such as a route param or row id (`{ "$state": "/route/params/itemId" }`) for one session per item. No row stores the session: the server keys every task the thread's `app.action` creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer's newest session with that key. A page can only write sessions of its own app.
+- `scope` is `"user"` (the default): each viewer has their own session per key. The viewer needs an identity; with none picked the composer is disabled. `scope: "shared"` (one session everyone on the page writes to) comes in a follow-up PR: the validator rejects it today. The planned design adds an everyone:write session share on the root when the server creates it.
+- It renders the same conversation as the dashboard's "Session about this page" panel: the session turn timeline (each person message with the sender's name, the swarm's replies with a live Queued / Working status, worker steps, approvals) and the shared composer. A person bubble shows the `message` of an app-action input instead of the whole agent prompt, cut at 4,000 characters. The composer's attachments and mic are off: a message is text only.
+- Sending a message takes one of three routes:
+  1. No session yet → run `onDispatch` with `$form = { message }` and `$chain = { leafTaskId: null, newTaskId: null }`. Its `app.action` creates the session's root task.
+  2. A task in the session is not finished → the composer steers the newest such task, on any agent, with `source: "app-page"`. It offers Queue, and Interrupt where the harness supports it. The server promotes a steer it cannot deliver into a follow-up task (source `ui`), and a toast says so.
+  3. Every task is finished (completed, failed, cancelled, superseded, skipped, or draft) → run `onDispatch` again with `$chain.leafTaskId` set to the newest task id, so `"parentTaskId": { "$chain": "leafTaskId" }` chains the new task under it. The follow-up keeps the session's key.
+- Each `app.action` step of `onDispatch` is sent with the session (`{ key, scope }`) and with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
+- "New session" (shown once a session exists) starts over: the next message creates a new root, and the thread shows only sessions created after the current one. Nothing is deleted; older sessions stay in the dashboard's Sessions list.
+- While the session loads, the composer is disabled with a loading notice. A session whose chain cannot be found blocks sending. After a send, the composer stays busy until the new task shows up, for at most 30 seconds.
+- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
+
+```json
+{ "type": "SessionThread", "props": {
+  "id": "chat",
+  "sessionKey": { "$state": "/route/params/screenId" },
+  "onDispatch": [{ "action": "app.action", "params": {
+    "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }]
+} }
+```
+
 Form details:
 
 - `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, or `enum`, and enum fields need `options`.
@@ -573,7 +674,7 @@ Drawer details:
 
 DetailList details:
 
-- `fields[]`: `{ key, label?, kind?, tones? }`. Kinds reuse Table formatting (`text`, `string`, `number`, `boolean`, `date`, `badge`, `enum`) and the Table cell renderers (`status`: lifecycle chip or `tones` pill; `user`: avatar plus name; `relative`: smart time, exact on hover; `copy`: value plus copy button), and add `code` for a monospace block and `json` for a collapsible JSON tree (objects, or a string holding JSON). Bind `data` to one record, commonly `/queries/<detailQuery>/data/0`.
+- `fields[]`: `{ key, label?, kind?, tones? }`. Kinds reuse Table formatting (`text`, `string`, `number`, `boolean`, `date`, `badge`, `enum`) and the Table cell renderers (`status`: lifecycle chip or `tones` pill; `user`: avatar plus name; `relative`: smart time, exact on hover; `copy`: value plus copy button; `link`: a smart link from the value, or from the row field named by `href`, with `linkLabel` as an optional label template), and add `code` for a monospace block and `json` for a collapsible JSON tree (objects, or a string holding JSON). Bind `data` to one record, commonly `/queries/<detailQuery>/data/0`.
 
 Motion details:
 
@@ -583,7 +684,7 @@ CardGrid details — the visual counterpart to Table for record browsers (projec
 
 - `titleKey` (required) picks the row field shown as the card title (an object value shows a JSON preview; titles are capped at 500 characters).
 - `imageKey` (optional) picks a row field holding an absolute http(s) image URL and adds an image tile to every card. When it is set, a non-URL value, a missing value, or a failed load shows a placeholder tile. Omit it for text-only cards with no tile.
-- `fields[]`: `{ key, kind?, tones? }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`), or `json` (no `label`, no `format`). A field with no `kind` whose value is an object renders like `json`. They render as an unlabeled `·`-joined meta line under the title, e.g. a `date` field for "created" and a `text` field for the author.
+- `fields[]`: `{ key, kind?, tones?, href?, linkLabel? }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge` (with `tones`), `link` (a smart link, with `href` / `linkLabel`), or `json` (no `label`, no `format`). A field with no `kind` whose value is an object renders like `json`. They render as an unlabeled `·`-joined meta line under the title, e.g. a `date` field for "created" and a `text` field for the author.
 - `columns`: same responsive shorthand as `Grid.columns` (default `{ "base": 1, "sm": 2, "md": 3 }`).
 - `onClick`: an action chain with `$row` / `$rowIndex`, run when a card is clicked or activated with Enter or Space. Commonly `app.navigate` into a detail page, the CardGrid equivalent of Table's `onRowClick`.
 - Bind `data` / `loading` / `error` to a named query like Table. Loading shows skeleton cards, an error shows a callout, and no rows shows `emptyMessage`.
@@ -595,13 +696,15 @@ Shortcut details:
 
 ## Layout & interactivity
 
+For a multi-page app that should feel like a product (a sidebar of pages, a sticky title bar with actions), set `layout: "sidebar"` (see Pages, routes, and page trees) instead of building navigation out of Tabs or button rows. Pair `Metric` tiles (with `sparkline`) in a `Grid` with `Chart`s inside `Card`s for dashboards.
+
 Use `Stack` as the primary page and section layout; `Container` is the legacy two-prop primitive retained for existing pages. Stack supports vertical or horizontal flow, shared spacing, alignment, justification, wrapping, and padding; row Stacks (filter bars, button rows) should set `collapseBelow: "sm"|"md"|"lg"` so they stack vertically on phones. Use `Grid` for responsive card or metric strips: a bare column count is responsive shorthand (1 column on phones, 2 from `sm`, the count from `md` up), or pin breakpoints explicitly with `{ "base": 1, "md": 2, "lg": 3 }`. `Grid` and `Split` also accept `padding` on the shared spacing scale.
 
 `Stack` and `Split` size to their content by default, so a page scrolls as a whole. Set `fill: true` to make one grow to fill the remaining height of a `fill`-aware parent (another `fill` Stack or Split) instead; chain it from the page root down through every container on the path to the element that should scroll, and that element scrolls within whatever height is left while the page itself does not. A non-`fill` sibling (a toolbar, a header) keeps its natural height and the `fill` sibling absorbs the rest. A `fill` Split stretches both panes to the full row height, so nesting a `fill` Split inside one pane of another `fill` Split is the way to build a three-or-more column viewport-height layout (`ratio` is only ever two panes).
 
 `Split` and `Tabs` children are positional. For Split, `children[0]` is the first pane, `children[1]` is the second, and extra children append inside the second pane. Below `collapseBelow`, panes stack; `reverse` changes only that narrow-layout stacking order. For Tabs, `children[i]` is the body for `tabs[i]`; keep both arrays in the same order and with the same count. Inactive tab children stay mounted but hidden, so Tables keep polling. Use `Divider` to separate sections and `Markdown` for richer explanatory content.
 
-SearchInput, Select, NumberInput, Chips, and Tree are client-side controls: each needs a literal `id` and writes state under `/ui/<id>/value` (Tree writes the clicked node key); Tabs writes its active key to `/ui/<id>/tab`. Bind those values into a Table's `search` and `filters` props. This filters already-polled rows locally; it does not alter or re-run the named query.
+SearchInput, Select, NumberInput, Chips, and Tree are client-side controls: each needs a literal `id` and writes state under `/ui/<id>/value` (Tree writes the clicked node key; a `selectable` Table writes its selected row ids to `/ui/<id>/selected`); Tabs writes its active key to `/ui/<id>/tab`. Bind those values into a Table's `search` and `filters` props. This filters already-polled rows locally; it does not alter or re-run the named query.
 
 ```json
 {
@@ -657,7 +760,7 @@ Valid `$state` roots are:
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
-Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, or `Form.onSubmit`) these scoped sentinels are valid, recursively inside objects and arrays:
+Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or a component chain prop such as `SessionThread.onDispatch`) these scoped sentinels are valid, recursively inside objects and arrays:
 
 | Sentinel | Resolves to |
 |---|---|
@@ -667,7 +770,7 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, o
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
-| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain; it carries `leafTaskId` and `newTaskId`. Where no chain scope is published, the sentinel is left in place and the action fails instead of silently dropping the parent. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain (`SessionThread`); it carries `leafTaskId` and `newTaskId`. The component publishes every key, `null` when it has no value yet; a `null` key resolves to nothing and its param is dropped (a `parentTaskId` bound to a `null` `leafTaskId` creates a root task). Where no chain scope is published (Table, Form), or the key is not one the scope carries (a typo), the sentinel is left in place and the action fails instead of silently dropping the parent. An empty string is not "no parent": a `$state` slot meaning "no parent yet" must hold `null`. |
 | `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
@@ -676,7 +779,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`, or `{ "$state": "/route/params/<param>" }` in a Drawer footer); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
-- `app.action`: `{ name, input?, parentTaskId? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400.
+- `app.action`: `{ name, input?, parentTaskId?, followUp? }`; `name` must be declared in definition `actions`. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`. `parentTaskId` chains the created task under an existing one for task-kind actions (typically `{ "$chain": "leafTaskId" }`; a literal or `$state` task id also works); a script or sync action rejects it with 400. `followUp: false` creates the task with no Lead follow-up (the review task the Lead adds when a worker task finishes); script and sync actions ignore it. A task an action creates is attributed to the viewer's identity. `session: { key, scope }` (SessionThread sets it) keys a task-kind action's task into the viewer's session; the server builds the key, never the page.
 - `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.

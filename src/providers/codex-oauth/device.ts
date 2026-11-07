@@ -1,12 +1,42 @@
 import { _fetchHolder, CLIENT_ID, exchangeAuthorizationCode, getAccountId } from "./flow.js";
 import type { CodexOAuthCredentials } from "./types.js";
 
-const DEVICE_CODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode";
-const DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token";
-const DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback";
+const DEFAULT_DEVICE_BASE_URL = "https://auth.openai.com";
 const UPSTREAM_TIMEOUT_MS = 15_000;
 
-export const CODEX_DEVICE_VERIFICATION_URL = "https://auth.openai.com/codex/device";
+/**
+ * Origin of the device login endpoints. Read on every call, so a config reload
+ * can point the login at a stand-in (the black-box suite runs one).
+ */
+/**
+ * `CODEX_OAUTH_DEVICE_BASE_URL` is a test knob for the black-box suite. It is an env-only
+ * reserved config key (swarm_config writes refuse it) and only a loopback origin is
+ * honoured: the device login carries ChatGPT credentials, so a redirect to any other host
+ * must be impossible. Anything else falls back to auth.openai.com.
+ */
+export function resolveCodexDeviceBaseUrl(raw: string | undefined): string {
+  const configured = raw?.trim();
+  if (!configured) return DEFAULT_DEVICE_BASE_URL;
+  try {
+    const url = new URL(configured);
+    const loopback =
+      url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    if (url.protocol === "http:" && loopback) return url.origin;
+  } catch {
+    // fall through
+  }
+  console.warn("[codex-oauth] CODEX_OAUTH_DEVICE_BASE_URL must be a loopback http origin; ignored");
+  return DEFAULT_DEVICE_BASE_URL;
+}
+
+function deviceBaseUrl(): string {
+  return resolveCodexDeviceBaseUrl(process.env.CODEX_OAUTH_DEVICE_BASE_URL);
+}
+
+/** The page where the user enters the code. Read on every call, like the other URLs. */
+export function codexDeviceVerificationUrl(): string {
+  return `${deviceBaseUrl()}/codex/device`;
+}
 
 export class DeviceCodeNotEnabledError extends Error {}
 
@@ -31,16 +61,19 @@ function parseInterval(value: unknown): number {
 }
 
 export async function requestDeviceCode(): Promise<DeviceCode> {
-  const response = await _fetchHolder.current(DEVICE_CODE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      originator: "agent-swarm",
-      "User-Agent": "agent-swarm",
+  const response = await _fetchHolder.current(
+    `${deviceBaseUrl()}/api/accounts/deviceauth/usercode`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        originator: "agent-swarm",
+        "User-Agent": "agent-swarm",
+      },
+      body: JSON.stringify({ client_id: CLIENT_ID }),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     },
-    body: JSON.stringify({ client_id: CLIENT_ID }),
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-  });
+  );
 
   if (response.status === 404) throw new DeviceCodeNotEnabledError();
   if (!response.ok) throw new Error(`Device code request failed with HTTP ${response.status}`);
@@ -63,7 +96,7 @@ export async function pollDeviceToken(
   deviceAuthId: string,
   userCode: string,
 ): Promise<DeviceTokenPollResult> {
-  const response = await _fetchHolder.current(DEVICE_TOKEN_URL, {
+  const response = await _fetchHolder.current(`${deviceBaseUrl()}/api/accounts/deviceauth/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -95,8 +128,9 @@ export async function exchangeDeviceAuthorizationCode(
   const token = await exchangeAuthorizationCode(
     authorizationCode,
     codeVerifier,
-    DEVICE_REDIRECT_URI,
+    `${deviceBaseUrl()}/deviceauth/callback`,
     AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    `${deviceBaseUrl()}/oauth/token`,
   );
   if (token.type !== "success") return null;
   const accountId = getAccountId(token.access);

@@ -1,8 +1,12 @@
 import {
   keyPrefixRange,
+  NO_GROUP_LEAF_KINDS,
   normalizeAssetKey,
+  parseAssetKey,
   SESSION_LEAF_KINDS,
+  SESSION_RESOURCE_KINDS,
   sessionGroupKey,
+  sessionResourceGroupOf,
 } from "../../assets/key";
 import {
   effectiveSource,
@@ -188,6 +192,9 @@ export async function getSessionGroupKey(task: { id: string; key: string }): Pro
  */
 function groupCondition(group: string, scan = false): SqlFragment {
   const { lo, hi } = keyPrefixRange(group);
+  // A namespace root keeps resource leaves out: they are resource groups (`sessionGroupKey`).
+  const kinds =
+    parseAssetKey(group).relativeSegments.length === 0 ? NO_GROUP_LEAF_KINDS : SESSION_LEAF_KINDS;
   // The remaining key must be one resource leaf, with no nested path.
   // SQLite substr/length count code points, so count them here too (not UTF-16 units).
   const start = [...lo].length + 1;
@@ -195,7 +202,7 @@ function groupCondition(group: string, scan = false): SqlFragment {
   return {
     sql: `(${scan ? "+" : ""}r."key" >= ? AND ${scan ? "+" : ""}r."key" < ? AND (r."key" = ? OR (
       instr(substr(r."key", ?, length(r."key") - ?), '/') = 0 AND
-      (${SESSION_LEAF_KINDS.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")}) AND
+      (${kinds.map(() => 'substr(r."key", ?) GLOB ?').join(" OR ")}) AND
       ${threadRoots.sql} < ?
     )))`,
     params: [
@@ -204,7 +211,7 @@ function groupCondition(group: string, scan = false): SqlFragment {
       lo,
       start,
       start,
-      ...SESSION_LEAF_KINDS.flatMap((kind) => [start, `${kind}:?*/`]),
+      ...kinds.flatMap((kind) => [start, `${kind}:?*/`]),
       ...threadRoots.params,
       NESTED_THREAD_MIN_ROOTS,
     ],
@@ -221,13 +228,39 @@ function noGroupCondition(userId: string | null | undefined): SqlFragment {
   };
 }
 
+/** The namespace roots whose resource groups the Inbox holds: `shared/` and the viewer's own. */
+function resourceBases(userId: string | null | undefined): string[] {
+  return userId ? ["shared/", `personal/${userId}/`] : ["shared/"];
+}
+
 /**
- * Roots the Inbox holds: No group and the source sections (Slack, Telegram,
- * Discord), which file sessions on their own. A session that a person filed
- * into a group (My groups, Shared with me) shows under that group only.
+ * Whether a root key sits in a resource section (Pages, Workflows, ...) of
+ * the viewer: `inboxScopeCondition`'s resource ranges, in JS.
+ */
+export function inResourceScope(key: string, userId: string | null | undefined): boolean {
+  return resourceBases(userId).some((base) =>
+    SESSION_RESOURCE_KINDS.some((kind) => key.startsWith(`${base}${kind}:`)),
+  );
+}
+
+/** Key ranges of every `<base><kind>:` prefix ({@link inResourceScope}). */
+function resourceKeyRanges(userId: string | null | undefined) {
+  return resourceBases(userId).flatMap((base) =>
+    SESSION_RESOURCE_KINDS.map((kind) => {
+      const lo = normalizeAssetKey(`${base}${kind}:`).slice(0, -1);
+      return { lo, hi: `${lo.slice(0, -1)};` };
+    }),
+  );
+}
+
+/**
+ * Roots the Inbox holds: No group, the source sections (Slack, Telegram,
+ * Discord), and the resource sections (Pages, Workflows, ...), which file
+ * sessions on their own. A session that a person filed into a group (My
+ * groups, Shared with me) shows under that group only.
  */
 function inboxScopeCondition(userId: string | null | undefined): SqlFragment {
-  const ranges = sourceKeyRanges();
+  const ranges = [...sourceKeyRanges(), ...resourceKeyRanges(userId)];
   const noGroup = noGroupCondition(userId);
   return {
     sql: `(${ranges.map(() => '(+r."key" >= ? AND +r."key" < ?)').join(" OR ")} OR ${noGroup.sql})`,
@@ -305,7 +338,7 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     add(sessionViewerCondition(opts.viewer));
     // Unary +: a full pass over the narrow summaries beats the partial thread index here.
     if (opts.tree) conditions.push("+r.requestedByUserId IS NOT NULL");
-    if (opts.mine) add(sessionMineCondition(opts.viewer.userId));
+    if (opts.mine) add(sessionMineCondition(opts.viewer.userId, opts.viewer.readAll));
   }
   if (opts.keyPrefix) {
     const { lo, hi } = keyPrefixRange(opts.keyPrefix);
@@ -504,8 +537,9 @@ export async function getSessionReadState(
   rootId: string,
   userId: string,
   now?: string,
+  readAll?: boolean,
 ): Promise<{ readState: SessionReadState; lastActivityAt: string } | null> {
-  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all" }, now });
+  const query = sessionSummaryQuery({ rootId, viewer: { userId, scope: "all", readAll }, now });
   const row = await getDbClient().get<{ readState: SessionReadState; lastActivityAt: string }>(
     `SELECT readState, lastActivityAt FROM (${query.sql})`,
     query.params,
@@ -627,6 +661,11 @@ export interface SessionTree {
   /** Slack channel ids backed by visible roots with matching Slack fields, including hidden sources. */
   slackChannels: string[];
   /**
+   * Every resource group key in this view and the key of its resource
+   * (`shared/app:<id>/` for an action group), hidden sources included, for labels.
+   */
+  resourceGroups: string[];
+  /**
    * The oldest visible root of each nested source thread, including hidden
    * sources: its title, else a preview of its prompt without the thread context.
    */
@@ -662,14 +701,16 @@ function threadPromptPreview(prompt: string): string {
 }
 
 export async function getSessionTree(
-  actor: { kind: "bypass" } | { kind: "user"; userId: string | null },
+  actor: { kind: "bypass" } | { kind: "user"; userId: string | null; readAll?: boolean },
   now?: string,
   opts: { mine?: boolean; hideSource?: string[]; showSource?: string[] } = {},
 ): Promise<SessionTree> {
   // No source filter in SQL: the source counts must include hidden sources,
   // so the filter menu can offer them back. The loop skips them instead.
   const query = sessionSummaryQuery({
-    ...(actor.kind === "user" ? { viewer: { userId: actor.userId, scope: "all" } as const } : {}),
+    ...(actor.kind === "user"
+      ? { viewer: { userId: actor.userId, scope: "all", readAll: actor.readAll } as const }
+      : {}),
     now,
     tree: true,
     mine: opts.mine,
@@ -702,6 +743,7 @@ export async function getSessionTree(
     sources: [],
     sourceGroups: [],
     slackChannels: [],
+    resourceGroups: [],
     threadLabels: {},
   };
   const hidden = new Set(opts.hideSource);
@@ -709,6 +751,7 @@ export async function getSessionTree(
   const sources = new Map<string, number>();
   const sourceGroups = new Set<string>();
   const slackChannels = new Set<string>();
+  const resourceGroups = new Set<string>();
   const threadRootIds: string[] = [];
   const groups = new Map<string, SessionTreeGroup>();
   const add = (section: SessionSectionCounts, row: (typeof rows)[number]) => {
@@ -732,6 +775,8 @@ export async function getSessionTree(
       sourceGroups.add(sourceGroupKey);
     }
     if (sourceOfKey(key)) sourceGroups.add(key);
+    const resource = sessionResourceGroupOf(key);
+    if (resource) resourceGroups.add(key).add(resource.resourceKey);
     if (hidden.has(source) || (shown && !shown.has(source))) continue;
     const noGroup =
       key === "shared/" || (actor.kind === "user" && key === `personal/${actor.userId}/`);
@@ -747,7 +792,8 @@ export async function getSessionTree(
     if (row.readState === "later" || row.readState === "done") add(result[row.readState], row);
     else {
       // A session filed into a group shows under it only (`inboxScopeCondition`).
-      if (noGroup || sourceOfKey(key)) add(result.inbox, row);
+      const viewer = actor.kind === "user" ? actor.userId : null;
+      if (noGroup || sourceOfKey(key) || inResourceScope(row.key, viewer)) add(result.inbox, row);
       if (noGroup) add(result.noGroup, row);
       else if (group) add(group, row);
     }
@@ -758,6 +804,7 @@ export async function getSessionTree(
     .sort((a, b) => b.total - a.total || a.source.localeCompare(b.source));
   result.sourceGroups = [...sourceGroups].sort();
   result.slackChannels = [...slackChannels].sort();
+  result.resourceGroups = [...resourceGroups].sort();
   if (threadRootIds.length) {
     // A missing or empty title falls back to a preview of the prompt without its thread context.
     const labels = await getDbClient().query<{ key: string; title: string | null; prompt: string }>(
@@ -795,12 +842,13 @@ export async function triageSessionList(
     "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "showSource" | "now"
   >,
   action: SessionListTriage,
+  readAll?: boolean,
 ): Promise<number> {
   const now = filters.now ?? new Date().toISOString();
   const query = sessionSummaryQuery({
     ...filters,
     now,
-    viewer: { userId, scope: "all" },
+    viewer: { userId, scope: "all", readAll },
     tree: true,
   });
   const status = action === "done" ? "done" : "open";

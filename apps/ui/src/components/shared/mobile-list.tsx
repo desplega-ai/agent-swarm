@@ -12,6 +12,7 @@ import { Children, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "../ui/checkbox";
 
 export function MobileList({
   children,
@@ -69,15 +70,33 @@ export function MobileList({
   );
 }
 
+/**
+ * How many lines a row title may take before it ends in an ellipsis. "full"
+ * shows the whole title: a phone has no hover tooltip to read a clipped one.
+ */
+export type MobileListTitleLines = 1 | 2 | 3 | "full";
+
+// Full class names, so Tailwind's scanner sees them.
+const TITLE_LINES_CLASS: Record<MobileListTitleLines, string> = {
+  1: "line-clamp-1",
+  2: "line-clamp-2",
+  3: "line-clamp-3",
+  full: "",
+};
+
 export function MobileListRow({
   to,
   onClick,
   selected,
   title,
+  titleLines = 2,
   leading,
   status,
   meta,
   live,
+  check,
+  controls,
+  extras,
 }: {
   /** Row link. Without it, `onClick` makes the row a button. */
   to?: string;
@@ -85,6 +104,8 @@ export function MobileListRow({
   /** Highlights the row whose detail is open. */
   selected?: boolean;
   title: ReactNode;
+  /** Title line limit. Defaults to 2; "full" never clamps. */
+  titleLines?: MobileListTitleLines;
   /** Avatar or icon before the title. */
   leading?: ReactNode;
   /** Status chip, kept on the title line so it is never pushed off-screen. */
@@ -93,12 +114,33 @@ export function MobileListRow({
   meta?: ReactNode[];
   /** Amber rail for rows that are working or waiting on the viewer. */
   live?: boolean;
+  /**
+   * Selection checkbox in its own 44px tap target BESIDE the row, never inside
+   * it (a checkbox is a button; the row may be a button or a link).
+   */
+  check?: {
+    checked: boolean | "indeterminate";
+    onChange: () => void;
+    label: string;
+    disabled?: boolean;
+  };
+  /**
+   * Interactive cells (a checkbox or switch column) in a trailing 44px tap
+   * target each. Beside the row for the same reason as `check`: a control
+   * inside a button or link row would nest interactive elements.
+   */
+  controls?: ReactNode[];
+  /**
+   * Links and buttons under the row. They sit outside the row, which is a
+   * link or a button, so no control nests inside another.
+   */
+  extras?: ReactNode;
 }) {
   const facts = (meta ?? []).filter(
     (fact) => fact !== null && fact !== undefined && fact !== false && fact !== "",
   );
   const rowClass = cn(
-    "relative flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
+    "relative flex min-h-11 w-full min-w-0 items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
     selected && "bg-accent/50",
   );
   const content = (
@@ -113,7 +155,12 @@ export function MobileListRow({
       {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex min-w-0 items-start gap-2">
-          <span className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere] line-clamp-2">
+          <span
+            className={cn(
+              "min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]",
+              TITLE_LINES_CLASS[titleLines],
+            )}
+          >
             {title}
           </span>
           {status ? <span className="shrink-0">{status}</span> : null}
@@ -136,24 +183,60 @@ export function MobileListRow({
       ) : null}
     </>
   );
+  const row =
+    to !== undefined ? (
+      <Link to={to} className={rowClass}>
+        {content}
+      </Link>
+    ) : onClick ? (
+      <button
+        type="button"
+        className={rowClass}
+        onClick={onClick}
+        aria-current={selected ? "true" : undefined}
+      >
+        {content}
+      </button>
+    ) : (
+      <div className={rowClass}>{content}</div>
+    );
+  const hasExtras = extras !== null && extras !== undefined && extras !== false;
+  const extrasBlock = hasExtras ? (
+    <div className="-mt-1 flex min-w-0 flex-wrap items-center gap-2 px-4 pb-3 text-sm">
+      {extras}
+    </div>
+  ) : null;
+  const trailing = (controls ?? []).filter(Boolean);
+  if (!check && trailing.length === 0) {
+    return (
+      <li className={cn(hasExtras && selected && "bg-accent/50")}>
+        {row}
+        {extrasBlock}
+      </li>
+    );
+  }
   return (
-    <li>
-      {to !== undefined ? (
-        <Link to={to} className={rowClass}>
-          {content}
-        </Link>
-      ) : onClick ? (
-        <button
-          type="button"
-          className={rowClass}
-          onClick={onClick}
-          aria-current={selected ? "true" : undefined}
-        >
-          {content}
-        </button>
-      ) : (
-        <div className={rowClass}>{content}</div>
-      )}
+    <li className={cn(hasExtras && selected && "bg-accent/50")}>
+      <div className="flex items-stretch">
+        {check ? (
+          <label className="flex w-11 shrink-0 cursor-pointer items-center justify-center pl-2">
+            <Checkbox
+              checked={check.checked}
+              disabled={check.disabled}
+              aria-label={check.label}
+              onCheckedChange={() => check.onChange()}
+            />
+          </label>
+        ) : null}
+        <div className="min-w-0 flex-1">{row}</div>
+        {trailing.map((control, index) => (
+          // Controls are positional (one per editable column), never reordered.
+          <div key={index} className="flex min-h-11 w-11 shrink-0 items-center justify-center">
+            {control}
+          </div>
+        ))}
+      </div>
+      {extrasBlock}
     </li>
   );
 }

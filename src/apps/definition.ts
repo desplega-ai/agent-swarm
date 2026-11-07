@@ -4,11 +4,13 @@ import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import { APPS_JSON_COLUMN_MAX_BYTES_BOUNDS } from "../be/swarm-config-guard";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
+import { AppIconSchema } from "../types";
 import catalog from "./catalog.generated.json";
 import {
   crossPageDefinitionIssues,
   type ElementReferenceContext,
   elementDefinitionIssues,
+  shellDefinitionIssues,
   validatePage,
 } from "./page-validator";
 import { resolveSyncRunAs } from "./sync-run-as";
@@ -379,6 +381,15 @@ const AppPageSchema = z
     elements: z.record(z.string(), z.unknown()),
     title: z.string().optional(),
     params: z.record(AppNameSchema, AppPageParamSchema).optional(),
+    // Sidebar layout (`layout: "sidebar"`) metadata. `icon` is a catalog icon
+    // name (checked against the generated catalog in `shellDefinitionIssues`).
+    icon: z.string().optional(),
+    /** One line under the title in the sticky page header. */
+    description: z.string().max(280).optional(),
+    /** Element of this page rendered in the header's actions slot, outside `root`'s tree. */
+    headerActions: z.string().optional(),
+    /** `false` leaves the page out of the sidebar. Pages with a required param never list. */
+    nav: z.boolean().optional(),
   })
   .strict();
 
@@ -467,6 +478,25 @@ export const AppDefinitionSchema = z
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
     theme: AppThemeIdSchema.optional(),
+    /**
+     * `sidebar` wraps every page in the app shell: a left sidebar listing the
+     * pages and a sticky page header (title, description, `headerActions`).
+     * Omitted = the plain page canvas.
+     */
+    layout: z.enum(["sidebar"]).optional(),
+    /**
+     * Icon shown for the app on the dashboard Apps page. One of:
+     * - `{type:"lucide", icon, color?}`: a lucide icon name + optional hex color.
+     *   The dashboard owns the curated icon catalog and falls back to a generic
+     *   icon when the name is unknown (`AVATAR_ICON_CATALOG` in
+     *   `apps/ui/src/lib/agent-icon.ts`).
+     * - `{type:"url", url}`: an https image link (no credentials, max 2048).
+     * - `{type:"agent-fs", path, orgId?, driveId?}`: an image in agent-fs. Omit
+     *   both IDs for the swarm drive, or pass both for another drive.
+     * The server validates shape only; the dashboard shows the glyph fallback
+     * when an image cannot load. A merge patch replaces `icon` whole.
+     */
+    icon: AppIconSchema.optional(),
   })
   .superRefine((definition, ctx) => {
     if (!Object.hasOwn(definition.pages, definition.defaultPage)) {
@@ -626,6 +656,8 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "defaultPage",
   "schemaVersion",
   "theme",
+  "icon",
+  "layout",
 ]);
 
 const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
@@ -634,6 +666,8 @@ const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
   themes: "theme",
   appearance: "theme",
   styling: "theme",
+  avatar: "icon",
+  emoji: "icon",
 };
 
 export type AppDefinitionPatchResult =
@@ -1024,6 +1058,7 @@ export async function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
+    ...shellDefinitionIssues(parsed.data, catalog),
     ...(await elementDefinitionIssues(parsed.data, catalog, elementContext)),
   ];
   const grandfatheredScriptRefs = collectScriptReferencePathMap(elementContext.existingDefinition);
@@ -1166,19 +1201,22 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
       delete result[key];
       continue;
     }
-    defineMergePatchValue(
-      result,
-      key,
-      entriesAreAtomic &&
+    // A top-level `icon` is replaced whole so switching its `type` never
+    // leaves keys from the previous variant behind.
+    const replaceWhole =
+      (path.length === 0 && key === "icon") ||
+      (entriesAreAtomic &&
         !(
           path.length === 1 &&
           path[0] === "elements" &&
           isMergePatchObject(value) &&
           Object.keys(value).length === 1 &&
           isMergePatchObject(value.elements)
-        )
-        ? value
-        : applyMergePatch(result[key], value, [...path, key]),
+        ));
+    defineMergePatchValue(
+      result,
+      key,
+      replaceWhole ? value : applyMergePatch(result[key], value, [...path, key]),
     );
   }
   return result;

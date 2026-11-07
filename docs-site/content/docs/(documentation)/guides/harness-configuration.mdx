@@ -52,8 +52,6 @@ HARNESS_PROVIDER=fx              →  FxAdapter             →  starts `fx acp`
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
-For local coding harnesses, Agent Swarm now wires in the `context-mode` MCP server by default for Claude Code, Codex, and opencode. That gives those providers the same `ctx_*` compressed-search / fetch-and-index tools out of the box. Hook guidance now nudges agents toward `ctx_execute` / `ctx_batch_execute` after every 3 qualifying external-MCP calls by default (override with `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY`). Set `CONTEXT_MODE_DISABLED=true` to opt a worker out: the adapters drop the MCP server and disable the installed context-mode plugin for the session, so its hooks stop too.
-
 When the runner refreshes an already-cloned repo for a new task, dirty working trees are auto-stashed instead of forcing a skipped pull. Any resulting `swarm-autostash` refs are appended to the composed prompt so the agent can restore them intentionally with `git stash apply <ref>` or `git stash pop <ref>` when that work matters to the current task.
 
 ---
@@ -191,7 +189,7 @@ The following keys are stored in the swarm config store (via `PUT /api/config` o
 
 ### Model Selection
 
-The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+Codex uses `gpt-5.6-terra` as its no-tier fallback only when no worker-wide `MODEL_OVERRIDE`, task-level `model`, task `modelTier`, or task/agent model profile selects a model. A task `modelTier` or task/agent model profile can resolve to a different model even when neither of the first two overrides is set. Set `MODEL_OVERRIDE` to choose a worker-wide baseline model, or set a task-level `model` to choose a concrete model for one task. `MODEL_TIER_CODEX_REGULAR` affects explicit regular-tier resolution only; it does not change the no-tier fallback.
 
 ### Reasoning / Effort
 
@@ -268,7 +266,7 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh | m
 
 - **In-process OpenCode 2**: each task runs its own embedded `@opencode/sdk` host inside the worker process. There is no `opencode serve` child. Config is passed as a string, the session database is in memory, and nothing is written into the task's working directory.
 - **Agent-swarm plugin**: `src/providers/opencode-swarm-plugin.ts` is passed to the host as a plugin object. It handles task cancellation, the polling limit, the activity heartbeat, lead concurrent context, and the compaction goal reminder. The adapter runs identity sync, memory auto-indexing, the session summary, and session close from the event stream.
-- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in. context-mode is added as a stdio MCP server unless `CONTEXT_MODE_DISABLED=true`. Before the first prompt the adapter waits up to 30 seconds for the swarm server to connect and register `store-progress`; a refused, unauthorized, or tool-less server fails the task with the reason instead of running without swarm tools.
+- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in. Before the first prompt the adapter waits up to 30 seconds for the swarm server to connect and register `store-progress`; a refused, unauthorized, or tool-less server fails the task with the reason instead of running without swarm tools.
 - **Session summaries do not read `auth.json`**: the end-of-session summary uses the shared internal-ai credentials, not OpenCode's `~/.local/share/opencode/auth.json`. A worker that authenticates OpenCode only through that file runs tasks normally but skips summaries (`session_summary skipped (opencode)`). To keep them, give the worker `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, Codex OAuth (see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth)), or `CLAUDE_CODE_OAUTH_TOKEN`; the first one found wins, in that order.
 
 ---
@@ -488,7 +486,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | `ACP_TARGET` | No | `custom` | `opencode`, `gemini`, `copilot`, `qwen`, `kiro` or `goose` for a curated preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
-| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
+| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array of strings (or comma-separated list for hand-authored config) naming environment/config keys explicitly allowed into a custom target process. JSON arrays containing non-string members fail with an `AcpTargetResolutionError` naming `ACP_TARGET_ENV_KEYS` |
 | `ACP_MODEL_ENV_KEY` | No | — | Custom target environment variable that receives `MODEL_OVERRIDE` when the ACP `model` option is unavailable |
 | `ACP_CONFIG_OPTIONS` | No | `{}` | JSON object of additional string or boolean ACP option values to apply when advertised |
 | `ACP_SYSTEM_PROMPT_PATH` | No | — | Where to write the composed system prompt before spawning, for targets that read their prompt from a file instead of an ACP field. Relative paths resolve against the task `cwd`; absolute paths are used as-is |

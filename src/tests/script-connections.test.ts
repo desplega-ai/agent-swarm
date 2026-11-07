@@ -680,6 +680,21 @@ describe("script connections", () => {
       markMigrationApplied(database, "266_script_runs_source_task.sql");
       // 269 alters pages, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "269_pages_design_system.sql");
+      // 271 normalizes session_costs, which this migration-112-only fixture lacks.
+      markMigrationApplied(database, "271_subscription_usage_model.sql");
+      // 278 indexes agent_tasks columns and alters slack_messages, neither of
+      // which this fixture's partial schema has.
+      markMigrationApplied(database, "278_slack_render_v2_reconcile.sql");
+      // 279 backfills agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "279_backfill_learning_expiry.sql");
+      // 281 alters model_profiles (made by the skipped 220) and scheduled_tasks.
+      markMigrationApplied(database, "281_model_profiles_pr2.sql");
+      // 283 alters workflow_runs, which this fixture does not create.
+      markMigrationApplied(database, "283_workflow_run_definitions.sql");
+      // 284 alters model_profiles (made by the skipped 220) and agent_tasks.
+      markMigrationApplied(database, "284_model_profile_fallbacks.sql");
+      // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
+      markMigrationApplied(database, "293_savings_component_links.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

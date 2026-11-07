@@ -17,6 +17,7 @@ import {
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
@@ -30,6 +31,7 @@ import {
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
+import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
@@ -94,6 +96,7 @@ import { handleFavorites } from "./favorites";
 import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
+import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
@@ -129,6 +132,8 @@ import { handleRepos } from "./repos";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
+import { handleSavings, savingsRollupSql } from "./savings";
+import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -150,6 +155,7 @@ import { handleUsers } from "./users";
 import {
   getPathSegments,
   httpServerSemconvAttributes,
+  loopPathForRequest,
   parseQueryParams,
   redactShareTokenInPath,
   safeRequestUrlForLog,
@@ -224,7 +230,8 @@ function startApiGcInterval() {
   }
 
   const interval = setInterval(() => {
-    void sweepRooms().catch((error) =>
+    // The rooms sweep is the DB work of this tick; name it for the stall line.
+    void withLoopPath("http.gc-interval", () => sweepRooms()).catch((error) =>
       console.error("[rooms] Sweep failed:", scrubSecrets(String(error))),
     );
     const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
@@ -421,8 +428,11 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
+        () => handleImprovements(req, res, pathSegments, queryParams),
         () => handleRanking(req, res, pathSegments, queryParams),
         () => handleFleetBenchmark(req, res, pathSegments, queryParams),
+        () => handleSavings(req, res, pathSegments, queryParams),
+        () => handleSavingsCalibration(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
@@ -453,11 +463,10 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    if (span) {
-      await withSpanContext(span, handleRequest);
-    } else {
-      await handleRequest();
-    }
+    // Name the entry point for the event-loop stall line.
+    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
+      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    );
   });
 });
 
@@ -542,6 +551,9 @@ async function shutdown() {
   // Stop opt-in session, agent-log, and event retention before closing SQLite.
   await stopDbRetention();
 
+  // Stop the automation-savings rollup before closing SQLite.
+  await stopSavingsRollup();
+
   // Stop the human-free reclassification drain before closing SQLite.
   stopHumanFreeDrain();
 
@@ -563,6 +575,7 @@ async function shutdown() {
     clearInterval(globalState.__apiGcInterval);
     delete globalState.__apiGcInterval;
   }
+  stopEventLoopLagProbe();
 
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
@@ -622,6 +635,7 @@ if (!globalState.__runId) {
 }
 
 startApiGcInterval();
+startEventLoopLagProbe();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
@@ -852,9 +866,8 @@ httpServer
     // restart — which is what the Configuration page's "Restart required"
     // badge promises for HEARTBEAT_DISABLE / HEARTBEAT_INTERVAL_MS.
     if (!isEnvFlagEnabled("HEARTBEAT_DISABLE", false)) {
-      const { startHeartbeat } = await import("../heartbeat");
-      const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
-      startHeartbeat(heartbeatMs);
+      const { parseHeartbeatIntervalMs, startHeartbeat } = await import("../heartbeat");
+      startHeartbeat(parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS));
     }
 
     startPoolRouting();
@@ -887,6 +900,9 @@ httpServer
     // read on each tick, so config reloads take effect without a restart.
     await startDbRetention();
 
+    // Hourly automation-savings rollup (backfills 90 days in the background).
+    startSavingsRollup(savingsRollupSql);
+
     // Finish the human-free reclassification a request left queued (a very large
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
@@ -908,6 +924,14 @@ httpServer
       })
       .catch((err) => {
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
+      });
+
+    // Normalize stored schema JSON so defaulted fields become optional.
+    // This repair never executes script source. It is idempotent and non-fatal.
+    import("../be/scripts/boot-args-schema")
+      .then(({ runBootArgsSchemaBackfill }) => runBootArgsSchemaBackfill())
+      .catch((err) => {
+        console.error("[boot-args-schema] startup backfill failed (non-fatal):", err);
       });
 
     // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored

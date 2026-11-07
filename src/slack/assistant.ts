@@ -230,6 +230,7 @@ export function createAssistant(
           ? await resolveSlackUserId(client, userId, {
               sampleEventType: "assistant_message",
               sampleContext: rawText,
+              userTeam: msg.user_team as string | undefined,
             })
           : undefined;
 
@@ -247,6 +248,7 @@ export function createAssistant(
             message.ts,
             files,
             cachedBotUserId ?? undefined,
+            msg.user_team as string | undefined,
           );
           const count = getBufferMessageCount(`${channelId}:${threadTs}`);
           const event = count === 1 ? "accepted" : "buffered";

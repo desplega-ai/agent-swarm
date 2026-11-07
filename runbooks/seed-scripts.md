@@ -55,6 +55,15 @@ even if the source definition also changed. With no recorded state (a
 pre-existing entity, or the first run after this framework landed), an entity
 that differs from the source is conservatively preserved.
 
+Workflows hash only their executable surface (definition, params, required
+params, requires, trigger schema), not the operator settings: input values,
+on/off, cooldown, description and event triggers. Changing a setting keeps a
+workflow pristine, and an update keeps the live settings (new template input
+keys are added). Older releases recorded a whole-workflow hash; such a row
+counts as pristine while the live row, or the version snapshot taken before its
+first edit, matches it on the executable surface, and the next update or in-sync
+check rewrites it in the new format.
+
 ## The scripts seeder — `src/be/seed-scripts/`
 
 ```

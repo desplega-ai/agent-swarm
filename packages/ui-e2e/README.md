@@ -54,7 +54,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 | `seed` | test | The manifest, or `null` in a remote run without `E2E_REMOTE_SEED=1`. Guard with `test.skip(!seed, ...)`. |
 | `api` | test | `get`, `post`, `put`, `delete` against the worker API with the bearer. |
 | `clean` | test, auto | Collects console errors and `/api` responses with status 400 or higher. `assertClean()` fails with both lists. |
-| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>`, and `agent-swarm-sessions-v2-guide=off` (the sessions v2 first-run guide) so no dialog blocks the dashboard. |
+| `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>`, a dismissed GitHub star nudge (`swarm:v1:<apiUrl>:github-star-nudge:<userId>:done`, a persistent toast over the phone composer), and `agent-swarm-sessions-v2-guide=off` (the sessions v2 first-run guide) so no dialog blocks the dashboard. |
 
 Two console errors are ignored on purpose, each with a comment in `fixtures/index.ts`: the browser SDK's `/@swarm/config` probe inside `/p/:id` (the pages API does not serve that route yet) and, only in remote mode with the static build, the CSP `frame-ancestors` violation for the page preview.
 

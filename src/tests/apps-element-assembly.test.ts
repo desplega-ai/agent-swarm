@@ -16,6 +16,7 @@ import {
   ELEMENT_KEYS,
   MAX_ELEMENT_REF_DEPTH,
   REWRITE_COVERAGE,
+  UI_STATE_COMPONENTS,
 } from "../../apps/ui/src/lib/json-render/assemble";
 
 /**
@@ -24,14 +25,18 @@ import {
  * in `src/apps/definition`, which opens the database, and the whole point of
  * the assembler is that it stays free of that.
  */
-function serverElementKeys(): string[] {
+function serverSetEntries(name: string): string[] {
   const source = require("node:fs").readFileSync(
     new URL("../apps/page-validator.ts", import.meta.url),
     "utf8",
   ) as string;
-  const block = /export const ELEMENT_KEYS = new Set\(\[([\s\S]*?)\]\)/.exec(source);
-  if (!block) throw new Error("ELEMENT_KEYS not found in src/apps/page-validator.ts");
+  const block = new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(source);
+  if (!block) throw new Error(`${name} not found in src/apps/page-validator.ts`);
   return [...block[1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+}
+
+function serverElementKeys(): string[] {
+  return serverSetEntries("ELEMENT_KEYS");
 }
 
 const NOTES_ID = "11111111-1111-4111-8111-111111111111";
@@ -78,8 +83,26 @@ function notesApp(): AppRecordLike {
             table: {
               type: "Table",
               props: {
+                id: "notesTable",
+                selectable: true,
                 data: { $state: "/queries/all/data" },
                 search: { $state: "/ui/filter/value" },
+                bulkActions: [
+                  {
+                    label: "Sync selected",
+                    actions: [
+                      {
+                        action: "app.action",
+                        params: {
+                          name: "sync",
+                          input: { ids: { $state: "/ui/notesTable/selected" } },
+                          // Runtime-owned: app JSON must not aim a handler at a state path.
+                          $outcome: "/queries/all/data",
+                        },
+                      },
+                    ],
+                  },
+                ],
                 rowActions: [
                   {
                     label: "Delete",
@@ -272,6 +295,16 @@ describe("assemblePageSpec — rewrite coverage across ELEMENT_KEYS", () => {
     });
   });
 
+  test("props — a Table's selection id is namespaced, its bulk chain follows it, and an authored $outcome is stripped", () => {
+    const table = node(spec, "ref:notes:table");
+    expect(table?.props.id).toBe("instances/notes/notesTable");
+    expect(table?.props.bulkActions[0].actions[0].params).toEqual({
+      name: "sync",
+      input: { ids: { $state: "/ui/instances/notes/notesTable/selected" } },
+      [DEFINING_APP_PARAM]: NOTES_ID,
+    });
+  });
+
   test("on — handler chains carry the defining app", () => {
     expect(node(spec, "ref:notes:refreshBtn")?.on.press[0].params).toEqual({
       query: "all",
@@ -353,6 +386,50 @@ describe("assemblePageSpec — instance scoping", () => {
     const { spec } = assemble();
     expect(node(spec, "ref:statA:search")?.props.id).toBe("instances/statA/q");
     expect(node(spec, "ref:statB:search")?.props.id).toBe("instances/statB/q");
+  });
+
+  test("the client's UI_STATE_COMPONENTS mirror the server's", () => {
+    expect([...UI_STATE_COMPONENTS].sort()).toEqual(serverSetEntries("UI_STATE_COMPONENTS").sort());
+  });
+
+  test("every /ui/<id> component gets a per-instance id, so two instances never share a draft", () => {
+    const panel = {
+      mode: "bound",
+      root: "col",
+      elements: {
+        col: { type: "Stack", props: {}, children: ["thread", "form", "tree", "num", "echo"] },
+        thread: {
+          type: "SessionThread",
+          props: {
+            id: "talk",
+            onDispatch: [{ action: "app.action", params: { name: "ask", input: { $form: "" } } }],
+          },
+        },
+        form: { type: "SchemaForm", props: { id: "props" } },
+        tree: { type: "Tree", props: { id: "nav" } },
+        num: { type: "NumberInput", props: { id: "count" } },
+        echo: { type: "Text", props: { content: { $state: "/ui/talk/value" } } },
+      },
+    };
+    const consumer = consumerApp({ elements: { panel } });
+    consumer.definition.pages!.main = {
+      root: "root",
+      elements: {
+        root: { type: "Stack", props: {}, children: ["a", "b"] },
+        a: { type: "ElementRef", props: { element: "panel" } },
+        b: { type: "ElementRef", props: { element: "panel" } },
+      },
+    };
+    const { spec } = assemble(consumer);
+    for (const key of ["a", "b"]) {
+      expect(node(spec, `ref:${key}:thread`)?.props.id).toBe(`instances/${key}/talk`);
+      expect(node(spec, `ref:${key}:form`)?.props.id).toBe(`instances/${key}/props`);
+      expect(node(spec, `ref:${key}:tree`)?.props.id).toBe(`instances/${key}/nav`);
+      expect(node(spec, `ref:${key}:num`)?.props.id).toBe(`instances/${key}/count`);
+      expect(node(spec, `ref:${key}:echo`)?.props.content).toEqual({
+        $state: `/ui/instances/${key}/talk/value`,
+      });
+    }
   });
 
   test("an explicit instanceKey overrides the referencing node id", () => {

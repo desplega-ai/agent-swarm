@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Agent } from "../../api/types";
+import type { Agent, ModelProfile, ModelProfileCheckResult } from "../../api/types";
 
 // A DOM for the interaction tests at the end; removed after this file so other
 // files keep their server-render environment.
@@ -59,6 +59,21 @@ let envPresence: Record<string, boolean> = {};
 mock.module("@/api/hooks/use-config-api", () => ({
   ...require("../../api/hooks/use-config-api"),
   useResolvedConfigs: () => ({ data: resolvedConfigs }),
+}));
+/** What `useModelProfiles` lists; empty hides the picker. */
+let modelProfiles: ModelProfile[] = [];
+/** `useModelProfileCheck` results by profile name. */
+let modelProfileChecks: Record<string, ModelProfileCheckResult> = {};
+mock.module("@/api/hooks/use-model-profiles", () => ({
+  ...require("../../api/hooks/use-model-profiles"),
+  useModelProfiles: ({ harness }: { harness?: string } = {}) => ({
+    data: modelProfiles.filter((profile) => !harness || profile.harness === harness),
+  }),
+  useModelProfileCheck: (_agentId: string, profile: string | null | undefined) => ({
+    data: profile ? modelProfileChecks[profile] : undefined,
+    isLoading: false,
+    isError: false,
+  }),
 }));
 mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: (requiredVersion: string) => ({
@@ -705,6 +720,160 @@ describe("AgentRuntimeSettings reasoning effort", () => {
     const view = await mountSettings("claude");
     await pickModel(view.container, "Claude Haiku 4.5", "Claude Opus 5.5");
     expect(active(view.container)).toEqual(["High"]);
+    await view.unmount();
+  });
+});
+
+// --- Model profile picker: a profile sets the model and effort ---
+
+function modelProfileRow(
+  name: string,
+  model: string,
+  effort: ModelProfile["effort"],
+): ModelProfile {
+  return {
+    id: `profile-${name}`,
+    name,
+    harness: "claude",
+    model,
+    effort,
+    allowCustomModel: false,
+    description: null,
+    seededFrom: null,
+    credentials: null,
+    createdAt: "",
+    lastUpdatedAt: "",
+  };
+}
+
+const saveButton = (container: HTMLElement) =>
+  [...container.querySelectorAll("button")].find((b) => b.textContent === "Save");
+
+describe("AgentRuntimeSettings model profile", () => {
+  beforeEach(() => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" }];
+    runtimeMetadata = cliRuntime;
+    runtimeError = false;
+    envPresence = ALL_KEYS;
+    saves.length = 0;
+    document.body.innerHTML = "";
+    modelProfiles = [
+      modelProfileRow("claude-smart", "claude-opus-5-5", "high"),
+      modelProfileRow("claude-broken", "claude-opus-5-5", null),
+    ];
+    modelProfileChecks = {
+      "claude-smart": {
+        agentId: "agent-1",
+        ok: true,
+        profiles: [
+          {
+            name: "claude-smart",
+            ok: true,
+            checks: [
+              { check: "harness", state: "pass" },
+              { check: "model", state: "pass" },
+              {
+                check: "harness-credentials",
+                state: "unverified",
+                detail: "the agent has not reported credentials yet",
+              },
+            ],
+          },
+        ],
+      },
+      "claude-broken": {
+        agentId: "agent-1",
+        ok: false,
+        profiles: [
+          {
+            name: "claude-broken",
+            ok: false,
+            checks: [
+              { check: "harness", state: "pass" },
+              {
+                check: "harness-credentials",
+                state: "fail",
+                detail: "ANTHROPIC_API_KEY is missing",
+              },
+            ],
+          },
+        ],
+      },
+    };
+  });
+  afterAll(() => {
+    modelProfiles = [];
+    modelProfileChecks = {};
+  });
+
+  test("picking a profile disables the model controls and shows its model and effort", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "None (set model below)", "claude-smart");
+    const modelTrigger = [...view.container.querySelectorAll("button[aria-expanded]")].find((b) =>
+      b.textContent?.includes("Claude Opus 5.5"),
+    ) as HTMLButtonElement | undefined;
+    expect(modelTrigger?.disabled).toBe(true);
+    expect(enabled(view.container)).toEqual([]);
+    expect(active(view.container)).toEqual(["High"]);
+    expect(view.container.querySelector('button[role="switch"]')?.hasAttribute("disabled")).toBe(
+      true,
+    );
+    // Warnings and unverified rows are notes, not blockers.
+    expect(view.container.textContent).toContain(
+      "Credentials: the agent has not reported credentials yet",
+    );
+    expect(saveButton(view.container)?.disabled).toBe(false);
+    await view.unmount();
+  });
+
+  test("save sends the profile with no model, custom flag or effort", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "None (set model below)", "claude-smart");
+    await save(view.container);
+    expect(saves).toHaveLength(1);
+    expect(saves[0]).toMatchObject({
+      id: "agent-1",
+      harnessProvider: "claude",
+      profile: "claude-smart",
+    });
+    expect(saves[0]).not.toHaveProperty("model");
+    expect(saves[0]).not.toHaveProperty("allowCustomModel");
+    expect(saves[0]).not.toHaveProperty("reasoningEffort");
+    await view.unmount();
+  });
+
+  test("a failing check shows why and disables Save", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "None (set model below)", "claude-broken");
+    expect(view.container.textContent).toContain("This agent cannot run the profile");
+    expect(view.container.textContent).toContain("Credentials: ANTHROPIC_API_KEY is missing");
+    expect(saveButton(view.container)?.disabled).toBe(true);
+    await save(view.container);
+    expect(saves).toEqual([]);
+    await view.unmount();
+  });
+
+  test("None on an agent with a saved profile sends the model, which clears it", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" },
+      { key: "MODEL_PROFILE", value: "claude-smart" },
+    ];
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "claude-smart", "None (set model below)");
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "claude", model: "claude-haiku-4-5" });
+    expect(saves.at(-1)).not.toHaveProperty("profile");
+    await view.unmount();
+  });
+
+  test("a harness switch drops a profile that runs on the old harness", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "None (set model below)", "claude-smart");
+    await pickSelect(view.container, "Claude", "Codex");
+    await save(view.container);
+    expect(saves.at(-1)?.harnessProvider).toBe("codex");
+    expect(saves.at(-1)).not.toHaveProperty("profile");
+    expect(saves.at(-1)).toHaveProperty("model");
     await view.unmount();
   });
 });

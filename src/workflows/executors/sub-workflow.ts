@@ -125,7 +125,7 @@ export class SubWorkflowExecutor extends BaseExecutor<
     // The child acts as the parent's principal, never as an `agentId` in
     // `config.inputs`: the parent's author writes those, so a creator-less
     // child would otherwise run as any agent the author names.
-    const parent = await db.getWorkflow(meta.workflowId);
+    const parent = await db.getRunWorkflow({ id: meta.runId, workflowId: meta.workflowId });
     const triggeredByAgentId =
       parent?.createdByAgentId ?? (await getWorkflowRunTriggeredByAgentId(meta.runId)) ?? undefined;
 

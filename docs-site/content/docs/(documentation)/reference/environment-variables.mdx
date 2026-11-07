@@ -75,7 +75,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `1` (on) | Hybrid memory retrieval blends vector similarity with a full-text pass before reranking. Set to `0` or `false` to use vector-only search. |
 | `MEMORY_GRAPH_EXPANSION` | `1` (on) | Expands search candidates with 1-hop memory-link neighbors (resolved `[[wikilink]]` targets) before reranking. Neighbors are damped (`parentRawSimilarity × strength × 0.7`), capped at 5 per search, respect the caller's scope/source/lead ACL, and carry `retrievalSource: "graph"` so `GET /api/memory/usefulness` can measure the arm's citation rate. Set to `0` or `false` to disable expansion. |
-| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
+| `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. The store-progress learning duplicate check ignores it and uses its own 0.80 threshold. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
@@ -288,12 +288,11 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | `90` | Positive-integer deadline for `docker-entrypoint.sh` to reach `${MCP_BASE_URL}/health` before provider-specific setup. This is bootstrap-only: set it in the worker/lead container environment rather than only in `swarm_config`. |
 | `SESSION_ID` | No | Auto-generated | Log folder name |
 | `LOG_DIR` | No | `/logs` | Base directory for session `.jsonl` log files (`<LOG_DIR>/<sessionId>/<timestamp>-<taskId8>.jsonl`) |
-| `YOLO` | No | `false` | Continue on errors |
 | `SYSTEM_PROMPT` | No | — | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
-| `CONTEXT_MODE_DISABLED` | No | `false` | Set to `true` to turn context-mode off for local Claude Code, Codex, and opencode workers. Drops the `ctx_*` MCP server and disables the installed Claude Code and Codex context-mode plugins for the session, so their hooks (SessionStart guidance, tool tips, WebFetch redirect) do not run either. |
+| `CONTEXT_MODE_DISABLED` | No | — | **Deprecated, ignored.** context-mode is no longer shipped or wired in, so this flag does nothing. Workers that still set it boot normally; you can remove it. The Claude Code and Codex adapters always turn off a context-mode plugin left over from an older image. |
 | `SCRIPTS_ONLY_MCP` | No | `false` | Experimental code-mode. Set alongside the API server value so worker prompts explain the reduced eight-tool MCP surface; all other swarm operations remain available through `script-run` and the scripts SDK. |
-| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
+| `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | — | **Deprecated, ignored.** Tuned the removed context-mode plugin. Workers no longer read or forward it. |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |
 | `CONTEXT_BOUND_NOTE_TOKENS` | No | `0` (off) | Context size (input + cache read + cache write tokens of the latest main-thread request) at which a worker session gets a one-time note to finish the current step and complete or defer. A positive integer turns it on; can be set per agent via `set-config`. See [Configuration](/docs/ui/configuration) |
 | `CONTEXT_PREAMBLE_RESUME_MAX_TOKENS` | No | `4000` | Token budget for the resume-task preamble (2x the regular budget — carries the original task brief plus a tool-call summary so the resumed agent doesn't redo completed work) |
@@ -333,13 +332,16 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
+| `SLACK_ENTERPRISE_INSTALL` | Set to `true` when `SLACK_BOT_TOKEN` comes from an org-wide Enterprise Grid install (`is_enterprise_install` from `oauth.v2.access`). The swarm then accepts deliveries for its enterprise's org-wide install instead of its workspace (default: `false`). See [Slack: Workspace guard](/docs/integrations/slack#workspace-guard) |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |
 | `SLACK_WORK_OBJECTS_ENABLED` | Set to `true` to populate task Work Object flexpanes (default: `false`). Apply the updated Slack manifest, reinstall the app, and enable Work Object Previews. See [Slack setup](/docs/integrations/slack#task-work-objects). |
 | `SLACK_RENDER_V2_DELEGATION` | Set to `true` to defer an ask's conclusion card until its whole closure (delegated tasks, children, follow-ups) settles, post child result cards, and gate the checkmark reaction on the closure instead of the ask alone. Requires `SLACK_RENDER_V2=true` (default: `false`) |
+| `SLACK_TASK_WATCHER_INTERVAL_MS` | Milliseconds between Slack task watcher ticks (default: `10000`). Under `SLACK_RENDER_V2` each tick is the full reconcile; a task status change or progress update renders its own thread within about a second. Inbound mentions do not wait on it. Read at startup |
 | `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |
 | `SLACK_CONCLUSION_TIMEOUT_MIN` | Idle minutes before a closure concludes with unfinished work and a `warning` reaction (default: `240`) |
 | `SLACK_TREE_STALL_MIN` | Minutes without a task update before the thread tree shows a stalled glyph for that task (default: `15`) |
+| `SLACK_REACTION_SKIPPED` | Reaction that replaces the ack reactions when every linked task ended `skipped`, or a `pre.task.create` extension blocked the task (default: `mute`). See [Slack: Acceptance reactions](/docs/integrations/slack#acceptance-reactions) |
 | `SLACK_STATUS_ICON_COMPLETED` | "Done" glyph in thread text: task tree, thread header and completed outcome cards. Bare name or `:name:`, rendered as `:name:`. Unset or invalid keeps ✅. A name the workspace lacks shows as literal `:name:`. See [Slack: Acceptance reactions](/docs/integrations/slack#acceptance-reactions) |
 | `SLACK_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains |
 | `SLACK_ALLOWED_USER_IDS` | Comma-separated user IDs to always allow |
@@ -471,7 +473,7 @@ A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integratio
 4. Enable "Agent session events" in webhook settings
 5. Set Webhook URL to your `/api/trackers/linear/webhook` endpoint
 6. Copy Client ID, Client Secret, and Webhook Signing Secret
-7. Start the server, then visit `/api/trackers/linear/authorize` to complete OAuth
+7. Start the server, then click **Connect to Linear** in the dashboard (or open the URL from `GET /api/trackers/linear/authorize?format=json`, which requires the swarm API key) to complete OAuth
 
 With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback`
 
@@ -492,7 +494,7 @@ With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/tra
 3. Set the callback URL to your `/api/trackers/jira/callback` endpoint
 4. Copy the Client ID and Client Secret
 5. Generate a webhook token (`openssl rand -hex 32`) and set `JIRA_WEBHOOK_TOKEN`
-6. Start the server, then visit `/api/trackers/jira/authorize` to complete OAuth
+6. Start the server, then click **Authorize** in the dashboard (or open the URL from `GET /api/trackers/jira/authorize?format=json`, which requires the swarm API key) to complete OAuth
 7. Register the dynamic webhook via `POST /api/trackers/jira/webhook-register` (admin, requires the swarm API key)
 
 See the [Jira Integration guide](/docs/integrations/jira) for the full walkthrough, webhook lifecycle, and known limitations.
@@ -626,6 +628,7 @@ NaN and Helmcode cap concurrency per key (NaN: 60 RPM, 7 concurrent requests in 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. Events carry an org ID, the org name and the admin's email domain, and a pseudonymous user reference (never an email address); see [Identity context](/docs/reference/telemetry#identity-context) |
+| `IMPROVEMENTS_ENABLED` | `true` | Kill switch for product improvements sent to Desplega (the `submit-improvement` MCP tool, `POST /api/improvements` and the header lightbulb). Set to `false` to turn drafting and sending off. A send carries the text, the approver's email and the install id; see [Improvements](/docs/ui/configuration#improvements) |
 | `DESPLEGA_TELEMETRY_ENV` | Auto-detected | Explicit telemetry environment tag. Overrides `NODE_ENV=test` and automatic `development` detection for git checkouts; shipped installs default to `production`. |
 | `PUBLIC_RANKING_ENABLED` | `false` | Opt-in to the public install ranking. Set by **Get ranked** in Settings → Configuration → Branding rather than by hand. While telemetry is on and `SWARM_ORG_NAME` and `SWARM_ORG_WEBSITE` are set, workers send `ranking.usage` token counts after each session; see [Public ranking](/docs/reference/telemetry#public-ranking) |
 | `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
@@ -644,6 +647,7 @@ OpenTelemetry traces and OTLP metrics are disabled unless `OTEL_EXPORTER_OTLP_EN
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
 | `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
 | `OTEL_EXPORT_API_LOGS` | OFF | When set to `1`/`true` on the API, also exports its console output as OTLP log records to the same endpoint as traces, scrubbed of secrets. Read at startup. |
+| `EVENT_LOOP_STALL_WARN_MS` | `1000` | Event-loop stall threshold in milliseconds. When a probe tick lags past it, the API logs the stalled request path and the slowest SQL statements recorded during the stall (scrubbed, params never logged). Read on every tick, so a config reload applies without a restart. |
 
 ## Business-Use Instrumentation
 

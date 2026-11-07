@@ -55,6 +55,7 @@ mock.module("@/contexts/current-user-context", () => ({
 mock.module("@/lib/notifications/definitions", () =>
   require("../../lib/notifications/definitions"),
 );
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/notifications/unread", () => require("../../lib/notifications/unread"));
 mock.module("./notification-panel", () => ({
   NotificationPanel: ({

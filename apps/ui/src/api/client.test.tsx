@@ -232,6 +232,25 @@ describe("updateAgentRuntime", () => {
     });
   });
 
+  test("sends a model profile without the model, custom flag or effort", async () => {
+    globalThis.fetch = async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        harness_provider: "claude",
+        profile: "claude-smart",
+      });
+      return Response.json({ id: "agent-claude" });
+    };
+
+    await api.updateAgentRuntime({
+      id: "agent-claude",
+      harnessProvider: "claude",
+      model: "claude-haiku-4-5",
+      allowCustomModel: true,
+      reasoningEffort: "high",
+      profile: "claude-smart",
+    });
+  });
+
   test("sends ACP target configuration with its model knob", async () => {
     globalThis.fetch = async (url, init) => {
       expect(url).toBe("https://api.example.test/api/agents/agent-acp/runtime");
@@ -376,6 +395,25 @@ describe("submitFeedback", () => {
     };
 
     for (const endpoint of ["http://evil.example/v1/feedback", "not a URL"]) {
+      await expect(api.submitFeedback(endpoint, input)).rejects.toThrow(
+        "Invalid feedback endpoint",
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
+  test("rejects feedback endpoints that include credentials before fetching", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response(null, { status: 202 });
+    };
+
+    for (const endpoint of [
+      "https://user:password@proxy.example.test/v1/feedback",
+      "https://user@proxy.example.test/v1/feedback",
+      "https://:password@proxy.example.test/v1/feedback",
+    ]) {
       await expect(api.submitFeedback(endpoint, input)).rejects.toThrow(
         "Invalid feedback endpoint",
       );

@@ -1,5 +1,7 @@
 import { defaultAssetKey } from "../assets/key";
 import { getDbClient, literalPrefixPattern } from "../be/db";
+import type { AppIcon } from "../types";
+import { AppIconSchema } from "../types";
 import type { AppDefinition, AppValidationIssue } from "./definition";
 import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
 import {
@@ -132,11 +134,25 @@ export async function getApp(id: string): Promise<AppRecord | null> {
   return row ? decodeApp(row) : null;
 }
 
+/** Best-effort `definition.icon` extraction: a malformed or absent value just means no custom icon. */
+function extractIcon(rawDefinitionJson: string): AppIcon | undefined {
+  try {
+    const parsed: unknown = JSON.parse(rawDefinitionJson);
+    const candidate =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, unknown>).icon
+        : undefined;
+    return AppIconSchema.safeParse(candidate).data;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function listApps(filters?: {
   /** Matches the name or description anywhere, case-insensitive. */
   q?: string;
   limit?: number;
-}): Promise<Array<Omit<AppRecord, "definition">>> {
+}): Promise<Array<Omit<AppRecord, "definition"> & { icon?: AppIcon }>> {
   const params: (string | number)[] = [];
   let where = "";
   if (filters?.q) {
@@ -154,13 +170,17 @@ export async function listApps(filters?: {
      FROM apps${where} ORDER BY created_at DESC, id${limit}`,
     params,
   );
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    ...(row.description === null ? {} : { description: row.description }),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return rows.map((row) => {
+    const icon = extractIcon(row.definition);
+    return {
+      id: row.id,
+      name: row.name,
+      ...(row.description === null ? {} : { description: row.description }),
+      ...(icon ? { icon } : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
 }
 
 export async function listAppRecords(): Promise<AppRecord[]> {

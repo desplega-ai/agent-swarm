@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ ba5bb0d7. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 7dc87f45. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -25,6 +25,7 @@ CONSTANTS
     G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     DRAIN_HANDOFF,    \* API drain handoff (#1837), opt-in via API_DRAIN_MAX_MS > 0
+    PROVIDER_FALLBACK, \* provider-error fallback supersede (#2736), on when a profile lists fallbacks
     HYPO_REOFFER,     \* hypothetical path that re-offers an unassigned task
     BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
     G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
@@ -33,7 +34,7 @@ CONSTANTS
 
 None == "none"
 Tasks == 1..NTasks
-Terminal == {"completed", "failed", "cancelled", "superseded"}
+Terminal == {"completed", "failed", "cancelled", "superseded", "skipped"}
 Active   == {"unassigned", "offered", "pending", "in_progress"}
 Status   == Terminal \cup Active \cup {"free"}
 
@@ -209,17 +210,20 @@ Progress(w, t) ==
                    hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* completeTask: WHERE status NOT IN terminal; worker then drops the session.
+\* skipTask (#2571, /finish or store-progress with status 'skipped', owner
+\* only) is the same terminal CAS with another label, so it is a choice here.
 Complete(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w]
-    /\ st' = [st EXCEPT ![t] = IF ~G_TERMINAL_CAS \/ @ \notin Terminal THEN "completed" ELSE @]
+    /\ \E out \in {"completed", "skipped"} :
+         st' = [st EXCEPT ![t] = IF ~G_TERMINAL_CAS \/ @ \notin Terminal THEN out ELSE @]
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, alive, cl, acc,
                    hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
-\* reconcileActiveTasks, runner.ts:5357): cancelled on every poll via
-\* /cancelled-tasks (core.ts:693), failed/superseded on a 30 s status read.
+\* reconcileActiveTasks, runner.ts:5401): cancelled on every poll via
+\* /cancelled-tasks (core.ts:699), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
@@ -236,8 +240,14 @@ AbortTerminal(w, t) ==
 \* The runner then aborts the session (AbortTerminal frees the slot). Enabled
 \* whenever the API is up, not only while draining (over-approximation); the
 \* drain's refusal to dispatch only removes behaviors and is not modeled.
+\* Since #2736 the same route also runs for a provider error on a task with a
+\* claim-time profile (requestProviderFallback, reason provider_fallback):
+\* the resume always pins to the caller, ignoring capacity, and runs the next
+\* fallback profile. Same guards and the same state change, so this action
+\* covers it; PROVIDER_FALLBACK enables it without the drain. No fallback left
+\* is a no-op on the server (the worker then fails the task: Complete).
 DrainHandoff(w, t) ==
-    /\ DRAIN_HANDOFF /\ apiUp /\ alive[w] /\ t \in running[w]
+    /\ (DRAIN_HANDOFF \/ PROVIDER_FALLBACK) /\ apiUp /\ alive[w] /\ t \in running[w]
     /\ st[t] = "in_progress" /\ own[t] = w
     /\ \E s \in Free :
          /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
@@ -557,10 +567,10 @@ AcceptOwnOffer == ~badAcc
 \* S6 (action): terminal is absorbing.
 TerminalAbsorbing == [][\A t \in Tasks : st[t] \in Terminal => st'[t] = st[t]]_vars
 
-\* L1: the work is eventually finished (completed or failed) or given up by
+\* L1: the work is eventually finished (completed, skipped or failed) or given up by
 \* recovery with a recorded failure; a lineage never sits forever with no
 \* active row and no finished row.
-Finished == \E t \in Tasks : st[t] \in {"completed", "failed"}
+Finished == \E t \in Tasks : st[t] \in {"completed", "failed", "skipped"}
 EventuallyFinished == <>Finished
 \* L2: a superseded task eventually has a resume.
 SupersededGetsResume == \A t \in Tasks : (st[t] = "superseded") ~> (\E s \in Tasks : par[s] = t)

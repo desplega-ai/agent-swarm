@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById, getDbClient, getTaskById } from "../be/db";
+import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
@@ -1568,8 +1569,12 @@ const MEMORY_GC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
 
 const SEARCH_RETRIEVAL_TTL_DAYS = 90;
-/** Rows per purge statement. The purge yields the event loop between batches. */
-const SEARCH_RETRIEVAL_PURGE_BATCH = 2000;
+/**
+ * Rows per purge statement. The purge yields the event loop between batches.
+ * A 2,000-row batch blocked the loop for 1.1 s in production; 500 keeps one
+ * batch near the 250 ms target.
+ */
+const SEARCH_RETRIEVAL_PURGE_BATCH = 500;
 
 export async function purgeStaleSearchRetrievals(
   batchSize = SEARCH_RETRIEVAL_PURGE_BATCH,
@@ -1629,12 +1634,12 @@ export async function startMemoryGc(
   // Clear any backlog soon after startup, but off the boot path.
   memoryGcInitialTimer = setTimeout(() => {
     memoryGcInitialTimer = null;
-    void runMemoryGcTick("Initial");
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Initial"));
   }, initialDelayMs);
   if (typeof memoryGcInitialTimer?.unref === "function") memoryGcInitialTimer.unref();
 
   memoryGcTimer = setInterval(() => {
-    void runMemoryGcTick("Periodic");
+    void withLoopPath("memory-gc.tick", () => runMemoryGcTick("Periodic"));
   }, intervalMs);
   if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
 }

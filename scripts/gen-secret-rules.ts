@@ -61,6 +61,51 @@ const ANCHORED_ALLOWLIST_REGEXES: Record<string, { regex: string; reason: string
   },
 };
 
+/** Top-level `|` branches of a JS regex source (outside groups and classes). */
+function topLevelBranches(source: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let inClass = false;
+  let start = 0;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") i++;
+    else if (inClass) inClass = c !== "]";
+    else if (c === "[") inClass = true;
+    else if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === "|" && depth === 0) {
+      out.push(source.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(source.slice(start));
+  return out;
+}
+
+/**
+ * Anchor an allowlist regex's alternation as a whole. `|` binds looser than
+ * `^` and `$`, so upstream's `(?i)^true|false|null$` allowlisted any secret
+ * that contains "false", starts with "true" or ends with "null": a vault
+ * token with `FALsE` inside it leaked. `^a|b$` becomes `^(?:a|b)$`; any other
+ * mix of anchored and unanchored branches fails the run for a human to read.
+ */
+export function anchorAlternation(re: ConvertedRegex): ConvertedRegex {
+  const branches = topLevelBranches(re.source);
+  if (branches.length < 2) return re;
+  const starts = branches.map((b) => b.startsWith("^"));
+  const ends = branches.map((b) => /(?:^|[^\\])(?:\\\\)*\$$/.test(b));
+  const uniform = (flags: boolean[]) => flags.every((f) => f === flags[0]);
+  if (uniform(starts) && uniform(ends)) return re;
+  const last = branches.length - 1;
+  const wholeValue =
+    starts.every((f, i) => f === (i === 0)) && ends.every((f, i) => f === (i === last));
+  if (!wholeValue) {
+    throw new Error(`allowlist regex ${re.source} mixes anchored and unanchored branches`);
+  }
+  return { ...re, source: `^(?:${re.source.slice(1, -1)})$` };
+}
+
 /**
  * Rules whose secret is the whole match, not the first capture group. gitleaks
  * reports the first non-empty group, which here is a named group that labels
@@ -292,7 +337,7 @@ function convertAllowlist(rule: GitleaksRule, ruleRe: RegExp, list: GitleaksAllo
   }
   return {
     target,
-    regexes: regexes.map(convertGoRegex),
+    regexes: regexes.map((re) => anchorAlternation(convertGoRegex(re))),
     stopwords: (list.stopwords ?? []).map((w) => w.toLowerCase()),
   };
 }
@@ -353,7 +398,7 @@ export function generate(text: string): string {
     version,
     commit,
     globalAllowlist: {
-      regexes: (global.regexes ?? []).map(convertGoRegex),
+      regexes: (global.regexes ?? []).map((re) => anchorAlternation(convertGoRegex(re))),
       stopwords: (global.stopwords ?? []).map((w) => w.toLowerCase()),
     },
     rules,

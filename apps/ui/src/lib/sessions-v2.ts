@@ -19,12 +19,6 @@ import { groupKeyOf } from "./session-groups";
  */
 export const SESSIONS_V2_MIN_VERSION = "2.5.1";
 
-/**
- * Where sessions toasts sit: bottom left, over the sidebar. Bottom right
- * covers the composer's Send button (UX review R9).
- */
-export const SESSIONS_TOAST_POSITION = "bottom-left" as const;
-
 /** The "New session" tab in `?tabs=`. On the path it is `/sessions` with no id. */
 export const NEW_SESSION_TAB = "new";
 

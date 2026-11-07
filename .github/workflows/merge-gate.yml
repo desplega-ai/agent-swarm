@@ -121,9 +121,10 @@ jobs:
           #   skill-fs-writer.ts      the FS reconcile the tests cover
           SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|plugin/pi-skills/|plugin/commands/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills|build-docs-index)\.ts$|docs-site/content/docs/|apps/ui/src/lib/integrations-catalog\.ts$)')
 
-          # script SDK types freshness: source constants + generator + outputs +
-          # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
-          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/|src/extensions/|scripts/bundle-(script|extension)-types\.ts$|src/server\.ts$)')
+          # Extension declarations follow transitive TypeScript imports. Provider-only
+          # changes can reorder emitted unions without changing the contract source.
+          # Include source and dependency inputs, generators, and checked-in outputs.
+          SCRIPT_TYPES=$(match '^(src/|packages/|package\.json$|bun\.lock$|bunfig\.toml$|tsconfig\.json$|scripts/(bundle-(script|extension)-types\.ts|check-script-types-freshness\.sh)$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
@@ -619,7 +620,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -639,8 +640,8 @@ jobs:
       - name: Type check E2E runner
         run: bun run e2e:tsc
 
-      - name: Run E2E contract suite
-        run: bun run e2e --json e2e-results.json --summary-md e2e-summary.md
+      - name: Run E2E contract suite (strict coverage gate)
+        run: bun run e2e --strict --json e2e-results.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -1414,8 +1415,9 @@ jobs:
     needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
-    # No checkout, no API calls; the job only inspects `needs` results.
-    permissions: {}
+    # No checkout. checks: read lets the last step read the PR Body check.
+    permissions:
+      checks: read
 
     steps:
       - name: Check results
@@ -1427,3 +1429,9 @@ jobs:
             exit 1
           fi
           echo "All jobs passed or were skipped."
+
+      # Merge Gate is the only required check, so a red PR Body (pr-body.yml)
+      # blocks the merge here. A description edit re-runs this job from
+      # pr-body.yml's sync-gate job. Skips on merge_group.
+      - name: Require a green PR Body
+        uses: desplega-ai/.github/actions/require-pr-body@aa9436df8f0ef570f033e78dc68d1ef052add22c

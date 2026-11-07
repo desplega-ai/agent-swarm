@@ -2,6 +2,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
 import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
+import { allUsersScopeEnabled, SESSION_SCOPE_HEADER } from "../lib/all-users-scope";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
 import { type AccessConnection, noteUnauthorized } from "./access-rejection";
@@ -20,6 +21,7 @@ import type {
   ApiKeyStatusResponse,
   AppActionResponse,
   AppDetail,
+  AppIcon,
   AppListItem,
   AppRow,
   ApprovalRequest,
@@ -68,6 +70,8 @@ import type {
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
+  Improvement,
+  ImprovementsResponse,
   InboxItemState,
   InboxItemStatus,
   InboxItemType,
@@ -88,6 +92,8 @@ import type {
   MetricSaveResponse,
   MetricsListResponse,
   MintTokenResponse,
+  ModelProfile,
+  ModelProfileCheckResult,
   ModelTierPreview,
   OAuthAppDiscoveryResult,
   OAuthAuthorization,
@@ -115,6 +121,12 @@ import type {
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
   RuntimePoolRuntime,
+  SavingsDailyResponse,
+  SavingsJobsResponse,
+  SavingsScheduleResponse,
+  SavingsSummaryResponse,
+  SavingsTarget,
+  SavingsTier,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -155,8 +167,10 @@ import type {
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
+  SteeringSource,
   SteerMode,
   SteerResult,
+  SubmitImprovementInput,
   SubscriptionPlansResponse,
   SwarmConfig,
   SwarmConfigsResponse,
@@ -486,6 +500,11 @@ class ApiClient {
     if (dashboardUserId) {
       headers[DASHBOARD_USER_HEADER] = dashboardUserId;
     }
+    // The admin "All users" read scope. The server ignores it for anyone it
+    // does not let read every session.
+    if (allUsersScopeEnabled(config)) {
+      headers[SESSION_SCOPE_HEADER] = "all";
+    }
     return headers;
   }
 
@@ -530,6 +549,24 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/models-catalog/tiers`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch model tiers: ${res.status}`);
+    return res.json();
+  }
+
+  /** Model profiles, ordered by harness then name; `harness` keeps one harness's. */
+  async fetchModelProfiles(harness?: string): Promise<{ profiles: ModelProfile[] }> {
+    const query = harness ? `?${new URLSearchParams({ harness })}` : "";
+    const url = `${this.getBaseUrl()}/api/model-profiles${query}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch model profiles: ${res.status}`);
+    return res.json();
+  }
+
+  /** Whether the agent, on its saved harness, can run the profile. Read-only. */
+  async fetchModelProfileCheck(agentId: string, profile: string): Promise<ModelProfileCheckResult> {
+    const query = new URLSearchParams({ profile });
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/profile-check?${query}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to check model profile: ${res.status}`);
     return res.json();
   }
 
@@ -633,10 +670,17 @@ class ApiClient {
       | "amp"
       | "grok"
       | "fx";
-    model: string | null;
+    /** Ignored when `profile` is set. */
+    model?: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
     reasoningEffort?: ReasoningEffortLevel | null;
+    /**
+     * Sets the agent's default model profile (`MODEL_PROFILE`). The server
+     * rejects it next to `model`, and a model or effort change clears it, so
+     * the body then carries neither.
+     */
+    profile?: string;
     acp?: AcpRuntimeConfig;
     claude?: ClaudeRuntimeConfig;
   }): Promise<AgentWithTasks> {
@@ -649,9 +693,15 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({
         harness_provider: data.harnessProvider,
-        model: data.model,
-        allow_custom_model: data.allowCustomModel ?? false,
-        ...(data.reasoningEffort !== undefined ? { reasoning_effort: data.reasoningEffort } : {}),
+        ...(data.profile
+          ? { profile: data.profile }
+          : {
+              model: data.model,
+              allow_custom_model: data.allowCustomModel ?? false,
+              ...(data.reasoningEffort !== undefined
+                ? { reasoning_effort: data.reasoningEffort }
+                : {}),
+            }),
         ...(data.acp ? { acp: data.acp } : {}),
         ...(data.claude ? { claude: data.claude } : {}),
       }),
@@ -753,6 +803,8 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+    vcsRepo?: string;
     /**
      * Create in `draft` status (#1240) — visible to the owner but not
      * dispatch-eligible. Used while attachments are still uploading; the
@@ -839,15 +891,21 @@ class ApiClient {
    */
   async steerTask(
     id: string,
-    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+    input: {
+      message: string;
+      mode: SteerMode;
+      requestedByUserId?: string;
+      source?: SteeringSource;
+    },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       // Identify the surface so the steering row is attributed to the dashboard
-      // rather than defaulting to a generic "api" caller.
-      body: JSON.stringify({ ...input, source: "ui" }),
+      // rather than defaulting to a generic "api" caller. A json-render app
+      // page passes "app-page".
+      body: JSON.stringify({ ...input, source: input.source ?? "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
@@ -1105,6 +1163,10 @@ class ApiClient {
       throw new Error("Invalid feedback endpoint");
     }
 
+    if (parsedEndpoint.username || parsedEndpoint.password) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
     const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
     if (
       parsedEndpoint.protocol !== "https:" &&
@@ -1166,7 +1228,7 @@ class ApiClient {
   async inviteAgentFsMember(data: {
     email: string;
     role: "viewer" | "editor" | "admin";
-  }): Promise<{ orgId: string; invited: boolean }> {
+  }): Promise<{ orgId: string; invited: boolean; status?: string; token?: string }> {
     const url = `${this.getBaseUrl()}/api/fs/members/invite`;
     const res = await fetch(url, {
       method: "POST",
@@ -3894,6 +3956,40 @@ class ApiClient {
     return (await res.json()) as { granted: boolean; changedAt: string };
   }
 
+  async fetchImprovements(): Promise<ImprovementsResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/improvements`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load improvements: ${res.status}`);
+    return (await res.json()) as ImprovementsResponse;
+  }
+
+  private async improvementWrite(path: string, body: unknown): Promise<Improvement> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Improvement request failed: ${res.status}`);
+    }
+    return ((await res.json()) as { improvement: Improvement }).improvement;
+  }
+
+  /** Draft an improvement, or approve and send it in one call with `sendNow`. */
+  submitImprovement(input: SubmitImprovementInput): Promise<Improvement> {
+    return this.improvementWrite("/api/improvements", input);
+  }
+
+  approveImprovement(id: string, email: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/approve`, { email });
+  }
+
+  discardImprovement(id: string): Promise<Improvement> {
+    return this.improvementWrite(`/api/improvements/${encodeURIComponent(id)}/discard`, {});
+  }
+
   /** Whether this install can join, or is in, the public agent-swarm.dev ranking. */
   async getRanking(): Promise<RankingState> {
     const url = `${this.getBaseUrl()}/api/ranking`;
@@ -3923,6 +4019,66 @@ class ApiClient {
     const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to leave the ranking: ${res.status}`);
     return (await res.json()) as { enabled: false };
+  }
+
+  /**
+   * Modelled saving of one workflow or script (`target`), or of every workflow
+   * or script with runs in the window (`{ kind }`), from the hourly rollup.
+   */
+  async getSavingsJobs(
+    target: SavingsTarget | { kind: "workflow" | "script" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean } = {},
+  ): Promise<SavingsJobsResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load savings: ${res.status}`);
+    return (await res.json()) as SavingsJobsResponse;
+  }
+
+  /**
+   * The saving of one schedule (`{ scheduleId }`) or of every schedule
+   * (`{ kind: "schedule" }`): its workflow or script target's row, or the
+   * measured spend of an agent-task schedule.
+   */
+  async getSavingsSchedules(
+    target: { scheduleId: string } | { kind: "schedule" },
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsScheduleResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/jobs?${savingsParams(target, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load schedule savings: ${res.status}`);
+    return (await res.json()) as SavingsScheduleResponse;
+  }
+
+  /**
+   * The modelled saving of one workflow or script per UTC day, from the same
+   * rollup as `getSavingsJobs`; with no target, of the whole fleet.
+   */
+  async getSavingsDaily(
+    target: SavingsTarget | undefined,
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsDailyResponse> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/savings/daily?${savingsParams(target ?? {}, opts)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`Failed to load daily savings: ${res.status}`);
+    return (await res.json()) as SavingsDailyResponse;
+  }
+
+  /** The fleet's modelled saving, spend and assumptions, from the savings rollup. */
+  async getSavingsSummary(
+    opts: { days?: 7 | 30 | 90; tier?: SavingsTier } = {},
+  ): Promise<SavingsSummaryResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/savings/summary?${savingsParams({}, opts)}`, {
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load the savings summary: ${res.status}`);
+    return (await res.json()) as SavingsSummaryResponse;
   }
 
   /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
@@ -4305,6 +4461,26 @@ class ApiClient {
   }
 
   /**
+   * RFC 7396 merge patch of an app (`app.manage`). `definition` merges into the
+   * stored definition; a `null` value removes that key. `definition.icon` is
+   * replaced whole, so switching icon types leaves no stale keys.
+   */
+  async patchApp(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string | null;
+      definition?: Record<string, unknown> & { icon?: AppIcon | null };
+    },
+  ): Promise<{ app: AppDetail }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+      "Failed to update app",
+    );
+  }
+
+  /**
    * Resolve a named query from the app definition. `params` feed the query's
    * `{ "$param": "<name>" }` filters and ride as repeatable `param.<name>=`
    * keys (same idiom as the row-list `filter.<col>=`).
@@ -4366,12 +4542,30 @@ class ApiClient {
     name: string,
     input?: Record<string, unknown>,
     parentTaskId?: string,
+    /**
+     * Task-kind actions only. `followUp: false` skips the Lead follow-up
+     * (review) of the created task; `requestedByUserId` names the picked
+     * identity, which the server honors only for a shared operator key.
+     * `session` puts the task in a SessionThread session.
+     */
+    options: {
+      followUp?: boolean;
+      requestedByUserId?: string;
+      /** A SessionThread session: the server keys the task by app, key and requester. */
+      session?: { key: string; scope?: "user" | "shared" };
+    } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       {
         method: "POST",
-        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+        body: JSON.stringify({
+          input: input ?? {},
+          ...(parentTaskId ? { parentTaskId } : {}),
+          ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+          ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+          ...(options.session ? { session: options.session } : {}),
+        }),
       },
       `Failed to run action ${name}`,
     );
@@ -4425,3 +4619,14 @@ export interface ExecutorTypeInfo {
 }
 
 export const api = new ApiClient();
+
+function savingsParams(
+  target: Record<string, string>,
+  opts: { days?: 7 | 30 | 90; tier?: SavingsTier; components?: boolean },
+): URLSearchParams {
+  const params = new URLSearchParams(target);
+  if (opts.days) params.set("days", String(opts.days));
+  if (opts.tier) params.set("tier", opts.tier);
+  if (opts.components) params.set("components", "true");
+  return params;
+}

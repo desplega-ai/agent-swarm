@@ -58,8 +58,17 @@ CLAUDE_ROUTES_E2E_LOG=1 bun run test:root -- src/tests/claude-routes-e2e.test.ts
 
 `bun run e2e` starts the real API on a free port with a fresh SQLite database.
 It runs deterministic HTTP and MCP scenarios with simulated agents. It does not use Docker or an LLM.
-The runner discovers route and MCP tool coverage from the running server.
+The runner discovers route, MCP tool and workflow node-type coverage from the running server.
 It writes `./e2e-results.json` by default.
+
+`bun run e2e --strict` is the CI contract: it fails when any route operation, MCP tool or
+workflow node type the server exposes is neither covered nor excluded with a reason in
+`scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned
+flow did not pass. Inference is mocked (`scripts/e2e/mocks/llm.ts`: OpenAI chat + Responses
++ embeddings, SystemOne) and the SUT boots with every capability on. Latency is recorded per
+call; `bun run e2e:bench before.json after.json` diffs two runs. Operator guide:
+[runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md). Authoring guide:
+[scripts/e2e/README.md](./scripts/e2e/README.md).
 
 The runner discovers exported scenarios in `scripts/e2e/scenarios/*.ts` and sorts them by their explicit numeric `order`. New scenarios need a unique name and order; duplicate values or a scenario file with no valid export fail discovery. Use optional `groups` tags and `--group` to select related scenarios without editing the runner or workflow lists.
 
@@ -68,10 +77,12 @@ so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NO
 Scenarios drive that Slack workspace through `ctx.slack`. The harness disables heartbeat
 checklists and boot triage so background tasks cannot consume a scenario's poll.
 The Slack scenarios include `slack-mention`, `slack-follow-up`, `slack-failed-task`,
-`slack-relay-restart`, and `slack-task-output-citations`. The citation scenario enables
-`SLACK_RENDER_V2` and checks MCP `store-progress` citations in the mock outcome card,
+`slack-skipped-task-legacy`, `slack-skipped-task-v2`, `slack-relay-restart`, and `slack-task-output-citations`.
+The citation and `-v2` skipped scenarios enable `SLACK_RENDER_V2`. The citation one checks MCP `store-progress` citations in the mock outcome card,
 including fail-open completion for invalid and oversized batches. The other scenarios
-cover a mention, a thread follow-up, a failed task outcome,
+cover a mention, a thread follow-up, a failed task outcome, a skipped task
+(skip reaction only, including the `SLACK_REACTION_SKIPPED` override, no thread post, and
+under v2 the tree row edited to the skip and its reason),
 and exactly-once terminal relay delivery across an API-process restart. The restart
 reuses the run's database, port, API key, secrets, agent-fs directory, and Slack mock.
 `ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
@@ -87,6 +98,7 @@ bun run e2e --only slack-task-output-citations
 bun run e2e --skip workflow-script-node
 bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
 bun run e2e --min-route-coverage 4 --min-tool-coverage 3
+bun run e2e --strict
 bun run e2e --keep
 ```
 
@@ -181,7 +193,7 @@ Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), a
 Fx needs a preinstalled `fx` executable (worker-full ships the pinned release) and defaults to `openrouter/openai/gpt-5-mini` on `OPENROUTER_API_KEY`. A bare `E2E_MODEL_FX=gpt-5-mini` needs `OPENAI_API_KEY`, and `vercel/<vendor>/<id>` needs `AI_GATEWAY_API_KEY`. Run `bun run e2e --only health --harness fx`.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.2-alpha.2` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.1` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { useAllUsersScopeChanges, useWithinAllUsersScope } from "../../lib/all-users-scope";
 import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
@@ -15,6 +16,7 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   RoutingReason,
+  SteeringSource,
   SteerMode,
   SteerResult,
   TaskWithLogs,
@@ -61,11 +63,13 @@ export interface UseTasksOptions {
 }
 
 export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
+  // Never across a scope change: the kept page could hold all-users rows.
+  const keepPrevious = useWithinAllUsersScope(keepPreviousData);
   return useQuery({
     queryKey: ["tasks", filters],
     queryFn: () => api.fetchTasks(filters),
     select: (data) => ({ tasks: data.tasks, total: data.total }),
-    ...(opts?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    ...(opts?.keepPreviousData ? { placeholderData: keepPrevious } : {}),
     ...(opts?.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
   });
 }
@@ -174,6 +178,8 @@ export function useRequestComposition(taskId: string, opts: RequestCompositionQu
     }
     wasLive.current = opts.live;
   }, [opts.live, queryClient, taskId]);
+  // The query keeps the previous sessions' manifests only within one scope.
+  useAllUsersScopeChanges();
   return useQuery(
     requestCompositionQuery(taskId, opts, (id) => api.fetchTaskRequestComposition(id)),
   );
@@ -500,6 +506,8 @@ export interface SteerTaskInput {
   message: string;
   mode: SteerMode;
   requestedByUserId?: string;
+  /** Originating surface; the client defaults to "ui". App pages send "app-page". */
+  source?: SteeringSource;
 }
 
 /**
@@ -511,8 +519,8 @@ export interface SteerTaskInput {
 export function useSteerTask() {
   const queryClient = useQueryClient();
   return useMutation<SteerResult, Error, SteerTaskInput, TaskMutationContext>({
-    mutationFn: ({ id, message, mode, requestedByUserId }) =>
-      api.steerTask(id, { message, mode, requestedByUserId }),
+    mutationFn: ({ id, message, mode, requestedByUserId, source }) =>
+      api.steerTask(id, { message, mode, requestedByUserId, source }),
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: ["task", id, "steering-messages"] });
       return snapshotTaskQueries(queryClient, id);

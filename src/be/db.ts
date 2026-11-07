@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -157,7 +158,8 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
-import { getCurrentRequestUserId } from "../utils/request-auth-context";
+import { isEffectiveOutputSchema } from "../utils/output-schema";
+import { getCurrentRequestUserId, getCurrentRunProvenance } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
   registerSensitiveKeyName,
@@ -190,6 +192,7 @@ import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
   approvalRequestListClause,
+  scheduleApprovalCardUpdates,
   scrubApprovalVotesJson,
 } from "./db/approvals";
 import {
@@ -216,6 +219,8 @@ import {
   threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
+import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
@@ -230,6 +235,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
+import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
   emitChildRunFinished,
   emitRunFinished,
@@ -325,6 +331,13 @@ export {
   assertAssetKeyMovesAllowed,
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
+export {
+  getRunWorkflow,
+  PINNED_WORKFLOW_KEYS,
+  type PinnedWorkflowDefinition,
+  pinWorkflowDefinition,
+  toPinnedDefinition,
+} from "./db/workflow-run-definitions";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -358,6 +371,7 @@ export {
   getAllTasks,
   getChildTasks,
   getCompletedSlackTasks,
+  getFirstTaskInThread,
   getInProgressSlackTasks,
   getInProgressTasksByContextKey,
   getLatestActiveTaskByContextKey,
@@ -366,6 +380,7 @@ export {
   getLatestLeadTaskInThread,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
+  getLatestTaskByContextKeyPrefix,
   getMostRecentTaskInThread,
   getPendingChatRelayTasks,
   getPendingSlackRelayTasks,
@@ -379,6 +394,7 @@ export {
   getTasksByAgentId,
   getTasksByStatus,
   getTasksCount,
+  getTasksDispatchedFrom,
   giveUpStaleChatRelays,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
@@ -417,6 +433,7 @@ export {
   resumeTask,
   setTaskTitleIfUnset,
   settleSupersededTaskDependents,
+  skipTask,
   startTask,
   supersedeTask,
   updateTaskClaudeSessionId,
@@ -593,6 +610,8 @@ export interface SlackMessageRecord {
   deliveryAbandonedAt?: string;
   /** Last Slack verdict for the card, "<code>: <messages>", 500 chars max. */
   deliveryLastError?: string;
+  /** Tree rows only: set once the thread has no render work left. */
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -625,6 +644,7 @@ type SlackMessageRow = {
   delivery_attempts: number;
   delivery_abandoned_at: string | null;
   delivery_last_error: string | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -647,6 +667,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     deliveryAttempts: row.delivery_attempts,
     deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
     deliveryLastError: row.delivery_last_error ?? undefined,
+    closedAt: row.closed_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -869,15 +890,20 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * CROSS JOIN and `+wake.taskType` pin the join order to the small chain. Without
  * them the planner drives the outer join from every terminal task (~1s at 150k tasks).
+ * The anchor drives from the partial index idx_agent_tasks_deferred (tasks
+ * that ever deferred), not from every outcome card: `deferral_resolved_at IS
+ * NULL` stays true forever on cards of tasks that never deferred.
+ * `+child.taskType` does the same for the NOT EXISTS: without it the planner
+ * walks every deferred-type task through idx_agent_tasks_list_filter per row.
  */
 export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
   const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
     `WITH RECURSIVE chain(card_id, task_id) AS (
-         SELECT card.id, deferred.id FROM slack_messages card
-         JOIN agent_tasks deferred ON deferred.id = card.task_id
-         WHERE card.kind = 'outcome' AND deferred.deferredAt IS NOT NULL
+         SELECT card.id, deferred.id FROM agent_tasks deferred
+         CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+         WHERE deferred.deferredAt IS NOT NULL
            AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
            AND card.ts NOT LIKE 'pending:%'
          UNION
@@ -895,10 +921,10 @@ export async function getResolvableDeferralOutcomes(
          AND card.ts NOT LIKE 'pending:%'
          AND NOT EXISTS (
            SELECT 1 FROM agent_tasks child
-           WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
+           WHERE child.parentTaskId = wake.id AND +child.taskType = 'deferred'
          )
          AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled')
+         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
     [limit],
@@ -965,57 +991,26 @@ export async function abandonSlackOutcomeDelivery(
   return row ? rowToSlackMessage(row) : null;
 }
 
-export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
+/**
+ * Trees with pending render work. Reads only open trees (closed_at IS NULL,
+ * idx_slack_messages_open_trees): a settled thread is closed after its render
+ * pass and reopened by migration 278's triggers on any task or outcome write
+ * in the thread. `thread` scopes the sweep to one thread (event-driven render).
+ */
+export async function getSlackTreeMessages(
+  options: { thread?: { channelId: string; threadTs: string } } = {},
+): Promise<SlackMessageRecord[]> {
+  const thread = options.thread;
   const rows = await getDbClient().query<SlackMessageRow>(
     `SELECT tree.*
        FROM slack_messages tree
        JOIN slack_render_v2_state state ON state.id = 1
        WHERE tree.kind = 'tree'
-       AND (
-         (tree.ts LIKE 'pending:%' AND tree.created_at >= state.activated_at)
-         OR EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.source = 'slack'
-           AND task.createdAt >= state.activated_at
-           AND task.status IN ('completed', 'failed', 'cancelled')
-           AND NOT EXISTS (
-             SELECT 1 FROM slack_messages outcome
-             WHERE outcome.kind = 'outcome'
-             AND outcome.task_id = task.id
-             AND (outcome.finalized_at IS NOT NULL OR outcome.delivery_abandoned_at IS NOT NULL)
-           )
-         )
-         OR
-         EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
-         )
-         OR EXISTS (
-           SELECT 1 FROM agent_tasks task
-           WHERE task.slackChannelId = tree.channel_id
-           AND task.slackThreadTs = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND task.lastUpdatedAt > tree.updated_at
-         )
-         OR EXISTS (
-           SELECT 1 FROM slack_messages outcome
-           JOIN agent_tasks task ON task.id = outcome.task_id
-           WHERE outcome.kind = 'outcome'
-           AND outcome.channel_id = tree.channel_id
-           AND outcome.thread_ts = tree.thread_ts
-           AND task.createdAt >= state.activated_at
-           AND (
-             (outcome.finalized_at IS NULL AND outcome.delivery_abandoned_at IS NULL)
-             OR outcome.updated_at > tree.updated_at
-           )
-         )
-       )
+       AND tree.closed_at IS NULL
+       ${thread ? "AND tree.channel_id = ? AND tree.thread_ts = ?" : ""}
+       AND ${SLACK_TREE_NEEDS_RENDER_SQL}
        ORDER BY tree.created_at ASC`,
+    thread ? [thread.channelId, thread.threadTs] : [],
   );
   return rows.map(rowToSlackMessage);
 }
@@ -2382,7 +2377,7 @@ export async function findRecentSimilarTasks(opts: {
 
   // Exclude all terminal statuses — only active or recently created.
   // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded')");
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
 
   if (opts.creatorAgentId) {
     conditions.push("creatorAgentId = ?");
@@ -2523,6 +2518,12 @@ export async function createTaskExtended(
       "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
     );
   }
+  // An explicit empty `outputSchema: {}` means "no output schema": it stores
+  // NULL and blocks the parent-schema inheritance below. Callers pass `{}` on
+  // purpose to keep a delegated child free of their own output contract.
+  if (options.outputSchema !== undefined && !isEffectiveOutputSchema(options.outputSchema)) {
+    options = { ...options, outputSchema: undefined, inheritParentOutputSchema: false };
+  }
   let requestedByUserIdInherited = false;
   // The parent key is read again inside the INSERT transaction (see below).
   let keyInherited = false;
@@ -2588,6 +2589,9 @@ export async function createTaskExtended(
       if (parent.slackUserId && !options.slackUserId && !explicitForeignChannel) {
         options.slackUserId = parent.slackUserId;
       }
+      if (parent.slackParticipants && !options.slackParticipants && !explicitForeignChannel) {
+        options.slackParticipants = parent.slackParticipants;
+      }
 
       // AgentMail context
       if (parent.agentmailInboxId && !options.agentmailInboxId) {
@@ -2612,32 +2616,44 @@ export async function createTaskExtended(
       // Webhook handlers locate active work via `findTaskByVcs(repo, number, provider)`,
       // so a resume / follow-up child MUST carry the full VCS identity or
       // subsequent review/update events get dropped.
-      if (parent.vcsProvider && !options.vcsProvider) {
-        options.vcsProvider = parent.vcsProvider;
-      }
-      if (parent.vcsRepo && !options.vcsRepo) {
-        options.vcsRepo = parent.vcsRepo;
-      }
-      if (parent.vcsNumber != null && options.vcsNumber == null) {
-        options.vcsNumber = parent.vcsNumber;
-      }
-      if (parent.vcsEventType && !options.vcsEventType) {
-        options.vcsEventType = parent.vcsEventType;
-      }
-      if (parent.vcsCommentId != null && options.vcsCommentId == null) {
-        options.vcsCommentId = parent.vcsCommentId;
-      }
-      if (parent.vcsAuthor && !options.vcsAuthor) {
-        options.vcsAuthor = parent.vcsAuthor;
-      }
-      if (parent.vcsUrl && !options.vcsUrl) {
-        options.vcsUrl = parent.vcsUrl;
-      }
-      if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
-        options.vcsInstallationId = parent.vcsInstallationId;
-      }
-      if (parent.vcsNodeId && !options.vcsNodeId) {
-        options.vcsNodeId = parent.vcsNodeId;
+      //
+      // Inherited as an atomic unit, like Slack context above: a child that
+      // names its own vcsRepo different from the parent's (e.g. `send-task
+      // vcsRepo=...`) inherits NONE of the parent's vcs* fields. Otherwise it
+      // would pair its repo with the parent's number/URL, so PR reconciliation
+      // attaches the parent's PR as the child's deliverable and
+      // `findTaskByVcs` matches an unrelated PR with the same number.
+      const inheritParentVcs =
+        !options.vcsRepo ||
+        (!!parent.vcsRepo && options.vcsRepo.toLowerCase() === parent.vcsRepo.toLowerCase());
+      if (inheritParentVcs) {
+        if (parent.vcsProvider && !options.vcsProvider) {
+          options.vcsProvider = parent.vcsProvider;
+        }
+        if (parent.vcsRepo && !options.vcsRepo) {
+          options.vcsRepo = parent.vcsRepo;
+        }
+        if (parent.vcsNumber != null && options.vcsNumber == null) {
+          options.vcsNumber = parent.vcsNumber;
+        }
+        if (parent.vcsEventType && !options.vcsEventType) {
+          options.vcsEventType = parent.vcsEventType;
+        }
+        if (parent.vcsCommentId != null && options.vcsCommentId == null) {
+          options.vcsCommentId = parent.vcsCommentId;
+        }
+        if (parent.vcsAuthor && !options.vcsAuthor) {
+          options.vcsAuthor = parent.vcsAuthor;
+        }
+        if (parent.vcsUrl && !options.vcsUrl) {
+          options.vcsUrl = parent.vcsUrl;
+        }
+        if (parent.vcsInstallationId != null && options.vcsInstallationId == null) {
+          options.vcsInstallationId = parent.vcsInstallationId;
+        }
+        if (parent.vcsNodeId && !options.vcsNodeId) {
+          options.vcsNodeId = parent.vcsNodeId;
+        }
       }
 
       // Execution context (per-task overrides)
@@ -2672,7 +2688,7 @@ export async function createTaskExtended(
       // Lead reroute-decision) that must not be held to the original work's
       // output contract.
       if (
-        parent.outputSchema &&
+        isEffectiveOutputSchema(parent.outputSchema) &&
         !options.outputSchema &&
         options.inheritParentOutputSchema !== false
       ) {
@@ -2951,17 +2967,19 @@ export async function createTaskExtended(
       workflowRunId: options?.workflowRunId,
     });
 
+    const provenance = getCurrentRunProvenance();
     const inserted = await getDbClient().get<AgentTaskRow>(
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
+        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId, slackParticipants,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, profile, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
+        sourceStepId, sourceScriptRunId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -2984,6 +3002,7 @@ export async function createTaskExtended(
         options?.slackThreadTs ?? null,
         options?.slackTriggerMessageTs ?? null,
         options?.slackUserId ?? null,
+        options?.slackParticipants ? JSON.stringify(options.slackParticipants) : null,
         options?.vcsProvider ?? null,
         options?.vcsRepo ?? null,
         options?.vcsEventType ?? null,
@@ -3000,10 +3019,12 @@ export async function createTaskExtended(
         options?.mentionChannelId ?? null,
         options?.dir ?? null,
         options?.parentTaskId ?? null,
+        options?.dispatchedByTaskId ?? null,
         options?.model ?? null,
         options?.modelTier ?? null,
         options?.effort ?? null,
         options?.profile?.trim() || null,
+        options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
         options?.scheduleId ?? null,
         options?.workflowRunId ?? null,
         options?.workflowRunStepId ?? null,
@@ -3019,6 +3040,10 @@ export async function createTaskExtended(
         auditUserId,
         auditUserId,
         isHumanFree ? 1 : 0,
+        // A task a workflow node owns keeps only its workflowRunId: the engine
+        // can run that node inside the request of the script that triggered it.
+        options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
+        options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
       ],
     );
     if (!inserted) throw new Error("Failed to create task");
@@ -3588,17 +3613,17 @@ export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
 }
 
 /**
- * Batch size and hard cap for the paginated eligibility scans in
+ * Batch size for the paginated eligibility scans in
  * `getUnassignedTaskIdsForAgent` (and `autoAssignPoolTasks` in
  * src/heartbeat/heartbeat.ts, which mirrors this pattern). A fixed single
  * window used to mean N ineligible affinity-tagged tasks at the head of the
  * priority order could hide all eligible work behind them forever — see
  * PR #954 review. Scanning continues page-by-page until `limit` eligible
- * candidates are found or the pool is exhausted; the cap bounds worst-case
- * DB load when eligible work is buried deep or genuinely absent.
+ * candidates are found or the pool is exhausted; the scan cap
+ * (`getEligibilityScanCap`) bounds worst-case DB load when eligible work is
+ * buried deep or genuinely absent.
  */
 const ELIGIBILITY_SCAN_BATCH_SIZE = Number(process.env.ELIGIBILITY_SCAN_BATCH_SIZE) || 25;
-const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
 
 /**
  * Same ordering as `getUnassignedTaskIds`, filtered through
@@ -3623,9 +3648,10 @@ export async function getUnassignedTaskIdsForAgent(
 
   const batchSize = Math.max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE);
   const eligible: string[] = [];
+  const scanCap = getEligibilityScanCap();
   let offset = 0;
 
-  while (eligible.length < limit && offset < ELIGIBILITY_SCAN_CAP) {
+  while (eligible.length < limit && offset < scanCap) {
     const rows = await getDbClient().query<AgentTaskRow>(
       "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
       [batchSize, offset],
@@ -3663,7 +3689,9 @@ export async function checkDependencies(taskId: string): Promise<{
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
     const depTask = await getTaskById(depId);
-    if (!depTask || depTask.status !== "completed") {
+    // A skipped dependency settled without work to hand on; it does not
+    // block, the same as a completed one.
+    if (!depTask || (depTask.status !== "completed" && depTask.status !== "skipped")) {
       blockedBy.push(depId);
     }
   }
@@ -4415,11 +4443,12 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
  */
 export async function claimMentions(
   agentId: string,
-): Promise<{ channelId: string; lastReadAt: string | null }[]> {
+): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const client = getDbClient();
   const channels = await getAllChannels();
-  const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
+  const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
+    [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
@@ -4463,7 +4492,11 @@ export async function claimMentions(
 
       // Only add to claimed list if we actually claimed it (not already processing)
       if (result.changes > 0) {
-        claimedChannels.push({ channelId: channel.id, lastReadAt });
+        claimedChannels.push({
+          channelId: channel.id,
+          lastReadAt,
+          mentionsCount: mentionCountRow.count,
+        });
       }
     }
   }
@@ -5033,13 +5066,22 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
       thinkingTokens,
       input.durationMs,
       input.numTurns,
-      input.model,
+      // Cost rows group by the underlying model, while task configuration and
+      // session logs retain the pi route used to select credentials.
+      chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
       input.isError ? 1 : 0,
       costSource,
       input.harnessCostUsd ?? null,
       input.cacheWrite5mTokens ?? null,
       input.cacheWrite1hTokens ?? null,
-      input.modelBreakdown ? JSON.stringify(input.modelBreakdown) : null,
+      input.modelBreakdown
+        ? JSON.stringify(
+            input.modelBreakdown.map((entry) => ({
+              ...entry,
+              model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
+            })),
+          )
+        : null,
     ],
   );
 
@@ -6013,6 +6055,7 @@ type ScheduledTaskRow = {
   lastErrorMessage: string | null;
   model: string | null;
   modelTier: string | null;
+  profile: string | null;
   scheduleType: string;
   targetType: string;
   workflowId: string | null;
@@ -6065,6 +6108,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    profile: row.profile ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
     targetType: row.targetType as "agent-task" | "workflow" | "script",
     workflowId: row.workflowId ?? undefined,
@@ -6226,6 +6270,7 @@ export interface CreateScheduledTaskData {
   timezone?: string;
   model?: string;
   modelTier?: ModelTier;
+  profile?: string;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string;
@@ -6246,11 +6291,11 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
-        timezone, model, modelTier, scheduleType,
+        timezone, model, modelTier, profile, scheduleType,
         targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -6272,6 +6317,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.timezone ?? "UTC",
       data.model ?? null,
       data.modelTier ?? null,
+      data.profile ?? null,
       data.scheduleType ?? "recurring",
       data.targetType ?? "agent-task",
       data.workflowId ?? null,
@@ -6311,6 +6357,7 @@ export interface UpdateScheduledTaskData {
   lastErrorMessage?: string | null;
   model?: string | null;
   modelTier?: ModelTier | null;
+  profile?: string | null;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string | null;
@@ -6406,6 +6453,10 @@ export async function updateScheduledTask(
   if (data.modelTier !== undefined) {
     updates.push("modelTier = ?");
     params.push(data.modelTier);
+  }
+  if (data.profile !== undefined) {
+    updates.push("profile = ?");
+    params.push(data.profile);
   }
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
@@ -7203,24 +7254,29 @@ export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapp
   );
 }
 
+/**
+ * Map an inbox to an agent. Re-registering an inbox the same agent already owns
+ * refreshes its email. Returns null, and changes nothing, when the inbox is
+ * already mapped to a different agent.
+ */
 export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): Promise<AgentMailInboxMapping> {
+): Promise<AgentMailInboxMapping | null> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = await getDbClient().get<AgentMailInboxMapping>(
     `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
+       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
+         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
        RETURNING *`,
     [id, inboxId, agentId, inboxEmail ?? null, now],
   );
 
-  if (!row) throw new Error("Failed to create AgentMail inbox mapping");
-  return row;
+  return row ?? null;
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
@@ -7928,7 +7984,13 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     [id],
   );
   // 3. Delete runs (they reference workflow)
+  const definitionHashes = await client.query<{ definitionHash: string }>(
+    `SELECT DISTINCT definitionHash FROM workflow_runs
+      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
+    [id],
+  );
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
@@ -7981,10 +8043,12 @@ export async function createWorkflowRun(data: {
   parentStepAttempt?: number;
   /** Server-stamped agent that started the run (migration 247). Never from trigger data. */
   triggeredByAgentId?: string;
+  /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
+  definitionHash?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7995,6 +8059,15 @@ export async function createWorkflowRun(data: {
       data.parentStepId ?? null,
       data.parentStepAttempt ?? 0,
       data.triggeredByAgentId ?? null,
+      data.definitionHash ?? null,
+      // The script step whose run token started this run (trigger-workflow is
+      // a manual or api trigger). A sub-workflow child is linked by
+      // parentStepId instead, and an event or schedule run is never the
+      // script's, even when it starts inside that script's request.
+      data.parentStepId ||
+      (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
+        ? null
+        : (getCurrentRunProvenance()?.sourceStepId ?? null),
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -8349,7 +8422,7 @@ export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
       CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wrs.status = 'waiting'
         AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')
+        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
   );
 }
@@ -10004,7 +10077,10 @@ export async function resolveApprovalRequest(
       id,
     ],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const resolved = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([resolved]);
+  return resolved;
 }
 
 // Cancels 1 pending request. The `status = 'pending'` guard lets a concurrent
@@ -10021,7 +10097,10 @@ export async function cancelApprovalRequestById(
        RETURNING *`,
     [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
   );
-  return row ? rowToApprovalRequest(row) : null;
+  if (!row) return null;
+  const cancelled = rowToApprovalRequest(row);
+  scheduleApprovalCardUpdates([cancelled]);
+  return cancelled;
 }
 
 export async function cancelPendingApprovalRequestsForRun(
@@ -10036,7 +10115,9 @@ export async function cancelPendingApprovalRequestsForRun(
        RETURNING *`,
     [scrubSecrets(reason), now, now, workflowRunId],
   );
-  return rows.map(rowToApprovalRequest);
+  const cancelled = rows.map(rowToApprovalRequest);
+  scheduleApprovalCardUpdates(cancelled);
+  return cancelled;
 }
 
 export async function listCancelledApprovalRequestsForRun(
@@ -10061,13 +10142,21 @@ export async function listCancelledApprovalRequestsForStep(
   return rows.map(rowToApprovalRequest);
 }
 
+/**
+ * Lease one Slack side effect of a settled request. `cancellationNotificationClaims`
+ * holds every such claim: the cancellation thread reply (`<channel>:<ts>`) and the
+ * in-place card edit (`card:<channel>:<ts>`), so a retry never repeats a delivered one.
+ * `anyTerminal` claims on every terminal status, not only `cancelled`.
+ */
 export async function claimApprovalCancellationNotification(
   id: string,
   notificationKey: string,
+  options?: { anyTerminal?: boolean },
 ): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
+  const statusClause = options?.anyTerminal ? "status <> 'pending'" : "status = 'cancelled'";
   return getDbClient().transaction(async () => {
     const row = await getDbClient().get<ApprovalRequestRow>(
-      "SELECT * FROM approval_requests WHERE id = ? AND status = 'cancelled'",
+      `SELECT * FROM approval_requests WHERE id = ? AND ${statusClause}`,
       [id],
     );
     if (!row) return null;
@@ -10093,7 +10182,7 @@ export async function claimApprovalCancellationNotification(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND ${statusClause}`,
       [JSON.stringify(claims), now, id],
     );
     return { approval: rowToApprovalRequest(row), leaseToken };
@@ -10142,7 +10231,7 @@ async function updateApprovalCancellationNotificationClaim(
     await getDbClient().run(
       `UPDATE approval_requests
          SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status = 'cancelled'`,
+         WHERE id = ? AND status <> 'pending'`,
       [JSON.stringify(claims), new Date().toISOString(), id],
     );
   });
@@ -13869,16 +13958,35 @@ export async function sweepExpiredKv(namespace: string, now = Date.now()): Promi
 /** Delete expired entries across a namespace family (`prefix` and
  * `prefix:*`). Used by per-agent internal stores whose inactive owners may
  * never return to trigger a namespace-local sweep. */
-export async function sweepExpiredKvPrefix(prefix: string, now = Date.now()): Promise<number> {
+export async function sweepExpiredKvPrefix(
+  prefix: string,
+  now = Date.now(),
+  /** Rows per DELETE, capped at 50 for multi-MB values. Yields between batches. */
+  batchSize = 50,
+): Promise<number> {
+  batchSize = Math.max(1, Math.min(batchSize, 50));
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [prefix, `${escaped}:%`, now],
-  );
-  return result.changes;
+  // Batched, with a macrotask yield between batches: one DELETE of every
+  // expired multi-MB overflow row blocked the event loop for seconds and
+  // starved the Slack socket ping. `now` is fixed for the whole sweep, so the
+  // batches delete the same row set as one statement. kv_entries is WITHOUT
+  // ROWID, so a batch selects the (namespace, key) primary key.
+  let removed = 0;
+  for (;;) {
+    const result = await getDbClient().run(
+      `DELETE FROM kv_entries
+          WHERE (namespace, key) IN (
+            SELECT namespace, key FROM kv_entries
+              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+                AND expires_at IS NOT NULL
+                AND expires_at <= ?
+              LIMIT ?)`,
+      [prefix, `${escaped}:%`, now, batchSize],
+    );
+    removed += result.changes;
+    if (result.changes < batchSize) return removed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 /**
@@ -14250,8 +14358,8 @@ export async function createScriptRun(data: {
   const row = await client.get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
-         created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         created_by, updated_by, startedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14267,6 +14375,8 @@ export async function createScriptRun(data: {
       data.sourceTaskId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      new Date().toISOString(),
     ],
   );
   if (!row) throw new Error("Failed to create script run");
@@ -14296,11 +14406,13 @@ export async function recordInlineScriptRun(data: {
   // redact them here so every caller is covered.
   const args = scrubJsonValue(data.args ?? null);
   const output = data.output === undefined ? null : scrubJsonValue(data.output);
+  const provenance = getCurrentRunProvenance();
   const row = await getDbClient().get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
-         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId)
-       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
+         sourceStepId, parentScriptRunId)
+       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       data.id,
@@ -14317,6 +14429,10 @@ export async function recordInlineScriptRun(data: {
       data.createdBy ?? null,
       data.createdBy ?? null,
       data.apiEndpointId ?? null,
+      // A run called through another script run's token (a nested
+      // ctx.swarm.script_run) records that run and its workflow step.
+      provenance?.sourceStepId ?? null,
+      provenance?.sourceScriptRunId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to record inline script run");

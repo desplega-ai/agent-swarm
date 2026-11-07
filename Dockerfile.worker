@@ -8,7 +8,7 @@
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
 #   worker-full-base             — worker-base + dev toolchain, Playwright
 #                                  Chromium + agent-browser, postgres/redis,
-#                                  glab, az (azure-devops), context-mode plugins
+#                                  glab, az (azure-devops)
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.316
+ARG CLAUDE_CODE_VERSION=2.1.319
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -152,7 +152,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.4.0
+ARG PI_CODING_AGENT_VERSION=1.5.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.166.0
+ARG CODEX_VERSION=0.167.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.5
+ARG OPENCODE_VERSION=2.2.6
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -212,19 +212,6 @@ ENV PATH="/home/worker/.opencode/bin:$PATH"
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
-    && rm -rf /tmp/npm-cache /root/.npm
-USER worker
-
-# Install context-mode CLI globally (context-window compression tools for all
-# harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
-# stdio MCP) AND makes the package importable (for the OpenCode in-process
-# plugin). The Claude/Codex plugin installs (worker-full-base) provide the
-# hooks; this provides the CLI binary + package importability. Disable
-# per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-ARG CONTEXT_MODE_VERSION=1.0.169
-USER root
-RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g context-mode@${CONTEXT_MODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
@@ -244,7 +231,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.14
+ARG AGENT_FS_VERSION=0.18.22
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -257,7 +244,7 @@ RUN mkdir -p /home/worker/.wts \
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
-  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings", "ScheduleWakeup"] }, \
+  "permissions": { "allow": ["mcp__agent-swarm__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings", "ScheduleWakeup"] }, \
   "outputStyle": "Concise", \
   "attribution": { "commit": "", "pr": "", "sessionUrl": false }, \
   "autoMemoryEnabled": false, \
@@ -267,7 +254,7 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   "disableRemoteControl": true, \
   "disableClaudeAiConnectors": true, \
   "enableAllProjectMcpServers": true, \
-  "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
+  "enabledMcpjsonServers": ["agent-swarm"], \
   "env": { "DISABLE_ERROR_REPORTING": "1" }, \
   "hooks": { \
     "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
@@ -382,7 +369,6 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
 # Runtime environment shared by all leaf stages
 ENV AGENT_ROLE=worker
 ENV HARNESS_PROVIDER=claude
-ENV WORKER_YOLO=false
 ENV MCP_BASE_URL=http://host.docker.internal:3013
 ENV WORKER_LOG_DIR=/logs
 ENV LEAD_LOG_DIR=/logs
@@ -559,8 +545,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-alpha.2
-ARG DSH_SHA512=99d729805f03d5e15057c1aedd3fec60b901c1fc3d87f2e2d2e3c8c57c9bcb55726c982b160f015352dee3416232737e85e2fb937cce32e0157bbb05abf24ee3
+ARG DSH_VERSION=0.2.2-rc.1
+ARG DSH_SHA512=8a347d504558906d7943f43bf49cefccb07340e41f73add52ebf67e9f969c073e1af920a9f6531b619d2a2da3f3fd97ba8677ba4fbc8d516ba4d6ecb1f7a0aa6
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -575,9 +561,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1793450357-gd44904
-ARG AMP_SHA512_AMD64=8c69618e88e214818d12305aa863e6a02971197121944982e7743a1c4ec01fdac683133577d2efd2433f18582ab05b0d046f3688b880552d36743478380aae2d
-ARG AMP_SHA512_ARM64=3f4fcf4c0e6923af05a519c5abc98a664879f0403baa23db0c35d42cb3af8a659dfb2993e43996d85d68a205c10801c20188fe87cae25ef1399a10feea5206cd
+ARG AMP_VERSION=0.0.1794052841-g6d76b7
+ARG AMP_SHA512_AMD64=3b5a9fbf687efd3ebbf8b7b4e9d46beb26a123f22fe3055924aba0cad37b5336ff048b0decf91fd110ac67c71365d1df6f410fed5570ff14f6029d52d5d67503
+ARG AMP_SHA512_ARM64=88b0ff17fefcf93d1f8cd0c9b3c84191f1ee74a10e4abcaf3d2aaffb3fb2b2a0ca7483aec863ee6f4555caf5637a5da46dae814859dcb05e20e6d92121ad6485
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -593,7 +579,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.2.0
+ARG CURSOR_SDK_VERSION=1.3.1
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -612,7 +598,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.66.0
+ARG GEMINI_CLI_VERSION=0.67.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -625,7 +611,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.105
+ARG COPILOT_CLI_VERSION=1.0.107
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -635,8 +621,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.26.4), so none run as root.
-ARG QWEN_CODE_VERSION=0.26.4
+# scripts are not needed for ACP (verified on 0.26.9), so none run as root.
+ARG QWEN_CODE_VERSION=0.26.9
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -662,12 +648,13 @@ RUN case "$TARGETARCH" in \
     && rm -rf /tmp/goose.tgz /tmp/goose-home
 # Kiro CLI, the `kiro` ACP target (`kiro-cli acp`). The headless tarball from
 # the versioned download path, verified against the SHA-256 the stable channel
-# manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
-# the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
-# pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.37.0
-ARG KIRO_CLI_SHA256_AMD64=02c49873ba64285f34048aac377ccf0b546b5627f39dd775bae9fa306112ff19
-ARG KIRO_CLI_SHA256_ARM64=3588100df2addfbb2c6953698ea2d6e7d2b88c5ef664ec3235e08fa454219f68
+# manifest lists. Since 3.0.0 the tarball ships a single `kiro-cli` binary
+# (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
+# KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
+# licence before publishing.
+ARG KIRO_CLI_VERSION=3.1.0
+ARG KIRO_CLI_SHA256_AMD64=006835b2f4f433f55bb02601cd3053ccb10bd3d408478719c33d320f18e46ba5
+ARG KIRO_CLI_SHA256_ARM64=acf8e80a10a079bad0c4e28b38a00aa4b3c537067c7844490384fddf94f88e7d
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -675,7 +662,7 @@ RUN case "$TARGETARCH" in \
     esac \
     && curl -fsSL "https://prod.download.cli.kiro.dev/stable/${KIRO_CLI_VERSION}/kirocli-${kiro_arch}-linux.tar.gz" -o /tmp/kiro.tgz \
     && echo "${kiro_sha256}  /tmp/kiro.tgz" | sha256sum -c - \
-    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli kirocli/bin/kiro-cli-chat \
+    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli \
     && test "$(HOME=/tmp/kiro-home /usr/local/bin/kiro-cli --version)" = "kiro-cli ${KIRO_CLI_VERSION}" \
     && rm -rf /tmp/kiro.tgz /tmp/kiro-home
 
@@ -685,9 +672,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.70
-ARG GROK_SHA512_AMD64=ac496c872733ffa4a03d2922146b4a1c0e2f495388f2a43a7748c57aee08f7685708c7efc603223af352cee0619b63fc25dfb8acd180b72db35b45709a01d278
-ARG GROK_SHA512_ARM64=ac7d137d6393fc26bfb0132d00927e189f54c9996bfd3913a881eaf052fba3e653cc93015af0afe34242e13fd7bb0119dd6326c4e1c688f6a9ec7f41e126c34b
+ARG GROK_VERSION=1.0.77
+ARG GROK_SHA512_AMD64=0ee3d2130d4d623fdbc0b3822bfecb270f37375ae029cf2112c220e0282027dcbbe3269b00e51d6a6af895f23e8b670a2cfabd87c4d07f628d6f213fcd7f3dca
+ARG GROK_SHA512_ARM64=29be3229b544ced5f4ee233b72f281d8bff18903f533f90b8c99f2464f3880db6bdc81bb6a1a89a7ad34e6e07f54bbf0d22b2fd428f9d3327d8d84caecd88eab
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
@@ -739,7 +726,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.41.0",
+    "agent-browser": "0.41.2",
     "playwright": "1.58.0"
   },
   "overrides": {
@@ -818,27 +805,6 @@ RUN ffmpeg -version \
     && head -c 8 /tmp/agent-browser-smoke.png | grep -q PNG \
     && agent-browser close \
     && rm -rf /tmp/agent-browser-smoke.png /home/worker/.agent-browser
-USER root
-
-# Install the context-mode plugins for Claude + Codex (build-time cache).
-# These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
-# skills-only installer cannot replace. NOTE: the Claude plugin tracks the
-# marketplace HEAD and is NOT version-pinned. A build-time `git checkout
-# v${CONTEXT_MODE_VERSION}` in the marketplace clone does not work (git
-# rejects it with "dubious ownership" and the clone is shallow without tags),
-# so we don't attempt it. The ctx_* TOOLS are served by the globally-installed
-# CLI (npm i -g context-mode in worker-base), which IS pinned; only the hook
-# bundle floats — acceptable since the hooks are backward-compatible.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build.
-# CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
-# `bun install` under the hood and previously left an 880 MB cache in a layer.
-USER worker
-RUN claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@context-mode --scope user || true \
-    && codex plugin marketplace add mksglu/context-mode || true \
-    && codex plugin add context-mode@context-mode || true \
-    && rm -rf /home/worker/.bun/install/cache
-
 USER root
 
 # ─── Stage: worker-full — default/published image (must stay LAST) ───────────

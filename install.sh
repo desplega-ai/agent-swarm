@@ -112,7 +112,8 @@ What it does:
      onboarding and only runs \`docker compose up -d\`, so an existing install
      keeps its services.
   4. Waits for http://localhost:<port>/health.
-  5. Prints the dashboard link to /setup with the API URL and key filled in. The
+  5. Prints a dashboard link to /setup with the API key redacted. Saves the full
+     link in .agent-swarm/setup-url (mode 600) and prints a command to show it. The
      link uses the public URL (tunnel, --public-url, or PUBLIC_MCP_BASE_URL in .env)
      when there is one, else http://localhost:<port>.
 
@@ -280,7 +281,7 @@ onboard() {
   local extra=()
   [ "$NO_AGENT_FS" -eq 1 ] && extra+=(--no-agent-fs)
   say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
-  run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
+  run env AGENT_SWARM_INSTALLER=1 bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
     --container-engine docker ${extra[@]+"${extra[@]}"} </dev/null
 }
 
@@ -450,6 +451,153 @@ env_value() {
   grep -E "^$1=" "$file" | tail -n 1 | cut -d= -f2- || true
 }
 
+# Compose files the running stack merges. Cwd is the install directory.
+# Compose loads docker-compose.yml plus the first override file it finds.
+compose_project_files() {
+  local f
+  [ -f docker-compose.yml ] || return 0
+  printf '%s\n' docker-compose.yml
+  for f in compose.override.yml compose.override.yaml docker-compose.override.yml docker-compose.override.yaml; do
+    if [ -f "$f" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done
+}
+
+# Space-separated API credential names Compose injects into swarm-api.
+# Generated compose lists `API_KEY=${API_KEY}` and does not list
+# AGENT_SWARM_API_KEY. An env_file counts too: every KEY= in that file is
+# present in the container. Empty when the files name neither.
+injected_swarm_api_key_names() {
+  local file line path names=" "
+  [ -f docker-compose.yml ] || return 0
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        file:*)
+          path="${line#file:}"
+          [ -f "$path" ] || continue
+          if grep -qE '^AGENT_SWARM_API_KEY=' "$path"; then
+            names="${names}AGENT_SWARM_API_KEY "
+          fi
+          if grep -qE '^API_KEY=' "$path"; then
+            names="${names}API_KEY "
+          fi
+          ;;
+        AGENT_SWARM_API_KEY | API_KEY)
+          case "$names" in
+            *" ${line} "*) ;;
+            *) names="${names}${line} " ;;
+          esac
+          ;;
+      esac
+    done < <(awk '
+      function indent_of(s) {
+        if (match(s, /^[[:space:]]*/)) return RLENGTH
+        return 0
+      }
+      function emit_name(item) {
+        gsub(/^["'\'']|["'\'']$/, "", item)
+        if (match(item, /^(AGENT_SWARM_API_KEY|API_KEY)[[:space:]]*[:=]/)) {
+          name = substr(item, 1, RLENGTH)
+          sub(/[[:space:]]*[:=]$/, "", name)
+          print name
+        }
+      }
+      function emit_file(path) {
+        sub(/^[[:space:]]+/, "", path)
+        sub(/[[:space:]]+$/, "", path)
+        gsub(/^["'\'']|["'\'']$/, "", path)
+        if (path != "") print "file:" path
+      }
+      /^[[:space:]]*#/ { next }
+      {
+        line = $0
+        ind = indent_of(line)
+        content = line
+        sub(/^[[:space:]]*/, "", content)
+      }
+      content == "swarm-api:" && ind == 2 {
+        in_svc = 1
+        in_env = 0
+        in_file = 0
+        next
+      }
+      in_svc && content != "" && ind <= 2 {
+        in_svc = 0
+        in_env = 0
+        in_file = 0
+      }
+      !in_svc { next }
+      content ~ /^environment:[[:space:]]*$/ {
+        in_env = 1
+        in_file = 0
+        block_indent = ind
+        next
+      }
+      content ~ /^env_file:[[:space:]]*\S/ {
+        in_env = 0
+        in_file = 0
+        path = content
+        sub(/^env_file:[[:space:]]*/, "", path)
+        emit_file(path)
+        next
+      }
+      content ~ /^env_file:[[:space:]]*$/ {
+        in_file = 1
+        in_env = 0
+        block_indent = ind
+        next
+      }
+      (in_env || in_file) && content != "" && ind <= block_indent && content !~ /^-/ {
+        in_env = 0
+        in_file = 0
+      }
+      in_env && content ~ /^-/ {
+        item = content
+        sub(/^-[[:space:]]*/, "", item)
+        emit_name(item)
+        next
+      }
+      in_env {
+        emit_name(content)
+        next
+      }
+      in_file && content ~ /^-/ {
+        path = content
+        sub(/^-[[:space:]]*/, "", path)
+        emit_file(path)
+      }
+    ' "$file")
+  done < <(compose_project_files)
+  printf '%s' "${names#" "}"
+}
+
+# Credential the running API accepts. getApiKey() prefers AGENT_SWARM_API_KEY,
+# but only a name Compose injects into swarm-api exists in that container.
+# A rerun whose .env holds both keys must use the one the generated compose
+# actually passes (API_KEY), or the recovery link does not authenticate.
+# When the files name neither, fall back to the same precedence against .env.
+running_api_key() {
+  local names val
+  names="$(injected_swarm_api_key_names)"
+  case " ${names} " in
+    *" AGENT_SWARM_API_KEY "*)
+      env_value AGENT_SWARM_API_KEY
+      ;;
+    *" API_KEY "*)
+      env_value API_KEY
+      ;;
+    *)
+      val="$(env_value AGENT_SWARM_API_KEY)"
+      [ -n "$val" ] || val="$(env_value API_KEY)"
+      printf '%s' "$val"
+      ;;
+  esac
+}
+
 # Decide whether to open the tunnel. An explicit --tunnel / --no-tunnel /
 # AGENT_SWARM_TUNNEL wins and is saved to .env as AGENT_SWARM_TUNNEL, so a later
 # re-run keeps the choice. In auto mode, a saved AGENT_SWARM_TUNNEL wins. Without
@@ -535,6 +683,19 @@ urlencode() {
   done
   printf '%s' "$out"
 }
+
+# Write privately from the first byte, including when replacing an old file.
+# Keep the full URL out of run(), which echoes its arguments to the terminal.
+save_setup_url() (
+  umask 077
+  local dir="${INSTALL_DIR}/.agent-swarm" tmp
+  mkdir -p "$dir"
+  [ ! -d "${dir}/setup-url" ] || die "${dir}/setup-url is a directory"
+  tmp="$(mktemp "${dir}/setup-url.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  printf '%s\n' "$1" >"$tmp"
+  mv -f "$tmp" "${dir}/setup-url"
+)
 
 lt_command() {
   if have lt && lt --help 2>/dev/null | grep -q "lt.desplega.ai"; then
@@ -720,9 +881,11 @@ main() {
     [ -z "$PUBLIC_URL" ] || apply_public_url "$PUBLIC_URL" "$port"
   fi
 
-  api_key="$(env_value API_KEY)"
-  [ -n "$api_key" ] || api_key="<API_KEY from ${INSTALL_DIR}/.env>"
-  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${PUBLIC_URL:-$local_url}")&apiKey=$(urlencode "$api_key")"
+  api_key="$(running_api_key)"
+  dash_url="${DASHBOARD_BASE}/setup?apiUrl=$(urlencode "${PUBLIC_URL:-$local_url}")&apiKey="
+  if [ "$DRY_RUN" -eq 0 ]; then
+    save_setup_url "${dash_url}$(urlencode "$api_key")"
+  fi
 
   printf '\n'
   say "Agent Swarm is running"
@@ -730,7 +893,10 @@ main() {
   [ -n "$PUBLIC_URL" ] && printf '  Public API: %s\n' "$PUBLIC_URL"
   printf '  Files:      %s\n' "$INSTALL_DIR"
   printf '\n  Finish setup (harness credentials, integrations) in the dashboard:\n'
-  printf '  %s\n\n' "$dash_url"
+  printf '  %s<redacted>\n\n' "$dash_url"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    printf '  Full link (contains API key): cat %q\n\n' "${INSTALL_DIR}/.agent-swarm/setup-url"
+  fi
   printf '  Logs: cd %s && docker compose logs -f\n' "$INSTALL_DIR"
   printf '  Stop: cd %s && docker compose down\n' "$INSTALL_DIR"
 }

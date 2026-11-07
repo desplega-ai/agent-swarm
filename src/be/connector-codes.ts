@@ -19,6 +19,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { getDbClient } from "./db";
+import { assertMayActOnOperatorGrantedTarget, userHoldsOperatorGrantedRole } from "./rbac-roles";
 import { type IdentityActor, mintToken, recordIdentityEvent } from "./users";
 
 export type ConnectorCodeKind = "connector" | "invite";
@@ -46,12 +47,17 @@ export async function createConnectorCode(
   const ttlMs = opts.ttlMs ?? CONNECTOR_CODE_TTL_MS;
   const code = randomBytes(32).toString("base64url");
   const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
-  await getDbClient().run(
-    `INSERT INTO connector_codes
-       (code_hash, user_id, label, actor_kind, actor_id, created_at, expires_at, kind)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [sha256Hex(code), userId, label, actor.kind, actor.id, now.toISOString(), expiresAt, kind],
-  );
+  // Check and insert under one write lock, so an operator grant cannot land
+  // between them (OperatorGrantedTargetError for another user's auditor).
+  await getDbClient().transaction(async (tx) => {
+    await assertMayActOnOperatorGrantedTarget(actor, userId);
+    await tx.run(
+      `INSERT INTO connector_codes
+         (code_hash, user_id, label, actor_kind, actor_id, created_at, expires_at, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [sha256Hex(code), userId, label, actor.kind, actor.id, now.toISOString(), expiresAt, kind],
+    );
+  });
   return { code, expiresAt };
 }
 
@@ -82,6 +88,15 @@ export async function exchangeConnectorCode(
     );
     if (!row) return null;
     const actor: IdentityActor = { kind: row.actor_kind, id: row.actor_id };
+    // Another user's code must not become a credential for an operator-granted
+    // role the target gained after the code was created. The code is spent.
+    if (
+      actor.kind !== "operator" &&
+      actor.id !== row.user_id &&
+      (await userHoldsOperatorGrantedRole(row.user_id))
+    ) {
+      return null;
+    }
 
     if (kind === "invite") {
       const activated = await tx.run(

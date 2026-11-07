@@ -27,7 +27,8 @@ import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import type { SessionListItem } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
-import { DataGrid, HIDE_WHEN_COMPACT } from "@/components/shared/data-grid";
+import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
+import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
@@ -37,6 +38,7 @@ import { useConfig } from "@/hooks/use-config";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsPhone } from "@/hooks/use-mobile";
 import { useStableHandler } from "@/hooks/use-stable-handler";
+import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import { peerColor } from "@/lib/comb/presence";
 import { chatSourceOf, groupCrumb } from "@/lib/session-groups";
 import { useSessionsFilter } from "@/lib/sessions-show";
@@ -128,6 +130,7 @@ function GroupList({
   const noUnread = view === "later" || view === "done";
 
   const { limit: _sidebarLimit, ...base } = sidebarListParams(view);
+  const keepPrevious = useWithinAllUsersScope(keepPreviousData);
   // The last page stays on screen while the next one loads: no blank grid, no "0 sessions".
   const list = useQuery({
     ...sessionsQueryOptions(me, {
@@ -138,7 +141,8 @@ function GroupList({
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    placeholderData: keepPreviousData,
+    // Never across a scope change: the kept page could hold all-users rows.
+    placeholderData: keepPrevious,
   });
   const total = list.data?.total ?? 0;
   // A kept page past the end of a list that shrank moves back to its last page.
@@ -163,6 +167,7 @@ function GroupList({
     },
   );
 
+  const gridColumns = useDataGridColumns("sessions-group");
   // biome-ignore lint/correctness/useExhaustiveDependencies: nameOf reads `users`, rebuilt each render
   const columns = useMemo(
     // No column sorts: the grid holds one page of 50, and a sort of one page reads like a sort of all.
@@ -313,6 +318,11 @@ function GroupList({
             { value: "needs", label: "Needs you" },
           ]}
         />
+        {phone ? null : (
+          <div className="ml-auto">
+            <DataGridColumnsMenu state={gridColumns} />
+          </div>
+        )}
       </ListFilterBar>
       {phone ? (
         (phoneList?.(rows, { loading: list.isPending, label: title }) ?? null)
@@ -320,6 +330,7 @@ function GroupList({
         <DataGrid
           rowData={rows}
           columnDefs={columns}
+          columns={gridColumns}
           loading={list.isPending}
           emptyMessage={q || filter !== "all" ? "No sessions match." : "No sessions here."}
           pagination={false}

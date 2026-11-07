@@ -86,6 +86,7 @@ const TIMELINE_STATUSES: ReadonlySet<AgentTaskStatus> = new Set<AgentTaskStatus>
   "failed",
   "cancelled",
   "superseded",
+  "skipped",
 ]);
 // Deep end matters: real tasks median ~2min (prod), so the tightest levels
 // resolve sub-minute work — at "30s" the axis splits into 5-second ticks.
@@ -176,6 +177,7 @@ function statusBarClass(status: AgentTaskStatus): string {
     case "offered":
       return "border-status-info bg-status-info/80 text-status-info-foreground";
     case "cancelled":
+    case "skipped":
     case "backlog":
     case "unassigned":
       return "border-status-neutral bg-status-neutral/75 text-status-neutral-foreground";

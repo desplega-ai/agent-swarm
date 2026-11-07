@@ -52,7 +52,6 @@ const UNSUPPORTED_GLOBALS = new Set([
   "performance",
   "queueMicrotask",
   "setImmediate",
-  "structuredClone",
 ]);
 const RESPONSE_BODY_METHODS = new Set(["arrayBuffer", "blob", "formData", "bytes"]);
 const LOCALE_METHODS = new Set(["toLocaleString", "toLocaleDateString", "toLocaleTimeString"]);

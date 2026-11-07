@@ -45,7 +45,10 @@ export const ELEMENT_KEYS = new Set([
   "repeat",
   "watch",
 ]);
-// Components whose `id` claims a `/ui/<id>/...` state slot.
+// Components whose `id` claims a `/ui/<id>/...` state slot. Mirrored by the
+// element assembler (`apps/ui/src/lib/json-render/assemble.ts`), which
+// namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
+// two lists equal.
 const UI_STATE_COMPONENTS = new Set([
   "SearchInput",
   "Select",
@@ -53,7 +56,44 @@ const UI_STATE_COMPONENTS = new Set([
   "Tabs",
   "Chips",
   "Tree",
+  "SchemaForm",
+  "SessionThread",
+  "Table",
 ]);
+
+// A SchemaForm or SessionThread id is spliced into `/ui/<id>/value`, so it must
+// be a plain token.
+const SCHEMA_FORM_ID = /^[A-Za-z0-9_-]+$/;
+const PLAIN_TOKEN_ID_COMPONENTS = new Set(["SchemaForm", "SessionThread"]);
+
+/** Mirrors `APP_SESSION_KEY_PATTERN` (`src/tasks/context-key.ts`). */
+const SESSION_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * `SessionThread.sessionKey` lands in a server-built context key, so a literal
+ * must be a plain token (a binding is checked by the server at send time).
+ * `scope: "shared"` is reserved for a follow-up PR (planned: an
+ * everyone:write `session_shares` row on the root when it is created).
+ */
+function sessionThreadIssues(
+  props: Record<string, unknown>,
+  propsPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  if (typeof props.sessionKey === "string" && !SESSION_KEY.test(props.sessionKey)) {
+    issues.push(
+      issue(
+        `${propsPath}.sessionKey`,
+        "SessionThread sessionKey must match ^[A-Za-z0-9_-]{1,128}$",
+      ),
+    );
+  }
+  if (props.scope === "shared") {
+    issues.push(issue(`${propsPath}.scope`, 'scope "shared" is not supported yet'));
+  }
+  return issues;
+}
+const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
  * Props that hold a plain action chain (an array of `{ action, params }`),
@@ -61,21 +101,24 @@ const UI_STATE_COMPONENTS = new Set([
  * whose items each carry a chain) are listed in `ITEM_ACTION_CHAINS`.
  */
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
-  Table: ["onRowClick"],
+  Table: ["onRowClick", "onRetry"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
   CardGrid: ["onClick"],
+  SchemaForm: ["onChange"],
+  SessionThread: ["onDispatch"],
 };
 
 /**
  * `[arrayProp, chainKey]` pairs: every item of `props[arrayProp]` carries an
  * action chain under `chainKey` (Table `rowActions[].actions`, Table
- * `columns[].onChange`, Drawer footer `actions[].actions`).
+ * `bulkActions[].actions`, Table `columns[].onChange`, Drawer footer `actions[].actions`).
  */
 const ITEM_ACTION_CHAINS: Record<string, readonly (readonly [string, string])[]> = {
   Table: [
     ["rowActions", "actions"],
+    ["bulkActions", "actions"],
     ["columns", "onChange"],
   ],
   Drawer: [["actions", "actions"]],
@@ -103,6 +146,7 @@ const DATA_FIELD_PROPS: Record<string, readonly string[]> = {
   Kanban: ["columnField", "titleField", "idField"],
   Calendar: ["startField", "endField", "titleField", "idField"],
   ContributionGraph: ["dateField", "countField"],
+  Chart: ["x"],
 };
 const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
@@ -699,6 +743,66 @@ function fieldBindingIssue(
   return issue(path, `unknown or hidden column "${columnName}" on model "${modelName}"`);
 }
 
+/** Most fields a Table cell popover lists. */
+const POPOVER_MAX_FIELDS = 12;
+
+/** Props of each component holding items whose `href` (and a column's popover fields) name row fields. */
+const LINK_FIELD_PROPS: Record<string, string> = {
+  Table: "columns",
+  DetailList: "fields",
+  CardGrid: "fields",
+};
+
+/**
+ * `href` on Table columns, DetailList fields and CardGrid fields, and the
+ * `key` / `href` of a Table column's popover fields, name row fields of the
+ * bound query's model. A typo'd name would render a link with no target, so
+ * cross-check them like the other row-field props.
+ */
+function collectLinkFieldIssues(
+  definition: AppDefinition,
+  type: unknown,
+  props: Record<string, unknown>,
+  elementPath: string,
+  issues: AppValidationIssue[],
+): void {
+  const itemsProp = typeof type === "string" ? LINK_FIELD_PROPS[type] : undefined;
+  const items = itemsProp ? props[itemsProp] : undefined;
+  if (!itemsProp || !Array.isArray(items)) return;
+  // The JSON-schema subset this validator evaluates has no `minItems` / `maxItems`.
+  for (const [index, item] of items.entries()) {
+    const fields = isPlainObject(item) && isPlainObject(item.popover) ? item.popover.fields : null;
+    if (Array.isArray(fields) && (fields.length === 0 || fields.length > POPOVER_MAX_FIELDS)) {
+      issues.push(
+        issue(
+          `${elementPath}.props.${itemsProp}.${index}.popover.fields`,
+          `must list 1 to ${POPOVER_MAX_FIELDS} fields`,
+        ),
+      );
+    }
+  }
+  const queryModel = queryModelFromDataBinding(definition, props.data);
+  if (!queryModel) return;
+  const check = (name: unknown, path: string) => {
+    if (typeof name !== "string") return;
+    const found = fieldBindingIssue(queryModel.modelName, queryModel.model, name, path);
+    if (found) issues.push(found);
+  };
+  for (const [index, item] of items.entries()) {
+    if (!isPlainObject(item)) continue;
+    const itemPath = `${elementPath}.props.${itemsProp}.${index}`;
+    check(item.href, `${itemPath}.href`);
+    const popoverFields = isPlainObject(item.popover) ? item.popover.fields : undefined;
+    if (!Array.isArray(popoverFields)) continue;
+    for (const [fieldIndex, field] of popoverFields.entries()) {
+      if (!isPlainObject(field)) continue;
+      const fieldPath = `${itemPath}.popover.fields.${fieldIndex}`;
+      check(field.key, `${fieldPath}.key`);
+      check(field.href, `${fieldPath}.href`);
+    }
+  }
+}
+
 function collectRowFieldIssues(
   value: unknown,
   path: string,
@@ -1254,6 +1358,72 @@ interface ElementTreeValidationTarget {
   elementProps?: Record<string, unknown>;
 }
 
+const CHART_MAX_SERIES = 8;
+
+/** Chart bounds the generic JSON-schema walker does not evaluate (minItems, pattern, minimum). */
+function chartPropIssues(
+  props: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const propsPath = `${elementPath}.props`;
+  if (Array.isArray(props.series)) {
+    if (props.series.length === 0 || props.series.length > CHART_MAX_SERIES) {
+      issues.push(issue(`${propsPath}.series`, `must list 1-${CHART_MAX_SERIES} series`));
+    }
+    const seen = new Set<string>();
+    for (const [index, entry] of props.series.entries()) {
+      if (!isPlainObject(entry) || typeof entry.key !== "string") continue;
+      if (seen.has(entry.key)) {
+        issues.push(issue(`${propsPath}.series.${index}.key`, `duplicate series "${entry.key}"`));
+      }
+      seen.add(entry.key);
+    }
+  }
+  if (typeof props.currency === "string" && !/^[A-Z]{3}$/.test(props.currency)) {
+    issues.push(issue(`${propsPath}.currency`, "must be an ISO 4217 code like USD"));
+  }
+  if (
+    typeof props.height === "number" &&
+    (!Number.isInteger(props.height) || props.height < 120 || props.height > 640)
+  ) {
+    issues.push(issue(`${propsPath}.height`, "must be an integer from 120 to 640"));
+  }
+  return issues;
+}
+
+/**
+ * Sidebar-layout page metadata: `icon` from the catalog icon set, and
+ * `headerActions` / `nav` only where the sidebar layout renders them.
+ */
+export function shellDefinitionIssues(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const iconNames = catalog.components.Icon?.props.properties?.name?.enum ?? [];
+  const sidebar = definition.layout === "sidebar";
+  for (const [pageName, page] of Object.entries(definition.pages)) {
+    const pagePath = appendPath("pages", pageName);
+    if (page.icon !== undefined && !iconNames.includes(page.icon)) {
+      issues.push(issue(appendPath(pagePath, "icon"), `unknown icon "${page.icon}"`));
+    }
+    if (!sidebar) {
+      for (const key of ["headerActions", "nav"] as const) {
+        if (page[key] !== undefined) {
+          issues.push(
+            issue(
+              appendPath(pagePath, key),
+              'only rendered with layout: "sidebar"; set it or drop this',
+            ),
+          );
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 export function validatePage(
   definition: AppDefinition,
   catalog: AppCatalog,
@@ -1351,6 +1521,23 @@ export function validatePage(
       }
       if (
         typeof type === "string" &&
+        PLAIN_TOKEN_ID_COMPONENTS.has(type) &&
+        isPlainObject(rawElement.props) &&
+        typeof rawElement.props.id === "string" &&
+        (!SCHEMA_FORM_ID.test(rawElement.props.id) || RESERVED_UI_IDS.has(rawElement.props.id))
+      ) {
+        issues.push(
+          issue(
+            `${propsPath}.id`,
+            `${type} id must match ^[A-Za-z0-9_-]+$ and not be __proto__, constructor, or prototype`,
+          ),
+        );
+      }
+      if (type === "SessionThread" && isPlainObject(rawElement.props)) {
+        issues.push(...sessionThreadIssues(rawElement.props, propsPath));
+      }
+      if (
+        typeof type === "string" &&
         UI_STATE_COMPONENTS.has(type) &&
         isPlainObject(rawElement.props) &&
         typeof rawElement.props.id === "string"
@@ -1377,7 +1564,59 @@ export function validatePage(
           ),
         );
       }
+      collectLinkFieldIssues(definition, type, rawElement.props, elementPath, issues);
+      if (type === "Chart") issues.push(...chartPropIssues(rawElement.props, elementPath));
       if (type === "Table") {
+        // Row selection lives at `/ui/<id>/selected`, so it needs an id to root it.
+        const tableProps = rawElement.props;
+        const selectionProps = ["selectable", "bulkActions"].filter((prop) => {
+          const value = tableProps[prop];
+          return value === true || (Array.isArray(value) && value.length > 0);
+        });
+        if (
+          selectionProps.length > 0 &&
+          (typeof tableProps.id !== "string" || tableProps.id === "")
+        ) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${selectionProps.join(" / ")}: the selection is stored at /ui/<id>/selected`,
+            ),
+          );
+        }
+        // Column filters live at `/ui/<id>/filters`: same id requirement.
+        const filterProps: string[] = [];
+        if (tableProps.filterable === true) filterProps.push("filterable");
+        if (
+          Array.isArray(tableProps.columns) &&
+          tableProps.columns.some(
+            (column) =>
+              isPlainObject(column) && (column.filter === "values" || column.filter === "text"),
+          )
+        ) {
+          filterProps.push("columns[].filter");
+        }
+        if (filterProps.length > 0 && (typeof tableProps.id !== "string" || tableProps.id === "")) {
+          issues.push(
+            issue(
+              `${elementPath}.props.id`,
+              `is required with ${filterProps.join(" / ")}: the filters are stored at /ui/<id>/filters`,
+            ),
+          );
+        }
+        // `clearState` entries are state paths "Clear filters" resets: only UI
+        // control slots, and the control must exist on the page.
+        if (Array.isArray(tableProps.clearState)) {
+          for (const [index, entry] of tableProps.clearState.entries()) {
+            if (typeof entry !== "string") continue;
+            const entryPath = `${elementPath}.props.clearState.${index}`;
+            if (!/^\/ui\/[^/]+\/.+/.test(entry)) {
+              issues.push(issue(entryPath, `must be a /ui/<id>/... state path (got "${entry}")`));
+            } else {
+              stateRefs.push({ path: entryPath, value: entry });
+            }
+          }
+        }
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {
           if (Array.isArray(rawElement.props.columns)) {
@@ -1452,6 +1691,13 @@ export function validatePage(
             for (const [index, field] of props.cardFields.entries()) {
               if (isPlainObject(field)) {
                 fieldNames.push([`${elementPath}.props.cardFields.${index}.key`, field.key]);
+              }
+            }
+          }
+          if (type === "Chart" && Array.isArray(props.series)) {
+            for (const [index, entry] of props.series.entries()) {
+              if (isPlainObject(entry)) {
+                fieldNames.push([`${elementPath}.props.series.${index}.key`, entry.key]);
               }
             }
           }
@@ -1678,6 +1924,19 @@ export function validatePage(
     }
   };
   if (typeof root === "string") markReachable(root);
+  // The sidebar layout renders `headerActions` as a second root in the sticky
+  // page header, so its subtree is reachable too, but never also from `root`.
+  const headerActions = pageName ? definition.pages[pageName]?.headerActions : undefined;
+  if (headerActions !== undefined) {
+    const headerPath = appendPath(pagePath, "headerActions");
+    if (!Object.hasOwn(elements, headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" not found`));
+    } else if (reachable.has(headerActions)) {
+      issues.push(issue(headerPath, `element "${headerActions}" is already rendered from root`));
+    } else {
+      markReachable(headerActions);
+    }
+  }
   for (const elementId of Object.keys(elements)) {
     if (!reachable.has(elementId)) {
       issues.push(issue(`${elementsPath}.${elementId}`, "element is not reachable from root"));

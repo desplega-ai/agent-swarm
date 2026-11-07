@@ -368,7 +368,7 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
 
     // A re-login returns an auth-benched slot to the pool right away.
     // Non-fatal: the credentials are stored; a later re-login also lifts it.
-    const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId);
+    const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId, slot);
     try {
       if (typeof authFence !== "number") throw authFence;
       if (await clearAuthBench(apiUrl, apiKey, keySuffix, slot, authFence)) {

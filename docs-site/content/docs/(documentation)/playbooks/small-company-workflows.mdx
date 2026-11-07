@@ -1,0 +1,128 @@
+---
+title: Small-Company Workflows
+description: Agent Swarm can coordinate recurring cross-team work at companies up to 100 (tech teams up to 20) in designs on documented playbooks, with a person's approval.
+agent:
+  when: "Someone at a small company asks which recurring cross-team workflows they could run with agents, with people approving the decisions"
+  notWhen: "Someone wants a documented production playbook for one job, which is the linked playbook itself"
+---
+
+Agent Swarm can coordinate recurring cross-team work at a company of up to 100 people with a technology team of up to 20. At that size most recurring work crosses a team boundary: the request arrives in one team, the context lives in another, the decision belongs to a third person. The six designs below take one boundary each and give it a shape you can copy, with a person approving anything that leaves the company or changes a system.
+
+Each design builds on a playbook that documents the mechanics. The pattern here supplies the cross-team shape.
+
+<Callout type="warn">
+**These patterns are illustrative.** They are designs. They are not customer stories or measured results, and no deployment is described. The companies are invented and no customer is named. Each pattern adapts a documented playbook to a cross-team process, and none of it runs until your team configures the integrations and permissions, plus approval steps.
+</Callout>
+
+## Start with a handoff
+
+The unit to automate is a handoff: work that regularly crosses a team boundary, where someone gathers context, someone else decides, and a named owner records the outcome.
+
+Pick one such handoff and write down five things first: the trigger, the single source of truth the work is checked against, the person accountable for the decision, the actions that never happen without that person's approval, and the path taken when information is missing or two records disagree.
+
+The split of labour is the same throughout. Deterministic checks handle facts: totals, required fields, duplicate records, status, dates. Agents gather context and draft the work a person reviews. A draft is reviewed before anything is sent or applied.
+
+## Illustrative pattern 1: support inquiry to approved reply
+
+- **Builds on**: [Proactive Customer Support](/docs/playbooks/proactive-customer-support) and [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories).
+- **Teams involved**: support, engineering for the technical answer, the account owner for anything commercially sensitive.
+- **Trigger**: a request lands in the queue, or a teammate escalates a thread they cannot answer.
+- **Source of truth**: the ticket, the approved documentation, and the account's directory. Where the ticket is silent, the answer waits.
+- **Flow**: an agent opens the customer's directory, pulls the account history, searches current documentation, and drafts a reply with its sources linked.
+- **Human decision**: the support owner checks the facts, tone and recipient, then approves or rewrites. Sending is a separate step with its own approval.
+- **Exception path**: missing account context, conflicting records, a security question, or a product gap with no documented answer goes to a named owner with the draft attached and nothing sent.
+- **What to measure**: first answers accepted without a factual correction, reopened tickets, requests routed to the wrong team, escalations with no answer.
+
+The linked playbook documents per-customer directories in agent-fs, and drafted reports and human review before an AgentMail send; pointing that machinery at support replies is the illustrative step.
+
+## Illustrative pattern 2: sales prospecting to approved outreach
+
+- **Builds on**: [Lead Prospecting](/docs/playbooks/lead-prospecting).
+- **Teams involved**: growth or sales, marketing for positioning, the founder or lead who owns the message.
+- **Trigger**: the daily scheduled run, or a person asking for outreach on one segment.
+- **Source of truth**: the CRM record, the contacts already approached, and the approved positioning the message agrees with.
+- **Flow**: an agent finds companies showing a defined buying signal, resolves a contact, checks the already-contacted record so a re-run does not repeat a person, and drafts a message per prospect.
+- **Human decision**: the person who owns the message approves, edits or discards each draft. Nothing sends without approval, per message rather than per campaign.
+- **Exception path**: an unverified contact, a company already in the pipeline, or a draft with no approved claim behind it is dropped from the digest and flagged.
+- **What to measure**: drafts that survive review unedited, prospects approached twice, approved messages that bounce or get reported, replies a person has to correct.
+
+The linked playbook documents daily discovery and drafting, approval in Slack before anything sends, and already-contacted tracking so re-runs do not double-touch; applying it to one segment is the adaptation.
+
+## Illustrative pattern 3: product or internal request to reviewed change
+
+- **Builds on**: [Feature Development](/docs/playbooks/feature-development) and the [Linear Delivery Loop](/docs/playbooks/linear-delivery-loop).
+- **Teams involved**: the requesting team, product for priority, engineering for the change, a reviewer for the result.
+- **Trigger**: a request arrives in Slack or as a tracker issue, from a customer-facing team or from inside the company.
+- **Source of truth**: the request record, the acceptance criteria agreed with the requester, the repository the change lands in.
+- **Flow**: intake creates a task, a lead agent triages it, research and planning produce a plan, implementation produces a pull request, and a reviewer agent reads the change against its claims. The Linear loop takes one action per issue per tick until the work is reviewable.
+- **Human decision**: the requester's owner confirms the acceptance criteria are met. The human owner approves any change to production, access or policy, and in the Linear loop a person approves before GitHub merges.
+- **Exception path**: requests with no owner or no acceptance criteria go back for clarification. A pull request whose review cannot be resolved stops and names the reviewer needed.
+- **What to measure**: requests reaching an owner without a second exchange, work reopened after merge, review rounds per change, pull requests abandoned.
+
+The linked playbooks document intake from Slack or Linear and Lead triage, then research, a plan, a pull request and a reviewer agent, with a person approving before merge; applying that shape to internal requests is the adaptation.
+
+## Illustrative pattern 4: incident alert to approved fix
+
+- **Builds on**: [Open Oncall](/docs/playbooks/open-oncall).
+- **Teams involved**: the team on call, platform or infrastructure for anything below the application, support for what customers are told.
+- **Trigger**: a monitoring alert, a provider webhook, or a person declaring an incident.
+- **Source of truth**: the alert payload, the deployed revision, the repository history, and the telemetry around the failure window.
+- **Flow**: the alert opens a thread, an agent investigates the code, history and telemetry, and posts its root cause reading with a one-click approval link for the fix. If the provider behind a step fails, the step runs on the next provider.
+- **Human decision**: the on-call engineer approves, rejects or rewrites the proposed fix before a pull request exists.
+- **Exception path**: an unclear root cause, an alert with no matching telemetry, or a fix touching an unowned system escalates as an open question, and the thread stays open rather than closing on a guess.
+- **What to measure**: root causes surviving the engineer's check, fixes approved as proposed, incidents needing a second investigation, threads open after mitigation.
+
+The linked playbook documents alert to Slack thread, root cause, one-click approval before the fix pull request, and provider failover; the same chain on a small rotation is the adaptation.
+
+## Illustrative pattern 5: recurring business report to decision brief for leadership
+
+- **Builds on**: [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources) and [No-op When Nothing Changed](/docs/playbooks/patterns/no-op-workflows).
+- **Teams involved**: finance or revenue operations, data engineering for the sources, leadership for the decision.
+- **Trigger**: the schedule, or a decision owner asking a question before a meeting.
+- **Source of truth**: a dated list of approved sources, the question being answered, a fixed reporting window.
+- **Flow**: a deterministic script collects each source into one payload, keeping the model out of the arithmetic. An agent writes the brief: what moved, what the evidence supports, the options and their open questions. When nothing changed, the run exits quietly instead of posting an empty digest.
+- **Human decision**: the brief informs, a person decides. The owner checks the evidence, picks an option, and records the decision where the team finds it.
+- **Exception path**: an unavailable source, windows that do not align, or a figure failing a consistency check produces a stated gap rather than an estimate.
+- **What to measure**: numbers corrected during review, briefs answering their template completely, sources missing from a window, decisions citing the brief later.
+
+The linked playbooks document deterministic swarm-script collection, synthesis into a Slack thread or a Page, and a no-op when nothing changed; framing that as a leadership decision brief is the illustrative part.
+
+## Illustrative pattern 6: release to docs update and approved customer note
+
+- **Builds on**: [Self-Documenting & Release Reports](/docs/playbooks/self-documenting-release-reports) and [HITL Gates](/docs/playbooks/patterns/hitl-gates).
+- **Teams involved**: engineering for the release, docs or product marketing for the explanation, support for who needs to hear it.
+- **Trigger**: a release or deployment that changes behaviour someone outside the team relies on.
+- **Source of truth**: the merged changes, the deployment status, the current documentation, and a verified list of affected recipients.
+- **Flow**: an agent reads the real changes rather than a summary, drafts the documentation update and the release note, and prepares a narrow customer note covering only verified behaviour and any action required.
+- **Human decision**: the docs owner approves the documentation change, and the support or product owner confirms the audience and approves the customer note. The gate pauses until a person approves in Slack, and the note never sends on its own.
+- **Exception path**: a change that is not deployed, an unclear impact, or an unverified recipient list holds the draft for clarification. A rejected note archives the draft and stops the workflow.
+- **What to measure**: factual corrections a doc update needs, audience lists corrected, approved notes needing a follow-up fix.
+
+The linked playbooks document release notes and doc updates from real changes, and a gate that pauses until a person approves in Slack; routing that to a named customer group is the adaptation.
+
+## Rollout checklist
+
+1. Write down the trigger, the source of truth, the accountable owner and the outcome you accept. If you cannot name the owner, the process is not ready.
+2. List the actions that wait for a person every time: sending outside the company, moving money, changing records or production, deleting data.
+3. Define the stop-and-escalate path for missing, conflicting or unverifiable information, and who gets the open question.
+4. Record a baseline for your measure before the first run, so a later change reads against something.
+5. Review real runs with the process owner, especially their corrections, and change the workflow from what those show.
+
+Integrations and permissions depend on your deployment, as do the approval steps. Nothing here is safe to run without your own configuration and testing, and no pattern is evidence of a result anywhere.
+
+## Related
+
+- [Playbooks](/docs/playbooks)
+- [Workflows](/docs/concepts/workflows)
+- [Scheduled Tasks](/docs/concepts/scheduling)
+- [Slack integration](/docs/integrations/slack)
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates)
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support)
+- [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)
+- [Lead Prospecting](/docs/playbooks/lead-prospecting)
+- [Feature Development](/docs/playbooks/feature-development)
+- [Linear Delivery Loop](/docs/playbooks/linear-delivery-loop)
+- [Open Oncall](/docs/playbooks/open-oncall)
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)
+- [No-op When Nothing Changed](/docs/playbooks/patterns/no-op-workflows)
+- [Self-Documenting & Release Reports](/docs/playbooks/self-documenting-release-reports)

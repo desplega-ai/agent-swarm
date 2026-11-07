@@ -1,4 +1,4 @@
-import type { AgentTask, ModelSource } from "@/api/types";
+import { type AgentTask, type ModelProfile, type ModelSource, PROVIDER_NAMES } from "../api/types";
 import { modelTierLabel } from "./model-tiers";
 
 /** Labels for `agent_tasks.modelSource`, the layer that chose the model the task ran on. */
@@ -9,6 +9,9 @@ export const MODEL_SOURCE_LABELS: Record<ModelSource, string> = {
   "tier-default": "Tier default",
   "fallback:cli-unsupported": "Fallback (CLI rejected the requested model)",
   "fallback:cli-unsupported:model": "Fallback (CLI rejected the task's own model)",
+  "profile:task": "Task profile",
+  "profile:agent-default": "Agent default profile",
+  "profile:tier-alias": "Tier (via profile)",
 };
 
 export function modelSourceLabel(source: string): string {
@@ -17,7 +20,13 @@ export function modelSourceLabel(source: string): string {
 
 type TaskModelFields = Pick<
   AgentTask,
-  "model" | "modelTier" | "resolvedModel" | "modelSource" | "modelAlias"
+  | "model"
+  | "modelTier"
+  | "resolvedModel"
+  | "modelSource"
+  | "modelAlias"
+  | "profile"
+  | "resolvedProfile"
 >;
 
 /**
@@ -40,6 +49,16 @@ export function taskDisplayModel(task: TaskModelFields): string | undefined {
 }
 
 /**
+ * The model profile a task ran (or will run) with: the one claim applied, else
+ * the one it asked for.
+ */
+export function taskDisplayProfile(
+  task: Pick<AgentTask, "profile" | "resolvedProfile">,
+): string | undefined {
+  return task.resolvedProfile ?? task.profile ?? undefined;
+}
+
+/**
  * Tooltip lines explaining how the server picked the model, or [] when the
  * task has no claim-time resolution (unclaimed, or an older API).
  */
@@ -52,7 +71,32 @@ export function describeModelResolution(task: TaskModelFields): string[] {
       ? `tier ${modelTierLabel(task.modelTier)}`
       : null;
   if (requested && requested !== task.resolvedModel) lines.push(`Requested: ${requested}`);
+  const profile = taskDisplayProfile(task);
+  if (profile) lines.push(`Profile: ${profile}`);
   if (task.modelSource) lines.push(`Chosen by: ${modelSourceLabel(task.modelSource)}`);
   if (task.modelAlias) lines.push(`Alias: ${task.modelAlias}`);
   return lines;
+}
+
+/** Catalog metadata wins; older/loading catalogs fall back to the seed naming rules. */
+export function isSeededTaskProfile(
+  task: TaskModelFields & Pick<AgentTask, "effort" | "resolvedEffort">,
+  profile?: Pick<ModelProfile, "seededFrom">,
+): boolean {
+  if (profile) return profile.seededFrom !== null;
+  const name = taskDisplayProfile(task);
+  if (!name) return false;
+  const model = taskDisplayModel(task)?.toLowerCase();
+  const effort = taskDisplayEffort(task);
+  return PROVIDER_NAMES.some((harness) => {
+    if (["smol", "regular", "smart", "ultra"].some((tier) => name === `${harness}-${tier}`)) {
+      return true;
+    }
+    if (!model) return false;
+    const stem = (model.startsWith(`${harness}-`) ? model : `${harness}-${model}`).replace(
+      /[/:]/g,
+      "-",
+    );
+    return name === `${stem}${effort ? `-${effort}` : ""}`;
+  });
 }

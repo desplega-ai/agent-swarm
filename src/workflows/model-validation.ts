@@ -5,6 +5,7 @@
  * from the create/update/patch handlers. The agent-task executor keeps its own
  * check as the run-time guard (it also covers pool nodes and interpolated values).
  */
+import { taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { splitLegacyModelAlias, type WorkflowDefinition } from "../types";
 
@@ -20,8 +21,21 @@ function isStatic(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && !value.includes("{{");
 }
 
-/** Errors for agent-task nodes (and foreach bodies) that pin a model their `agentId` cannot run. */
-export async function workflowModelErrors(def: WorkflowDefinition): Promise<string[]> {
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Errors for agent-task nodes (and foreach bodies) that pin a model or a
+ * profile their `agentId` cannot run. A static `profile` must exist, must not
+ * sit beside `model`/`modelTier`, and must pass the profile check when
+ * `agentId` is static too.
+ */
+export async function workflowModelErrors(
+  def: WorkflowDefinition,
+  /** The workflow-level `vcsRepo` a node without its own inherits. */
+  { vcsRepo }: { vcsRepo?: string | null } = {},
+): Promise<string[]> {
   const errors: string[] = [];
   for (const node of def.nodes) {
     const targets: Array<{ config: NodeConfig; path: string }> = [];
@@ -31,6 +45,17 @@ export async function workflowModelErrors(def: WorkflowDefinition): Promise<stri
       if (body) targets.push({ config: body, path: "config.body.config" });
     }
     for (const { config, path } of targets) {
+      if (isStatic(config.profile)) {
+        const error = await taskProfileError({
+          profile: config.profile,
+          model: asString(config.model),
+          modelTier: asString(config.modelTier),
+          agentId: isStatic(config.agentId) ? config.agentId : undefined,
+          // A node's own repo wins over the workflow's, as in the executor.
+          vcsRepo: config.vcsRepo === undefined ? vcsRepo : asString(config.vcsRepo),
+        });
+        if (error) errors.push(`Node "${node.id}" ${path}.profile: ${error}`);
+      }
       if (!isStatic(config.model) || !isStatic(config.agentId)) continue;
       const modelTier = typeof config.modelTier === "string" ? config.modelTier : undefined;
       const error = await explicitModelErrorForAgent({
