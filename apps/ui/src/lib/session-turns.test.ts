@@ -8,6 +8,7 @@ import {
   foldWaits,
   hasHandoffs,
   isDeferral,
+  keepSeenApprovals,
   onlyWaits,
   partSteps,
   type SessionTurns,
@@ -799,6 +800,16 @@ describe("approvalsByPart", () => {
     expect(placed.get(turns[1].parts[1].id)?.map((a) => a.id)).toEqual(["a2"]);
     expect(placed.get(null)?.map((a) => a.id)).toEqual(["a3"]);
   });
+});
+
+test("keepSeenApprovals keeps an approval that left the pending list", () => {
+  const a1 = { id: "a1", status: "pending" as const, sourceTaskId: "t1", title: "Ship it?" };
+  const a2 = { id: "a2", status: "pending" as const, sourceTaskId: "t2", title: "Publish?" };
+  const seen = keepSeenApprovals([], [a1, a2]);
+  const a3 = { ...a1, id: "a3", title: "Rotate?" };
+  expect(keepSeenApprovals(seen, [a2]).map((a) => a.id)).toEqual(["a1", "a2"]);
+  expect(keepSeenApprovals(seen, [a2, a3]).map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
+  expect(keepSeenApprovals(seen, [a1, a2])).toEqual([a1, a2]);
 });
 
 test("formatSpan rounds to whole minutes like the mockup", () => {
