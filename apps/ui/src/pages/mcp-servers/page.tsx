@@ -7,6 +7,9 @@ import { toast } from "sonner";
 import { useCreateMcpServer, useMcpServers } from "@/api/hooks";
 import type { McpServer } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { SearchBox } from "@/components/shared/search-box";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { formatRelativeTime } from "@/lib/utils";
 
 const TRANSPORT_VALUES = ["stdio", "http", "sse"] as const;
@@ -222,6 +227,7 @@ function ScopeBadge({ scope }: { scope: string }) {
 
 export default function McpServersPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
   const scopeFilter = readStringParam(searchParams, "scope", "all");
@@ -249,6 +255,17 @@ export default function McpServersPage() {
 
   const { data, isLoading } = useMcpServers(filters);
   const servers = data?.servers ?? [];
+  const searchedServers = useMemo(
+    () =>
+      servers.filter((server) =>
+        matchesSearchTerms(
+          searchText([server.name, server.description, server.url, server.command]),
+          search,
+        ),
+      ),
+    [servers, search],
+  );
+  const activeFilterCount = (scopeFilter !== "all" ? 1 : 0) + (transportFilter !== "all" ? 1 : 0);
 
   const columnDefs = useMemo<ColDef<McpServer>[]>(
     () => [
@@ -327,67 +344,157 @@ export default function McpServersPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="MCP Servers" className="shrink-0" />
 
-      <div className="flex items-center gap-3 shrink-0">
-        <Input
-          placeholder="Search servers..."
-          value={search}
-          onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
-          className="max-w-xs"
-        />
-        <Select
-          value={transportFilter}
-          onValueChange={(value) =>
-            setParam("transport", value, {
-              defaultValue: "all",
-              reset: ["mcpServersPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Transport" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Transports</SelectItem>
-            <SelectItem value="stdio">stdio</SelectItem>
-            <SelectItem value="http">http</SelectItem>
-            <SelectItem value="sse">sse</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={scopeFilter}
-          onValueChange={(value) =>
-            setParam("scope", value, {
-              defaultValue: "all",
-              reset: ["mcpServersPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Scope" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Scopes</SelectItem>
-            <SelectItem value="global">Global</SelectItem>
-            <SelectItem value="swarm">Swarm</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-          </SelectContent>
-        </Select>
-        {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
-        <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add server
-        </Button>
-      </div>
+      {isMobile ? (
+        // One row on a phone: search, then the facets behind Filters (n).
+        <div className="flex shrink-0 items-center gap-2">
+          <SearchBox
+            value={search}
+            onChange={(value) => setParam("search", value, { reset: ["mcpServersPage"] })}
+            placeholder="Search servers…"
+            ariaLabel="Search servers"
+            className="flex-1"
+          />
+          <FiltersPopover activeCount={activeFilterCount}>
+            <FilterField label="Transport">
+              <Select
+                value={transportFilter}
+                onValueChange={(value) =>
+                  setParam("transport", value, { defaultValue: "all", reset: ["mcpServersPage"] })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Transport" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Transports</SelectItem>
+                  <SelectItem value="stdio">stdio</SelectItem>
+                  <SelectItem value="http">http</SelectItem>
+                  <SelectItem value="sse">sse</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Scope">
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, { defaultValue: "all", reset: ["mcpServersPage"] })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Scopes</SelectItem>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="swarm">Swarm</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+          </FiltersPopover>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 shrink-0">
+          <Input
+            placeholder="Search servers..."
+            value={search}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["mcpServersPage"] })}
+            className="max-w-xs"
+          />
+          <Select
+            value={transportFilter}
+            onValueChange={(value) =>
+              setParam("transport", value, {
+                defaultValue: "all",
+                reset: ["mcpServersPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[130px]">
+              <SelectValue placeholder="Transport" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Transports</SelectItem>
+              <SelectItem value="stdio">stdio</SelectItem>
+              <SelectItem value="http">http</SelectItem>
+              <SelectItem value="sse">sse</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={scopeFilter}
+            onValueChange={(value) =>
+              setParam("scope", value, {
+                defaultValue: "all",
+                reset: ["mcpServersPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[130px]">
+              <SelectValue placeholder="Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Scopes</SelectItem>
+              <SelectItem value="global">Global</SelectItem>
+              <SelectItem value="swarm">Swarm</SelectItem>
+              <SelectItem value="agent">Agent</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+          <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add server
+          </Button>
+        </div>
+      )}
 
-      <DataGrid
-        rowData={servers}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No MCP servers found"
-        paginationQueryKey="mcpServers"
-      />
+      {isMobile ? (
+        <MobileList label="MCP servers" emptyMessage="No MCP servers found">
+          {searchedServers.map((server) => (
+            <MobileListRow
+              key={server.id}
+              to={`/mcp-servers/${server.id}`}
+              title={server.name}
+              titleLines={1}
+              status={
+                server.isEnabled ? null : (
+                  <Badge
+                    variant="outline"
+                    size="tag"
+                    className="border-status-error/30 text-status-error-strong"
+                  >
+                    Disabled
+                  </Badge>
+                )
+              }
+              meta={[
+                server.transport,
+                server.scope,
+                `auth: ${server.authMethod}`,
+                server.createdAt ? formatRelativeTime(server.createdAt) : null,
+              ]}
+              extras={
+                server.description ? (
+                  <p className="line-clamp-1 text-xs text-muted-foreground">{server.description}</p>
+                ) : undefined
+              }
+            />
+          ))}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={servers}
+          columnDefs={columnDefs}
+          quickFilterText={search}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage="No MCP servers found"
+          paginationQueryKey="mcpServers"
+        />
+      )}
 
       <AddMcpServerDialog
         open={Boolean(newParam)}

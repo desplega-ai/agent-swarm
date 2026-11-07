@@ -1,4 +1,3 @@
-import Editor from "@monaco-editor/react";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -10,14 +9,16 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useTheme } from "@/hooks/use-theme";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
+import { PhoneDetailHeader } from "../../../components/phone-detail-header";
+import { TemplateCode } from "../../../components/template-code";
 
 export default function TemplateVersionDetailPage() {
   const { id, version: versionParam } = useParams<{ id: string; version: string }>();
   const navigate = useNavigate();
-  const { theme } = useTheme();
+  const isMobile = useIsMobile();
   const { searchParams, setParam } = useUrlSearchState();
   const activeTab = readStringParam(searchParams, "tab") === "rendered" ? "rendered" : "raw";
   const versionNum = Number(versionParam);
@@ -88,38 +89,83 @@ export default function TemplateVersionDetailPage() {
     );
   }
 
+  const stateBadge = (
+    <Badge variant="outline" size="tag">
+      {versionEntry.state?.replace(/_/g, " ") ?? "—"}
+    </Badge>
+  );
+
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-3 md:gap-4">
       {/* Header */}
-      <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(`/templates/${id}`)}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to{" "}
-          <Link to={`/templates/${id}`} className="hover:underline">
-            {template.eventType}
-          </Link>
-        </button>
-
-        <PageHeader
-          title={
-            <div className="flex items-center gap-3 flex-wrap min-w-0">
-              <h1 className="text-xl font-semibold">Version {versionEntry.version}</h1>
-              <Badge variant="outline" size="tag">
-                {versionEntry.state?.replace(/_/g, " ") ?? "—"}
-              </Badge>
-            </div>
-          }
-        />
-
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          {versionEntry.changedBy && <span>Changed by: {versionEntry.changedBy}</span>}
-          <span>Changed at: {formatSmartTime(versionEntry.changedAt)}</span>
-          {versionEntry.changeReason && <span>Reason: {versionEntry.changeReason}</span>}
+      {isMobile ? (
+        <div className="flex flex-col gap-2">
+          <PhoneDetailHeader
+            backTo={`/templates/${id}`}
+            backLabel={`Back to ${template.eventType}`}
+            title={
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                Version {versionEntry.version}
+                {stateBadge}
+              </span>
+            }
+            actions={
+              <Link
+                to={`/templates/${id}`}
+                title={template.eventType}
+                className="max-w-[48%] self-center truncate font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                {template.eventType}
+              </Link>
+            }
+          />
+          {/* Two rows, label left: who and when, then why. */}
+          <dl className="grid grid-cols-[4rem_1fr] gap-x-2 gap-y-1 pl-8 text-xs">
+            <dt className="text-muted-foreground">Changed</dt>
+            <dd className="min-w-0 truncate">
+              {[versionEntry.changedBy, formatSmartTime(versionEntry.changedAt)]
+                .filter(Boolean)
+                .join(" · ")}
+            </dd>
+            {versionEntry.changeReason ? (
+              <>
+                <dt className="text-muted-foreground">Reason</dt>
+                <dd className="line-clamp-2 min-w-0 [overflow-wrap:anywhere]">
+                  {versionEntry.changeReason}
+                </dd>
+              </>
+            ) : null}
+          </dl>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => navigate(`/templates/${id}`)}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to{" "}
+            <Link to={`/templates/${id}`} className="hover:underline">
+              {template.eventType}
+            </Link>
+          </button>
+
+          <PageHeader
+            title={
+              <div className="flex items-center gap-3 flex-wrap min-w-0">
+                <h1 className="text-xl font-semibold">Version {versionEntry.version}</h1>
+                {stateBadge}
+              </div>
+            }
+          />
+
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            {versionEntry.changedBy && <span>Changed by: {versionEntry.changedBy}</span>}
+            <span>Changed at: {formatSmartTime(versionEntry.changedAt)}</span>
+            {versionEntry.changeReason && <span>Reason: {versionEntry.changeReason}</span>}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs
@@ -133,25 +179,12 @@ export default function TemplateVersionDetailPage() {
         </TabsList>
 
         {/* Raw Tab — read only */}
-        <TabsContent value="raw" className="flex-1 min-h-0">
-          <div className="flex-1 min-h-0 h-full border border-border rounded-md overflow-hidden">
-            <Editor
-              language="markdown"
-              theme={theme === "dark" ? "vs-dark" : "vs"}
-              value={versionEntry.body}
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fontSize: 13,
-                lineNumbers: "on",
-                wordWrap: "on",
-                automaticLayout: true,
-                padding: { top: 8 },
-              }}
-              height="100%"
-            />
-          </div>
+        <TabsContent value="raw" className="flex flex-col flex-1 min-h-0">
+          <TemplateCode
+            editorKey={`version-${id}-${versionEntry.version}-${isMobile}`}
+            value={versionEntry.body}
+            phone={isMobile}
+          />
         </TabsContent>
 
         {/* Rendered Tab */}
@@ -173,7 +206,7 @@ export default function TemplateVersionDetailPage() {
               </div>
             )}
 
-            <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
+            <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-3 md:p-4 overflow-auto">
               <Streamdown>{rendered || versionEntry.body}</Streamdown>
             </div>
           </div>
