@@ -1,39 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 /**
- * Regression tests for the provider-binary reachability check in
- * docker-entrypoint.sh, focused on the `acp` harness provider.
- *
- * The chain is extracted verbatim from docker-entrypoint.sh between its
- * `# BEGIN verify_provider_binary` / `# END verify_provider_binary` markers and
- * run in a real bash subprocess, so these tests track the deployed boot script
- * instead of a hand-written mirror that could silently drift.
- *
- * Regression: every branch before the `!= "pi"` catch-all excluded exactly one
- * provider (codex, claude-managed, devin, opencode, dsh) but none excluded
- * `acp`, so an `acp` worker fell through to the catch-all and had its `claude`
- * binary checked instead of its ACP target. `claude` is installed
- * unconditionally in the worker image, so the check always passed and a worker
- * with a wrong ACP_TARGET_COMMAND booted clean, then failed at `Bun.spawn`
- * inside ACPAdapter.createSession on the first claimed task.
- *
- * The check has to agree with resolveAcpTarget / customTargetProfile.command
- * in src/providers/acp-targets.ts, so these tests pin the two rules that are
- * easy to get subtly wrong:
- *   - every fallback is unset-only, because the resolver uses `??`. A
- *     set-but-empty ACP_TARGET or ACP_TARGET_COMMAND must fail at boot, not
- *     quietly fall through to a different target.
- *   - the whitespace split that isolates the executable happens only when
- *     ACP_TARGET_ARGS is absent or blank, because parseCommand keeps the whole
- *     trimmed command as argv[0] whenever those args are set.
- *
- * The stub directory is first on PATH and includes an executable `claude` on
- * purpose: it reproduces the original false pass, so the pre-fix chain really
- * does exit 0 for a missing ACP target and these tests fail without the fix.
+ * Exercise the deployed Bash shim with an isolated copy of the Bun helper.
+ * Reachable Claude stubs must never hide a missing ACP target. Unset-only
+ * fallbacks and command splitting must match the runtime adapter.
  */
 
 const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
@@ -54,6 +29,19 @@ const STUB_BINARIES = [
 ] as const;
 
 let stubDir: string | undefined;
+let helperPath: string;
+
+beforeAll(async () => {
+  helperPath = join(getStubDir(), "entrypoint-provider-binary.ts");
+  await Bun.write(
+    helperPath,
+    Bun.file(`${import.meta.dir}/../commands/entrypoint-provider-binary.ts`),
+  );
+});
+
+afterAll(async () => {
+  if (stubDir) await rm(stubDir, { recursive: true, force: true });
+});
 
 /** Executable no-op stubs, so `command -v` resolves for the provider branches. */
 function getStubDir(): string {
@@ -84,7 +72,10 @@ function extractProviderBinaryChain(): string {
     throw new Error("Could not locate `# END verify_provider_binary` in docker-entrypoint.sh.");
   }
 
-  return script.slice(beginIndex, endIndex);
+  return script
+    .slice(beginIndex, endIndex)
+    .replace("/usr/local/bin/bun", '"$1"')
+    .replace("/usr/local/lib/agent-swarm/entrypoint-provider-binary.ts", '"$2"');
 }
 
 interface ChainResult {
@@ -94,12 +85,23 @@ interface ChainResult {
 
 async function runChain(env: Record<string, string>): Promise<ChainResult> {
   const chain = extractProviderBinaryChain();
-  const result = await runChild(["bash", "-c", `set -u\n${chain}\n`], {
-    // runChild passes env verbatim, so PATH is built here rather than merged.
-    // Stubs go first so they win over any real provider CLI on the runner,
-    // and the ambient PATH stays for bash and awk.
-    env: { PATH: [getStubDir(), process.env.PATH ?? ""].join(delimiter), ...env },
-  });
+  const result = await runChild(
+    [
+      "bash",
+      "-c",
+      `set -eu\n${chain}\necho "provider setup reached"\n`,
+      "bash",
+      process.execPath,
+      helperPath,
+    ],
+    {
+      cwd: getStubDir(),
+      // runChild passes env verbatim, so PATH is built here rather than merged.
+      // Stubs go first so they win over any real provider CLI on the runner,
+      // and the ambient PATH stays for bash and awk.
+      env: { PATH: [getStubDir(), process.env.PATH ?? ""].join(delimiter), ...env },
+    },
+  );
   return { exitCode: result.exitCode, stdout: result.stdout };
 }
 
@@ -118,6 +120,7 @@ describe("docker-entrypoint.sh: acp target binary verification", () => {
       );
       // The regression proper: a reachable `claude` used to satisfy this check.
       expect(result.stdout).not.toContain("Claude CLI");
+      expect(result.stdout).not.toContain("provider setup reached");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -373,22 +376,26 @@ describe("docker-entrypoint.sh: acp target resolution matches the adapter", () =
 });
 
 describe("docker-entrypoint.sh: provider binary chain contract", () => {
-  test("gives acp its own branch ahead of the claude catch-all", () => {
-    const chain = extractProviderBinaryChain();
-
-    const acpIndex = chain.indexOf('elif [ "$HARNESS_PROVIDER" = "acp" ]; then');
-    const catchAllIndex = chain.indexOf('elif [ "$HARNESS_PROVIDER" != "pi" ]; then');
-
-    expect(acpIndex).toBeGreaterThan(-1);
-    expect(catchAllIndex).toBeGreaterThan(acpIndex);
-  });
-
-  test("acp appears in the entrypoint source at all", () => {
-    // Asserted against the whole file, not the extracted block, so a missing
-    // branch fails with a readable diff instead of an extraction throw.
+  test("checks binaries before workspace setup", () => {
     const script = readFileSync(entrypointPath, "utf8");
-    expect(script).toContain('elif [ "$HARNESS_PROVIDER" = "acp" ]; then');
+    expect(script.indexOf("# END verify_provider_binary")).toBeLessThan(
+      script.indexOf("# ---- Git safe.directory backstop ----"),
+    );
   });
+
+  test(
+    "uses system Bun even when a worker-writable PATH contains bun",
+    async () => {
+      const shadow = join(getStubDir(), "bun");
+      writeFileSync(shadow, "#!/bin/sh\necho shadow-bun\nexit 99\n");
+      chmodSync(shadow, 0o755);
+      const result = await runChain({ HARNESS_PROVIDER: "pi" });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain("shadow-bun");
+      expect(result.stdout).toContain("provider setup reached");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   test.each([
     ["claude", "Claude CLI:"],
@@ -433,6 +440,39 @@ describe("docker-entrypoint.sh: provider binary chain contract", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).not.toContain("FATAL");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test.each([
+    ["grok", "GROK_BINARY", "GROK_DISABLE_AUTOUPDATER", "1"],
+    ["fx", "FX_BINARY", "FX_AUTO_UPGRADE", "0"],
+  ])(
+    "%s keeps a failing version call informational and disables updates",
+    async (provider, binaryVar, updateFlag, expected) => {
+      const binary = join(getStubDir(), `${provider} version stub`);
+      writeFileSync(binary, `#!/bin/sh\nprintf '%s' "$${updateFlag}"\nexit 3\n`);
+      chmodSync(binary, 0o755);
+      const result = await runChain({ HARNESS_PROVIDER: provider, [binaryVar]: binary });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`${provider} CLI: ${binary} (${expected})`);
+      expect(result.stdout).toContain("provider setup reached");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "rejects a non-executable Cursor ripgrep and accepts it after chmod",
+    async () => {
+      const binary = join(getStubDir(), "cursor-rg");
+      writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+      chmodSync(binary, 0o644);
+      const env = { HARNESS_PROVIDER: "cursor", CURSOR_RIPGREP_PATH: binary };
+      const missing = await runChain(env);
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stdout).not.toContain("provider setup reached");
+      chmodSync(binary, 0o755);
+      expect((await runChain(env)).exitCode).toBe(0);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

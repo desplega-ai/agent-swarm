@@ -40,13 +40,14 @@ Placement rules:
 
 ### Worker boot helpers
 
-The API-readiness step is a standalone Bun module,
-`src/commands/entrypoint-api-readiness.ts`. Both leaf stages copy it to
-`/usr/local/lib/agent-swarm/entrypoint-api-readiness.ts`; the shell entrypoint
-calls it with `/usr/local/bin/bun` from `worker-base`, independent of the worker's
-writable PATH entries. It needs no npm packages
-or compiled CLI initialization. Keep this code-dependent COPY in both leaf
-blocks. Custom worker images ship the helper and shell entrypoint together.
+API readiness and provider-binary verification are standalone Bun modules:
+`src/commands/entrypoint-api-readiness.ts` and
+`src/commands/entrypoint-provider-binary.ts`. Both leaf stages copy them to
+`/usr/local/lib/agent-swarm/`; the shell entrypoint calls them with
+`/usr/local/bin/bun` from `worker-base`, independent of the worker's writable
+PATH entries. They need no npm packages or compiled CLI initialization. Keep
+these code-dependent COPYs in both leaf blocks. Custom worker images ship the
+helpers and shell entrypoint together.
 
 ## Skills: `npx skills`, not plugin marketplaces
 
