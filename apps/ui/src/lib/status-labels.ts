@@ -10,6 +10,8 @@ export const STATUS_LABELS: Record<string, string> = {
   busy: "BUSY",
   offline: "OFFLINE",
   waiting_for_credentials: "WAITING FOR CREDS",
+  // Not a stored status: an offline pool agent that a sent task wakes (`Agent.onDemand`).
+  on_demand: "ON DEMAND",
 
   // Task statuses. `draft` is the transient "attachments still uploading" state.
   draft: "UPLOADING",
