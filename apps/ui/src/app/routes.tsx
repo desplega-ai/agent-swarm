@@ -28,7 +28,6 @@ import {
   Network,
   Palette,
   PiggyBank,
-  Plug,
   Plus,
   SlidersHorizontal,
   Store,

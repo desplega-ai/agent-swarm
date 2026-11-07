@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
-import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useSchedulesSavings } from "@/api/hooks/use-savings";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
 import type {

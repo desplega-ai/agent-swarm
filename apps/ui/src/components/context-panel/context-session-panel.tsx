@@ -113,7 +113,9 @@ export function ContextSessionPanel() {
     return (
       <aside
         aria-label="Session about this page"
-        className="flex h-svh w-[380px] shrink-0 flex-col border-l border-border 2xl:w-[420px]"
+        // A floating panel on the canvas, like the sidebar and the page: 8px
+        // apart, rounded, bordered.
+        className="my-2 mr-2 flex h-[calc(100svh-1rem)] w-[380px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xs 2xl:w-[420px]"
       >
         {panel}
       </aside>

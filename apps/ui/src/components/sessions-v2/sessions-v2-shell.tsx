@@ -129,9 +129,15 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
       treeRef.current?.move(sessions, returnFocus),
     [],
   );
+  // The session header's group crumb: open the group in its tab, next to
+  // the session, and show it in the sidebar tree.
+  const { openView } = url;
   const revealGroup = useCallback(
-    (groupKey: string | null) => treeRef.current?.revealGroup(groupKey),
-    [],
+    (groupKey: string | null) => {
+      treeRef.current?.revealGroup(groupKey);
+      openView(groupKey ?? "nogroup");
+    },
+    [openView],
   );
 
   /**
