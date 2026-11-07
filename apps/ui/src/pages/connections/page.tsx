@@ -225,6 +225,8 @@ function scriptUsageSnippet(
 ): string {
   const namespace = normalizeScriptSlug(slug) || "myConnection";
   if (kind === "graphql") return `await ctx.api.${namespace}.graphql("query { ... }");`;
+  // mockup(ui-audit): sql connections expose only query(); the OpenAPI fallback invented exampleOperation()
+  if ((kind as string) === "sql") return `await ctx.api.${namespace}.query("select 1", []);`;
   if (kind === "mcp") {
     const tool = detail?.tools[0]?.name || "toolName";
     return `await ctx.mcp.${namespace}.${tool}({});`;
@@ -3298,16 +3300,19 @@ export default function ConnectionsPage() {
         }
         className="flex flex-col flex-1 min-h-0"
       >
-        <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden sm:w-fit">
-            <TabsTrigger value="connections">Connections</TabsTrigger>
-            <TabsTrigger value="oauth-apps">OAuth Apps</TabsTrigger>
-            <TabsTrigger value="playground">Playground</TabsTrigger>
-            <TabsTrigger value="bindings">Raw fetch credentials</TabsTrigger>
-          </TabsList>
+        {/* mockup(ui-audit): connections toolbar — tabs keep their width (4th tab no longer squeezed out), mobile toolbar packs into 2 rows */}
+        <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+          <div className="relative min-w-0 lg:shrink-0">
+            <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden sm:w-fit lg:shrink-0 max-sm:[&>button]:px-1.5 max-sm:[&>button]:text-[13px]">
+              <TabsTrigger value="connections">Connections</TabsTrigger>
+              <TabsTrigger value="oauth-apps">OAuth Apps</TabsTrigger>
+              <TabsTrigger value="playground">Playground</TabsTrigger>
+              <TabsTrigger value="bindings">Raw fetch</TabsTrigger>
+            </TabsList>
+          </div>
           {activeTab !== "playground" ? (
-            <div className="flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-end lg:w-auto">
-              <div className="relative w-full md:w-72">
+            <div className="flex w-full flex-wrap items-center gap-2 md:flex-nowrap md:justify-end lg:ml-auto lg:w-auto">
+              <div className="relative order-1 min-w-0 flex-1 md:w-72 md:flex-none lg:w-56">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder={searchPlaceholder}
@@ -3320,52 +3325,56 @@ export default function ConnectionsPage() {
                   className="pl-9"
                 />
               </div>
-              {activeTab === "connections" ? (
-                <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-                  <Select
-                    value={kindFilter}
-                    onValueChange={(value) =>
-                      setParam("kind", value, {
-                        defaultValue: "all",
-                        reset: ["connectionsPage"],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full md:w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Kinds</SelectItem>
-                      <SelectItem value="openapi">OpenAPI</SelectItem>
-                      <SelectItem value="graphql">GraphQL</SelectItem>
-                      <SelectItem value="mcp">MCP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={scopeFilter}
-                    onValueChange={(value) =>
-                      setParam("scope", value, {
-                        defaultValue: "all",
-                        reset: ["connectionsPage"],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full md:w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Scopes</SelectItem>
-                      <SelectItem value="global">Global</SelectItem>
-                      <SelectItem value="agent">Agent</SelectItem>
-                      <SelectItem value="repo">Repo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : null}
               {activeTab === "connections" || activeTab === "bindings" ? (
-                <DataGridColumnsMenu
-                  state={activeTab === "connections" ? gridColumns : bindingsColumns}
-                />
+                <div className="order-3 grid w-full auto-cols-fr grid-flow-col gap-2 md:order-2 md:flex md:w-auto md:items-center">
+                  {activeTab === "connections" ? (
+                    <>
+                      <Select
+                        value={kindFilter}
+                        onValueChange={(value) =>
+                          setParam("kind", value, {
+                            defaultValue: "all",
+                            reset: ["connectionsPage"],
+                          })
+                        }
+                      >
+                        <SelectTrigger className="w-full max-md:px-2.5 md:w-[124px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Kinds</SelectItem>
+                          <SelectItem value="openapi">OpenAPI</SelectItem>
+                          <SelectItem value="graphql">GraphQL</SelectItem>
+                          <SelectItem value="mcp">MCP</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={scopeFilter}
+                        onValueChange={(value) =>
+                          setParam("scope", value, {
+                            defaultValue: "all",
+                            reset: ["connectionsPage"],
+                          })
+                        }
+                      >
+                        <SelectTrigger className="w-full max-md:px-2.5 md:w-[124px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Scopes</SelectItem>
+                          <SelectItem value="global">Global</SelectItem>
+                          <SelectItem value="agent">Agent</SelectItem>
+                          <SelectItem value="repo">Repo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </>
+                  ) : null}
+                  <span className="flex min-w-0 max-md:[&>button]:h-9 max-md:[&>button]:w-full max-md:[&>button>span]:hidden max-md:[&>button>svg:last-child]:hidden">
+                    <DataGridColumnsMenu
+                      state={activeTab === "connections" ? gridColumns : bindingsColumns}
+                    />
+                  </span>
+                </div>
               ) : null}
               {/* Per-tab add action rides the toolbar as a bare "+" — no
                   lone header action row. */}
@@ -3374,7 +3383,7 @@ export default function ConnectionsPage() {
                   <TooltipTrigger asChild>
                     <Button
                       size="icon"
-                      className="size-8 shrink-0"
+                      className="order-2 size-9 shrink-0 md:order-3 md:size-8"
                       onClick={() => setNewParam(addTarget)}
                       aria-label={addLabel}
                     >

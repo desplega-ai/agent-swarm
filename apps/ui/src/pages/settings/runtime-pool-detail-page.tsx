@@ -206,8 +206,9 @@ function PoolEditor({
     <PageHeader
       title={
         pool ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate">{pool.name}</span>
+          // mockup(ui-audit): settings-runtime-pool-detail P1 — name on its own line on a phone, badges wrap under it
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="basis-full break-all font-medium sm:basis-auto">{pool.name}</span>
             <Badge variant="outline" size="tag">
               {RUNTIME_KIND_LABEL[pool.kind]}
             </Badge>
@@ -229,10 +230,11 @@ function PoolEditor({
       }
       action={
         <div className="flex items-center gap-2">
+          {/* mockup(ui-audit): settings-runtime-pool-detail P1 — icon-only actions below sm, labels from sm up */}
           <Button type="button" size="sm" variant="ghost" asChild>
-            <Link to={RUNTIME_POOLS_PATH}>
+            <Link to={RUNTIME_POOLS_PATH} aria-label="Back to runtime pools">
               <ArrowLeft className="h-4 w-4" />
-              Back
+              <span className="hidden sm:inline">Back</span>
             </Link>
           </Button>
           {pool ? (
@@ -240,15 +242,24 @@ function PoolEditor({
               type="button"
               size="sm"
               variant="destructive-outline"
+              aria-label="Delete pool"
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="h-4 w-4" />
-              Delete
+              <span className="hidden sm:inline">Delete</span>
             </Button>
           ) : null}
-          <Button type="button" size="sm" onClick={save} disabled={saving}>
+          <Button
+            type="button"
+            size="sm"
+            onClick={save}
+            disabled={saving}
+            aria-label={pool ? "Save pool" : "Create pool"}
+          >
             {pool ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            {saving ? "Saving…" : pool ? "Save" : "Create pool"}
+            <span className={pool ? "hidden sm:inline" : undefined}>
+              {saving ? "Saving…" : pool ? "Save" : "Create pool"}
+            </span>
           </Button>
         </div>
       }

@@ -15,7 +15,7 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   useApiKeyCosts,
@@ -26,8 +26,10 @@ import {
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { KeyStatusPill, type KeyStatusTone } from "@/components/shared/key-status-pill";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +51,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatPanel } from "@/components/ui/stat-panel";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import type { ProviderIconKey } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
@@ -219,7 +222,56 @@ function ModelLimitBadges({ modelLimits }: { modelLimits: ApiKeyStatus["modelLim
   );
 }
 
+// mockup(ui-audit): settings-api-keys P1 - phone stats as one compact 3-up strip (value over label, no icon).
+function CompactStats({
+  items,
+}: {
+  items: { label: string; value: ReactNode; className?: string }[];
+}) {
+  return (
+    <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-border bg-card">
+      {items.map((item, index) => (
+        <div
+          key={item.label}
+          className={cn(
+            "min-w-0 px-3 py-2",
+            index % 3 !== 0 && "border-l border-border-subtle",
+            index >= 3 && "border-t border-border-subtle",
+          )}
+        >
+          <p className={cn("text-base font-semibold leading-tight tabular-nums", item.className)}>
+            {item.value}
+          </p>
+          <p className="truncate text-[11px] text-muted-foreground">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FacetField({
+  label,
+  labelled,
+  children,
+}: {
+  label: string;
+  labelled: boolean;
+  children: ReactNode;
+}) {
+  return labelled ? <FilterField label={label}>{children}</FilterField> : children;
+}
+
+/** Same fields the grid's quick filter matches, so a phone finds the same rows. */
+function matchesSearch(key: ApiKeyStatus, search: string): boolean {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  return [key.name, key.keySuffix, key.keyType, formatKeyType(key.keyType), key.provider]
+    .filter(Boolean)
+    .some((v) => String(v).toLowerCase().includes(q));
+}
+
 export default function ApiKeysPage() {
+  const isMobile = useIsMobile();
   const { data: keys, isLoading } = useApiKeyStatuses();
   const { data: costs } = useApiKeyCosts();
   const setKeyName = useSetApiKeyName();
@@ -564,64 +616,14 @@ export default function ApiKeysPage() {
     [costMap],
   );
 
-  return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Provider keys" />
+  const activeFacetCount = [providerFilter, statusFilter, typeFilter].filter(
+    (v) => v !== "all",
+  ).length;
+  const mobileKeys = isMobile ? filteredKeys.filter((k) => matchesSearch(k, search)) : [];
 
-      {/* Summary cards */}
-      <div
-        className={cn(
-          "grid gap-3 grid-cols-2",
-          // Seven panels truncate their labels in one row below 2xl.
-          stats.rejected > 0 ? "lg:grid-cols-4 2xl:grid-cols-7" : "lg:grid-cols-6",
-        )}
-      >
-        <StatPanel icon={Key} label="Total Keys" value={stats.total} />
-        <StatPanel
-          icon={ShieldCheck}
-          label="Available"
-          value={stats.available}
-          tone="success"
-          colorValue
-        />
-        <StatPanel
-          icon={ShieldAlert}
-          label="Rate Limited"
-          value={stats.rateLimited}
-          tone="error"
-          colorValue
-        />
-        {stats.rejected > 0 ? (
-          <StatPanel
-            icon={ShieldAlert}
-            label="Rejected"
-            value={stats.rejected}
-            tone="error"
-            colorValue
-          />
-        ) : null}
-        <StatPanel
-          icon={AlertTriangle}
-          label="Model Limited"
-          value={stats.modelLimited}
-          tone="warning"
-          colorValue
-        />
-        <StatPanel icon={BarChart3} label="Total Usage" value={stats.totalUsage.toLocaleString()} />
-        <StatPanel icon={DollarSign} label="Total Cost" value={formatCost(stats.totalCost)} />
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search by name, suffix, type…"
-            value={search}
-            onChange={(e) => setParam("search", e.target.value, { reset: ["apiKeysPage"] })}
-            className="pl-9"
-          />
-        </div>
+  const facets = (
+    <>
+      <FacetField label="Provider" labelled={!!isMobile}>
         <Select
           value={providerFilter}
           onValueChange={(value) =>
@@ -631,7 +633,7 @@ export default function ApiKeysPage() {
             })
           }
         >
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className={isMobile ? "w-full" : "w-[140px]"}>
             <SelectValue placeholder="Provider" />
           </SelectTrigger>
           <SelectContent>
@@ -643,6 +645,8 @@ export default function ApiKeysPage() {
             ))}
           </SelectContent>
         </Select>
+      </FacetField>
+      <FacetField label="Status" labelled={!!isMobile}>
         <Select
           value={statusFilter}
           onValueChange={(value) =>
@@ -652,7 +656,7 @@ export default function ApiKeysPage() {
             })
           }
         >
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className={isMobile ? "w-full" : "w-[140px]"}>
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -663,7 +667,9 @@ export default function ApiKeysPage() {
             <SelectItem value="rejected">Rejected</SelectItem>
           </SelectContent>
         </Select>
-        {keyTypes.length > 1 && (
+      </FacetField>
+      {keyTypes.length > 1 && (
+        <FacetField label="Type" labelled={!!isMobile}>
           <Select
             value={typeFilter}
             onValueChange={(value) =>
@@ -673,7 +679,7 @@ export default function ApiKeysPage() {
               })
             }
           >
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className={isMobile ? "w-full" : "w-[170px]"}>
               <SelectValue placeholder="Key Type" />
             </SelectTrigger>
             <SelectContent>
@@ -685,22 +691,210 @@ export default function ApiKeysPage() {
               ))}
             </SelectContent>
           </Select>
-        )}
-        <div className="ml-auto">
-          <DataGridColumnsMenu state={gridColumns} />
+        </FacetField>
+      )}
+    </>
+  );
+
+  return (
+    // mockup(ui-audit): settings-api-keys P0 - below lg the page flows and `main` scrolls; the fill-height shell is lg+ only.
+    <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0">
+      <PageHeader title="Provider keys" />
+
+      {/* Summary cards */}
+      {isMobile ? (
+        <CompactStats
+          items={[
+            { label: "Total keys", value: stats.total },
+            { label: "Available", value: stats.available, className: "text-status-success-strong" },
+            {
+              label: "Rate limited",
+              value: stats.rateLimited,
+              className: "text-status-error-strong",
+            },
+            ...(stats.rejected > 0
+              ? [
+                  {
+                    label: "Rejected",
+                    value: stats.rejected,
+                    className: "text-status-error-strong",
+                  },
+                ]
+              : []),
+            {
+              label: "Model limited",
+              value: stats.modelLimited,
+              className: "text-status-warning-strong",
+            },
+            { label: "Usage", value: stats.totalUsage.toLocaleString() },
+            { label: "Cost", value: formatCost(stats.totalCost) },
+          ]}
+        />
+      ) : (
+        <div
+          className={cn(
+            "grid gap-3 grid-cols-2",
+            // Seven panels truncate their labels in one row below 2xl.
+            stats.rejected > 0 ? "lg:grid-cols-4 2xl:grid-cols-7" : "lg:grid-cols-6",
+          )}
+        >
+          <StatPanel icon={Key} label="Total Keys" value={stats.total} />
+          <StatPanel
+            icon={ShieldCheck}
+            label="Available"
+            value={stats.available}
+            tone="success"
+            colorValue
+          />
+          <StatPanel
+            icon={ShieldAlert}
+            label="Rate Limited"
+            value={stats.rateLimited}
+            tone="error"
+            colorValue
+          />
+          {stats.rejected > 0 ? (
+            <StatPanel
+              icon={ShieldAlert}
+              label="Rejected"
+              value={stats.rejected}
+              tone="error"
+              colorValue
+            />
+          ) : null}
+          <StatPanel
+            icon={AlertTriangle}
+            label="Model Limited"
+            value={stats.modelLimited}
+            tone="warning"
+            colorValue
+          />
+          <StatPanel
+            icon={BarChart3}
+            label="Total Usage"
+            value={stats.totalUsage.toLocaleString()}
+          />
+          <StatPanel icon={DollarSign} label="Total Cost" value={formatCost(stats.totalCost)} />
         </div>
+      )}
+
+      {/* Filters */}
+      {/* mockup(ui-audit): settings-api-keys P2 - narrower desktop selects so Columns stays on the filter row. */}
+      {/* mockup(ui-audit): settings-api-keys P1 - phone toolbar is one row: search + Filters popover. */}
+      <div className={cn("flex items-center gap-3", isMobile ? "flex-nowrap" : "flex-wrap")}>
+        <div className={cn("relative", isMobile ? "min-w-0 flex-1" : "flex-1 min-w-40 max-w-sm")}>
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={isMobile ? "Search keys…" : "Search name, suffix, type…"}
+            value={search}
+            onChange={(e) => setParam("search", e.target.value, { reset: ["apiKeysPage"] })}
+            className="pl-9"
+          />
+        </div>
+        {isMobile ? (
+          <FiltersPopover activeCount={activeFacetCount}>{facets}</FiltersPopover>
+        ) : (
+          <>
+            {facets}
+            <div className="ml-auto">
+              <DataGridColumnsMenu state={gridColumns} />
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Data grid */}
-      <DataGrid
-        rowData={filteredKeys}
-        columnDefs={columnDefs}
-        columns={gridColumns}
-        quickFilterText={search}
-        loading={isLoading}
-        emptyMessage="No provider keys tracked yet"
-        paginationQueryKey="apiKeys"
-      />
+      {/* mockup(ui-audit): settings-api-keys P0/P1 - phones get one row per key; Clear stays on the row. */}
+      {isMobile ? (
+        <MobileList
+          label="Provider keys"
+          loading={isLoading}
+          emptyMessage="No provider keys tracked yet"
+          className="flex-none overflow-hidden"
+        >
+          {mobileKeys.map((key) => {
+            const meta = getKeyTypeMeta(key.keyType);
+            const cost = costMap.get(`${key.keyType}:${key.keySuffix}`) ?? 0;
+            return (
+              <MobileListRow
+                key={`${key.keyType}:${key.keySuffix}:${key.scope}:${key.scopeId ?? ""}`}
+                onClick={() => {
+                  setEditingKey(key);
+                  setEditingName(key.name ?? "");
+                }}
+                titleLines={1}
+                leading={<ProviderIcon provider={meta.icon} className="h-4 w-4" />}
+                title={
+                  <>
+                    {key.name ? (
+                      key.name
+                    ) : (
+                      <span className="italic text-muted-foreground">
+                        Unnamed · ...{key.keySuffix}
+                      </span>
+                    )}
+                    <Pencil
+                      className="ml-1.5 inline h-3 w-3 -translate-y-px text-muted-foreground/60"
+                      aria-label="Rename"
+                    />
+                  </>
+                }
+                status={
+                  isRejected(key) ? (
+                    <RejectedBadge keyStatus={key} />
+                  ) : (
+                    <KeyStatusBadge status={key.status} />
+                  )
+                }
+                meta={[
+                  meta.label,
+                  key.name ? `...${key.keySuffix}` : null,
+                  `${key.totalUsageCount.toLocaleString()} uses`,
+                  cost > 0 ? formatCost(cost, { precision: 4 }) : null,
+                  key.lastUsedAt ? formatSmartTime(key.lastUsedAt) : null,
+                ]}
+                extras={
+                  key.status === "rate_limited" || key.modelLimits.some((l) => l.active) ? (
+                    <>
+                      {key.status === "available" ? (
+                        <ModelLimitBadges modelLimits={key.modelLimits} />
+                      ) : null}
+                      {key.status === "rate_limited" ? (
+                        <>
+                          <span className="font-mono text-xs text-status-error-strong">
+                            {formatExpiry(key.rateLimitedUntil) === "Expired"
+                              ? "Limit expired"
+                              : `Resets in ${formatExpiry(key.rateLimitedUntil)}`}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="ml-auto h-7 gap-1.5 text-xs"
+                            onClick={() => setClearingKey(key)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Clear
+                          </Button>
+                        </>
+                      ) : null}
+                    </>
+                  ) : null
+                }
+              />
+            );
+          })}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={filteredKeys}
+          columnDefs={columnDefs}
+          columns={gridColumns}
+          quickFilterText={search}
+          loading={isLoading}
+          emptyMessage="No provider keys tracked yet"
+          paginationQueryKey="apiKeys"
+        />
+      )}
 
       {/* Rename dialog */}
       <Dialog
