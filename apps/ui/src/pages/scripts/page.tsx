@@ -10,6 +10,7 @@ import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/scr
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { formatUsd } from "@/pages/usage/usage-format";
@@ -34,6 +36,7 @@ const RUNS_FETCH_LIMIT = 500;
 
 export default function ScriptsPage() {
   const navigate = useNavigate();
+  const isPhone = useIsPhone();
   const { searchParams, setParam } = useUrlSearchState();
   const activeTab = readStringParam(searchParams, "tab", "scripts") === "runs" ? "runs" : "scripts";
   const search = readStringParam(searchParams, "search");
@@ -173,6 +176,15 @@ export default function ScriptsPage() {
     [navigate],
   );
 
+  const phoneRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const all = scripts ?? [];
+    if (!q) return all;
+    return all.filter((s) =>
+      `${s.name} ${s.description ?? ""} ${s.scope}`.toLowerCase().includes(q),
+    );
+  }, [scripts, search]);
+
   const hasFilters = !!search || scopeFilter !== "all" || includeScratch;
   const showEmptyState = !scriptsLoading && (scripts?.length ?? 0) === 0 && !hasFilters;
 
@@ -183,23 +195,32 @@ export default function ScriptsPage() {
       <Tabs
         value={activeTab}
         onValueChange={(value) => setParam("tab", value, { defaultValue: "scripts" })}
-        className="flex flex-col flex-1 min-h-0"
+        className="flex flex-col flex-1 min-h-0 max-md:flex-none"
       >
         {/* Shared toolbar (People pattern): the active tab's filters on the
             left, tabs pinned to the right. Filters hide over the first-run
             empty state (showEmptyState is false whenever a filter is active). */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Mockup (UI audit 2026-11-06): on a phone the tabs lead (sticky)
+            and the filters share one row: search, scope, scratch. The
+            Columns menu has no grid to act on there, so it hides. */}
+        {isPhone ? (
+          <TabsList sticky className="w-full">
+            <TabsTrigger value="scripts">Scripts</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
+          </TabsList>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-3 max-md:flex-nowrap max-md:gap-2">
           {activeTab === "scripts" && (
             <div
               className={cn(
-                "flex flex-1 min-w-0 flex-wrap items-center gap-3",
+                "flex flex-1 min-w-0 flex-wrap items-center gap-3 max-md:flex-nowrap max-md:gap-2",
                 showEmptyState && "hidden",
               )}
             >
-              <div className="relative w-full max-w-sm">
+              <div className="relative w-full max-w-sm max-md:min-w-0 max-md:flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search scripts…"
+                  placeholder={isPhone ? "Search…" : "Search scripts…"}
                   value={search}
                   onChange={(e) => setParam("search", e.target.value, { reset: ["scriptsPage"] })}
                   className="pl-9"
@@ -211,13 +232,13 @@ export default function ScriptsPage() {
                   setParam("scope", value, { defaultValue: "all", reset: ["scriptsPage"] })
                 }
               >
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[140px] max-md:w-[88px]">
                   <SelectValue placeholder="Scope" />
                 </SelectTrigger>
                 <SelectContent>
                   {SCOPE_OPTIONS.map((scope) => (
                     <SelectItem key={scope} value={scope}>
-                      {scope === "all" ? "All scopes" : scope}
+                      {scope === "all" ? (isPhone ? "All" : "All scopes") : scope}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -232,12 +253,14 @@ export default function ScriptsPage() {
                   }
                 />
                 <Label htmlFor="include-scratch" className="text-xs text-muted-foreground">
-                  Include scratch
+                  {isPhone ? "Scratch" : "Include scratch"}
                 </Label>
               </div>
-              <div className="ml-auto">
-                <DataGridColumnsMenu state={gridColumns} />
-              </div>
+              {isPhone ? null : (
+                <div className="ml-auto">
+                  <DataGridColumnsMenu state={gridColumns} />
+                </div>
+              )}
             </div>
           )}
           {activeTab === "runs" && (
@@ -245,10 +268,12 @@ export default function ScriptsPage() {
               <ScriptRunsStatusFilter paginationQueryKey="scriptRuns" />
             </div>
           )}
-          <TabsList className="ml-auto shrink-0">
-            <TabsTrigger value="scripts">Scripts</TabsTrigger>
-            <TabsTrigger value="runs">Runs</TabsTrigger>
-          </TabsList>
+          {isPhone ? null : (
+            <TabsList className="ml-auto shrink-0">
+              <TabsTrigger value="scripts">Scripts</TabsTrigger>
+              <TabsTrigger value="runs">Runs</TabsTrigger>
+            </TabsList>
+          )}
         </div>
 
         <TabsContent value="scripts" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
@@ -260,6 +285,32 @@ export default function ScriptsPage() {
               entity="script"
               fullPage
             />
+          ) : isPhone ? (
+            <MobileList
+              label="Scripts"
+              loading={scriptsLoading}
+              emptyMessage="No scripts match the current filters"
+              className="flex-none overflow-visible"
+            >
+              {phoneRows.map((script) => (
+                <MobileListRow
+                  key={script.id}
+                  to={`/scripts/${script.id}`}
+                  title={script.name}
+                  titleLines={1}
+                  status={
+                    <Badge variant="outline" size="tag">
+                      {script.isScratch ? "scratch" : script.scope}
+                    </Badge>
+                  }
+                  meta={[
+                    `v${script.version}`,
+                    `${runCounts.get(script.name) ?? 0} runs`,
+                    script.description || null,
+                  ]}
+                />
+              ))}
+            </MobileList>
           ) : (
             <DataGrid
               rowData={scripts ?? []}
