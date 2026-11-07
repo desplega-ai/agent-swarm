@@ -378,7 +378,7 @@ export async function buildResolvedApprovalCard(
       const users = await getAllUsers();
       const user =
         users.find((user) => user.email === claim) ?? users.find((user) => user.name === claim);
-      by = user?.name ?? claim;
+      by = `operator key (as ${user?.name ?? claim})`;
     }
   }
   const byText = by ? ` by ${escapeSlackMrkdwn(by)}` : "";

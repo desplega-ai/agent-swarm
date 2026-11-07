@@ -187,10 +187,10 @@ describe("resolved approval Slack card", () => {
 
         const expected =
           identity === "unknown"
-            ? "Guest &lt;@U123&gt; &amp; visitor"
+            ? "operator key (as Guest &lt;@U123&gt; &amp; visitor)"
             : identity === "missing"
               ? "operator"
-              : user.name;
+              : `operator key (as ${user.name})`;
         expect(updates).toHaveLength(1);
         expect(cardText(updates[0]!)).toContain(
           `*${status === "approved" ? "Approved" : "Rejected"} by ${expected}*`,
