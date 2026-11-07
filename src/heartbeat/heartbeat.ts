@@ -138,19 +138,24 @@ function defaultIntervalMs(): number {
   return parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS);
 }
 
-/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
-function stallThresholdMinutes(): number {
-  return Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes.
+ * Invalid values (non-numeric, zero, or negative) fall back to the default: a negative threshold
+ * would flag every task — even one updated seconds ago — as stalled immediately. */
+export function stallThresholdMinutes(): number {
+  const parsed = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
 }
 
 /** Stall threshold: tasks with no active session (worker clearly dead) */
-function stallThresholdNoSessionMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+export function stallThresholdNoSessionMin(): number {
+  const parsed = Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
 }
 
 /** Stall threshold: tasks with stale worker heartbeat */
-function stallThresholdStaleHeartbeatMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+export function stallThresholdStaleHeartbeatMin(): number {
+  const parsed = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
 }
 
 /** Grace window for a fresh pending steering message before normal stall remediation resumes. */
