@@ -858,4 +858,28 @@ describe("extractSlackMessageText — bot text that repeats its blocks", () => {
     });
     expect(result).toBe("this is fine\nhi");
   });
+
+  test("a block ending in a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the caféteria",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the caféteria\ncafé");
+  });
+
+  test("a block starting with a non-ASCII letter inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "see the résumé",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "ésumé" } }],
+    });
+    expect(result).toBe("see the résumé\nésumé");
+  });
+
+  test("a non-ASCII block on word boundaries is still dropped", () => {
+    const result = extractSlackMessageText({
+      text: "meet at the café today",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "café" } }],
+    });
+    expect(result).toBe("meet at the café today");
+  });
 });

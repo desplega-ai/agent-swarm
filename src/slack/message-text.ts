@@ -175,7 +175,9 @@ function collapseWhitespace(text: string): string {
 
 /** `needle` occurs in `haystack` without splitting a word at either end. */
 function containsOnWordBoundaries(haystack: string, needle: string): boolean {
-  const isWord = (char: string | undefined) => char !== undefined && /\w/.test(char);
+  // Unicode-aware: `/\w/` is ASCII-only, so `café` would match inside `caféteria`.
+  const isWord = (char: string | undefined) =>
+    char !== undefined && /[\p{L}\p{N}\p{M}_]/u.test(char);
   for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
     const end = at + needle.length;
     const startOk = !isWord(needle[0]) || !isWord(haystack[at - 1]);
