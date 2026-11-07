@@ -55,6 +55,22 @@ export function useLiveApprovalRequest(id: string) {
   });
 }
 
+/**
+ * One request for a session's approval card. No polling: the session detail
+ * already polls, and the card refetches once the request leaves its pending
+ * list, so N cards never mean N timers.
+ */
+export function useSessionApprovalRequest(id: string) {
+  return useQuery({
+    queryKey: ["approval-request", id],
+    queryFn: () => api.fetchApprovalRequest(id),
+    select: (data) => data.approvalRequest,
+    enabled: !!id,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useRespondToApprovalRequest() {
   const queryClient = useQueryClient();
   return useMutation({

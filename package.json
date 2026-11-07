@@ -223,6 +223,7 @@
     "@earendil-works/pi-coding-agent": "^1.5.0",
     "@inkjs/ui": "^2.0.0",
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
+    "@json-render/chat": "0.22.0",
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@openai/codex": "0.167.0",

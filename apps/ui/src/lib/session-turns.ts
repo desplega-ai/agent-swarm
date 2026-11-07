@@ -386,6 +386,23 @@ export function approvalsByPart(
   return out;
 }
 
+/**
+ * The approvals to show: every one seen in this view, in first-seen order.
+ * The session detail lists only pending approvals, so one resolved meanwhile
+ * would vanish; kept, its card shows the resolved state.
+ */
+export function keepSeenApprovals(
+  seen: SessionApproval[],
+  current: SessionApproval[],
+): SessionApproval[] {
+  const byId = new Map(current.map((approval) => [approval.id, approval]));
+  const seenIds = new Set(seen.map((approval) => approval.id));
+  return [
+    ...seen.map((approval) => byId.get(approval.id) ?? approval),
+    ...current.filter((approval) => !seenIds.has(approval.id)),
+  ];
+}
+
 /** `true` when the Handoffs toggle has rows to show. */
 export function hasHandoffs(turns: Turn[]): boolean {
   return turns.some((turn) => turn.parts.some((part) => part.internal.length > 0));

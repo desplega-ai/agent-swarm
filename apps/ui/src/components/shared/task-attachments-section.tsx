@@ -799,20 +799,39 @@ function AttachmentRow({
   );
 }
 
+/**
+ * A file the person sent with their message: a dashboard composer upload, or
+ * a file shared with the bot in Slack or a chat channel. A legacy row with
+ * neither `intent` nor `agentId` was written by no agent, so it is the
+ * person's too. Every other row is the agent's: `store-progress` output, a
+ * Slack file an agent fetched (`intent: "slack-file"`), and agent rows with
+ * no intent.
+ */
+export function isPersonUpload(attachment: TaskAttachment): boolean {
+  if (attachment.intent) return attachment.intent === "user-upload";
+  return !attachment.agentId;
+}
+
 export function TaskPromptAttachments({
   taskId,
   attachments,
+  from,
   className,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
+  /**
+   * Whose files to show: the person's uploads (right-aligned, above their
+   * bubble) or the agent's (left-aligned, with its reply). Omitted: all.
+   */
+  from?: "person" | "agent";
   className?: string;
 }) {
   const listQuery = useTaskAttachments(taskId, attachments);
-  const rows = useMemo(
-    () => listQuery.data?.attachments ?? attachments ?? [],
-    [attachments, listQuery.data?.attachments],
-  );
+  const rows = useMemo(() => {
+    const all = listQuery.data?.attachments ?? attachments ?? [];
+    return from ? all.filter((a) => isPersonUpload(a) === (from === "person")) : all;
+  }, [attachments, from, listQuery.data?.attachments]);
 
   if (rows.length === 0) return null;
 
@@ -830,8 +849,12 @@ export function TaskPromptAttachments({
 
   return (
     <section
-      className={cn("flex max-w-full flex-wrap justify-end gap-2", className)}
-      aria-label="Prompt attachments"
+      className={cn(
+        "flex max-w-full flex-wrap gap-2",
+        from === "agent" ? "justify-start" : "justify-end",
+        className,
+      )}
+      aria-label={from === "agent" ? "Reply attachments" : "Prompt attachments"}
     >
       {rows.map((a) => (
         <AttachmentRow
