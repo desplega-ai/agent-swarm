@@ -9,7 +9,7 @@ export const slackHttpMention: Scenario = {
   async run(ctx) {
     const flip = await enableNativeHttp(ctx);
     try {
-      await runSlackMentionFlow(flip.ctx, "e2e-lead-http-mention");
+      await runSlackMentionFlow(flip.ctx, "e2e-lead-http-mention", { pinLead: true });
       await expectNativeTransport(ctx, flip);
     } finally {
       await flip.undo();

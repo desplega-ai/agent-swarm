@@ -83,7 +83,7 @@ export const slackHttpSignatureRetry: Scenario = {
       );
 
       // A real mention: the receiver stores the event, the drain creates the task.
-      const message = await ask(flip.ctx, "say hello once");
+      const message = await ask(flip.ctx, `swarm#${leadId} say hello once`);
       await waitForEyes(flip.ctx, message.ts);
       const task = await findSlackTask(flip.ctx, message.ts);
       taskId = String(task.id);

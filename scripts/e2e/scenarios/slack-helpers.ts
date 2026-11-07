@@ -400,9 +400,18 @@ export async function announceLiveView(ctx: ScenarioContext, path: string): Prom
  * `ctx.slack`, so a caller on another transport passes `{ ...ctx, slack: otherMock }`
  * after its own connection checks.
  */
-export async function runSlackMentionFlow(ctx: ScenarioContext, leadName: string): Promise<void> {
+export async function runSlackMentionFlow(
+  ctx: ScenarioContext,
+  leadName: string,
+  options: { pinLead?: boolean } = {},
+): Promise<void> {
   const leadId = await registerLead(ctx, leadName);
-  const message = await ask(ctx, "say hello from the E2E worker");
+  // `swarm#<id>` pins the task to this lead: a scenario that runs late in the suite meets
+  // older leads, some busy, and routing may hand the task to one of them.
+  const message = await ask(
+    ctx,
+    `${options.pinLead ? `swarm#${leadId} ` : ""}say hello from the E2E worker`,
+  );
   ctx.markThread("mention", "C0GENERAL0", message.ts);
   await waitForEyes(ctx, message.ts);
 
