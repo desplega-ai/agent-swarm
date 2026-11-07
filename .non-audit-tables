@@ -74,3 +74,5 @@ workflow_run_definitions # immutable content-addressed run definition snapshots;
 automation_savings_daily # system-written savings rollup buckets, no user attribution (289)
 automation_savings_days  # system-written rollup day markers, no user attribution (289)
 automation_savings_links # system-written savings rollup links between jobs, no user attribution (290)
+import_items             # importer ownership map, system-written at boot (294)
+import_pending_assignments # importer-written assignments awaiting agent registration (294)

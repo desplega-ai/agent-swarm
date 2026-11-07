@@ -42,6 +42,10 @@ import type {
   ChannelsResponse,
   ChatSdkStatusResponse,
   ChatSdkTelegramWebhookResponse,
+  ChecklistAddRequest,
+  ChecklistItem,
+  ChecklistResponse,
+  ChecklistUpdateRequest,
   ClaudeRuntimeConfig,
   CombReviewBatchInput,
   CombReviewBatchResult,
@@ -67,6 +71,7 @@ import type {
   FavoritesResponse,
   FeedbackInput,
   FleetBenchmarkResponse,
+  FsMeResponse,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -91,6 +96,7 @@ import type {
   MetricSaveInput,
   MetricSaveResponse,
   MetricsListResponse,
+  MintedFsKey,
   MintTokenResponse,
   ModelProfile,
   ModelProfileCheckResult,
@@ -167,6 +173,7 @@ import type {
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
+  SteeringSource,
   SteerMode,
   SteerResult,
   SubmitImprovementInput,
@@ -175,6 +182,7 @@ import type {
   SwarmConfigsResponse,
   SwarmRepo,
   SwarmReposResponse,
+  TaskAttachment,
   TaskContextResponse,
   TaskLineageResponse,
   TasksResponse,
@@ -375,6 +383,20 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
     // fall through to the generic throw below
   }
   throw new Error(`${genericLabel}: ${res.status}`);
+}
+
+/**
+ * A failed `/api/fs/*` call (`GET /api/fs/me`, `POST /api/fs/keys`,
+ * `POST /api/fs/continue`). `status` picks the message: a 501 (agent-fs too
+ * old for named keys), a 409 (account pending), a 400, and the rest.
+ */
+export class FsApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "FsApiError";
+    this.status = status;
+  }
 }
 
 /**
@@ -762,6 +784,14 @@ class ApiClient {
     return res.json();
   }
 
+  /** The file attachments of one task (`GET /api/fs/tasks/{id}/files`). */
+  async fetchTaskFiles(taskId: string): Promise<{ attachments: TaskAttachment[] }> {
+    const url = `${this.getBaseUrl()}/api/fs/tasks/${encodeURIComponent(taskId)}/files`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch task files: ${res.status}`);
+    return res.json();
+  }
+
   async fetchTask(id: string): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -890,15 +920,21 @@ class ApiClient {
    */
   async steerTask(
     id: string,
-    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+    input: {
+      message: string;
+      mode: SteerMode;
+      requestedByUserId?: string;
+      source?: SteeringSource;
+    },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       // Identify the surface so the steering row is attributed to the dashboard
-      // rather than defaulting to a generic "api" caller.
-      body: JSON.stringify({ ...input, source: "ui" }),
+      // rather than defaulting to a generic "api" caller. A json-render app
+      // page passes "app-page".
+      body: JSON.stringify({ ...input, source: input.source ?? "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
@@ -1231,6 +1267,57 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** The current user's agent-fs account (`GET /api/fs/me`). */
+  async fsMe(): Promise<FsMeResponse> {
+    const url = `${this.getBaseUrl()}/api/fs/me`;
+    const res = await fetch(url, { headers: this.getHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(
+        err.error || `Failed to load the files account: ${res.status}`,
+        res.status,
+      );
+    }
+    return res.json();
+  }
+
+  /**
+   * Mint a named agent-fs key for this browser (`POST /api/fs/keys`). The API
+   * returns the key once and never stores it.
+   */
+  async mintFsKey(label: string): Promise<MintedFsKey> {
+    const url = `${this.getBaseUrl()}/api/fs/keys`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ label }),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(err.error || `Failed to create a files key: ${res.status}`, res.status);
+    }
+    return res.json();
+  }
+
+  /**
+   * "Continue with your swarm": mint a named agent-fs key for the current user
+   * and get `returnTo` back with the key in its fragment. The API allows only
+   * the live agent-fs app as `returnTo`.
+   */
+  async fsContinue(data: { returnTo: string }): Promise<{ redirectUrl: string }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/fs/continue`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(err.error || `Failed to continue: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -4296,6 +4383,38 @@ class ApiClient {
     return res.json();
   }
 
+  /** The post-onboarding checklist for the picked user (swarm items plus their own). */
+  async getChecklist(): Promise<ChecklistResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/checklist`, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getChecklist: ${res.status}`);
+    return res.json();
+  }
+
+  private async checklistWrite(
+    method: "POST" | "PATCH",
+    path: string,
+    body: unknown,
+  ): Promise<ChecklistItem> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method,
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Checklist update failed: ${res.status}`);
+    }
+    return ((await res.json()) as { item: ChecklistItem }).item;
+  }
+
+  addChecklistItem(body: ChecklistAddRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("POST", "/api/checklist/items", body);
+  }
+
+  updateChecklistItem(id: string, body: ChecklistUpdateRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("PATCH", `/api/checklist/items/${encodeURIComponent(id)}`, body);
+  }
+
   async listFavorites(opts?: {
     itemType?: FavoriteItemType;
     itemIds?: string[];
@@ -4535,12 +4654,30 @@ class ApiClient {
     name: string,
     input?: Record<string, unknown>,
     parentTaskId?: string,
+    /**
+     * Task-kind actions only. `followUp: false` skips the Lead follow-up
+     * (review) of the created task; `requestedByUserId` names the picked
+     * identity, which the server honors only for a shared operator key.
+     * `session` puts the task in a SessionThread session.
+     */
+    options: {
+      followUp?: boolean;
+      requestedByUserId?: string;
+      /** A SessionThread session: the server keys the task by app, key and requester. */
+      session?: { key: string; scope?: "user" | "shared" };
+    } = {},
   ): Promise<AppActionResponse> {
     return this.appRequest(
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       {
         method: "POST",
-        body: JSON.stringify({ input: input ?? {}, ...(parentTaskId ? { parentTaskId } : {}) }),
+        body: JSON.stringify({
+          input: input ?? {},
+          ...(parentTaskId ? { parentTaskId } : {}),
+          ...(options.followUp === undefined ? {} : { followUp: options.followUp }),
+          ...(options.requestedByUserId ? { requestedByUserId: options.requestedByUserId } : {}),
+          ...(options.session ? { session: options.session } : {}),
+        }),
       },
       `Failed to run action ${name}`,
     );

@@ -225,7 +225,7 @@ Prefer `choice` questions on laya for now. On laya-server 0.1.0, a `noul` questi
 
 ### SystemOne Extraction
 
-A `system-one-extraction` node (display name "SystemOne Extraction") sends one `state` text, and optionally up to 4 images, to a typed-extraction model and returns one typed answer per declared field. The model is Cloudflare's Clairic on Workers AI (`provider: cloudflare`, the default and only provider today). It shares the decision node's provider registry, credential, preflight, transport, and error messages: it needs the global secret `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and the global config value `CLOUDFLARE_ACCOUNT_ID`.
+A `system-one-extraction` node (display name "SystemOne Extraction") sends one `state` text, and optionally up to 4 images, to a typed-extraction model and returns one typed answer per declared field. The model is Cloudflare's Clairic on Workers AI (`provider: cloudflare`, the only provider today). A node that names no provider uses `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER`, read at run time with `cloudflare` as the fallback. It shares the decision node's provider registry, credential, preflight, transport, and error messages: it needs the global secret `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and the global config value `CLOUDFLARE_ACCOUNT_ID`.
 
 ```json
 {

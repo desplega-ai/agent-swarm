@@ -578,3 +578,41 @@ describe("Transcript tasks this one started", () => {
     await unmount();
   });
 });
+
+describe("Transcript live status", () => {
+  const createdRows = buildTranscriptRows({
+    messages: [],
+    logs: [
+      {
+        id: "log-1",
+        eventType: "task_created",
+        taskId: "t1",
+        createdAt: "2026-11-05T10:00:00Z",
+      } as never,
+    ],
+    withMessages: false,
+  });
+
+  test("a queued run with only lifecycle rows still says it is waiting", async () => {
+    expect(createdRows.length).toBeGreaterThan(0);
+    const { container, unmount } = await mount(
+      <Transcript rows={createdRows} running waitingLabel="Queued. Waiting…" />,
+    );
+    expect(container.textContent).toContain("Queued. Waiting…");
+    await unmount();
+  });
+
+  test("a working run shows its timer instead of the waiting line", async () => {
+    const { container, unmount } = await mount(
+      <Transcript
+        rows={createdRows}
+        running
+        waitingLabel="Queued. Waiting…"
+        workingSince="2026-11-05T10:00:00Z"
+      />,
+    );
+    expect(container.textContent).not.toContain("Queued. Waiting…");
+    expect(container.querySelector('[data-slot="transcript-working"]')).not.toBeNull();
+    await unmount();
+  });
+});

@@ -1,4 +1,4 @@
-import type { AgentTask, RuntimePool } from "../../types";
+import type { AgentTask, RuntimeInstance, RuntimePool } from "../../types";
 import { checkDependencies, getDbClient } from "../db";
 import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
 
@@ -37,6 +37,24 @@ export interface AgentDemand {
   provisioning: number;
 }
 
+/** The most runtimes one agent may hold: `maxTasks` split into whole runtimes. */
+export function agentRuntimeLimit(maxTasks: number, slotsPerRuntime: number): number {
+  return Math.floor(maxTasks / slotsPerRuntime);
+}
+
+/** Runtimes that count against a pool's `maxRuntimes`: provisioning, or active and fresh. */
+export function countPoolRuntimes(
+  runtimes: Pick<RuntimeInstance, "status" | "lastSeenAt">[],
+  now: Date,
+  staleMinutes: number,
+): number {
+  return runtimes.filter(
+    (r) =>
+      r.status === "provisioning" ||
+      (r.status === "active" && Date.parse(r.lastSeenAt) >= now.getTime() - staleMinutes * 60_000),
+  ).length;
+}
+
 export function computeDesired(
   pool: Pick<RuntimePool, "slotsPerRuntime" | "minRuntimes" | "maxRuntimes">,
   agents: AgentDemand[],
@@ -52,7 +70,7 @@ export function computeDesired(
       0,
       agent.work - agent.freeSlots - agent.provisioning * pool.slotsPerRuntime,
     );
-    const limit = Math.floor(agent.maxTasks / pool.slotsPerRuntime);
+    const limit = agentRuntimeLimit(agent.maxTasks, pool.slotsPerRuntime);
     const count = Math.min(
       limit,
       Math.max(pool.minRuntimes, agent.current + Math.ceil(uncovered / pool.slotsPerRuntime)),

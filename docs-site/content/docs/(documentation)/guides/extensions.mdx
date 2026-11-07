@@ -5,7 +5,7 @@ description: Install trusted TypeScript hooks that change swarm orchestration at
 
 Extensions let operators change swarm behavior without changing the API server source.
 Each extension is a bundle with a YAML or JSON manifest and the files it references.
-You install extensions by name from a predefined catalog. An operator can also allow [inline installs](#inline-install), where the request carries the manifest and files.
+For a new or custom extension, build an [inline bundle](#inline-install), install it on your swarm, enable it, and use it. No pull request or deploy is needed. The catalog provides existing extensions by name; adding a catalog template promotes a proven extension to every deployment and should happen only when a human asks.
 
 A bundle has one `hooks` file and can also ship scripts, schedules, workflows, and skills.
 
@@ -281,7 +281,7 @@ A lead, operator, or dashboard user must enable it again, which restores them.
 
 ## Install and operate
 
-The catalog is the only install source.
+For custom extensions, use [inline install](#inline-install) first. The catalog is for installing existing templates and promoting proven extensions on human request.
 List it with `GET /api/extensions/catalog` or the `extension-catalog` MCP tool.
 Each entry shows the template's asset counts, its README, and whether it is installed.
 In the dashboard, open Settings, Extensions, and select **Install extension** to reach the catalog page at `/settings/extensions/new`.
@@ -330,8 +330,9 @@ Installing a catalog template with the same name adds a version to the existing 
 
 ## Inline install
 
-By default an extension installs only from the catalog, which needs a pull request and a deploy.
-Set `EXTENSION_ALLOW_INLINE_INSTALL=true` to also accept an inline bundle, so a lead can create an extension directly.
+The inline authoring path is the default for new or custom extensions.
+Ask an operator to set `EXTENSION_ALLOW_INLINE_INSTALL=true` so a lead, operator, or dashboard user can install the manifest and files directly.
+If the operator will not enable inline installs, a catalog template PR is the fallback, only when a human asks to promote the extension.
 The key is off by default.
 Set it under **Settings > Configuration > Security & access** or in the API environment.
 It is read on every request, so a change needs no restart.
@@ -354,7 +355,7 @@ curl -X POST "$API/api/extensions/install" \
 
 - `manifest` and `files` go together and exclude `template`. `files` holds every path the manifest references, with no extras.
 - Flag off: every inline body returns 400 `inline_install_disabled`.
-- Flag on: only lead agents, the operator, and dashboard users can send an inline bundle. A worker gets 403 and stays catalog-only. The check is the `extension.install.inline` permission.
+- Flag on: only lead agents, the operator, and dashboard users can send an inline bundle. A worker gets 403. Stage the full bundle (manifest and every file) where a lead can read it, such as `/workspace/shared/extensions/<name>/` or agent-fs, and hand it to a lead or operator to install and enable. The check is the `extension.install.inline` permission.
 - Validation, asset creation, ownership, and version staging match a catalog install. The extension lands disabled. Enabling it uses the existing enable path and its `extension.activate` check.
 - Agents use the `extension-install` MCP tool with `manifest` and `files`.
 

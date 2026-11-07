@@ -7,18 +7,17 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import {
-  type AgentStatus,
   type AgentWithTasks,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
 } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
+import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { HarnessCell, harnessLabel } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
-import { StatusBadge } from "@/components/shared/status-badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -151,7 +150,8 @@ export default function AgentsPage() {
         field: "status",
         headerName: "Status",
         width: 120,
-        cellRenderer: (params: { value: AgentStatus }) => <StatusBadge status={params.value} />,
+        cellRenderer: (params: { data: AgentWithTasks | undefined }) =>
+          params.data ? <AgentStatusBadge agent={params.data} /> : null,
       },
       {
         colId: "capacity",
@@ -279,7 +279,7 @@ export default function AgentsPage() {
                 live={agent.status === "busy"}
                 leading={<AgentAvatar agentId={agent.id} agentName={agent.name} size="sm" />}
                 title={agent.name}
-                status={<StatusBadge status={agent.status} />}
+                status={<AgentStatusBadge agent={agent} />}
                 meta={[
                   agent.role,
                   agent.harnessProvider ? harnessLabel(agent.harnessProvider) : null,

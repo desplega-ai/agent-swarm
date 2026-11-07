@@ -46,6 +46,24 @@ const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
   "reviewing",
 ]);
 
+/**
+ * The live line of an active task that is not running yet. Lifecycle rows
+ * ("Created", "Offered") alone never replace it, so a fresh task always says
+ * where it stands.
+ */
+function waitingLabelFor(status: AgentTaskStatus): string {
+  switch (status) {
+    case "paused":
+      return "Paused";
+    case "reviewing":
+      return "In review";
+    case "draft":
+      return "Draft. Not queued yet";
+    default:
+      return "Queued. Waiting for an agent to pick this up…";
+  }
+}
+
 export interface ChainOfThoughtProps {
   taskId: string;
   status: AgentTaskStatus;
@@ -102,13 +120,25 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
 
   if (!isActive && !task) return null;
 
+  // The polled row is fresher than the caller's (a session poll): a queued
+  // task flips to "Working for…" as soon as an agent starts it.
+  const liveStatus = fetched?.status ?? status;
+  const workingSince =
+    liveStatus === "in_progress" && task ? (task.acceptedAt ?? task.createdAt) : undefined;
+
   return (
     <Transcript
       className={className}
       rows={rows}
       running={isActive}
+      workingSince={workingSince}
+      // A working task shows "Working for …" instead (`workingSince`).
       waitingLabel={
-        status === "in_progress" ? "Thinking…" : "Waiting for an agent to pick this up…"
+        liveStatus === "in_progress"
+          ? workingSince
+            ? undefined
+            : "Thinking…"
+          : waitingLabelFor(liveStatus)
       }
       fold={
         task

@@ -25,6 +25,9 @@ export async function runAppAction({
   name,
   input = {},
   parentTaskId,
+  followUp,
+  requestedByUserId,
+  contextKey,
   caller,
   actor,
 }: {
@@ -33,6 +36,18 @@ export async function runAppAction({
   input?: Record<string, unknown>;
   /** Task-kind actions only: chains the created task under an existing one. The HTTP route rejects it (400) for script and sync actions, which never read it. */
   parentTaskId?: string;
+  /** Task-kind actions only: `false` creates the task with no Lead follow-up (review) when it finishes. */
+  followUp?: boolean;
+  /**
+   * Task-kind actions only: the person the task is for, already resolved by
+   * the caller (`resolveTaskRequester`). Falls back to the user in `actor`.
+   */
+  requestedByUserId?: string;
+  /**
+   * Task-kind actions only: the created task's `contextKey`, built by the
+   * caller from this app's id (`appSessionContextKey`), never client-supplied.
+   */
+  contextKey?: string;
   caller: AppActionCaller;
   actor: string;
 }) {
@@ -138,8 +153,13 @@ export async function runAppAction({
       // App-spawned tasks group under the app's asset namespace so a
       // swarm-tasks source can pull them back via config.assetKey.
       key: normalizeAssetKey(`shared/app:${app.id}/action:${name}/`),
-      ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
+      requestedByUserId:
+        requestedByUserId ?? (actor.startsWith("user:") ? actor.slice("user:".length) : undefined),
       ...(parentTaskId ? { parentTaskId } : {}),
+      // The worker task's Lead follow-up reviews its result; a chat-style
+      // caller (SessionThread) opts out so each message stays one task.
+      followUpConfig: followUp === false ? { disabled: true } : undefined,
+      contextKey,
     },
     { origin: "app" },
   );

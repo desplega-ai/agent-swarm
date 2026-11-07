@@ -1,0 +1,8 @@
+{
+  "$schema": "../manifest.schema.json",
+  "name": "sql-admin-only",
+  "description": "Blocks db-query tool calls on tasks created by a non-admin user",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

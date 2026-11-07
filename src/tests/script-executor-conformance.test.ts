@@ -594,6 +594,7 @@ const retryServer = Bun.serve({
     hits.push({ at: Date.now(), key: req.headers.get("idempotency-key") });
     retryHits.set(hitKey, hits);
     if (spec && hits.length <= Number(spec[2])) {
+      if (spec[3].includes("held")) await holdFor(6_000);
       const status = Number(spec[1]);
       const headers: Record<string, string> =
         status === 429 && spec[3].includes("ra") ? { "retry-after": "1" } : {};
@@ -611,15 +612,20 @@ const hitsOf = (path: string) => retryHits.get(path) ?? [];
 // A raw TCP server whose first connection for each path closes before any
 // answer (a network error on the client); later connections answer 200.
 const dropHits = new Map<string, number>();
+const dropKeys = new Map<string, Array<string | null>>();
 const dropServer = Bun.listen({
   hostname: "127.0.0.1",
   port: 0,
   socket: {
-    data(socket, chunk) {
+    async data(socket, chunk) {
       const path = /^[A-Z]+ (\S+)/.exec(chunk.toString())?.[1] ?? "";
       const count = (dropHits.get(path) ?? 0) + 1;
       dropHits.set(path, count);
+      const keys = dropKeys.get(path) ?? [];
+      keys.push(/idempotency-key: ([^\r\n]+)/i.exec(chunk.toString())?.[1] ?? null);
+      dropKeys.set(path, keys);
       if (count === 1) {
+        if (path.includes("held")) await holdFor(6_000);
         socket.end();
         return;
       }
@@ -989,7 +995,25 @@ export default async (_args, ctx) => {
     // A keyed write is repeat-safe, but it is still a write: its retry may start
     // a run, so the read retry budget must not cut it off and report a failure.
     retryTest("ctx.swarm never cuts off a keyed write's retry", async () => {
-      const keys = { after429: `429-1-slow-${name}-k429`, after502: `502-1-slow-${name}-k502` };
+      const keys = {
+        after429: `429-1-slow-${name}-k429`,
+        after502: `502-1-slow-${name}-k502`,
+        held502: `502-1-held-${name}-k502`,
+      };
+      const droppedId = `held-drop-${name}`;
+      const dropped = run(
+        makeExecutor,
+        `export default async (args, ctx) => {
+  try {
+    const r = await ctx.swarm.workflow_trigger({ id: args.id, idempotencyKey: "same-key" });
+    return [r.success, r.status];
+  } catch {
+    return "threw";
+  }
+};`,
+        { id: droppedId },
+        dropBase,
+      );
       const output = await run(
         makeExecutor,
         `export default async (args, ctx) => {
@@ -998,13 +1022,26 @@ export default async (_args, ctx) => {
     const r = await ctx.swarm.workflow_trigger({ id, idempotencyKey: "same-key" });
     return { result: [r.success, r.status], ms: Date.now() - started };
   };
-  const [after429, after502] = await Promise.all([timed(args.after429), timed(args.after502)]);
-  return { after429, after502 };
+  const { held502: key } = args;
+  const [after429, after502, held502, read] = await Promise.all([
+    timed(args.after429), timed(args.after502), timed(args.held502),
+    ctx.swarm.kv_get({ key }),
+  ]);
+  return { after429, after502, held502, read: [read.success, read.status] };
 };`,
         keys,
       );
       expect(output.error).toBeUndefined();
       const result = output.result as Record<string, { result: unknown; ms: number }>;
+      const droppedOutput = await dropped;
+      expect(droppedOutput.error).toBeUndefined();
+      expect({ held502: result.held502.result, dropped: droppedOutput.result }).toEqual({
+        held502: [true, 200],
+        dropped: [true, 200],
+      });
+      expect(dropKeys.get(`/api/workflows/${droppedId}/trigger`)).toEqual(["same-key", "same-key"]);
+      expect(output.result).toMatchObject({ read: [false, 502] });
+      expect(hitsOf(`/api/kv/${keys.held502}`).length).toBe(1);
       for (const [label, id] of Object.entries(keys)) {
         expect(result[label].result).toEqual([true, 200]);
         expect(result[label].ms).toBeGreaterThanOrEqual(5_900);

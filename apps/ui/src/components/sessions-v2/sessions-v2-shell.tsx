@@ -7,7 +7,9 @@
  * pane area (Phase 8) holds the main pane with its tabs and one split pane.
  * A tab shows the New session composer (it keeps the `?seed=` and
  * `?prefill=` links working), the group tab (`?view=`), or a session: the
- * header (Phase 6) over the turn timeline (Phase 7). The first-run guide
+ * header (Phase 6) over the turn timeline (Phase 7). A use-case group (one
+ * with a schedule or files under its key) gets a pinned Overview tab first
+ * (step-10), and `?tab=overview|list` picks its face. The first-run guide
  * and the "Open in split…" picker mount here too.
  */
 
@@ -19,6 +21,7 @@ import type { SessionListItem } from "@/api/types";
 import { LinkPreviewDock } from "@/components/link-preview/link-preview-dock";
 import { ResizeHandle } from "@/components/shared/resize-handle";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
@@ -29,6 +32,8 @@ import { cn } from "@/lib/utils";
 import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
 import { GroupTab } from "./group-tab";
 import { NewSessionTab } from "./new-session-tab";
+import { GroupPanePending, useGroupPane } from "./overview/group-pane";
+import { OverviewTab } from "./overview/overview-tab";
 import { SessionPane } from "./pane/session-pane";
 import { usePaneKeys } from "./pane/use-pane-keys";
 import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
@@ -84,6 +89,13 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
   const url = useSessionsUrlState();
   const { focused, tabs, split, view, q, setQuery, focusTab } = url;
+  // A use case is one tab: its Overview and its session list are two faces
+  // of that tab, switched inside it (`?tab=`), never two strip tabs.
+  const groupPane = useGroupPane(view, url.groupPane);
+  const focusStripTab = (tab: string) => {
+    setActivePane(0);
+    focusTab(tab);
+  };
   const [width, setWidth] = useSidebarWidth();
   const sidebarId = useId();
   // The pane that holds the pane keys, Cmd+K's session, and sidebar clicks.
@@ -117,9 +129,15 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
       treeRef.current?.move(sessions, returnFocus),
     [],
   );
+  // The session header's group crumb: open the group in its tab, next to
+  // the session, and show it in the sidebar tree.
+  const { openView } = url;
   const revealGroup = useCallback(
-    (groupKey: string | null) => treeRef.current?.revealGroup(groupKey),
-    [],
+    (groupKey: string | null) => {
+      treeRef.current?.revealGroup(groupKey);
+      openView(groupKey ?? "nogroup");
+    },
+    [openView],
   );
 
   /**
@@ -218,8 +236,29 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     ) : null;
     const body =
       tab === NEW_SESSION_TAB ? null : tab === GROUP_TAB && view ? (
-        // A row opens next to the group tab, in the main pane.
-        <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+        groupPane.pane === "pending" ? (
+          // A link with no `?tab=` waits for the group's schedules and files.
+          <GroupPanePending />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {groupPane.qualifies ? (
+              <GroupPaneSwitch pane={groupPane.pane} onPick={url.focusGroupPane} />
+            ) : null}
+            {groupPane.pane === "overview" && groupPane.qualifies ? (
+              // A new key per group: the last visit and the Ask the Lead draft
+              // never carry over to the next group.
+              <OverviewTab
+                key={view}
+                view={view}
+                onOpen={(id) => openSession(id, { pane: 0 })}
+                onOpenList={() => url.focusGroupPane("list")}
+              />
+            ) : (
+              // A row opens next to the group tab, in the main pane.
+              <GroupTab view={view} onOpen={(id) => openSession(id, { pane: 0 })} />
+            )}
+          </div>
+        )
       ) : (
         renderSession(tab, 0)
       );
@@ -311,10 +350,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
             view={view}
             activePane={activePane}
             onActivatePane={setActivePane}
-            onFocusTab={(tab) => {
-              setActivePane(0);
-              focusTab(tab);
-            }}
+            onFocusTab={focusStripTab}
             onCloseTab={url.closeTab}
             onNewSession={() => newSession(null)}
             onPickSplit={() => setPickingSplit(true)}
@@ -345,5 +381,31 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         <FirstRunGuide state={guide.state} onStep={guide.setStep} onClose={guide.close} />
       </div>
     </TooltipProvider>
+  );
+}
+
+const GROUP_PANES = [
+  { value: "overview", label: "Overview" },
+  { value: "list", label: "Sessions" },
+] as const;
+
+/** The use case tab's two faces: its Overview and its session list. */
+function GroupPaneSwitch({
+  pane,
+  onPick,
+}: {
+  pane: "overview" | "list";
+  onPick: (pane: "overview" | "list") => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center border-b border-border-subtle px-4 py-2">
+      <SegmentedControl
+        size="sm"
+        aria-label="Use case view"
+        value={pane}
+        onValueChange={onPick}
+        options={GROUP_PANES}
+      />
+    </div>
   );
 }

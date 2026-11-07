@@ -138,9 +138,14 @@ function defaultIntervalMs(): number {
   return parseHeartbeatIntervalMs(process.env.HEARTBEAT_INTERVAL_MS);
 }
 
-/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
+/**
+ * Stall threshold: tasks with fresh worker heartbeat but no task update for
+ * this many minutes. A positive integer, or 30: `Number(value) || 30` kept a
+ * negative threshold, which flagged every recently updated task (#2835).
+ */
 function stallThresholdMinutes(): number {
-  return Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+  const value = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN);
+  return Number.isInteger(value) && value > 0 ? value : 30;
 }
 
 /** Stall threshold: tasks with no active session (worker clearly dead) */
@@ -169,9 +174,14 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
  */
 const DRAFT_TASK_TIMEOUT_MINUTES = Number(process.env.HEARTBEAT_DRAFT_TASK_TIMEOUT_MIN) || 5;
 
-/** Max crash-recovery resume generations before failing for lead triage */
+/**
+ * Max crash-recovery resume generations before failing for lead triage: a
+ * positive integer, or 3. `Number(value) || 3` kept a negative limit, which
+ * exhausted the budget before the first resume (#2834).
+ */
 export function maxResumeGenerations(): number {
-  return Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
+  const value = Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS);
+  return Number.isInteger(value) && value > 0 ? value : 3;
 }
 
 export const RESUME_BUDGET_EXHAUSTED_REASON = "resume_budget_exhausted";

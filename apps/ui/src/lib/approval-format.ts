@@ -406,3 +406,10 @@ export function claimedNameFor(
   }
   return undefined;
 }
+
+/** How often a live approval card re-reads its request: 5 s until it leaves `pending`, then never. */
+export function approvalPollInterval(
+  status: ApprovalRequest["status"] | undefined,
+): number | false {
+  return status === undefined || status === "pending" ? 5000 : false;
+}

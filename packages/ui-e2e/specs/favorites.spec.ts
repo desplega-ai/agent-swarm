@@ -52,3 +52,37 @@ test("starring a page in the list stays on the list and is stored for the picked
 
   await clean.assertClean();
 });
+
+test("starring a sessions group in its title row stays on after a reload", async ({
+  page,
+  seed,
+  swarm,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const { groupKey, groupName } = seed!.sessionChain;
+  const keyFavorites = async () => {
+    const response = await fetch(`${swarm.apiUrl}/api/favorites?itemType=key`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "X-Swarm-User-Id": seed!.user.id },
+    });
+    return ((await response.json()) as FavoriteIds).favoriteIds;
+  };
+  // The title row, not the sidebar row's hover star with the same name.
+  const titleRow = () =>
+    page.getByRole("heading", { level: 2, name: groupName }).locator("xpath=..");
+
+  await page.goto(`/sessions?view=${groupKey}`);
+  await titleRow().getByRole("button", { name: "Star this use case" }).click();
+  await expect(titleRow().getByRole("button", { name: "Unstar" })).toBeVisible();
+  await expect.poll(keyFavorites).toContain(groupKey);
+
+  await page.reload();
+  await expect(titleRow().getByRole("button", { name: "Unstar" })).toBeVisible();
+
+  // Leave the worker's seeded state as found.
+  await titleRow().getByRole("button", { name: "Unstar" }).click();
+  await expect(titleRow().getByRole("button", { name: "Star this use case" })).toBeVisible();
+  await expect.poll(keyFavorites).not.toContain(groupKey);
+
+  await clean.assertClean();
+});

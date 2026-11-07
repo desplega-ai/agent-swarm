@@ -36,8 +36,24 @@ nonzero exit status, so provider initialization never continues after failure.
 
 The step injects its HTTP probe, clock, sleep and logger for unit tests.
 `src/tests/entrypoint-api-readiness.test.ts` also runs the real Bash shim and Bun
-module against local HTTP servers. This is the first per-step migration from
-Bash tracked in #2047; the remaining boot stages still run in the shell.
+module against local HTTP servers. This and provider-binary verification below
+are per-step migrations from Bash tracked in #2047. Other boot stages still
+run in the shell.
+
+## Worker provider-binary verification
+
+After credential preparation and before workspace setup, the shell calls
+`src/commands/entrypoint-provider-binary.ts` with the selected harness. The
+standalone Bun step checks the configured CLI on PATH, the OpenCode SDK file,
+or Cursor's explicit ripgrep path. Cloud providers and pi need no CLI check.
+ACP checks its target executable, with unset-only custom-command fallbacks and
+explicit-argument handling matching the adapter. Grok/fx version calls disable
+auto-updates and remain informational. A missing required binary exits 1.
+
+The step injects executable lookup, file/access probes, version execution and
+logging. Its unit tests and the real Bash-shim tests cover it without Docker.
+Both worker image leaf stages ship the standalone file; see
+[docker-images.md](./docker-images.md#worker-boot-helpers).
 
 ## Tool-schema cost on harness bumps
 
@@ -813,7 +829,7 @@ Internal refactors that don't change observable behavior don't need a doc update
 1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
 2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
 3. Add its name to `ProviderNameSchema`, wire `createProviderAdapter`, and keep `traits.steerModes` synchronized with `PROVIDER_STEER_CAPABILITIES`.
-4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files, and give it its own branch in the `verify_provider_binary` chain (or add it to the final `!= "pi"` guard when it has no binary).
+4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files, and add its executable/SDK check (or explicit no-binary branch) to `src/commands/entrypoint-provider-binary.ts`.
 5. Run `bun run test:root -- src/tests/provider-registration.test.ts`. It iterates `ProviderNameSchema` over every mandatory touch point (credential checkers, the live Test-connection switch, both unknown-provider messages, `PricingProviderSchema`, the pricing seeder, the local-harness lists on server and dashboard, the dashboard's `PROVIDER_NAMES`, and both entrypoint chains) and names the provider and file on a miss. When a touch point should not carry the provider, add it to that touch point's `exempt` map with a one-line reason; an exemption for a provider that is present fails as stale.
 6. Update the docs-site guide:
    - Add to "Reference implementations" table.

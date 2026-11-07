@@ -135,6 +135,11 @@ export function isMyGroupRow(
   return row?.type === "group" && !row.sharedWithMe && !row.readOnly;
 }
 
+/** The key a row's star stands for: real group rows only, not nested thread rows. */
+export function groupStarKey(row: TreeRow): string | null {
+  return row.type === "group" && !row.node.thread ? row.node.key : null;
+}
+
 export function isNavRow(row: TreeRow): row is NavRow {
   return NAV_TYPES.has(row.type);
 }

@@ -1148,6 +1148,104 @@ test("limit clamps to 200 and count without chain filters does not recurse", asy
 });
 
 describe("Mine view hides machine-started roots", () => {
+  test("grouped schedule runs appear in Mine and source-filtered groups only", async () => {
+    const schedule = await createScheduledTask({
+      name: crypto.randomUUID(),
+      intervalMs: 60_000,
+      taskTemplate: "Research",
+    });
+    const key = "shared/competitor-research/";
+    const run = await task(key, {
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: other.id,
+    });
+    const ownerless = await task(`${key}task:ownerless/`, {
+      source: "schedule",
+      scheduleId: schedule.id,
+      requestedByUserId: undefined,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [run.id]);
+    await task(key, { source: "ui", requestedByUserId: other.id });
+    // Even shared schedule runs outside user groups retain the default source filter.
+    for (const inboxKey of [
+      "shared/",
+      `shared/schedule:${schedule.id}/`,
+      "shared/slack/channel/",
+    ]) {
+      const ungrouped = await task(inboxKey, { source: "schedule", scheduleId: schedule.id });
+      await share(ungrouped);
+    }
+    const headers = { "x-swarm-user-id": owner.id };
+    for (const shown of ["", "&showSource=comb,ui", "&showSource="]) {
+      const response = await fetch(
+        `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(key)}${shown}`,
+        { headers },
+      );
+      expect(response.status).toBe(200);
+      const list = (await response.json()) as {
+        total: number;
+        sessions: { root: { id: string } }[];
+      };
+      expect(list.total).toBe(2);
+      expect(list.sessions.map((row) => row.root.id).sort()).toEqual([run.id, ownerless.id].sort());
+      const treeResponse = await fetch(`${baseUrl}/api/session-tree?${shown.slice(1)}`, {
+        headers,
+      });
+      expect(treeResponse.status).toBe(200);
+      const tree = (await treeResponse.json()) as Awaited<ReturnType<typeof getSessionTree>>;
+      expect(tree.groups.find((group) => group.key === key)).toMatchObject({
+        total: 2,
+        running: 1,
+      });
+      if (shown) expect(tree.inbox.total).toBe(0);
+      const inboxResponse = await fetch(`${baseUrl}/api/sessions?scope=tree&triage=inbox${shown}`, {
+        headers,
+      });
+      const inbox = (await inboxResponse.json()) as { sessions: { root: { id: string } }[] };
+      expect(
+        inbox.sessions.some((row) => row.root.id === run.id || row.root.id === ownerless.id),
+      ).toBe(false);
+    }
+    const defaultList = await fetch(`${baseUrl}/api/sessions?scope=tree&showSource=comb,ui`, {
+      headers,
+    });
+    expect(((await defaultList.json()) as { total: number }).total).toBe(0);
+    // A resource group view keeps the default filters: only user groups relax them.
+    const resourceList = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&showSource=comb,ui&groupKey=${encodeURIComponent(
+        `shared/schedule:${schedule.id}/`,
+      )}`,
+      { headers },
+    );
+    expect(((await resourceList.json()) as { total: number }).total).toBe(0);
+    const hidden = await getSessionTree(actor(), NOW, { mine: true, hideSource: ["schedule"] });
+    expect(hidden.groups.find((group) => group.key === key)).toBeUndefined();
+    // "Select all N" in the group writes the schedule runs the group list shows.
+    const bulk = await fetch(`${baseUrl}/api/session-triage`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ action: "read", groupKey: key }),
+    });
+    expect(bulk.status).toBe(200);
+    expect(await bulk.json()).toEqual({ updated: 2 });
+    await state(run.id, "done");
+    const triaged = await fetch(
+      `${baseUrl}/api/sessions?scope=tree&groupKey=${encodeURIComponent(key)}`,
+      { headers },
+    );
+    expect(((await triaged.json()) as { total: number }).total).toBe(1);
+    // The Done count matches the Done list, which keeps the Mine rule for schedule runs.
+    const doneList = (await (
+      await fetch(`${baseUrl}/api/sessions?scope=tree&triage=done`, { headers })
+    ).json()) as { total: number; sessions: { root: { id: string } }[] };
+    expect(doneList.sessions.some((row) => row.root.id === run.id)).toBe(false);
+    const doneTree = (await (
+      await fetch(`${baseUrl}/api/session-tree`, { headers })
+    ).json()) as Awaited<ReturnType<typeof getSessionTree>>;
+    expect(doneTree.done.total).toBe(doneList.total);
+  });
+
   test("a workflow root attributed to the viewer is hidden by default and shown under All", async () => {
     // Positive control: pr-review-demo fan-out carries the trigger user as requester.
     const demo = await task("shared/", { source: "workflow", tags: ["pr-review-demo"] });

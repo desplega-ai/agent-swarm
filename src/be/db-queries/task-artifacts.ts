@@ -1,3 +1,4 @@
+import { getGitHubHostForSql } from "../../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../../utils/github-pull-request";
 import { getDbClient } from "../db";
 
@@ -29,6 +30,7 @@ function githubTokenDelimitersSql(): string {
 
 /** Keep aggregate SQL matching aligned with extractGitHubPullRequestUrls(). */
 function githubPullRequestExistsSql(value: string): string {
+  const host = getGitHubHostForSql();
   return `EXISTS (
     WITH RECURSIVE
     token_delimiters(position, code_point) AS (
@@ -58,16 +60,16 @@ function githubPullRequestExistsSql(value: string): string {
     ),
     github_paths(path) AS (
       SELECT CASE
-        WHEN lower(token) GLOB 'https://github.com/*'
-          THEN substr(token, length('https://github.com/') + 1)
-        WHEN lower(token) GLOB 'http://github.com/*'
-          THEN substr(token, length('http://github.com/') + 1)
-        ELSE substr(token, length('github.com/') + 1)
+        WHEN lower(token) GLOB 'https://${host}/*'
+          THEN substr(token, length('https://${host}/') + 1)
+        WHEN lower(token) GLOB 'http://${host}/*'
+          THEN substr(token, length('http://${host}/') + 1)
+        ELSE substr(token, length('${host}/') + 1)
       END
       FROM tokens
-      WHERE lower(token) GLOB 'https://github.com/*'
-         OR lower(token) GLOB 'http://github.com/*'
-         OR lower(token) GLOB 'github.com/*'
+      WHERE lower(token) GLOB 'https://${host}/*'
+         OR lower(token) GLOB 'http://${host}/*'
+         OR lower(token) GLOB '${host}/*'
     ),
     github_segments(owner, repo, remainder) AS (
       SELECT

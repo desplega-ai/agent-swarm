@@ -89,7 +89,7 @@ export default function ConnectionDetailPage() {
   if (error || !connection) {
     return (
       <div className="flex flex-col gap-3 p-4">
-        <BackButton fallback="/connections" />
+        <BackButton fallback="/integrations/tools?tab=connections" />
         <InlineError error={error ?? "Connection not found"} />
       </div>
     );
@@ -124,7 +124,7 @@ export default function ConnectionDetailPage() {
       <PageHeader
         title={
           <span className="flex min-w-0 flex-wrap items-center gap-2">
-            <BackButton fallback="/connections" iconOnly />
+            <BackButton fallback="/integrations/tools?tab=connections" iconOnly />
             <span className="truncate text-xl font-semibold">{connection.slug}</span>
             <CopyIconButton value={connection.slug} label="Copy slug" />
             <KindBadge kind={connection.kind} />
@@ -234,7 +234,7 @@ export default function ConnectionDetailPage() {
                           {connection.credentialBinding.authKind}
                         </Badge>
                         <Link
-                          to="/connections?tab=bindings"
+                          to="/settings/fetch-credentials"
                           className="hover:underline"
                           title="View credential bindings"
                         >
@@ -242,7 +242,7 @@ export default function ConnectionDetailPage() {
                         </Link>
                         {connection.credentialBinding.oauthProvider ? (
                           <Link
-                            to={`/connections/oauth-apps/${encodeURIComponent(oauthAppId ?? connection.credentialBinding.oauthProvider)}`}
+                            to={`/integrations/tools/oauth-apps/${encodeURIComponent(oauthAppId ?? connection.credentialBinding.oauthProvider)}`}
                             className="text-muted-foreground hover:text-foreground hover:underline"
                             title="View OAuth app"
                           >

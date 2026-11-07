@@ -138,7 +138,8 @@ export const registerJoinSwarmTool = (server: McpServer) => {
             capabilities,
             claudeMd: defaultClaudeMd,
             soulMd: defaultSoulMd,
-            identityMd: defaultIdentityMd,
+            // A pending file import may have written it in createAgent.
+            identityMd: agent.identityMd || defaultIdentityMd,
           });
 
           return updatedAgent ?? agent;

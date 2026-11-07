@@ -11,6 +11,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { sessionErrorStatus, useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
+import type { AgentTask } from "@/api/types";
 import { TurnTimeline } from "@/components/sessions-v2/pane/turn-timeline";
 import { EmptyState } from "@/components/shared/empty-state";
 import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-composer";
@@ -20,7 +21,12 @@ import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { CHAT_COLUMN } from "@/lib/chat-width";
 import { typingLabel } from "@/lib/session-presence";
 import { isReadOnlyAccess } from "@/lib/session-sharing";
-import { canSteerSessionTask, sessionComposerTarget } from "@/lib/task-steer";
+import {
+  anyAgentComposerTarget,
+  canSteerAnyAgentTask,
+  canSteerSessionTask,
+  sessionComposerTarget,
+} from "@/lib/task-steer";
 import { cn } from "@/lib/utils";
 import { ComposerReadOnlyNotice } from "./composer-dock";
 import { useSessionPresenceContext } from "./session-presence";
@@ -41,6 +47,25 @@ export interface SessionConversationProps {
    * bar`), and classes for its dock (the safe-area inset).
    */
   composer?: { bar?: boolean; className?: string };
+  /**
+   * Who the composer steers. `lead` (the default): the latest live lead task,
+   * as Sessions does. `any`: the newest unfinished task of any agent, for a
+   * session whose tasks run on workers (a json-render app page).
+   */
+  steerTarget?: "lead" | "any";
+  /** The steering row's source. Omitted: `"ui"`. */
+  steerSource?: TaskComposerProps["steerSource"];
+  /** Hands follow-ups to the caller; see `TaskComposerProps.onFollowUp`. */
+  onFollowUp?: TaskComposerProps["onFollowUp"];
+  /** The person's words in a wrapped task prompt; see `TurnTimeline`. Turns timeline only. */
+  requestText?: (task: AgentTask) => string | null;
+  /** Controlled composer draft. Omit both to keep the draft in the composer. */
+  value?: string;
+  onValueChange?: (next: string) => void;
+  /** Follow-up placeholder. Omitted: the composer's "Follow up…". */
+  placeholder?: string;
+  /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
+  routeLabel?: string;
 }
 
 const SCROLLED_UP_FADE = {
@@ -54,6 +79,14 @@ export function SessionConversation({
   renderComposerActions,
   timeline = "legacy",
   composer: composerLayout,
+  steerTarget = "lead",
+  steerSource,
+  onFollowUp,
+  requestText,
+  value,
+  onValueChange,
+  placeholder,
+  routeLabel,
 }: SessionConversationProps) {
   // Steering (≥1.122.1). Older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
@@ -87,10 +120,14 @@ export function SessionConversation({
   // `isLeadTask`, `provider`, and `supportedSteerModes` to decide between
   // steering the running task and chaining a new one (decision 6). The live
   // lead turn wins over a newer delegated worker task.
+  const anyAgent = steerTarget === "any";
   const latestLeafTask = useMemo(() => {
     if (!detail) return null;
-    return sessionComposerTarget(detail.chain) ?? detail.root;
-  }, [detail]);
+    const target = anyAgent
+      ? anyAgentComposerTarget(detail.chain)
+      : sessionComposerTarget(detail.chain);
+    return target ?? detail.root;
+  }, [detail, anyAgent]);
 
   // Signature changes whenever the chain shape changes (new task) or any
   // existing task's status/output updates. Stable when polling returns the
@@ -100,8 +137,12 @@ export function SessionConversation({
     [detail?.chain],
   );
 
-  // Sessions steers only the latest *lead* task (decision 6).
-  const canSteer = steerGate.supported && steeringEnabled && canSteerSessionTask(latestLeafTask);
+  // Sessions steers only the latest *lead* task (decision 6). The `any` rule
+  // steers whatever unfinished task the target is.
+  const canSteer =
+    steerGate.supported &&
+    steeringEnabled &&
+    (anyAgent ? canSteerAnyAgentTask(latestLeafTask) : canSteerSessionTask(latestLeafTask));
 
   // The turn timeline also grows with a typing bubble and an approval line.
   const flowSignature = turns
@@ -160,6 +201,7 @@ export function SessionConversation({
                 showHandoffs={showInternalHandoffs}
                 typing={typingViewers}
                 onLayoutChange={recheck}
+                requestText={requestText}
               />
             ) : (
               <SessionTimeline
@@ -240,9 +282,15 @@ export function SessionConversation({
             renderActions={renderComposerActions}
             bar={composerLayout?.bar}
             className={composerLayout?.className}
+            steerSource={steerSource}
+            onFollowUp={onFollowUp}
+            placeholder={placeholder}
+            routeLabel={routeLabel}
+            value={value}
             onValueChange={(next) => {
               composer.current.hasText = next.trim().length > 0;
               reportTyping();
+              onValueChange?.(next);
             }}
           />
         </div>

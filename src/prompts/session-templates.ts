@@ -103,8 +103,38 @@ Worker completion/failure triggers a follow-up, or only wakes your deferred wait
 
 For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 
+A use case is work that repeats or continues, for example a report twice a week. Plan it as one use case with one asset key:
+- When the task prompt names a use case, use its key. Else agree a short slug with the requester. The key is \`shared/<slug>/\`, or \`personal/<user>/<slug>/\` for private work.
+- Give that \`key\` to \`create-schedule\` and \`create-page\`. The results go under the same path (see Outputs).
+- End the planning reply with this line: "This use case lives in Sessions → <slug>: {{appUrl}}/sessions?view=<key>".
+- In a use-case session, a request for one time only is a normal task in the key. A request that changes the future runs is an \`update-schedule\` call with the new \`taskTemplate\`. After that call, show the old and the new template as a \`diff\` block in your reply, and ask the requester to confirm it.
+
 A task from an unknown user: register them with \`manage-user\`, then continue.
+A task needs a tool that is not connected (GitHub, Linear, Jira, Gmail, ...): say so and link {{appUrl}}/integrations/tools. Do not work around it.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
+`,
+  variables: [
+    {
+      name: "appUrl",
+      description: "Dashboard origin from getAppUrl() (APP_URL, else the default app URL)",
+    },
+  ],
+  category: "system",
+});
+
+// Lead-only, appended by base-prompt when the Slack prompt tools are on or the
+// server has the chat-sdk capability (not when an adapter is connected). All
+// posting tools (slack-start-thread, slack-post, chat-post) are lead-only, so
+// workers never get this rule. The skills hold the steps.
+registerTemplate({
+  eventType: "system.agent.lead.channel_thread",
+  header: "",
+  defaultBody: `
+## Use-case channel thread
+
+When you handle the follow-up of the first run of a use case (the planning session has usually ended by then), offer once to post a summary of each run to a channel thread. Before you offer, read \`kv-get\` with namespace \`usecase:<key>\` and key \`thread\`. A stored value means that you offered before. Do not offer again.
+When you finish or review a run of a use case that has a stored thread, post the run summary in that thread.
+The \`slack-interaction\` skill (Slack) and the \`chat-sdk\` skill (Telegram, Discord, Teams) give the steps.
 `,
   variables: [],
   category: "system",
@@ -212,17 +242,23 @@ registerTemplate({
 ## Outputs
 
 Short answers: inline in the task output.
-agent-fs is the shared drive between agents and people. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
-Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
+agent-fs is the shared drive between agents and people. Deliver results as files. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
+Use-case results go under the task's asset key (\`key\` in \`get-task-details\`) in the shared drive. The drive path equals the key string, for example \`shared/<slug>/report-<YYYY-MM-DD>.md\`. Later runs read the earlier reports in that folder and compare.
+Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
-Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. Report missing variables.
-Give people the live app link \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
+Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
+Link files as \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>{{fileLinkQuery}}\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
   variables: [
     {
       name: "fileLinkBase",
       description:
-        "Base URL of people-facing file links (AGENT_FS_LINK_TARGET); the literal AGENT_FS_LIVE_URL shell reference when unset",
+        "Base URL of people-facing file links: APP_URL by default when set, else the agent-fs live app (AGENT_FS_LINK_TARGET overrides)",
+    },
+    {
+      name: "fileLinkQuery",
+      description:
+        "Query string for live-app file links (?apiUrl=<AGENT_FS_PUBLIC_URL>); empty for dashboard links",
     },
   ],
   category: "system",
@@ -236,7 +272,7 @@ registerTemplate({
 
 Short answers: inline in the task output.
 Documents: Markdown task attachments; agent-fs is not configured here.
-Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
+Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
 `,
@@ -641,6 +677,45 @@ If this task reveals new stable communication preferences, persist them for the 
       description: "Formatted notes section sourced from users.notes, or empty string",
     },
   ],
+  category: "task_lifecycle",
+});
+
+// One-shot setup nudge for the lead. The API picks the requester's first open
+// checklist item, marks it nudged, and ships it on the poll trigger. The task
+// prompt carries it once; the system prompt never does.
+registerTemplate({
+  eventType: "task.checklist.nudge",
+  header: "",
+  defaultBody: `
+## Setup suggestion
+The requester has not finished setting up the swarm. Open item: {{label}}.
+If it fits the conversation, offer it once, at the end of your reply{{link_clause}}. If it does not fit, leave it out. Do not repeat the offer, and do not raise it again if they decline.
+`,
+  variables: [
+    { name: "label", description: "Checklist item label, e.g. Connect a chat channel" },
+    {
+      name: "href",
+      description:
+        "Dashboard link that opens the setup page for the item. Empty when APP_URL is not set",
+    },
+    {
+      name: "link_clause",
+      description: '", with the link <href>" when there is a link, or empty string',
+    },
+  ],
+  category: "task_lifecycle",
+});
+
+// Lead only: the task's key is a use-case group (the same rule create-schedule
+// and create-page use to inherit it). The system prompt never carries a key.
+registerTemplate({
+  eventType: "task.use_case",
+  header: "",
+  defaultBody: `
+## Use case
+This task is in the use case with key \`{{key}}\`. \`create-schedule\` and \`create-page\` use this key when you give no \`key\`. Its schedules: \`list-schedules\` with this key.
+`,
+  variables: [{ name: "key", description: "The task's asset key, a use-case group key" }],
   category: "task_lifecycle",
 });
 

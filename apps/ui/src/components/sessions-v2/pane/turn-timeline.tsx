@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
-import { ChainOfThought } from "@/components/sessions/chain-of-thought";
 import { TaskCard } from "@/components/sessions/task-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -65,6 +64,7 @@ export function TurnTimeline({
   showHandoffs,
   typing,
   onLayoutChange,
+  requestText,
 }: {
   rootTaskId: string;
   chain: AgentTask[];
@@ -75,8 +75,18 @@ export function TurnTimeline({
   typing: SessionViewer[];
   /** Called after a person opens or closes a step block: the bottom edge moved. */
   onLayoutChange?: () => void;
+  /**
+   * The person's words in a task whose prompt wraps them (a json-render app
+   * page's action prompt), or null for any other task. A task it names opens
+   * a turn, and its bubble shows only those words. Pass a stable function.
+   * Omitted: turns follow the task sources and show `task.task`.
+   */
+  requestText?: (task: AgentTask) => string | null;
 }) {
-  const { turns, rest } = useMemo(() => buildTurns(chain), [chain]);
+  const { turns, rest } = useMemo(
+    () => buildTurns(chain, { personText: requestText }),
+    [chain, requestText],
+  );
   const placed = useMemo(() => approvalsByPart(turns, approvals), [turns, approvals]);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
@@ -114,7 +124,13 @@ export function TurnTimeline({
     <div className={cn("@container/turns flex min-w-0 flex-col gap-6", CHAT_COLUMN)}>
       {turns.map((turn) => (
         <Fragment key={turn.id}>
-          {turn.person ? <PersonBubble task={turn.person} rootSource={rootSource} /> : null}
+          {turn.person ? (
+            <PersonBubble
+              task={turn.person}
+              rootSource={rootSource}
+              text={requestText?.(turn.person) ?? undefined}
+            />
+          ) : null}
           {/* Waits in a row fold into one line; a part with a card, an approval, or handoffs on screen stays whole. */}
           {foldWaits(
             turn.parts,
@@ -244,7 +260,7 @@ function PartView({
         </div>
       ) : null}
       {/* The lead works again: a live line under the latest answer, never in its place. */}
-      {part.live ? <ChainOfThought taskId={part.live.id} status={part.live.status} /> : null}
+      {part.live ? <SwarmReply task={part.live} /> : null}
       {approvals.map((approval) => (
         <ApprovalLine key={approval.id} approval={approval} />
       ))}

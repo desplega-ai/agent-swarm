@@ -927,3 +927,34 @@ describe("deferrals", () => {
     expect(isDeferral(task({ id: "k", output: waiting("Lead", "15:03"), ...deferred }))).toBe(true);
   });
 });
+
+describe("personText (an app page's messages)", () => {
+  // An app page sends each message as an `api` task whose prompt carries it.
+  const appTask = (id: string, createdAt: string, message: string, parentTaskId?: string) =>
+    task({ id, createdAt, source: "api", task: `prompt\n[msg] ${message}`, parentTaskId });
+  const personText = (t: AgentTask) =>
+    t.source === "api" ? (/^\[msg\] (.*)$/m.exec(t.task)?.[1] ?? null) : null;
+
+  test("without it, api tasks never open a turn", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain);
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(turns[0]?.person).toBeUndefined();
+  });
+
+  test("a task it names opens a turn, the root included", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.person?.id)).toEqual(["a", "b"]);
+  });
+
+  test("a task it returns null for keeps the source rules", () => {
+    const chain = [
+      appTask("a", at(10), "hi"),
+      task({ id: "w", createdAt: at(8), parentTaskId: "a", agentId: "worker", isLeadTask: false }),
+    ];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(partSteps(turns[0]!.parts[0]!).map((step) => step.tries[0]?.id)).toEqual(["w"]);
+  });
+});

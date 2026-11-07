@@ -2,6 +2,7 @@
 import type { MouseEvent } from "react";
 import type { AgentFsState } from "../../lib/agent-fs/state";
 import { encodedPathToCombPath, isCombNavigable } from "../../lib/comb/links";
+import type { AutoConnectOutcome } from "../comb/connect-flow";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
 
 const DEFAULT_AGENT_FS_LIVE_URL = "https://live.agent-fs.dev";
@@ -88,12 +89,14 @@ export interface AgentFsLinkContext {
   orgId: string | null;
   driveId: string | null;
   liveUrl: string | null;
+  /** This page load's settled automatic connect outcome (`isCombNavigable`). */
+  autoConnect?: AutoConnectOutcome | null;
 }
 
 /**
  * The links of an agent-fs attachment row. `href` opens the agent-fs live UI
  * (new tab). `combTo` opens the file in Comb (same tab) while Comb is
- * connected. A row without ids uses the swarm drive only while Comb is on.
+ * connected or connecting (`isCombNavigable`). A row without ids uses the swarm drive only while Comb is on.
  * With Comb off such a row has no link, the same as before Comb. `agentFs` is
  * null outside the provider (`/setup`).
  */
@@ -108,7 +111,7 @@ export function agentFsAttachmentLinks(
     defaultDriveId: combOn ? agentFs?.driveId : null,
   });
   if (!file) return { href: null, combTo: null };
-  const navigable = agentFs !== null && isCombNavigable(agentFs.state);
+  const navigable = agentFs !== null && isCombNavigable(agentFs.state, agentFs.autoConnect);
   return {
     href: liveFileUrl(file, agentFs?.liveUrl),
     combTo: navigable ? encodedPathToCombPath(file) : null,

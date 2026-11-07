@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar C · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<style>
+.itile:hover::after, .force-tip .itile[href="#schedules"]::after {
+  content: attr(title); position: absolute; z-index: 6; left: 50%; top: 100%; transform: translate(-50%, 6px);
+  white-space: nowrap; font-size: 12px; padding: 4px 8px; border-radius: var(--radius-md);
+  background: var(--color-foreground); color: var(--color-background); pointer-events: none;
+}
+.sb.icon .scroll { overflow: visible; }
+</style>
+</head>
+<body>
+<header class="chrome">
+  <span class="badge">Post-onboarding · step-16</span>
+  <h1>Sidebar <span>· C · WORK expanded, CONNECT and BUILD as icon rows</span></h1>
+  <span class="sp"></span>
+  <a class="back" href="./index.html">All variants</a>
+  <button class="theme-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="page">
+  <div class="lede">
+    <div><b>Idea</b>Only WORK gets labelled rows. CONNECT (Channels, Tools, AI providers) and BUILD (eight surfaces) become compact icon rows with tooltips. Everything is one click away and nothing needs a collapse state.</div>
+    <div><b>Trade-off</b>Densest and flattest, but icon rows rely on hover tooltips: no labels on touch, slower to learn, and harder to add a badge or a ninth BUILD item. Icon-collapsed mode becomes a long column of 18 icons.</div>
+  </div>
+  <p class="narrow-note">Desktop states are hidden on narrow screens. Widen the window to see them.</p>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>expanded</em> · hover tooltip shown on Schedules</h2>
+    <div class="desk"><div class="app force-tip">
+      <nav class="sb" aria-label="Main navigation, mockup 1"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav on" href="#home" title="Home" aria-current="page"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><div class="irow"><a class="itile" href="#channels" title="Channels" aria-label="Channels"><span class="ic i-message-circle" aria-hidden="true"></span></a><a class="itile" href="#tools" title="Tools" aria-label="Tools"><span class="ic i-wrench" aria-hidden="true"></span></a><a class="itile" href="#ai" title="AI providers" aria-label="AI providers"><span class="ic i-key" aria-hidden="true"></span></a></div></div><div class="grp"><div class="grp-l">Build</div><div class="irow"><a class="itile" href="#agents" title="Agents" aria-label="Agents"><span class="ic i-bot" aria-hidden="true"></span></a><a class="itile" href="#schedules" title="Schedules" aria-label="Schedules"><span class="ic i-clock" aria-hidden="true"></span></a><a class="itile" href="#workflows" title="Workflows" aria-label="Workflows"><span class="ic i-workflow" aria-hidden="true"></span></a><a class="itile" href="#scripts" title="Scripts" aria-label="Scripts"><span class="ic i-file-code" aria-hidden="true"></span></a><a class="itile" href="#skills" title="Skills" aria-label="Skills"><span class="ic i-book-open" aria-hidden="true"></span></a><a class="itile" href="#templates" title="Templates" aria-label="Templates"><span class="ic i-file-text" aria-hidden="true"></span></a><a class="itile" href="#memory" title="Memory" aria-label="Memory"><span class="ic i-database" aria-hidden="true"></span></a><a class="itile" href="#tasks" title="Tasks" aria-label="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span></a></div></div></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Good morning, Taras</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content"><div class="hp">
+  <section class="card">
+    <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-clipboard-check muted" aria-hidden="true"></span><span class="t">Approve: post the competitor digest to #market-intel</span><span class="m">20m ago</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-star-fill star" aria-hidden="true"></span><span class="t">competitor-research</span><span class="tag run">1 running</span></div>
+    </div>
+  </section>
+  <section class="card hp-wide">
+    <div class="card-h"><h3 class="card-t">Recent activity</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="st runn"></span><span class="t shimmer">Researcher is running Competitor scan</span><span class="m">4m ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Researcher wrote report-2026-11-04.md</span><span class="m">2h ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Lead planned the use case competitor-research</span><span class="m">5d ago</span></div>
+    </div>
+  </section>
+</div>
+</div></div>
+    </div></div>
+  </section>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>icon-collapsed</em> · every entry is a flat icon</h2>
+    <div class="desk"><div class="app tall">
+      <nav class="sb icon" aria-label="Main navigation, mockup 2"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span></div><div class="scroll"><a class="nav on" href="#home" title="Home" aria-label="Home"><span class="ic i-home" aria-hidden="true"></span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions" aria-label="Sessions"><span class="ic i-message-square" aria-hidden="true"></span></a><a class="nav" href="#files" title="Files" aria-label="Files"><span class="ic i-folder-open" aria-hidden="true"></span></a><a class="nav" href="#apps" title="Apps" aria-label="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span></a><a class="nav" href="#pages" title="Pages" aria-label="Pages"><span class="ic i-globe" aria-hidden="true"></span></a><div class="sep"></div><a class="nav" href="#channels" title="Channels" aria-label="Channels"><span class="ic i-message-circle" aria-hidden="true"></span></a><a class="nav" href="#tools" title="Tools" aria-label="Tools"><span class="ic i-wrench" aria-hidden="true"></span></a><a class="nav" href="#ai" title="AI providers" aria-label="AI providers"><span class="ic i-key" aria-hidden="true"></span></a><div class="sep"></div><a class="nav" href="#agents" title="Agents" aria-label="Agents"><span class="ic i-bot" aria-hidden="true"></span></a><a class="nav" href="#schedules" title="Schedules" aria-label="Schedules"><span class="ic i-clock" aria-hidden="true"></span></a><a class="nav" href="#workflows" title="Workflows" aria-label="Workflows"><span class="ic i-workflow" aria-hidden="true"></span></a><a class="nav" href="#scripts" title="Scripts" aria-label="Scripts"><span class="ic i-file-code" aria-hidden="true"></span></a><a class="nav" href="#skills" title="Skills" aria-label="Skills"><span class="ic i-book-open" aria-hidden="true"></span></a><a class="nav" href="#templates" title="Templates" aria-label="Templates"><span class="ic i-file-text" aria-hidden="true"></span></a><a class="nav" href="#memory" title="Memory" aria-label="Memory"><span class="ic i-database" aria-hidden="true"></span></a><a class="nav" href="#tasks" title="Tasks" aria-label="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span></a></div><div class="foot"><a class="nav" href="#settings" title="Settings" aria-label="Settings"><span class="ic i-settings" aria-hidden="true"></span></a><a class="nav" href="#usage" title="Usage" aria-label="Usage"><span class="ic i-chart" aria-hidden="true"></span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Good morning, Taras</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content"><div class="hp">
+  <section class="card">
+    <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-clipboard-check muted" aria-hidden="true"></span><span class="t">Approve: post the competitor digest to #market-intel</span><span class="m">20m ago</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-star-fill star" aria-hidden="true"></span><span class="t">competitor-research</span><span class="tag run">1 running</span></div>
+    </div>
+  </section>
+  <section class="card hp-wide">
+    <div class="card-h"><h3 class="card-t">Recent activity</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="st runn"></span><span class="t shimmer">Researcher is running Competitor scan</span><span class="m">4m ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Researcher wrote report-2026-11-04.md</span><span class="m">2h ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Lead planned the use case competitor-research</span><span class="m">5d ago</span></div>
+    </div>
+  </section>
+</div>
+</div></div>
+    </div></div>
+  </section>
+
+  <section class="state">
+    <h2>Phone · <em>page</em> and <em>sheet open</em></h2>
+    <div class="phones">
+      <div class="phone-col"><h3>Home, menu closed</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Home</b></span><span class="sp"></span><span class="avatar">TY</span></div><div class="pbody"><div class="hp">
+  <section class="card">
+    <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-clipboard-check muted" aria-hidden="true"></span><span class="t">Approve: post the competitor digest to #market-intel</span><span class="m">20m ago</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-star-fill star" aria-hidden="true"></span><span class="t">competitor-research</span><span class="tag run">1 running</span></div>
+    </div>
+  </section>
+  <section class="card hp-wide">
+    <div class="card-h"><h3 class="card-t">Recent activity</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="st runn"></span><span class="t shimmer">Researcher is running Competitor scan</span><span class="m">4m ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Researcher wrote report-2026-11-04.md</span><span class="m">2h ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Lead planned the use case competitor-research</span><span class="m">5d ago</span></div>
+    </div>
+  </section>
+</div>
+</div></div>
+      </div>
+      <div class="phone-col"><h3>Menu sheet open (icon rows need a tap-and-hold label on touch)</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Home</b></span><span class="sp"></span><span class="avatar">TY</span></div><div class="pbody"><div class="hp">
+  <section class="card">
+    <div class="card-h"><span class="st need">1</span><h3 class="card-t">Needs you</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-clipboard-check muted" aria-hidden="true"></span><span class="t">Approve: post the competitor digest to #market-intel</span><span class="m">20m ago</span></div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-h"><span class="st runn"></span><h3 class="card-t">In progress</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="ic i-star-fill star" aria-hidden="true"></span><span class="t">competitor-research</span><span class="tag run">1 running</span></div>
+    </div>
+  </section>
+  <section class="card hp-wide">
+    <div class="card-h"><h3 class="card-t">Recent activity</h3></div>
+    <div class="card-b rows">
+      <div class="row"><span class="st runn"></span><span class="t shimmer">Researcher is running Competitor scan</span><span class="m">4m ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Researcher wrote report-2026-11-04.md</span><span class="m">2h ago</span></div>
+      <div class="row"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span class="t">Lead planned the use case competitor-research</span><span class="m">5d ago</span></div>
+    </div>
+  </section>
+</div>
+</div>
+          <div class="scrim"></div><div class="sheet"><nav class="sb" aria-label="Main navigation, mockup 3"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav on" href="#home" title="Home" aria-current="page"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><div class="irow"><a class="itile" href="#channels" title="Channels" aria-label="Channels"><span class="ic i-message-circle" aria-hidden="true"></span></a><a class="itile" href="#tools" title="Tools" aria-label="Tools"><span class="ic i-wrench" aria-hidden="true"></span></a><a class="itile" href="#ai" title="AI providers" aria-label="AI providers"><span class="ic i-key" aria-hidden="true"></span></a></div></div><div class="grp"><div class="grp-l">Build</div><div class="irow"><a class="itile" href="#agents" title="Agents" aria-label="Agents"><span class="ic i-bot" aria-hidden="true"></span></a><a class="itile" href="#schedules" title="Schedules" aria-label="Schedules"><span class="ic i-clock" aria-hidden="true"></span></a><a class="itile" href="#workflows" title="Workflows" aria-label="Workflows"><span class="ic i-workflow" aria-hidden="true"></span></a><a class="itile" href="#scripts" title="Scripts" aria-label="Scripts"><span class="ic i-file-code" aria-hidden="true"></span></a><a class="itile" href="#skills" title="Skills" aria-label="Skills"><span class="ic i-book-open" aria-hidden="true"></span></a><a class="itile" href="#templates" title="Templates" aria-label="Templates"><span class="ic i-file-text" aria-hidden="true"></span></a><a class="itile" href="#memory" title="Memory" aria-label="Memory"><span class="ic i-database" aria-hidden="true"></span></a><a class="itile" href="#tasks" title="Tasks" aria-label="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span></a></div></div></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("theme");
+  var q = new URLSearchParams(location.search).get("theme"), t = "light";
+  try { t = q || localStorage.getItem("swarmMock") || "light"; } catch (e) { t = q || "light"; }
+  function set(v) {
+    t = v; root.classList.toggle("dark", v === "dark"); root.setAttribute("data-theme", v);
+    btn.innerHTML = '<span class="ic i-' + (v === "dark" ? "sun" : "moon") + '" aria-hidden="true"></span>';
+    try { localStorage.setItem("swarmMock", v); } catch (e) { /* file:// without storage */ }
+  }
+  set(t);
+  btn.addEventListener("click", function () { set(t === "dark" ? "light" : "dark"); });
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    list.querySelectorAll("[role=tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        list.querySelectorAll("[role=tab]").forEach(function (o) {
+          var on = o === tab; o.setAttribute("aria-selected", String(on));
+          document.getElementById(o.getAttribute("aria-controls")).hidden = !on;
+        });
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

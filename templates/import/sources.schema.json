@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "description": "Stable source id. Owns every resource this source imports."
+      },
+      "type": {
+        "type": "string",
+        "const": "dir",
+        "description": "v1 ships the `dir` source only."
+      },
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute path of the package root. Read only; mount it read-only."
+      },
+      "onConflict": {
+        "default": "noop",
+        "description": "`noop` keeps UI/API edits and skips resources this source does not own. `overwrite` makes the files win and adopts same-named resources.",
+        "type": "string",
+        "enum": [
+          "noop",
+          "overwrite"
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "type",
+      "path"
+    ],
+    "additionalProperties": false
+  },
+  "$id": "https://github.com/desplega-ai/agent-swarm/blob/main/templates/import/sources.schema.json",
+  "title": "Agent Swarm import sources",
+  "description": "Value of SWARM_IMPORT_SOURCES (JSON) or the file SWARM_IMPORT_SOURCES_FILE names."
+}

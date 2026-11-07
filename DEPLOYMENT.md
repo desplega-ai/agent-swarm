@@ -256,16 +256,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.318)
+# Override the pinned Claude Code version (default: 2.1.319)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.318`
+- `CLAUDE_CODE_VERSION=2.1.319`
 - `PI_CODING_AGENT_VERSION=1.5.0`
 - `CODEX_VERSION=0.167.0`
-- `OPENCODE_VERSION=2.2.5` (installs `@opencode/cli` and `@opencode/sdk`)
+- `OPENCODE_VERSION=2.2.6` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -753,7 +753,7 @@ Enable GitHub webhooks for automated task creation from PR reviews and issue ass
 
 ### Setup
 
-1. Create a GitHub App at https://github.com/settings/apps/new
+1. Create a GitHub App at https://github.com/settings/apps/new (GitHub Enterprise Server: `https://<host>/settings/apps/new`, and set `GITHUB_URL=https://<host>` on the API and every worker; see the GitHub integration docs)
 2. Set webhook URL to your server: `https://your-server.com/github/webhook`
 3. Generate a webhook secret
 4. (Optional) Generate a private key for bot reactions

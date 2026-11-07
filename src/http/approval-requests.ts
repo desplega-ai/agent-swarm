@@ -180,7 +180,15 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
   resolutionReason: true,
   notificationChannels: true,
   configState: true,
-}).extend({ questionCount: z.number().int() });
+}).extend({
+  questionCount: z.number().int(),
+  viewerCanRespond: z
+    .boolean()
+    .optional()
+    .describe(
+      "Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed).",
+    ),
+});
 
 /**
  * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
@@ -209,9 +217,13 @@ async function toApprovalRequestResponse(
   };
 }
 
-/** Slim rows plus `approvalProgress` for the pending ones (one extra read). */
+/**
+ * Slim rows plus `approvalProgress` and `viewerCanRespond` for the pending ones
+ * (one extra read). `viewer` is null when the caller cannot answer any request.
+ */
 async function withApprovalProgress(
   rows: Awaited<ReturnType<typeof listApprovalRequestSummaries>>,
+  viewer: ApprovalResponder | null,
 ): Promise<z.infer<typeof ApprovalRequestSummarySchema>[]> {
   const pendingIds = rows.filter((row) => row.status === "pending").map((row) => row.id);
   const state = new Map(
@@ -225,6 +237,10 @@ async function withApprovalProgress(
         approvalProgress: entry
           ? await approvalProgress(entry.approvers as ApproversShape, entry.approvals ?? [])
           : null,
+        ...(entry && {
+          viewerCanRespond:
+            viewer !== null && isListedApprover(entry.approvers as ApproversShape, viewer),
+        }),
       };
     }),
   );
@@ -490,7 +506,7 @@ const listRoute = route({
   pattern: ["api", "approval-requests"],
   summary: "List approval requests with optional filters",
   description:
-    "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
+    "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.",
   tags: ["ApprovalRequests"],
   query: z.object({
     status: z.string().optional(),
@@ -890,8 +906,12 @@ export async function handleApprovalRequests(
     };
     // Opt-in: API, MCP and script callers that don't ask keep the full rows.
     if (parsed.query.fields === "slim") {
+      const viewer = await approvalResponder(req);
       listRoute.respond(res, 200, {
-        approvalRequests: await withApprovalProgress(await listApprovalRequestSummaries(filters)),
+        approvalRequests: await withApprovalProgress(
+          await listApprovalRequestSummaries(filters),
+          viewer.ok ? viewer.responder : null,
+        ),
       });
       return true;
     }
