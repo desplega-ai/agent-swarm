@@ -60,7 +60,7 @@ export async function runSeeder(seeder: Seeder, opts?: SeederRunOptions): Promis
       // we conservatively assume a user authored it and must not clobber it.
       const pristine = state ? upstream === state.seededHash : false;
 
-      if (!pristine) {
+      if (!pristine && !seeder.overwriteUserModified) {
         // A user changed the upstream copy since our last seed — preserve it.
         result.skippedUserModified += 1;
         continue;

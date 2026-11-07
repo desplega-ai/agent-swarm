@@ -95,6 +95,8 @@
     "build:extension-types": "bun scripts/bundle-extension-types.ts",
     "build:extension-schema": "bun scripts/build-extension-manifest-schema.ts",
     "check:extension-schema": "bun scripts/build-extension-manifest-schema.ts --check",
+    "build:import-schema": "bun scripts/build-import-schema.ts",
+    "check:import-schema": "bun scripts/build-import-schema.ts --check",
     "build:extension-catalog": "bun scripts/build-extension-catalog.ts",
     "check:extension-catalog": "bun scripts/build-extension-catalog.ts --check",
     "build:secret-rules": "bun scripts/gen-secret-rules.ts",

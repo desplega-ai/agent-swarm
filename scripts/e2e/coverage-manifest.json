@@ -278,6 +278,10 @@
       "description": "swarm_x, WhatsApp send and reply, AgentMail inbox registration with ownership, the Codex device login against a loopback stand-in",
       "scenarios": ["platform-external-tools", "platform-codex-device-login"]
     },
+    "file-import": {
+      "description": "A mounted package imports at boot, a late agent registration resolves its pending assignment, a re-import updates the same row, and a broken second source leaves the API healthy.",
+      "scenarios": ["platform-file-import"]
+    },
     "first-run-onboarding": {
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]

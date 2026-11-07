@@ -86,6 +86,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Performance & Resource Sizing](https://docs.agent-swarm.dev/docs/guides/performance-resource-sizing). Reference.
 - [Cost & context computation](https://docs.agent-swarm.dev/docs/guides/cost-and-context-computation). Reference.
 - [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions). Reference.
+- [File import](https://docs.agent-swarm.dev/docs/guides/file-import). Reference.
 - [Scripts runtime](https://docs.agent-swarm.dev/docs/guides/scripts-runtime). Reference.
 - [Agent capabilities and tool allowlist](https://docs.agent-swarm.dev/docs/guides/agent-capabilities). Reference.
 - [Scripts-only mode (code-mode)](https://docs.agent-swarm.dev/docs/guides/scripts-only-mode). Reference.
