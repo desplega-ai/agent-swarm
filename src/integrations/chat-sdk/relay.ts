@@ -1,3 +1,5 @@
+import { CardSpecError, toCard } from "@json-render/chat";
+import type { CardChild, CardElement } from "chat";
 import {
   getAgentById,
   getPendingChatRelayTasks,
@@ -7,10 +9,13 @@ import {
   markChatRelayGivenUp,
   recordChatRelayError,
 } from "@/be/db";
+import { getTaskUiSpec } from "@/be/task-ui-spec";
 import { terminalReactionEvent } from "@/integrations/reaction-events";
 import { chatThreadOfContextKey } from "@/tasks/context-key";
 import type { AgentTask } from "@/types";
+import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { UI_SPEC_CARD_LIMITS } from "@/utils/task-ui-spec";
 import { workflowEventBus } from "@/workflows/event-bus";
 import { shortId } from "./commands";
 import { chatMessageLimit, splitChatMessage } from "./limits";
@@ -99,6 +104,85 @@ export function formatChatRelayMessages(
 }
 
 /**
+ * The card's children with every callback Button removed, and any Actions row
+ * left empty dropped. Chat SDK clicks have no handler, so a Button would do
+ * nothing; a LinkButton stays.
+ */
+function withoutCallbackButtons(children: CardChild[]): CardChild[] {
+  return children.flatMap((child): CardChild[] => {
+    if (child.type === "section") {
+      return [{ ...child, children: withoutCallbackButtons(child.children) }];
+    }
+    if (child.type !== "actions") return [child];
+    const kept = child.children.filter((element) => element.type !== "button");
+    return kept.length ? [{ ...child, children: kept }] : [];
+  });
+}
+
+/**
+ * The task's stored card for a Chat SDK channel, without callback Buttons.
+ * `null` when `UI_SPEC_ENABLED` is off or the task has no spec. `card` is
+ * `null` when the stored spec no longer converts; the caller then posts the
+ * stored fallback text. Logs the issues, never the spec body.
+ */
+export async function chatRelayUiSpec(
+  taskId: string,
+): Promise<{ card: CardElement | null; fallbackText: string } | null> {
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return null;
+  const stored = await getTaskUiSpec(taskId);
+  if (!stored) return null;
+  try {
+    const card = toCard(stored.spec as Parameters<typeof toCard>[0], {
+      limits: UI_SPEC_CARD_LIMITS,
+    });
+    return {
+      card: { ...card, children: withoutCallbackButtons(card.children) },
+      fallbackText: stored.fallbackText,
+    };
+  } catch (error) {
+    if (!(error instanceof CardSpecError)) throw error;
+    console.warn(
+      `[chat-sdk] stored uiSpec for task ${taskId} no longer renders: ${error.issues.join(" | ")}`,
+    );
+    return { card: null, fallbackText: stored.fallbackText };
+  }
+}
+
+/**
+ * Post the task's card as one more message after the answer. When the card
+ * post throws, post the fallback text as markdown instead. Never throws: the
+ * answer already landed, so a card failure must not re-send it on retry.
+ */
+async function postChatRelayCard(
+  adapter: string,
+  threadId: string,
+  task: AgentTask,
+): Promise<void> {
+  let uiSpec: Awaited<ReturnType<typeof chatRelayUiSpec>>;
+  try {
+    uiSpec = await chatRelayUiSpec(task.id);
+  } catch (error) {
+    console.error(`[chat-sdk] uiSpec of task ${task.id} unreadable: ${errorMessage(error)}`);
+    return;
+  }
+  if (!uiSpec) return;
+  if (uiSpec.card) {
+    try {
+      await postChatMessage({ adapter, threadId, text: [], card: uiSpec.card, taskId: task.id });
+      return;
+    } catch (error) {
+      console.warn(`[chat-sdk] Card post of task ${task.id} failed: ${errorMessage(error)}`);
+    }
+  }
+  if (!uiSpec.fallbackText) return;
+  try {
+    await postChatMessage({ adapter, threadId, text: uiSpec.fallbackText, taskId: task.id });
+  } catch (error) {
+    console.error(`[chat-sdk] Card fallback of task ${task.id} failed: ${errorMessage(error)}`);
+  }
+}
+
+/**
  * Deliver every pending, out-of-backoff chat relay row for a running adapter.
  * Exported with an injectable clock so retry and give-up behavior is testable
  * without waiting.
@@ -162,6 +246,7 @@ export async function processPendingChatRelays(
         // defer wake-up inherits it from its parent, so it answers the same ask.
         replyToMessageId: task.mentionMessageId,
       });
+      await postChatRelayCard(target.adapter, target.threadId, task);
       stopTypingKeepalive(target.threadId);
       await markChatRelayDelivered(task.id, now);
       console.log(`[chat-sdk] Relayed ${task.status} task ${task.id} to ${target.adapter}`);
