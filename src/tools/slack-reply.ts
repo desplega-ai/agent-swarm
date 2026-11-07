@@ -15,6 +15,7 @@ import {
   cardSpecInputSchema,
   cardToSlack,
   renderCard,
+  slackFallbackText,
 } from "@/integrations/cards";
 import { getSlackApp } from "@/slack/app";
 import {
@@ -95,13 +96,14 @@ export const registerSlackReplyTool = (server: McpServer) => {
       if (!message && !card) return toolErr("Provide a message or a card.");
 
       // Validate the card before any side effect, so a bad spec changes nothing.
-      let cardSlack: Awaited<ReturnType<typeof cardToSlack>> | undefined;
+      let cardSlack: { blocks: Record<string, unknown>[]; text: string } | undefined;
       if (card) {
         const rendered = renderCard(card);
-        if ("issues" in rendered) {
-          return toolErr(cardIssuesMessage(rendered.issues), { data: { issues: rendered.issues } });
+        const slack = "card" in rendered ? await cardToSlack(rendered.card) : rendered;
+        if ("issues" in slack) {
+          return toolErr(cardIssuesMessage(slack.issues), { data: { issues: slack.issues } });
         }
-        cardSlack = await cardToSlack(rendered.card);
+        cardSlack = slack;
       }
 
       // Determine Slack context from inbox message or task
@@ -117,7 +119,10 @@ export const registerSlackReplyTool = (server: McpServer) => {
         slackThreadTs = inboxMsg.slackThreadTs;
 
         // Mark as responded
-        await markInboxMessageResponded(inboxMessageId, message ?? cardSlack?.text ?? "");
+        await markInboxMessageResponded(
+          inboxMessageId,
+          slackFallbackText(message ?? "", cardSlack?.text),
+        );
       } else if (taskId) {
         const task = await getTaskById(taskId);
         if (!task) {
@@ -209,7 +214,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
           app.client.chat.postMessage({
             channel: slackChannelId,
             thread_ts: slackThreadTs,
-            text: cardSlack?.text ?? slackMessage, // Fallback for notifications
+            text: slackFallbackText(slackMessage, cardSlack?.text), // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
             username: getAgentDisplayName(agent),

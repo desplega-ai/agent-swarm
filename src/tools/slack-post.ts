@@ -11,6 +11,7 @@ import {
   cardSpecInputSchema,
   cardToSlack,
   renderCard,
+  slackFallbackText,
 } from "@/integrations/cards";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
@@ -90,13 +91,14 @@ export const registerSlackPostTool = (server: McpServer) => {
       }
       if (blocks && card) return toolErr("Provide either blocks or card, not both.");
       if (!message && !card) return toolErr("Provide a message or a card.");
-      let cardSlack: Awaited<ReturnType<typeof cardToSlack>> | undefined;
+      let cardSlack: { blocks: Record<string, unknown>[]; text: string } | undefined;
       if (card) {
         const rendered = renderCard(card);
-        if ("issues" in rendered) {
-          return toolErr(cardIssuesMessage(rendered.issues), { data: { issues: rendered.issues } });
+        const slack = "card" in rendered ? await cardToSlack(rendered.card) : rendered;
+        if ("issues" in slack) {
+          return toolErr(cardIssuesMessage(slack.issues), { data: { issues: slack.issues } });
         }
-        cardSlack = await cardToSlack(rendered.card);
+        cardSlack = slack;
       }
 
       const app = getSlackApp();
@@ -147,7 +149,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const result = await withAutoJoin(app.client, channelId, () =>
           app.client.chat.postMessage({
             channel: channelId,
-            text: cardSlack?.text ?? slackMessage, // Fallback for notifications
+            text: slackFallbackText(slackMessage, cardSlack?.text), // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
             username: getAgentDisplayName(agent),

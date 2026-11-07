@@ -498,4 +498,71 @@ describe("Slack tool cards", () => {
     ]);
     expect(payload.text).toContain("Status: green");
   });
+
+  // 100 rows plus the header, 40-character cells: the size where Slack's
+  // native data_table stops and the adapter's 3,000-char code block cut rows.
+  function tableCard(rows: number, columns: number) {
+    return {
+      root: "card",
+      elements: {
+        card: { type: "Card", props: { title: "Big table" }, children: ["t"] },
+        t: {
+          type: "Table",
+          props: {
+            headers: Array.from({ length: columns }, (_, c) => `col ${c}`),
+            rows: Array.from({ length: rows }, (_, r) =>
+              Array.from({ length: columns }, (_, c) => `${r}-${c}`.padEnd(40, "x")),
+            ),
+          },
+          children: [],
+        },
+      },
+    };
+  }
+
+  const cardTools = [
+    ["slack-reply", () => ({ taskId }), () => meta(workerId)],
+    ["slack-post", () => ({ channelId: "C_DIRECT" }), () => meta(leadId)],
+  ] as const;
+
+  test.each(
+    cardTools,
+  )("%s refuses a table Slack would truncate and posts nothing", async (tool, target, who) => {
+    const tools = buildTools();
+    for (const card of [tableCard(101, 2), tableCard(100, 3)]) {
+      const result = await tools[tool]!.handler({ ...target(), card }, who());
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toStartWith("Invalid card spec.");
+    }
+    expect(mockChatPostMessage).not.toHaveBeenCalled();
+  });
+
+  test.each(
+    cardTools,
+  )("%s posts every row of a 100-row table natively", async (tool, target, who) => {
+    const tools = buildTools();
+    const result = await tools[tool]!.handler({ ...target(), card: tableCard(100, 2) }, who());
+
+    expect(result.structuredContent.success).toBe(true);
+    const payload = mockChatPostMessage.mock.calls[0]![0];
+    const table = payload.blocks.find((block: PostedBlock) => block.type === "data_table");
+    expect(table.rows).toHaveLength(101);
+    expect(table.rows.at(-1)[0].text).toStartWith("99-0");
+  });
+
+  test.each(
+    cardTools,
+  )("%s puts the message and the card in the notification text", async (tool, target, who) => {
+    const tools = buildTools();
+    const result = await tools[tool]!.handler(
+      { ...target(), message: "Here is the deploy.", card: CARD },
+      who(),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    const payload = mockChatPostMessage.mock.calls[0]![0];
+    expect(payload.text).toStartWith("Here is the deploy.");
+    expect(payload.text).toContain("Deploy report");
+    expect(payload.text).toContain("Status: green");
+  });
 });

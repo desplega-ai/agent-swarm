@@ -1,5 +1,5 @@
 import { CardSpecError, standardComponentDefinitions, toCard } from "@json-render/chat";
-import type { CardElement } from "chat";
+import type { CardChild, CardElement } from "chat";
 import * as z from "zod";
 
 // No callback buttons yet: nothing handles a click, so `Button` stays out and
@@ -12,8 +12,25 @@ export const chatCardComponents = {
   Actions: { ...standard.Actions, description: "Row of LinkButton elements." },
 };
 
-/** Slack's per-message caps; past them the adapter degrades content, so reject instead. */
-export const CARD_LIMITS = { tables: 1, charts: 2 } as const;
+/**
+ * Slack's caps. Past them the adapter turns a table or chart into a code block
+ * cut at 3,000 characters, which drops content while the post succeeds, so
+ * reject instead. `tableRows` counts the header row.
+ */
+export const CARD_LIMITS = {
+  tables: 1,
+  charts: 2,
+  fields: 10,
+  tableRows: 101,
+  tableColumns: 20,
+  chartTitle: 50,
+  chartLabel: 20,
+  chartSeries: 12,
+  chartPoints: 20,
+} as const;
+
+/** Slack's data_table cap on the characters of all cells, header included. */
+export const TABLE_MAX_CELL_CHARS = 10_000;
 
 // One line per component: its description and an example of its props, which
 // is the only place the agent sees prop names (Chart and Table need them).
@@ -35,7 +52,7 @@ export const cardSpecInputSchema = z
       ),
   })
   .describe(
-    `Optional json-render card spec, rendered as a native card. Use it for structured results: key figures, a table, up to ${CARD_LIMITS.charts} charts, links. At most ${CARD_LIMITS.tables} table. ${CARD_RULES} Components: ${catalogLines}`,
+    `Optional json-render card spec, rendered as a native card. Use it for structured results: key figures, a table, up to ${CARD_LIMITS.charts} charts, links. At most ${CARD_LIMITS.tables} table, of up to ${CARD_LIMITS.tableRows - 1} rows, ${CARD_LIMITS.tableColumns} columns and ${TABLE_MAX_CELL_CHARS} characters in all. ${CARD_RULES} Components: ${catalogLines}`,
   );
 
 export type CardSpecInput = z.infer<typeof cardSpecInputSchema>;
@@ -45,13 +62,33 @@ export type CardSpecInput = z.infer<typeof cardSpecInputSchema>;
  * `CardSpecError` issues instead of throwing so a tool can hand them back.
  */
 export function renderCard(spec: CardSpecInput): { card: CardElement } | { issues: string[] } {
+  let card: CardElement;
   try {
     // biome-ignore lint/suspicious/noExplicitAny: toCard validates the shape and reports issues
-    return { card: toCard(spec as any, { components: chatCardComponents, limits: CARD_LIMITS }) };
+    card = toCard(spec as any, { components: chatCardComponents, limits: CARD_LIMITS });
   } catch (error) {
     if (error instanceof CardSpecError) return { issues: error.issues };
     throw error;
   }
+  // toCard has no character limit, so check the expanded tables here.
+  const issues = cardChildren(card)
+    .filter((child) => child.type === "table")
+    .flatMap((table) => {
+      const chars = [table.headers, ...table.rows]
+        .flat()
+        .reduce((sum, cell) => sum + cell.length, 0);
+      return chars > TABLE_MAX_CELL_CHARS
+        ? [`Table: ${chars} characters in its cells, at most ${TABLE_MAX_CELL_CHARS}`]
+        : [];
+    });
+  return issues.length ? { issues } : { card };
+}
+
+/** Every child of the card, sections flattened. */
+function cardChildren(card: { children: CardChild[] }): CardChild[] {
+  return card.children.flatMap((child) =>
+    child.type === "section" ? [child, ...cardChildren(child)] : [child],
+  );
 }
 
 /** Tool error text for a rejected spec: one issue per line, for the agent to fix. */
@@ -59,14 +96,41 @@ export function cardIssuesMessage(issues: string[]): string {
   return `Invalid card spec. Fix it and retry:\n${issues.map((issue) => `- ${issue}`).join("\n")}`;
 }
 
-/** Block Kit and notification text for native Slack. */
+const NATIVE_SLACK_BLOCKS: Record<string, string[]> = {
+  table: ["table", "data_table"],
+  chart: ["data_visualization"],
+};
+
+/**
+ * Block Kit and the card's notification text for native Slack. Returns issues when a table or chart would not render natively: the
+ * adapter's code-block fallback is cut at 3,000 characters, so a post could
+ * succeed with rows missing. `CARD_LIMITS` stops the known cases first; this
+ * catches the rest (a duplicate chart label, a long axis label).
+ */
 export async function cardToSlack(
   card: CardElement,
-): Promise<{ blocks: Record<string, unknown>[]; text: string }> {
+): Promise<{ blocks: Record<string, unknown>[]; text: string } | { issues: string[] }> {
   // Lazy like the Chat SDK adapters: the adapter module is only loaded when a card is posted.
   const { cardToBlockKit, cardToFallbackText } = await import("@chat-adapter/slack");
+  const issues = cardChildren(card).flatMap((child) => {
+    const native = NATIVE_SLACK_BLOCKS[child.type];
+    if (!native) return [];
+    const [block] = cardToBlockKit({ type: "card", children: [child] });
+    return block && native.includes(String(block.type))
+      ? []
+      : [`${child.type === "table" ? "Table" : "Chart"}: Slack cannot render it natively`];
+  });
+  if (issues.length) return { issues };
   return {
     blocks: cardToBlockKit(card),
     text: cardToFallbackText(card),
   };
+}
+
+/**
+ * Notification text for a message posted with a card: both, message first, so
+ * notifications and screen readers do not lose the message.
+ */
+export function slackFallbackText(message: string, cardText?: string): string {
+  return [message, cardText].filter(Boolean).join("\n\n");
 }

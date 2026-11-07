@@ -65,6 +65,7 @@ describe("renderCard", () => {
     const rendered = renderCard(FULL_CARD);
     if (!("card" in rendered)) throw new Error(rendered.issues.join("; "));
     const slack = await cardToSlack(rendered.card);
+    if ("issues" in slack) throw new Error(slack.issues.join("; "));
     expect(slack.blocks.map((block) => block.type)).toEqual([
       "header",
       "context",
@@ -112,6 +113,49 @@ describe("renderCard", () => {
       },
     });
     expect(charts).toEqual({ issues: ["at most 2 Chart per message"] });
+  });
+
+  test("a table Slack would cut to a code block is refused", () => {
+    const table = (rows: number, columns: number) =>
+      renderCard({
+        root: "card",
+        elements: {
+          card: { type: "Card", props: {}, children: ["t"] },
+          t: leaf("Table", {
+            headers: Array.from({ length: columns }, (_, c) => `col ${c}`),
+            rows: Array.from({ length: rows }, (_, r) =>
+              Array.from({ length: columns }, (_, c) => `${r}-${c}`.padEnd(40, "x")),
+            ),
+          }),
+        },
+      });
+    expect(table(101, 2)).toEqual({ issues: ["t: at most 101 rows including the header"] });
+    expect(table(1, 21)).toEqual({ issues: ["t: at most 20 columns"] });
+    expect(table(100, 3)).toEqual({
+      issues: ["Table: 12015 characters in its cells, at most 10000"],
+    });
+    expect("card" in table(100, 2)).toBe(true);
+  });
+
+  test("a chart Slack cannot draw natively is refused instead of cut to a code block", async () => {
+    const rendered = renderCard({
+      root: "card",
+      elements: {
+        card: { type: "Card", props: {}, children: ["c"] },
+        c: leaf("Chart", {
+          title: "Dupes",
+          chart: {
+            type: "bar",
+            categories: ["Mon", "Mon"],
+            series: [{ name: "Deploys", values: [3, 5] }],
+          },
+        }),
+      },
+    });
+    if (!("card" in rendered)) throw new Error(rendered.issues.join("; "));
+    expect(await cardToSlack(rendered.card)).toEqual({
+      issues: ["Chart: Slack cannot render it natively"],
+    });
   });
 
   test("a broken spec returns every issue as tool error text", () => {
