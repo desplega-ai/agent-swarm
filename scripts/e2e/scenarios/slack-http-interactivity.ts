@@ -6,7 +6,9 @@ import { enableNativeHttp, expectNativeTransport } from "./slack-http-helpers";
 /** A Cancel button click as a signed `block_actions` form post cancels the task and updates its card. */
 export const slackHttpInteractivity: Scenario = {
   name: "slack-http-interactivity",
-  order: 178,
+  // Before slack-delegation-flag-off-repro (130) turns SLACK_RENDER_V2 on for the rest of the
+  // run: only the legacy progress card carries a Cancel button, the v2 tree does not.
+  order: 126,
   async run(ctx) {
     const flip = await enableNativeHttp(ctx);
     try {
@@ -31,7 +33,12 @@ export const slackHttpInteractivity: Scenario = {
         cardTs = card?.ts;
         return cardTs !== undefined;
       }, 30_000);
-      expect(found && cardTs, `No bot card with a cancel_task button in thread ${message.ts}`);
+      expect(
+        found && cardTs,
+        `No bot card with a cancel_task button in thread ${message.ts}: ${JSON.stringify(
+          slack.messages("general").filter((m) => m.thread_ts === message.ts),
+        ).slice(0, 1500)}`,
+      );
 
       const ack = await slack.clickButton({
         channel: "general",
