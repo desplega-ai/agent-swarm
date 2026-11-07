@@ -1140,20 +1140,29 @@ Pick the model that matches your runtime; if your provider has no native skill m
 
 The swarm syncs skill files into each provider's skill dir at container boot and during per-task refreshes (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/`). Add an entry for your provider there.
 
-### Step 10 — Worker bootstrap (Docker entrypoint)
+### Step 10 — Worker bootstrap and runtime dependencies
 
-Provider executable checks live in the standalone Bun module
-[`src/commands/entrypoint-provider-binary.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/entrypoint-provider-binary.ts).
+Provider executable/SDK checks live in
+[`src/providers/runtime-dependencies.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/runtime-dependencies.ts).
+The runner calls it before every provider session with the task's resolved
+configuration, including after a live harness switch. A worker may join with a
+missing dependency; the affected task fails with the provider, dependency and
+installation guidance, and its active session is removed. Install the dependency
+or fix its override before retrying the task.
+
 Add the provider's CLI/SDK check there, or an explicit branch when it needs no
-local executable. The shell calls it after credential preparation, before
-workspace setup; failure stops boot. Both worker image variants ship the helper
-and invoke it with the system Bun binary. The module's dependencies can be
-injected for tests without starting Docker or a harness.
+external dependency. Use the same command resolver as the adapter. Checks honor
+configured executable paths and the spawn working directory; ACP uses its target
+resolver. Codex app-server resolves relative overrides from the worker directory. Codex supports `CODEX_PATH_OVERRIDE`, then legacy `CODEX_BINARY`, PATH
+and the local npm package. OpenCode resolves `OPENCODE_SDK_PATH`, global npm
+roots, then the local SDK package; no OpenCode CLI is required. Cloud and bundled
+in-process providers need no CLI check, except Cursor's explicit ripgrep override.
+The validator is compiled into the worker and never runs a CLI version command.
 
 Wire the worker bootstrap:
 
 1. Credential validation — extend the provider branches in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh).
-2. Binary reachability — add the check in `src/commands/entrypoint-provider-binary.ts` and cover it in the entrypoint tests.
+2. Dependency validation — add the runtime check and regression tests for boot-selected and live-switched harnesses.
 3. Skill sync — extend the shell's skill-copy block with your provider's skill directory.
 4. If your provider has a CLI binary, install it in [`Dockerfile.worker`](https://github.com/desplega-ai/agent-swarm/blob/main/Dockerfile.worker).
 
@@ -1358,7 +1367,8 @@ Manual verification:
 | OAuth (optional) | `src/providers/<foo>-oauth/*`, `src/commands/<foo>-login.ts` |
 | Setup CLI (optional, e.g. claude-managed) | `src/commands/<foo>-setup.ts` |
 | CLI wiring | `src/cli.tsx` (`COMMAND_HELP`, command routing) |
-| Docker bootstrap | `docker-entrypoint.sh`, `src/commands/entrypoint-provider-binary.ts`, `Dockerfile.worker` |
+| Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
+| Runtime dependencies | `src/providers/runtime-dependencies.ts`, `src/commands/runner.ts` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
 | Models / pricing | `src/providers/<foo>-models.ts`, `src/be/seed-pricing.ts`, `src/be/pricing-normalize.ts` |

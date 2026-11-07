@@ -296,12 +296,6 @@ else
     fi
 fi
 
-# BEGIN verify_provider_binary
-# Standalone Bun step; keep failure fatal before workspace setup.
-/usr/local/bin/bun --no-orphans /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts "$HARNESS_PROVIDER"
-
-# END verify_provider_binary
-
 # ---- Git safe.directory backstop ----
 # Avoid "dubious ownership" when /workspace dirs are owned by a different uid
 # (root-owned auto-clone, host-mounted volumes, etc.).
