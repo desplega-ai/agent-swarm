@@ -58,6 +58,7 @@ import {
   SteeringRequestError,
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
+import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
@@ -221,6 +222,7 @@ const GetTaskResponseSchema = AgentTaskSchema.extend({
   logs: z.array(AgentLogSchema),
   attachments: z.array(TaskAttachmentSchema),
   citations: z.array(TaskCitationSchema),
+  uiSpec: TaskUiSpecSchema.nullable(),
 });
 
 const FinishTaskSuccessSchema = z.object({
@@ -1731,6 +1733,7 @@ export async function handleTasks(
       logs,
       attachments,
       citations: await getTaskCitations(task.id),
+      uiSpec: await getTaskUiSpec(task.id),
     });
     return true;
   }

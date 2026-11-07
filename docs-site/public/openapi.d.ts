@@ -15369,6 +15369,25 @@ export interface paths {
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
                             }[];
+                            uiSpec: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    };
+                                };
+                                fallbackText: string;
+                            } | null;
                         };
                     };
                 };
@@ -22089,6 +22108,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
@@ -22105,6 +22143,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -30802,7 +30859,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
