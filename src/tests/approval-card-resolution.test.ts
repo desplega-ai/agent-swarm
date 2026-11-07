@@ -17,8 +17,14 @@ const postMessage = mock(async (_args: Record<string, unknown>) => ({
   ts: "1700000000.000200",
   channel: "D0DM",
 }));
+const conversationsOpen = mock(async ({ users }: { users: string }) => ({
+  ok: true,
+  channel: { id: `D${users}` },
+}));
 mock.module("../slack/app", () => ({
-  getSlackApp: () => ({ client: { chat: { update, postMessage } } }),
+  getSlackApp: () => ({
+    client: { chat: { update, postMessage }, conversations: { open: conversationsOpen } },
+  }),
 }));
 
 import {
@@ -86,6 +92,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   updates.length = 0;
+  conversationsOpen.mockClear();
   failUpdates = false;
 });
 
@@ -244,5 +251,33 @@ describe("resolved approval Slack card", () => {
     // The DM conversation id from chat.postMessage, not the user-id target.
     expect(updates[0]!.channel).toBe("D0DM");
     expect(cardText(updates[0]!)).toContain("✅ *Approved by operator*");
+  });
+
+  test("a DM card stored before channelId existed is edited in the bot's DM with the user", async () => {
+    // The pre-deploy entry shape: a user-id target and the messageTs, no conversation id.
+    const user = await createPosted({}, [
+      { channel: "slack", target: "U0LEGACY", messageTs: "1700000000.000300" },
+    ]);
+    const grid = await createPosted({}, [
+      { channel: "slack", target: "W0GRID", messageTs: "1700000000.000400" },
+    ]);
+    await resolveApprovalRequest(user.id, { status: "approved", resolvedBy: "operator" });
+    await resolveApprovalRequest(grid.id, { status: "rejected", resolvedBy: "operator" });
+    await settle(2);
+
+    expect(updates).toHaveLength(2);
+    const byTs = Object.fromEntries(updates.map((u) => [u.ts, u]));
+    expect(byTs["1700000000.000300"]?.channel).toBe("DU0LEGACY");
+    expect(byTs["1700000000.000400"]?.channel).toBe("DW0GRID");
+    expect(conversationsOpen).toHaveBeenCalledWith({ users: "U0LEGACY" });
+    expect(conversationsOpen).toHaveBeenCalledWith({ users: "W0GRID" });
+  });
+
+  test("a stored channelId or a channel target never opens a DM", async () => {
+    await resolveApprovalRequest((await createPosted()).id, { status: "approved" });
+    await settle(1);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.channel).toBe("C0CHAN");
+    expect(conversationsOpen).not.toHaveBeenCalled();
   });
 });

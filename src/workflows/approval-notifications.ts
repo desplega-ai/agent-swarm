@@ -13,7 +13,7 @@ import {
 import { approvalCancellationNotificationKey } from "../be/db/approvals";
 import { resolveTemplate } from "../prompts/resolver";
 import { getSlackApp } from "../slack/app";
-import { resolveSlackConversationId } from "../slack/dm";
+import { isSlackUserId, resolveSlackConversationId } from "../slack/dm";
 import {
   externalChannelToolError,
   getChannelBlockReason,
@@ -317,6 +317,9 @@ export interface ApprovalCardSlackClient {
       unfurl_media: false;
     }): Promise<unknown>;
   };
+  conversations?: {
+    open(input: { users: string }): Promise<{ channel?: { id?: string } }>;
+  };
 }
 
 type ApprovalSlackEntry = {
@@ -325,6 +328,24 @@ type ApprovalSlackEntry = {
   messageTs?: string;
   channelId?: string;
 };
+
+/**
+ * The conversation holding a posted card. Entries stored before `channelId`
+ * existed carry only the U/W target of a DM, which chat.update rejects; the
+ * bot's DM with that user (conversations.open) is where the card was posted.
+ */
+async function resolveCardChannel(
+  client: ApprovalCardSlackClient,
+  card: ApprovalSlackEntry,
+): Promise<string> {
+  if (card.channelId) return card.channelId;
+  if (!isSlackUserId(card.target)) return card.target;
+  if (!client.conversations) throw new Error("Slack client cannot open the DM conversation");
+  const opened = await client.conversations.open({ users: card.target });
+  const dmId = opened.channel?.id;
+  if (!dmId) throw new Error(`conversations.open returned no DM channel for user ${card.target}`);
+  return dmId;
+}
 
 /** The claim key of one Slack card's in-place edit, beside the cancellation reply's key. */
 export function approvalCardUpdateKey(target: string, messageTs: string): string {
@@ -406,7 +427,7 @@ export async function updateResolvedApprovalCards(
           const rendered = await buildResolvedApprovalCard(claim.approval);
           if (!rendered) throw new Error("approval is still pending");
           await client.chat.update({
-            channel: card.channelId ?? card.target,
+            channel: await resolveCardChannel(client, card),
             ts: card.messageTs!,
             text: rendered.text,
             blocks: rendered.blocks,
