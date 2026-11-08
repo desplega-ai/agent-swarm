@@ -517,6 +517,7 @@ value:markSteeringHandled
 value:markSteeringPromoted
 value:markTaskSlackReplySent
 value:markTasksNotified
+value:markWorkflowStepTaskSuperseded
 value:maskSecrets
 value:moveAssetKey
 value:moveTaskChainKeyInTx

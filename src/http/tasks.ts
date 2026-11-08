@@ -820,7 +820,7 @@ const supersedeTaskRoute = route({
   session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
-    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.',
+    "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z
@@ -2352,8 +2352,9 @@ export async function handleTasks(
     }
 
     // Workflow-step tasks: fail back to the engine instead of superseding.
-    // Check this BEFORE the supersede UPDATE so we don't leave a workflow
-    // step in `superseded` if the engine expects `failed`.
+    // Check this BEFORE the supersede UPDATE: the engine's retry path runs off
+    // `task.failed`. Once it queues the step's retry it moves the task to
+    // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
       if (task.agentId) {
