@@ -5,8 +5,10 @@ import { useMemoryKeys } from "@/api/hooks/use-memory";
 import type { MemoryKeySummary } from "@/api/types";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { formatTokens } from "@/lib/format-tokens";
 import {
   ancestorFolderPaths,
@@ -69,6 +71,7 @@ export function LongtermView({
   const tokens = rows.reduce((sum, r) => sum + r.estTokens, 0);
 
   const gridColumns = useDataGridColumns("memory-longterm");
+  const isMobile = useIsMobile();
   const columnDefs = useMemo<ColDef<MemoryKeySummary>[]>(
     () => [
       {
@@ -223,20 +226,56 @@ export function LongtermView({
               {error instanceof Error ? error.message : "Could not load keys"}
             </span>
           )}
-          <div className="ml-auto">
-            <DataGridColumnsMenu state={gridColumns} />
-          </div>
+          {isMobile ? null : (
+            <div className="ml-auto">
+              <DataGridColumnsMenu state={gridColumns} />
+            </div>
+          )}
         </div>
-        <DataGrid
-          rowData={rows}
-          columnDefs={columnDefs}
-          columns={gridColumns}
-          loading={isLoading}
-          emptyMessage="No memories under this folder"
-          onRowClicked={onRowClicked}
-          getRowId={(p) => p.data.memoryId}
-          pagination={false}
-        />
+        {isMobile ? (
+          // A phone gets rows, not a clipped grid: key, then the facts that decide whether to open it.
+          <MobileList label="Longterm memories" emptyMessage="No memories under this folder">
+            {[...rows]
+              .sort((a, b) => b.accessCount - a.accessCount)
+              .map((row) => (
+                <MobileListRow
+                  key={row.memoryId}
+                  onClick={() => onOpenMemory(row.memoryId)}
+                  title={
+                    <span className="font-mono text-xs">
+                      {row.key.slice(selectedFolder.length)}
+                    </span>
+                  }
+                  titleLines={1}
+                  status={
+                    row.complete ? null : (
+                      <AlertTriangle
+                        className="size-3.5 text-status-warning-strong"
+                        aria-label="Chunk mismatch"
+                      />
+                    )
+                  }
+                  meta={[
+                    row.scope === "swarm" ? "swarm" : agentName(row.agentId),
+                    `${row.accessCount} uses`,
+                    hasRatingSignal(row) ? `rating ${formatRating(row.rating ?? undefined)}` : null,
+                    formatSmartTime(row.updatedAt),
+                  ]}
+                />
+              ))}
+          </MobileList>
+        ) : (
+          <DataGrid
+            rowData={rows}
+            columnDefs={columnDefs}
+            columns={gridColumns}
+            loading={isLoading}
+            emptyMessage="No memories under this folder"
+            onRowClicked={onRowClicked}
+            getRowId={(p) => p.data.memoryId}
+            pagination={false}
+          />
+        )}
       </div>
     </div>
   );

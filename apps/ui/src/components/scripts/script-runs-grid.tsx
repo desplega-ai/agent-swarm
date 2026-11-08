@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import type { ScriptRunKind, ScriptRunListItem, ScriptRunStatus } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { ScriptRunKindBadge } from "@/components/shared/script-run-kind-badge";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -111,6 +113,7 @@ export function ScriptRunsGrid({
   hideToolbar = false,
 }: ScriptRunsGridProps) {
   const navigate = useNavigate();
+  const isPhone = useIsPhone();
   const { searchParams } = useUrlSearchState();
   const statusParam = readStringParam(searchParams, statusParamKey, "all");
   const statusFilter = STATUS_OPTIONS.includes(statusParam as ScriptRunStatus | "all")
@@ -227,14 +230,53 @@ export function ScriptRunsGrid({
           paginationQueryKey={paginationQueryKey}
         />
       )}
-      <DataGrid
-        rowData={filteredRows}
-        columnDefs={columns}
-        onRowClicked={onRowClicked}
-        loading={loading}
-        emptyMessage="No script runs"
-        paginationQueryKey={paginationQueryKey}
-      />
+      {isPhone ? (
+        // Phone rows instead of a clipped grid.
+        // Title = script name (or run id), status on the title line, the
+        // facts that the grid spreads over 7 columns on one meta line.
+        <MobileList
+          label="Script runs"
+          loading={loading}
+          emptyMessage="No script runs"
+          // The page scrolls on a phone: no scroll box inside it.
+          className="flex-none overflow-visible"
+        >
+          {filteredRows.map((run) => (
+            <MobileListRow
+              key={run.id}
+              to={`/script-runs/${run.id}`}
+              title={
+                hideNameColumn ? (
+                  <span className="font-mono text-xs">{run.id.slice(0, 8)}</span>
+                ) : (
+                  run.scriptName || "One-off script"
+                )
+              }
+              titleLines={1}
+              status={<StatusBadge status={run.status} />}
+              meta={[
+                run.kind,
+                formatSmartTime(run.startedAt),
+                run.finishedAt ? formatDuration(run.startedAt, run.finishedAt) : "running",
+                run.error ? (
+                  <span key="err" className="text-status-error-strong">
+                    {run.error}
+                  </span>
+                ) : null,
+              ]}
+            />
+          ))}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={filteredRows}
+          columnDefs={columns}
+          onRowClicked={onRowClicked}
+          loading={loading}
+          emptyMessage="No script runs"
+          paginationQueryKey={paginationQueryKey}
+        />
+      )}
     </>
   );
 }

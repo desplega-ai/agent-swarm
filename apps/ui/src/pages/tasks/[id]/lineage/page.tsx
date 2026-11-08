@@ -9,6 +9,7 @@ import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useIsPhone } from "@/hooks/use-mobile";
 import {
   allExpandable,
   buildLineageTree,
@@ -135,7 +136,9 @@ function LineageCanvas({
     [agentNames],
   );
 
+  const compact = useIsPhone();
   const state: LineageViewState = {
+    compact,
     focusId,
     pathIds,
     expanded,

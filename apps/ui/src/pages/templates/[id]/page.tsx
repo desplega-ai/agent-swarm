@@ -1,6 +1,13 @@
-import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Pencil,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
@@ -17,6 +24,7 @@ import {
 } from "@/api/hooks";
 import type { PromptTemplateHistory } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,9 +47,11 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useTheme } from "@/hooks/use-theme";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
+import { PhoneDetailHeader } from "../components/phone-detail-header";
+import { TemplateCode } from "../components/template-code";
 
 const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   enabled: "default",
@@ -52,7 +62,7 @@ const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "dest
 export default function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { theme } = useTheme();
+  const isMobile = useIsMobile();
 
   const { searchParams, setParam } = useUrlSearchState();
   const tabParam = readStringParam(searchParams, "tab", "raw");
@@ -286,190 +296,227 @@ export default function TemplateDetailPage() {
     );
   }
 
-  return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* Header */}
-      <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => navigate("/templates")}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
+  const badges = (
+    <>
+      <Badge variant="outline" size="tag">
+        {template.scope}
+      </Badge>
+      <Badge variant={STATE_VARIANTS[template.state] ?? "outline"} size="tag">
+        {template.state.replace(/_/g, " ")}
+      </Badge>
+      <Badge variant="outline" size="tag">
+        v{template.version}
+      </Badge>
+      {template.isDefault && (
+        <Badge variant="secondary" size="tag">
+          Default
+        </Badge>
+      )}
+      {template.defaultDrifted && (
+        <Badge
+          variant="outline"
+          size="tag"
+          className="border-status-warning/30 text-status-warning-strong"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to Templates
-        </button>
+          Default drifted
+        </Badge>
+      )}
+    </>
+  );
 
-        <PageHeader
-          title={
-            <div className="flex items-center gap-3 flex-wrap min-w-0">
-              <h1 className="text-xl font-semibold">{template.eventType}</h1>
-              <Badge variant="outline" size="tag">
-                {template.scope}
-              </Badge>
-              <Badge variant={STATE_VARIANTS[template.state] ?? "outline"} size="tag">
-                {template.state.replace(/_/g, " ")}
-              </Badge>
-              <Badge variant="outline" size="tag">
-                v{template.version}
-              </Badge>
-              {template.isDefault && (
-                <Badge variant="secondary" size="tag">
-                  Default
-                </Badge>
-              )}
-              {template.defaultDrifted && (
-                <Badge
-                  variant="outline"
-                  size="tag"
-                  className="border-status-warning/30 text-status-warning-strong"
-                >
-                  Default drifted
-                </Badge>
-              )}
-            </div>
-          }
-          action={
-            !template.isDefault && (
-              <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
-                Delete
-              </Button>
-            )
+  // The raw tab's primary action sits in the tab row on a phone, so the code
+  // starts right under it instead of under a toolbar of its own.
+  const rawAction =
+    activeTab !== "raw" || editing ? null : template.isDefault ? (
+      <Button variant="outline" size="sm" className="ml-auto h-9" onClick={handleCustomize}>
+        Customize
+      </Button>
+    ) : (
+      <Button variant="outline" size="sm" className="ml-auto h-9" onClick={() => setEditing(true)}>
+        <Pencil /> Edit
+      </Button>
+    );
+
+  const stateSelect = (
+    <Select value={state} onValueChange={setState}>
+      <SelectTrigger className={isMobile ? "min-w-0 flex-1" : "w-[220px]"}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="enabled">Enabled</SelectItem>
+        <SelectItem value="default_prompt_fallback">Default Prompt Fallback</SelectItem>
+        <SelectItem value="skip_event">Skip Event</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
+  const editActions = (
+    <>
+      <Button
+        size="sm"
+        onClick={handleSave}
+        disabled={upsertMutation.isPending || !hasChanges}
+        className="bg-primary hover:bg-primary/90"
+      >
+        {upsertMutation.isPending ? "Saving..." : "Save"}
+      </Button>
+      {hasChanges ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (template) {
+              setBody(template.body);
+              setState(template.state);
+            }
+          }}
+        >
+          Reset
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      )}
+    </>
+  );
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 gap-3 md:gap-4">
+      {/* Header */}
+      {isMobile ? (
+        <PhoneDetailHeader
+          backTo="/templates"
+          backLabel="Back to Templates"
+          title={template.eventType}
+          badges={badges}
+          menuTitle={template.eventType}
+          menu={
+            template.isDefault
+              ? undefined
+              : [
+                  {
+                    key: "reset",
+                    label: "Reset to default",
+                    icon: RotateCcw,
+                    onSelect: () => setResetOpen(true),
+                  },
+                  {
+                    key: "delete",
+                    label: "Delete template",
+                    icon: Trash2,
+                    destructive: true,
+                    onSelect: () => setDeleteOpen(true),
+                  },
+                ]
           }
         />
-      </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/templates")}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to Templates
+          </button>
+
+          <PageHeader
+            title={
+              <div className="flex items-center gap-3 flex-wrap min-w-0">
+                <h1 className="text-xl font-semibold">{template.eventType}</h1>
+                {badges}
+              </div>
+            }
+            action={
+              !template.isDefault && (
+                <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
+                  Delete
+                </Button>
+              )
+            }
+          />
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs
         value={activeTab}
         onValueChange={(value) => setParam("tab", value, { defaultValue: "raw" })}
-        className="flex flex-col flex-1 min-h-0"
+        className="flex flex-col flex-1 min-h-0 gap-2 md:gap-2"
       >
-        <TabsList>
-          <TabsTrigger value="raw">Raw</TabsTrigger>
-          <TabsTrigger value="rendered">Rendered</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
+        {isMobile ? (
+          <div className="flex items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="raw">Raw</TabsTrigger>
+              <TabsTrigger value="rendered">Rendered</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+            {rawAction}
+          </div>
+        ) : (
+          <TabsList>
+            <TabsTrigger value="raw">Raw</TabsTrigger>
+            <TabsTrigger value="rendered">Rendered</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+          </TabsList>
+        )}
 
         {/* Raw Tab */}
         <TabsContent value="raw" className="flex flex-col flex-1 min-h-0 gap-3">
           {template.isDefault ? (
             <>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" size="tag">
-                  Default — Read Only
-                </Badge>
-                <Button variant="outline" size="sm" onClick={handleCustomize}>
-                  Customize
-                </Button>
-              </div>
-              <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
-                <Editor
-                  key={`readonly-${id}`}
-                  language="markdown"
-                  theme={theme === "dark" ? "vs-dark" : "vs"}
-                  value={template.body}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    fontSize: 13,
-                    lineNumbers: "on",
-                    wordWrap: "on",
-                    automaticLayout: true,
-                    padding: { top: 8 },
-                  }}
-                  height="100%"
-                />
-              </div>
+              {isMobile ? null : (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" size="tag">
+                    Default — Read Only
+                  </Badge>
+                  <Button variant="outline" size="sm" onClick={handleCustomize}>
+                    Customize
+                  </Button>
+                </div>
+              )}
+              <TemplateCode
+                editorKey={`readonly-${id}-${isMobile}`}
+                value={template.body}
+                phone={isMobile}
+              />
             </>
           ) : editing ? (
             <>
-              <div className="flex items-center gap-3">
-                <Select value={state} onValueChange={setState}>
-                  <SelectTrigger className="w-[220px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="enabled">Enabled</SelectItem>
-                    <SelectItem value="default_prompt_fallback">Default Prompt Fallback</SelectItem>
-                    <SelectItem value="skip_event">Skip Event</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={upsertMutation.isPending || !hasChanges}
-                  className="bg-primary hover:bg-primary/90"
-                >
-                  {upsertMutation.isPending ? "Saving..." : "Save"}
-                </Button>
-                {hasChanges ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (template) {
-                        setBody(template.body);
-                        setState(template.state);
-                      }
-                    }}
-                  >
-                    Reset
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
-                    Cancel
-                  </Button>
-                )}
+              <div className="flex items-center gap-2 md:gap-3">
+                {stateSelect}
+                {editActions}
               </div>
-              <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
-                <Editor
-                  key={`editable-${id}`}
-                  language="markdown"
-                  theme={theme === "dark" ? "vs-dark" : "vs"}
-                  value={body}
-                  onChange={(value) => setBody(value ?? "")}
-                  options={{
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    fontSize: 13,
-                    lineNumbers: "on",
-                    wordWrap: "on",
-                    automaticLayout: true,
-                    padding: { top: 8 },
-                  }}
-                  height="100%"
-                />
-              </div>
+              <TemplateCode
+                editorKey={`editable-${id}-${isMobile}`}
+                value={body}
+                onChange={setBody}
+                readOnly={false}
+                phone={isMobile}
+              />
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-                <Button variant="destructive-outline" size="sm" onClick={() => setResetOpen(true)}>
-                  Reset to default
-                </Button>
-              </div>
-              <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
-                <Editor
-                  key={`view-${id}`}
-                  language="markdown"
-                  theme={theme === "dark" ? "vs-dark" : "vs"}
-                  value={template.body}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    fontSize: 13,
-                    lineNumbers: "on",
-                    wordWrap: "on",
-                    automaticLayout: true,
-                    padding: { top: 8 },
-                  }}
-                  height="100%"
-                />
-              </div>
+              {isMobile ? null : (
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                    Edit
+                  </Button>
+                  <Button
+                    variant="destructive-outline"
+                    size="sm"
+                    onClick={() => setResetOpen(true)}
+                  >
+                    Reset to default
+                  </Button>
+                </div>
+              )}
+              <TemplateCode
+                editorKey={`view-${id}-${isMobile}`}
+                value={template.body}
+                phone={isMobile}
+              />
             </>
           )}
         </TabsContent>
@@ -520,7 +567,7 @@ export default function TemplateDetailPage() {
                       ))}
                     </div>
                   )}
-                  <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
+                  <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-3 md:p-4 overflow-auto">
                     <Streamdown>{hasContent ? rendered : body}</Streamdown>
                   </div>
                 </>
@@ -545,11 +592,16 @@ export default function TemplateDetailPage() {
                 {varsOpen && (
                   <div className="px-3 pb-3 space-y-2">
                     {eventDef.variables.map((v) => (
-                      <div key={v.name} className="flex items-start gap-3 text-sm">
+                      <div
+                        key={v.name}
+                        className="flex flex-wrap items-start gap-x-3 gap-y-1 text-sm"
+                      >
                         <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded shrink-0">
                           {`{{${v.name}}}`}
                         </code>
-                        <span className="text-muted-foreground">{v.description}</span>
+                        <span className="min-w-0 flex-1 text-muted-foreground">
+                          {v.description}
+                        </span>
                         {v.example && (
                           <span className="text-xs text-muted-foreground/60 shrink-0">
                             e.g. {v.example}
@@ -565,14 +617,62 @@ export default function TemplateDetailPage() {
         </TabsContent>
 
         {/* History Tab */}
-        <TabsContent value="history" className="flex-1 min-h-0">
-          <DataGrid
-            rowData={history}
-            columnDefs={historyColumns}
-            onRowClicked={onHistoryRowClicked}
-            emptyMessage="No version history"
-            pagination={false}
-          />
+        <TabsContent
+          value="history"
+          className={isMobile ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"}
+        >
+          {isMobile ? (
+            <MobileList
+              label="Version history"
+              emptyMessage="No version history"
+              className="overflow-visible"
+            >
+              {history.map((h) => (
+                <MobileListRow
+                  key={h.id}
+                  to={`/templates/${id}/history/${h.version}`}
+                  title={`Version ${h.version}`}
+                  status={
+                    h.version === template.version ? (
+                      <Badge variant="secondary" size="tag">
+                        Current
+                      </Badge>
+                    ) : null
+                  }
+                  meta={[
+                    h.changedBy,
+                    formatSmartTime(h.changedAt),
+                    h.state !== "enabled" ? h.state.replace(/_/g, " ") : null,
+                  ]}
+                  extras={
+                    <>
+                      <span className="min-w-0 flex-1 text-xs text-muted-foreground [overflow-wrap:anywhere] line-clamp-2">
+                        {h.changeReason}
+                      </span>
+                      {h.version === template.version ? null : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-auto h-9"
+                          onClick={() => setCheckoutVersion(h.version)}
+                        >
+                          Checkout
+                        </Button>
+                      )}
+                    </>
+                  }
+                />
+              ))}
+            </MobileList>
+          ) : (
+            <DataGrid
+              rowData={history}
+              columnDefs={historyColumns}
+              onRowClicked={onHistoryRowClicked}
+              emptyMessage="No version history"
+              pagination={false}
+            />
+          )}
         </TabsContent>
       </Tabs>
 

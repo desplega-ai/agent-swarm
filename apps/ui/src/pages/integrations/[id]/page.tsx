@@ -1,4 +1,4 @@
-import { ExternalLink, Info, Plug } from "lucide-react";
+import { ExternalLink, Info, MoreHorizontal, Plug } from "lucide-react";
 import { type ComponentType, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -25,7 +25,6 @@ import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +37,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { DetailPageBody } from "@/components/ui/detail-page-layout";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { adapterChannelState, CHANNEL_DEFS } from "@/lib/channel-cards";
 import { CHAT_SDK_ADAPTER_DEFS } from "@/lib/chat-sdk-fields";
@@ -340,23 +345,13 @@ function IntegrationDetailInner({
       ) : (
         <div className="space-y-6">
           {isGithub && (
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertDescription>
-                <p className="leading-relaxed">
-                  <strong>PAT mode is the default and simpler path.</strong> For GitHub App
-                  integration (recommended for production), expand <em>Advanced</em> below and fill{" "}
-                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                    GITHUB_APP_ID
-                  </code>{" "}
-                  +{" "}
-                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                    GITHUB_APP_PRIVATE_KEY
-                  </code>
-                  .
-                </p>
-              </AlertDescription>
-            </Alert>
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                PAT mode is the default. For GitHub App mode (recommended in production), open{" "}
+                <em>Advanced</em>.
+              </span>
+            </p>
           )}
 
           {requiredFields.length > 0 && (
@@ -418,7 +413,8 @@ function IntegrationDetailInner({
                   logo
                 )}
               </div>
-              <p className="min-w-0 text-sm text-muted-foreground">
+              {/* Two lines below lg so the first field stays near the top of a phone screen. */}
+              <p className="min-w-0 text-sm text-muted-foreground max-lg:line-clamp-2">
                 {channel ? `${channel.name}: ${channel.description}` : def.description}
               </p>
             </div>
@@ -445,14 +441,15 @@ function IntegrationDetailInner({
 
       <DetailPageBody
         main={
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             {/* Action bar, hidden when a special flow replaces the generic form. */}
+            {/* Below lg the bar moves under the form and sticks to the bottom; Disable and Reset go into a "…" menu. */}
             {!isReplaced && (
-              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20 max-lg:order-last max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:flex-nowrap max-lg:bg-background/95 max-lg:backdrop-blur max-lg:shadow-sm max-lg:p-2">
                 <Button
                   onClick={handleSave}
                   disabled={!hasDirty || upsertBatch.isPending}
-                  className="bg-primary hover:bg-primary/90"
+                  className="bg-primary hover:bg-primary/90 max-lg:flex-1"
                   size="sm"
                 >
                   {upsertBatch.isPending
@@ -469,12 +466,13 @@ function IntegrationDetailInner({
                     size="sm"
                     onClick={handleToggleDisable}
                     disabled={upsertBatch.isPending}
+                    className="max-lg:hidden"
                   >
                     {isDisabled ? "Enable" : "Disable"} {def.name}
                   </Button>
                 )}
 
-                <div className="flex-1" />
+                <div className="flex-1 max-lg:hidden" />
 
                 <Button
                   type="button"
@@ -482,9 +480,41 @@ function IntegrationDetailInner({
                   size="sm"
                   onClick={() => setConfirmResetOpen(true)}
                   disabled={deleteBatch.isPending}
+                  className="max-lg:hidden"
                 >
                   Reset integration
                 </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 lg:hidden"
+                      aria-label={`More ${def.name} actions`}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="top">
+                    {def.disableKey && (
+                      <DropdownMenuItem
+                        onSelect={handleToggleDisable}
+                        disabled={upsertBatch.isPending}
+                      >
+                        {isDisabled ? "Enable" : "Disable"} {def.name}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => setConfirmResetOpen(true)}
+                      disabled={deleteBatch.isPending}
+                    >
+                      Reset integration
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
 

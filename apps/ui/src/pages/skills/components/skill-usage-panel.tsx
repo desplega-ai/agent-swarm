@@ -30,10 +30,13 @@ export function SkillUsagePanel({
   skillId,
   window,
   onWindowChange,
+  compact = false,
 }: {
   skillId: string;
   window: SkillUsageWindow;
   onWindowChange: (value: SkillUsageWindow) => void;
+  /** Phone: the page shows the window control in its sticky bar, so this drops its own. */
+  compact?: boolean;
 }) {
   const navigate = useNavigate();
   const { data: usage, isLoading } = useSkillUsageDetail(skillId, window);
@@ -124,15 +127,15 @@ export function SkillUsagePanel({
   return (
     <div className="flex flex-col gap-4 pb-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
+        <p className={compact ? "text-xs text-muted-foreground" : "text-sm text-muted-foreground"}>
           Loads of this skill, at most one per runner session. Days follow your timezone.
         </p>
-        <UsageWindowControl value={window} onChange={onWindowChange} />
+        {compact ? null : <UsageWindowControl value={window} onChange={onWindowChange} />}
       </div>
 
       {isLoading && !usage ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {[0, 1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-24" />
             ))}
@@ -143,7 +146,7 @@ export function SkillUsagePanel({
         <p className="py-8 text-center text-sm text-muted-foreground">Usage unavailable.</p>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatPanel label="Loads" value={formatCount(usage.totals.invocations)} />
             <StatPanel label="Agents" value={formatCount(usage.totals.distinctAgents)} />
             <StatPanel label="Tasks" value={formatCount(usage.totals.distinctTasks)} />
