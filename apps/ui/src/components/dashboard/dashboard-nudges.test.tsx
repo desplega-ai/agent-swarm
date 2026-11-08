@@ -3,11 +3,17 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, type ReactNode } from "react";
 
 GlobalRegistrator.register();
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, __APP_VERSION__: "1.0.0" });
+Object.assign(globalThis, {
+  IS_REACT_ACT_ENVIRONMENT: true,
+  __APP_VERSION__: "1.0.0",
+  __AGENT_FS_VERSION__: "0.18.22",
+});
 const { createRoot } = await import("react-dom/client");
 
 let telemetryEnabled = false;
 let role = "admin";
+let apiVersion: string | null = null;
+let agentFsVersion: string | null = null;
 const started: string[] = [];
 
 mock.module("react-router-dom", () => ({
@@ -17,7 +23,7 @@ mock.module("@/api/hooks/use-config-api", () => ({
   useConfigs: () => ({ data: [{ key: "SWARM_ORG_NAME", value: "Acme" }] }),
 }));
 mock.module("@/api/hooks/use-feature-gate", () => ({
-  useFeatureGate: () => ({ currentVersion: null, supported: true }),
+  useFeatureGate: () => ({ currentVersion: apiVersion, supported: apiVersion === null }),
 }));
 mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
 mock.module("@/app/status-context", () => ({
@@ -68,7 +74,9 @@ mock.module("@/components/ui/button", () => ({
       </button>
     ),
 }));
-mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => null }));
+mock.module("@/contexts/agent-fs-context", () => ({
+  useOptionalAgentFs: () => ({ serverVersion: agentFsVersion }),
+}));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ user: { role } }),
 }));
@@ -109,6 +117,8 @@ async function mount() {
 beforeEach(() => {
   telemetryEnabled = false;
   role = "admin";
+  apiVersion = null;
+  agentFsVersion = null;
   started.length = 0;
   localStorage.clear();
 });
@@ -154,4 +164,21 @@ test("a dismissal persists across remounts", async () => {
   expect(container.textContent).not.toContain(TITLE);
   await cleanup?.();
   expect((await mount()).textContent).not.toContain(TITLE);
+});
+
+test("an older API shows the update banner with the version step", async () => {
+  apiVersion = "0.9.0";
+  const text = (await mount()).textContent;
+  expect(text).toContain("Update available");
+  expect(text).toContain("API v0.9.0 → v1.0.0");
+});
+
+test("an older agent-fs shows its own banner against the pinned version", async () => {
+  agentFsVersion = "0.18.20";
+  const text = (await mount()).textContent;
+  expect(text).toContain("agent-fs update available");
+  expect(text).toContain("v0.18.20 → v0.18.22");
+  await cleanup?.();
+  agentFsVersion = "0.18.22";
+  expect((await mount()).textContent).not.toContain("agent-fs update available");
 });
