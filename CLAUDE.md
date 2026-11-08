@@ -4,6 +4,8 @@ Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Bun + TypeScript, 
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) to get set up. Start the server with `bun run start:http`.
 
+Keep local `.pi/` artifacts git-ignored; do not stage or commit them.
+
 ## Architecture invariants
 
 The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers talk to the API over HTTP using the swarm API key + `X-Agent-ID` headers. Enforced by `scripts/check-db-boundary.sh` (CI).
