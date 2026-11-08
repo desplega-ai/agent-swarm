@@ -1597,6 +1597,9 @@ function agentFsPropIssues(
   return issues;
 }
 
+/** `PageFrame.pageId` literal: a page id as the `/pages/:id` route takes it (no slugs). */
+const PAGE_FRAME_ID = /^[a-f0-9]{32}$/i;
+
 function isAgentFsPath(value: string): boolean {
   return value.startsWith("/") && !value.split("/").includes("..");
 }
@@ -1829,6 +1832,14 @@ export function validatePage(
       if (type === "Accordion") issues.push(...accordionIssues(rawElement, elementPath));
       if (type === "File" || type === "Files") {
         issues.push(...agentFsPropIssues(type, rawElement.props, elementPath));
+      }
+      if (
+        type === "PageFrame" &&
+        typeof rawElement.props.pageId === "string" &&
+        rawElement.props.pageId !== "" &&
+        !PAGE_FRAME_ID.test(rawElement.props.pageId)
+      ) {
+        issues.push(issue(`${elementPath}.props.pageId`, "must be a page id (32 hex characters)"));
       }
       if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
       if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
