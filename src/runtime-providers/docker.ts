@@ -1,4 +1,5 @@
 import { redactWithEnv } from "../e2b/env";
+import { parseEnvFlag } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ConfigStatus,
@@ -19,8 +20,55 @@ import {
  * - DOCKER_HOST: `unix:///path/to/docker.sock` (default /var/run/docker.sock)
  * - DOCKER_NETWORK: optional network to attach runtimes to
  * - DOCKER_EXTRA_HOSTS: comma-separated host:address entries
+ * - DOCKER_RUNTIME: optional OCI runtime name (`runsc`, `kata`) -> HostConfig.Runtime
+ * - DOCKER_HARDENED: `true` or `1` (parseEnvFlag) drops all capabilities except the
+ *   entrypoint set, forbids privilege escalation, and disables swap when memory is limited
+ * - DOCKER_PIDS_LIMIT: optional positive integer -> HostConfig.PidsLimit
  */
 const MAX_API_VERSION = 47;
+const OCI_RUNTIME_NAME = /^[A-Za-z0-9._-]+$/;
+const PIDS_LIMIT = /^[1-9]\d*$/;
+
+/**
+ * Capabilities the worker entrypoint still needs after `CapDrop: ["ALL"]`, verified against
+ * `agent-swarm-worker:slim` with `--security-opt no-new-privileges`:
+ * - CHOWN + DAC_OVERRIDE: root chowns and writes into the 750 `/home/worker` tree.
+ * - FOWNER: `chmod` after `chown` on the codex `auth.json`.
+ * - SETUID + SETGID: the entrypoint drops from root to the `worker` user.
+ * - KILL: tini forwards signals to the worker process.
+ */
+const HARDENED_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"];
+
+class DockerConfigError extends Error {
+  constructor(
+    readonly key: string,
+    message: string,
+  ) {
+    super(scrubSecrets(message));
+  }
+}
+
+type IsolationOptions = { runtime?: string; pidsLimit?: number; hardened: boolean };
+
+function isolationOptions(target: RuntimeTargetConfig): IsolationOptions {
+  const runtime = target.DOCKER_RUNTIME?.trim();
+  if (runtime && !OCI_RUNTIME_NAME.test(runtime))
+    throw new DockerConfigError(
+      "DOCKER_RUNTIME",
+      `DOCKER_RUNTIME must be an OCI runtime name (letters, digits, ".", "-", "_"), got ${runtime}`,
+    );
+  const pids = target.DOCKER_PIDS_LIMIT?.trim();
+  if (pids && (!PIDS_LIMIT.test(pids) || !Number.isSafeInteger(Number(pids))))
+    throw new DockerConfigError(
+      "DOCKER_PIDS_LIMIT",
+      `DOCKER_PIDS_LIMIT must be a positive integer, got ${pids}`,
+    );
+  return {
+    runtime: runtime || undefined,
+    pidsLimit: pids ? Number(pids) : undefined,
+    hardened: parseEnvFlag(target.DOCKER_HARDENED, false),
+  };
+}
 const apiVersions = new Map<string, Promise<string>>();
 
 async function apiVersion(socket: string): Promise<string> {
@@ -146,14 +194,17 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
     try {
       socketPath(target);
+      isolationOptions(target);
       return { ready: true, missing: [] };
     } catch (err) {
-      return { ready: false, missing: ["DOCKER_HOST"], hint: (err as Error).message };
+      const key = err instanceof DockerConfigError ? err.key : "DOCKER_HOST";
+      return { ready: false, missing: [key], hint: (err as Error).message };
     }
   }
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
     try {
+      const isolation = isolationOptions(target);
       let cacheWarning: string | undefined;
       let cacheMount: { Type: "volume"; Source: string; Target: string } | undefined;
       if (req.cache) {
@@ -200,6 +251,19 @@ export class DockerRuntimeProvider implements RuntimeProvider {
           Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
           NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
           ...(cacheMount ? { Mounts: [cacheMount] } : {}),
+          ...(isolation.runtime ? { Runtime: isolation.runtime } : {}),
+          ...(isolation.pidsLimit ? { PidsLimit: isolation.pidsLimit } : {}),
+          ...(isolation.hardened
+            ? {
+                CapDrop: ["ALL"],
+                CapAdd: HARDENED_CAP_ADD,
+                SecurityOpt: ["no-new-privileges:true"],
+                // MemorySwap == Memory means no swap on top of the memory limit.
+                ...(req.resources?.memoryMb
+                  ? { MemorySwap: req.resources.memoryMb * 1024 * 1024 }
+                  : {}),
+              }
+            : {}),
         },
       };
       const createAndStart = async (): Promise<string> => {

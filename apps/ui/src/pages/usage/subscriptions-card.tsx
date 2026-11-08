@@ -14,8 +14,6 @@ import {
 import { cn } from "@/lib/utils";
 import { formatCount, formatDay, formatUsd } from "./usage-format";
 
-/** Average month length, used to prorate a monthly list price to days. */
-
 const SUBSCRIPTION_LABELS: Record<string, string> = {
   CLAUDE_CODE_OAUTH_TOKEN: "Claude",
   CODEX_OAUTH: "ChatGPT",
@@ -73,6 +71,8 @@ export function SubscriptionsCard({
   );
   const missing = lines.length - counted.length;
   const paygTotal = payg.reduce((sum, row) => sum + row.costUsd, 0);
+  const unattributed = rows.filter((row) => row.keyType === null);
+  const unattributedSessions = unattributed.reduce((sum, row) => sum + row.sessions, 0);
 
   return (
     <Card className="gap-5 py-5">
@@ -82,7 +82,7 @@ export function SubscriptionsCard({
         </h2>
         {lines.length === 0 ? (
           <p className="pr-36 text-sm text-muted-foreground">
-            No subscription runs in this window. All spend used pay-as-you-go keys.
+            No attributed subscription runs in this window.
           </p>
         ) : (
           <div className="space-y-1 pr-36">
@@ -191,6 +191,15 @@ export function SubscriptionsCard({
           </FoldedList>
         ) : null}
 
+        {unattributed.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            Unattributed: {formatUsd(unattributed.reduce((sum, row) => sum + row.costUsd, 0))}
+            {" across "}
+            {formatCount(unattributedSessions)}
+            {unattributedSessions === 1 ? " session" : " sessions"}
+            {". They reported no credential, so their billing type is unknown."}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {catalog ? `List prices checked ${formatDay(catalog.checkedAt, true)}. ` : null}
           <Link to="/integrations/ai" className="text-primary hover:underline">

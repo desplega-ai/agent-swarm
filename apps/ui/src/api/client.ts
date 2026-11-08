@@ -898,6 +898,23 @@ class ApiClient {
     return res.json();
   }
 
+  /** Runs the action a task card Button declares. Throws with the server's error text. */
+  async runTaskUiAction(
+    id: string,
+    actionId: string,
+  ): Promise<{ status: "started" | "already_done"; taskId?: string }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/ui-actions/${encodeURIComponent(actionId)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to run the card action" }));
+      throw new Error(error.error || `Failed to run the card action: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async resumeTask(id: string): Promise<{ success: boolean; task: TaskWithLogs }> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/resume`;
     const res = await fetch(url, {
@@ -3112,6 +3129,17 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/keys/status${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch API key statuses: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchKeyWindowUsage(filter: {
+    keyType: string;
+    keySuffix: string;
+  }): Promise<import("./types").KeyWindowUsageResponse> {
+    const params = new URLSearchParams(filter);
+    const url = `${this.getBaseUrl()}/api/keys/window-usage?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch window usage: ${res.status}`);
     return res.json();
   }
 

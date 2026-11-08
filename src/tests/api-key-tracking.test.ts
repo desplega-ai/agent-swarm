@@ -18,7 +18,6 @@ import {
   recordKeyUsage,
   setApiKeyPlan,
 } from "../be/db";
-import type { CredentialSelection } from "../utils/credentials";
 import {
   ModelWindowExhaustedError,
   resolveCredentialPools,
@@ -841,76 +840,5 @@ describe("API key tracking DB queries", () => {
         expect(result.earliestModelResetAt).toBeNull();
       });
     });
-  });
-});
-
-// ─── Cross-keyType Failover Logic Tests ──────────────────────────────────────
-
-describe("cross-keyType failover", () => {
-  test("prefers non-rate-limited credential when both keyTypes available", () => {
-    const rateLimited: CredentialSelection = {
-      selected: "sk-xxx",
-      index: 0,
-      total: 1,
-      keySuffix: "k-xxx",
-      keyType: "OPENAI_API_KEY",
-      isRateLimitFallback: true,
-    };
-    const healthy: CredentialSelection = {
-      selected: "oauth-yyy",
-      index: 0,
-      total: 2,
-      keySuffix: "h-yyy",
-      keyType: "CODEX_OAUTH",
-      isRateLimitFallback: false,
-    };
-
-    // Simulate the runner's primary selection logic
-    let primarySelection: CredentialSelection | undefined;
-    if (rateLimited && healthy) {
-      if (rateLimited.isRateLimitFallback && !healthy.isRateLimitFallback) {
-        primarySelection = healthy;
-      } else {
-        primarySelection = rateLimited;
-      }
-    } else {
-      primarySelection = rateLimited ?? healthy;
-    }
-
-    expect(primarySelection).toBe(healthy);
-    expect(primarySelection!.keyType).toBe("CODEX_OAUTH");
-  });
-
-  test("uses first credential when neither is rate-limited", () => {
-    const first: CredentialSelection = {
-      selected: "sk-aaa",
-      index: 0,
-      total: 1,
-      keySuffix: "k-aaa",
-      keyType: "OPENAI_API_KEY",
-      isRateLimitFallback: false,
-    };
-    const second: CredentialSelection = {
-      selected: "oauth-bbb",
-      index: 0,
-      total: 1,
-      keySuffix: "h-bbb",
-      keyType: "CODEX_OAUTH",
-      isRateLimitFallback: false,
-    };
-
-    let primarySelection: CredentialSelection | undefined;
-    if (first && second) {
-      if (first.isRateLimitFallback && !second.isRateLimitFallback) {
-        primarySelection = second;
-      } else {
-        primarySelection = first;
-      }
-    } else {
-      primarySelection = first ?? second;
-    }
-
-    expect(primarySelection).toBe(first);
-    expect(primarySelection!.keyType).toBe("OPENAI_API_KEY");
   });
 });

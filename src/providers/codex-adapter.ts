@@ -42,12 +42,17 @@ import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/cont
 import { getApiKey } from "../utils/api-key";
 import { isCodexRejectedAccessError } from "../utils/codex-auth-failure";
 import {
+  normalizeCodexRateLimits,
+  normalizeCodexRateLimitsResponse,
+} from "../utils/codex-rate-limits";
+import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
 } from "../utils/context-window";
 import { selectCredential } from "../utils/credentials";
 import { isSessionSummarySkipped } from "../utils/env-flag";
+import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
@@ -57,6 +62,13 @@ import {
   registerProcessGroup,
   terminateProcessGroup,
 } from "../utils/process-group";
+import {
+  applyProviderQuotaReport,
+  type ProviderAccountTelemetry,
+  type ProviderQuotaReport,
+  type RateLimitReplacement,
+  scrubProviderQuotaReport,
+} from "../utils/provider-account-telemetry";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
@@ -178,6 +190,9 @@ type ErrorItem = Extract<ThreadItem, { type: "error" }>;
 type FileChangeItem = Extract<ThreadItem, { type: "file_change" }>;
 type McpToolCallItem = Extract<ThreadItem, { type: "mcp_tool_call" }>;
 type ReasoningItem = Extract<ThreadItem, { type: "reasoning" }>;
+
+/** `turn/start` reasoning summary: OpenAI returns summaries only, never raw reasoning. */
+export const CODEX_REASONING_SUMMARY = "detailed";
 type TodoListItem = Extract<ThreadItem, { type: "todo_list" }>;
 type WebSearchItem = Extract<ThreadItem, { type: "web_search" }>;
 
@@ -200,6 +215,10 @@ export type ThreadEvent =
 interface CodexThread {
   readonly id: string | null;
   readonly version?: string;
+  getQuotaTelemetry?(): Pick<
+    ProviderResult,
+    "rateLimitWindows" | "providerAccount" | "rateLimitReplacements"
+  >;
   runStreamed(input: string): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
   steer(input: string): Promise<void>;
   interrupt(): Promise<void>;
@@ -208,7 +227,7 @@ interface CodexThread {
 
 interface CodexAppServerClient {
   readonly version?: string;
-  request<T>(method: string, params?: unknown): Promise<T>;
+  request<T>(method: string, params?: unknown, options?: { timeoutMs: number }): Promise<T>;
   onNotification(listener: (notification: CodexAppServerNotification) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
   close(): Promise<void>;
@@ -713,6 +732,55 @@ class AppServerCodexThread implements CodexThread {
   get version(): string | undefined {
     return this.client.version;
   }
+  private quotaWindows: RateLimitWindowTelemetry = {};
+  private quotaAccount: ProviderAccountTelemetry | null = null;
+  getQuotaTelemetry(): Pick<
+    ProviderResult,
+    "rateLimitWindows" | "providerAccount" | "rateLimitReplacements"
+  > {
+    const replace: RateLimitReplacement[] = [];
+    for (const [limitId, limit] of Object.entries(this.quotaAccount?.limits ?? {})) {
+      for (const slot of ["primary", "secondary"] as const) {
+        const observedAt = limit.windowRemovedAt?.[slot];
+        if (observedAt) replace.push({ source: "codex", limitId, observedAt, slots: [slot] });
+      }
+    }
+    return this.quotaAccount
+      ? {
+          rateLimitWindows: { ...this.quotaWindows },
+          providerAccount: this.quotaAccount,
+          rateLimitReplacements: replace,
+        }
+      : {};
+  }
+
+  private applyQuota(quota: ProviderQuotaReport, initialRead = false): void {
+    const merged = applyProviderQuotaReport(
+      { windows: this.quotaWindows, account: this.quotaAccount },
+      scrubProviderQuotaReport(quota),
+      initialRead,
+    );
+    this.quotaWindows = merged.windows;
+    this.quotaAccount = merged.account;
+  }
+
+  async readInitialQuota(): Promise<void> {
+    // The request time precedes notifications received during the read. On equal
+    // millisecond timestamps, those notifications retain priority per field.
+    const observedAt = new Date().toISOString();
+    try {
+      const response = await this.client.request<unknown>(
+        "account/rateLimits/read",
+        { excludeResetCreditDetails: true },
+        { timeoutMs: 5000 },
+      );
+      const quota = normalizeCodexRateLimitsResponse(response, observedAt);
+      if (quota) this.applyQuota(quota, true);
+    } catch {
+      // Quota collection is best-effort. Task execution uses its own error path.
+    }
+  }
+
   private activeTurnId: string | null = null;
   private activePush: ((event: ThreadEvent) => void) | null = null;
   private activeFinish: (() => void) | null = null;
@@ -771,6 +839,9 @@ class AppServerCodexThread implements CodexThread {
       const response = await this.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.id,
         input: textInput(input),
+        // The bundled model catalog defaults the reasoning summary to `none`,
+        // so reasoning items arrived with empty `summary` and `content`.
+        summary: CODEX_REASONING_SUMMARY,
       });
       if (!finished) this.setActiveTurn(response.turn.id);
     } catch (error) {
@@ -829,6 +900,11 @@ class AppServerCodexThread implements CodexThread {
       notification.params && typeof notification.params === "object"
         ? (notification.params as Record<string, unknown>)
         : {};
+    if (notification.method === "account/rateLimits/updated") {
+      const quota = normalizeCodexRateLimits(params.rateLimits, new Date().toISOString(), true);
+      if (quota) this.applyQuota(quota);
+      return;
+    }
     if (params.threadId !== undefined && params.threadId !== this.id) return;
     const push = this.activePush;
     if (!push) return;
@@ -1169,7 +1245,11 @@ export class CodexSession implements ProviderSession {
     // Resolution deferred until `runSession`'s finally-block fully cleans up
     // (see `pendingResult` rationale on the field above). Caller-visible
     // ordering: cleanup → resolve waitForCompletion.
-    this.pendingResult = { ...result, appliedReasoningEffort: this.appliedReasoningEffort };
+    this.pendingResult = {
+      ...result,
+      ...this.thread.getQuotaTelemetry?.(),
+      appliedReasoningEffort: this.appliedReasoningEffort,
+    };
   }
 
   /** Build CostData from the usage accumulated across completed turns. */
@@ -2067,7 +2147,9 @@ export async function createInProcessCodexSession(
         ephemeral: false,
       });
       void pruneCodexRollouts(env).catch(() => {});
-      thread = new AppServerCodexThread(client, response.thread.id);
+      const appThread = new AppServerCodexThread(client, response.thread.id);
+      await appThread.readInitialQuota();
+      thread = appThread;
     } catch (error) {
       await client.close();
       throw error;

@@ -137,9 +137,9 @@ export class CodexAppServer {
     void this.ready.catch(() => {});
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, options?: { timeoutMs: number }): Promise<T> {
     await this.ready;
-    return this.requestRaw<T>(method, params);
+    return this.requestRaw<T>(method, params, options?.timeoutMs);
   }
 
   get version(): string | undefined {
@@ -185,7 +185,11 @@ export class CodexAppServer {
     this.write({ method: "initialized" });
   }
 
-  private requestRaw<T>(method: string, params?: unknown): Promise<T> {
+  private requestRaw<T>(
+    method: string,
+    params?: unknown,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<T> {
     if (this.terminalError) return Promise.reject(this.terminalError);
     if (this.closePromise) return Promise.reject(new Error("Codex app-server closed"));
 
@@ -193,8 +197,8 @@ export class CodexAppServer {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server ${method} timed out after ${this.requestTimeoutMs}ms`));
-      }, this.requestTimeoutMs);
+        reject(new Error(`Codex app-server ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       this.pending.set(id, {
         method,
         resolve: resolve as (value: unknown) => void,

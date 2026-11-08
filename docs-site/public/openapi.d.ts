@@ -6397,6 +6397,7 @@ export interface paths {
                         scope?: string;
                         scopeId?: string;
                         plan?: string;
+                        planRaw?: string;
                     };
                 };
             };
@@ -6663,7 +6664,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record provider-emitted rate-limit window telemetry for an API key */
+        /**
+         * Record provider-emitted rate-limit window telemetry for an API key
+         * @description Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -6682,12 +6686,96 @@ export interface paths {
                                 status: string;
                                 utilization?: number;
                                 resetsAt?: number;
+                                fieldObservedAt?: {
+                                    /** Format: date-time */
+                                    durationMins?: string;
+                                    /** Format: date-time */
+                                    resetsAt?: string;
+                                    /** Format: date-time */
+                                    label?: string;
+                                    /** Format: date-time */
+                                    normalModelSlug?: string;
+                                };
+                                durationMins?: number;
+                                /** @enum {string} */
+                                source?: "claude" | "codex";
+                                limitId?: string;
+                                label?: string;
+                                normalModelSlug?: string;
+                                overageStatus?: string;
+                                overageDisabledReason?: string;
                                 isUsingOverage?: boolean;
                                 surpassedThreshold?: number;
                                 /** Format: date-time */
                                 lastSeenAt: string;
                             };
                         };
+                        account?: {
+                            /** @enum {string} */
+                            source: "codex" | "claude";
+                            /** Format: date-time */
+                            observedAt: string;
+                            fieldObservedAt?: {
+                                /** Format: date-time */
+                                ordinaryUsageAllowed?: string;
+                                /** Format: date-time */
+                                resetCreditsAvailable?: string;
+                            };
+                            ordinaryUsageAllowed?: boolean | null;
+                            resetCreditsAvailable?: number | null;
+                            limits?: {
+                                [key: string]: {
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        planRaw?: string;
+                                        /** Format: date-time */
+                                        label?: string;
+                                        /** Format: date-time */
+                                        normalModelSlug?: string;
+                                        /** Format: date-time */
+                                        credits?: string;
+                                        /** Format: date-time */
+                                        spend?: string;
+                                        /** Format: date-time */
+                                        spendControlReached?: string;
+                                        /** Format: date-time */
+                                        reachedType?: string;
+                                    };
+                                    windowRemovedAt?: {
+                                        /** Format: date-time */
+                                        primary?: string;
+                                        /** Format: date-time */
+                                        secondary?: string;
+                                    };
+                                    planRaw?: string | null;
+                                    label?: string | null;
+                                    normalModelSlug?: string | null;
+                                    credits?: {
+                                        hasCredits: boolean;
+                                        unlimited: boolean;
+                                        balance?: string | null;
+                                    } | null;
+                                    spend?: {
+                                        limit: string;
+                                        used: string;
+                                        remainingPercent: number;
+                                        resetsAt: number;
+                                    } | null;
+                                    spendControlReached?: boolean | null;
+                                    reachedType?: string | null;
+                                };
+                            };
+                        };
+                        replace?: {
+                            /** @enum {string} */
+                            source: "codex";
+                            limitId: string;
+                            /** Format: date-time */
+                            observedAt: string;
+                            slots: ("primary" | "secondary")[];
+                        }[];
                         scope?: string;
                         scopeId?: string;
                     };
@@ -6718,6 +6806,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Telemetry report exceeds 256 KiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6924,15 +7021,92 @@ export interface paths {
                                         status: string;
                                         utilization?: number;
                                         resetsAt?: number;
+                                        fieldObservedAt?: {
+                                            /** Format: date-time */
+                                            durationMins?: string;
+                                            /** Format: date-time */
+                                            resetsAt?: string;
+                                            /** Format: date-time */
+                                            label?: string;
+                                            /** Format: date-time */
+                                            normalModelSlug?: string;
+                                        };
+                                        durationMins?: number;
+                                        /** @enum {string} */
+                                        source?: "claude" | "codex";
+                                        limitId?: string;
+                                        label?: string;
+                                        normalModelSlug?: string;
+                                        overageStatus?: string;
+                                        overageDisabledReason?: string;
                                         isUsingOverage?: boolean;
                                         surpassedThreshold?: number;
                                         /** Format: date-time */
                                         lastSeenAt: string;
                                     };
                                 };
+                                providerAccount: {
+                                    /** @enum {string} */
+                                    source: "codex" | "claude";
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        ordinaryUsageAllowed?: string;
+                                        /** Format: date-time */
+                                        resetCreditsAvailable?: string;
+                                    };
+                                    ordinaryUsageAllowed?: boolean | null;
+                                    resetCreditsAvailable?: number | null;
+                                    limits?: {
+                                        [key: string]: {
+                                            /** Format: date-time */
+                                            observedAt: string;
+                                            fieldObservedAt?: {
+                                                /** Format: date-time */
+                                                planRaw?: string;
+                                                /** Format: date-time */
+                                                label?: string;
+                                                /** Format: date-time */
+                                                normalModelSlug?: string;
+                                                /** Format: date-time */
+                                                credits?: string;
+                                                /** Format: date-time */
+                                                spend?: string;
+                                                /** Format: date-time */
+                                                spendControlReached?: string;
+                                                /** Format: date-time */
+                                                reachedType?: string;
+                                            };
+                                            windowRemovedAt?: {
+                                                /** Format: date-time */
+                                                primary?: string;
+                                                /** Format: date-time */
+                                                secondary?: string;
+                                            };
+                                            planRaw?: string | null;
+                                            label?: string | null;
+                                            normalModelSlug?: string | null;
+                                            credits?: {
+                                                hasCredits: boolean;
+                                                unlimited: boolean;
+                                                balance?: string | null;
+                                            } | null;
+                                            spend?: {
+                                                limit: string;
+                                                used: string;
+                                                remainingPercent: number;
+                                                resetsAt: number;
+                                            } | null;
+                                            spendControlReached?: boolean | null;
+                                            reachedType?: string | null;
+                                        };
+                                    };
+                                } | null;
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                detectedPlanRaw: string | null;
                                 lastSeatMismatchAt: string | null;
                                 lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
@@ -6954,6 +7128,152 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keys/window-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Swarm-observed usage within current provider windows
+         * @description Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    keyType?: string;
+                    keySuffix?: string;
+                    scope?: string;
+                    scopeId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Independent windows with receipt-time tokens and explicit measurement coverage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            asOf: string;
+                            /** @enum {string} */
+                            accounting: "session_cost_receipt_time";
+                            windows: {
+                                statusId: string;
+                                keyType: string;
+                                keySuffix: string;
+                                scope: string;
+                                scopeId: string | null;
+                                windowKey: string;
+                                durationMins: number | null;
+                                startsAt: string | null;
+                                endsAt: string | null;
+                                dataThrough: string;
+                                observedAt: string;
+                                observationAgeMs: number;
+                                modelScope: {
+                                    /** @enum {string} */
+                                    kind: "account" | "family" | "unknown";
+                                    model: string | null;
+                                };
+                                /** @enum {string|null} */
+                                unavailableReason: "missing_reset" | "unknown_duration" | "unknown_model_scope" | "window_not_started" | null;
+                                usage: {
+                                    sessions: number;
+                                    errorSessions: number;
+                                    completedTasks: number;
+                                    tokens: {
+                                        uncachedInput: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        output: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheRead: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheWrite: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        reasoning: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        thinking: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                    };
+                                    modelUnattributedSessions: number;
+                                    swarmUnattributedSessions: number;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid filters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Requested usage exceeds the aggregation bounds */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Usage query budget exhausted. Retry after one second */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14648,7 +14968,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -15369,6 +15689,25 @@ export interface paths {
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
                             }[];
+                            uiSpec: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    };
+                                };
+                                fallbackText: string;
+                            } | null;
                         };
                     };
                 };
@@ -15887,6 +16226,79 @@ export interface paths {
                 };
                 /** @description Task not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the action a task card Button declares
+         * @description Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    actionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The action started, or it already ran */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "started" | "already_done";
+                            taskId?: string;
+                        };
+                    };
+                };
+                /** @description Only the task requester may run the action */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task or action not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20631,12 +21043,16 @@ export interface paths {
                         id?: string;
                         sessionId: string;
                         agentId: string;
+                        credentialKeyType?: string | null;
+                        credentialKeySuffix?: string | null;
+                        /** @enum {string|null} */
+                        harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
-                        cacheReadTokens?: number;
+                        cacheReadTokens?: number | null;
                         cacheWriteTokens?: number | null;
                         cacheWrite5mTokens?: number | null;
                         cacheWrite1hTokens?: number | null;
@@ -20677,6 +21093,24 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Untrusted session attribution */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Session identity conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20736,6 +21170,8 @@ export interface paths {
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             };
                             daily: {
                                 date: string;
@@ -20744,6 +21180,8 @@ export interface paths {
                                 outputTokens: number;
                                 sessions: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -22237,6 +22675,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
@@ -22253,6 +22710,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -30950,7 +31426,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -31194,15 +31670,19 @@ export interface components {
             /** Format: uuid */
             taskId?: string;
             agentId: string;
+            credentialKeyType?: string | null;
+            credentialKeySuffix?: string | null;
+            /** @enum {string|null} */
+            harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             totalCostUsd: number;
             /** @default 0 */
             inputTokens: number;
             /** @default 0 */
             outputTokens: number;
-            /** @default 0 */
-            cacheReadTokens: number;
-            /** @default 0 */
-            cacheWriteTokens: number;
+            /** @default null */
+            cacheReadTokens: number | null;
+            /** @default null */
+            cacheWriteTokens: number | null;
             /** @default 0 */
             reasoningOutputTokens: number;
             /** @default 0 */

@@ -22,7 +22,7 @@ import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
 
-// Worker deployments configure Slack rendering, links, and organization defaults.
+// Worker deployments configure Slack rendering, links, organization, and provider defaults.
 // Start tests from the same unset defaults as CI; suites can still opt in by
 // setting their own values after the preload runs.
 for (const key of Object.keys(process.env)) {
@@ -30,6 +30,8 @@ for (const key of Object.keys(process.env)) {
     key.startsWith("SLACK_") ||
     [
       "COMB_ENABLED",
+      "SYSTEM_ONE_DEFAULT_PROVIDER",
+      "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER",
       "APP_URL",
       "AGENT_FS_API_URL",
       "AGENT_FS_PROXY",

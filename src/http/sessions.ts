@@ -52,6 +52,7 @@ import {
 } from "../be/session-shares";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
+import { getTaskUiSpecsForTasks, TaskUiSpecSchema } from "../be/task-ui-spec";
 import {
   AgentTokenExistsError,
   findUserById,
@@ -211,6 +212,7 @@ const SessionKeyFilterSchema = z.string().transform((value, ctx) => {
  */
 const TaskWithSteeringSchema = AgentTaskSchema.extend({
   citations: z.array(TaskCitationSchema),
+  uiSpec: TaskUiSpecSchema.nullable(),
   isLeadTask: z.boolean(),
   supportedSteerModes: z.array(SteerModeSchema),
 });
@@ -1298,11 +1300,12 @@ export async function handleSessions(
       sessionRoot.id,
       actor,
     );
-    // Load steering, citations and pending approvals for the already loaded chain.
+    // Load steering, citations, UI specs and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
-    const [steering, citations, approvals, read, groupKey] = await Promise.all([
+    const [steering, citations, uiSpecs, approvals, read, groupKey] = await Promise.all([
       getTaskSteeringFieldsForTasks(tasks),
       getTaskCitationsForTasks(tasks.map((task) => task.id)),
+      getTaskUiSpecsForTasks(tasks.map((task) => task.id)),
       getPendingApprovalsForTasks(tasks.map((task) => task.id)),
       // The viewer's read state, so a client marks a session read on open
       // without the list row (the same rule as `GET /api/sessions`).
@@ -1315,6 +1318,7 @@ export async function handleSessions(
       ...task,
       ...steering.get(task.id)!,
       citations: citations.get(task.id)!,
+      uiSpec: uiSpecs.get(task.id) ?? null,
     });
     getSession.respond(res, 200, {
       root: decorate(root),

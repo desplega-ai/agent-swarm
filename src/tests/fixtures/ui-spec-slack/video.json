@@ -1,0 +1,446 @@
+{
+  "uiSpec": {
+    "spec": {
+      "root": "c",
+      "elements": {
+        "c": {
+          "type": "Card",
+          "props": {
+            "title": "Q3 revenue at a glance"
+          },
+          "children": ["a1", "f", "ch1", "ch2", "t1", "tb", "a2", "src"]
+        },
+        "a1": {
+          "type": "Actions",
+          "props": {},
+          "children": ["view"]
+        },
+        "view": {
+          "type": "LinkButton",
+          "props": {
+            "label": "View report",
+            "url": "https://example.com/q3"
+          },
+          "children": []
+        },
+        "f": {
+          "type": "Fields",
+          "props": {},
+          "children": ["f1", "f2", "f3", "f4", "f5", "f6"]
+        },
+        "f1": {
+          "type": "Field",
+          "props": {
+            "label": "Revenue",
+            "value": "$4.2M (+18%)"
+          },
+          "children": []
+        },
+        "f2": {
+          "type": "Field",
+          "props": {
+            "label": "New customers",
+            "value": "64"
+          },
+          "children": []
+        },
+        "f3": {
+          "type": "Field",
+          "props": {
+            "label": "ARR",
+            "value": "$16.8M (+12%)"
+          },
+          "children": []
+        },
+        "f4": {
+          "type": "Field",
+          "props": {
+            "label": "Avg deal",
+            "value": "$65.6K"
+          },
+          "children": []
+        },
+        "f5": {
+          "type": "Field",
+          "props": {
+            "label": "Net retention",
+            "value": "118%"
+          },
+          "children": []
+        },
+        "f6": {
+          "type": "Field",
+          "props": {
+            "label": "Win rate",
+            "value": "31%"
+          },
+          "children": []
+        },
+        "ch1": {
+          "type": "Chart",
+          "props": {
+            "title": "Monthly revenue (2026, USD M)",
+            "chart": {
+              "type": "line",
+              "categories": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"],
+              "series": [
+                {
+                  "name": "Revenue",
+                  "values": [1.02, 1.08, 1.15, 1.2, 1.26, 1.31, 1.38, 1.45, 1.52]
+                }
+              ]
+            }
+          },
+          "children": []
+        },
+        "ch2": {
+          "type": "Chart",
+          "props": {
+            "title": "Revenue by region (Q3, USD M)",
+            "chart": {
+              "type": "bar",
+              "categories": ["NA", "EMEA", "APAC", "LATAM"],
+              "series": [
+                {
+                  "name": "Revenue",
+                  "values": [1.7, 1.3, 0.8, 0.4]
+                }
+              ]
+            }
+          },
+          "children": []
+        },
+        "t1": {
+          "type": "Text",
+          "props": {
+            "content": "Revenue by plan: Enterprise 52%, Team 31%, Self-serve 17%",
+            "style": "bold"
+          },
+          "children": []
+        },
+        "tb": {
+          "type": "Table",
+          "props": {
+            "headers": ["Account", "Region", "Revenue", "QoQ"],
+            "rows": [
+              ["Halcyon Labs", "NA", "$412K", "+22%"],
+              ["Brightline", "EMEA", "$356K", "+31%"],
+              ["Kestrel Health", "EMEA", "$298K", "+27%"],
+              ["Meridian Freight", "APAC", "$241K", "+9%"]
+            ],
+            "align": ["left", "left", "right", "right"],
+            "caption": "Top accounts this quarter"
+          },
+          "children": []
+        },
+        "a2": {
+          "type": "Actions",
+          "props": {},
+          "children": ["open", "csv"]
+        },
+        "open": {
+          "type": "LinkButton",
+          "props": {
+            "label": "Open dashboard",
+            "url": "https://example.com/dashboard"
+          },
+          "children": []
+        },
+        "csv": {
+          "type": "LinkButton",
+          "props": {
+            "label": "Export CSV",
+            "url": "https://example.com/q3.csv"
+          },
+          "children": []
+        },
+        "src": {
+          "type": "Text",
+          "props": {
+            "content": "Source: billing warehouse · Updated 2:41 PM",
+            "style": "muted"
+          },
+          "children": []
+        }
+      }
+    }
+  },
+  "specBlocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Q3 revenue at a glance",
+        "emoji": true
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "View report",
+            "emoji": true
+          },
+          "action_id": "link-https://example.com/q3",
+          "url": "https://example.com/q3"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Revenue*\n$4.2M (+18%)"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*New customers*\n64"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*ARR*\n$16.8M (+12%)"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Avg deal*\n$65.6K"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Net retention*\n118%"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Win rate*\n31%"
+        }
+      ]
+    },
+    {
+      "type": "data_visualization",
+      "title": "Monthly revenue (2026, USD M)",
+      "chart": {
+        "type": "line",
+        "series": [
+          {
+            "name": "Revenue",
+            "data": [
+              {
+                "label": "Jan",
+                "value": 1.02
+              },
+              {
+                "label": "Feb",
+                "value": 1.08
+              },
+              {
+                "label": "Mar",
+                "value": 1.15
+              },
+              {
+                "label": "Apr",
+                "value": 1.2
+              },
+              {
+                "label": "May",
+                "value": 1.26
+              },
+              {
+                "label": "Jun",
+                "value": 1.31
+              },
+              {
+                "label": "Jul",
+                "value": 1.38
+              },
+              {
+                "label": "Aug",
+                "value": 1.45
+              },
+              {
+                "label": "Sep",
+                "value": 1.52
+              }
+            ]
+          }
+        ],
+        "axis_config": {
+          "categories": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"]
+        }
+      }
+    },
+    {
+      "type": "data_visualization",
+      "title": "Revenue by region (Q3, USD M)",
+      "chart": {
+        "type": "bar",
+        "series": [
+          {
+            "name": "Revenue",
+            "data": [
+              {
+                "label": "NA",
+                "value": 1.7
+              },
+              {
+                "label": "EMEA",
+                "value": 1.3
+              },
+              {
+                "label": "APAC",
+                "value": 0.8
+              },
+              {
+                "label": "LATAM",
+                "value": 0.4
+              }
+            ]
+          }
+        ],
+        "axis_config": {
+          "categories": ["NA", "EMEA", "APAC", "LATAM"]
+        }
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Revenue by plan: Enterprise 52%, Team 31%, Self-serve 17%*"
+      }
+    },
+    {
+      "type": "data_table",
+      "caption": "Top accounts this quarter",
+      "rows": [
+        [
+          {
+            "type": "raw_text",
+            "text": "Account"
+          },
+          {
+            "type": "raw_text",
+            "text": "Region"
+          },
+          {
+            "type": "raw_text",
+            "text": "Revenue"
+          },
+          {
+            "type": "raw_text",
+            "text": "QoQ"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "Halcyon Labs"
+          },
+          {
+            "type": "raw_text",
+            "text": "NA"
+          },
+          {
+            "type": "raw_text",
+            "text": "$412K"
+          },
+          {
+            "type": "raw_text",
+            "text": "+22%"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "Brightline"
+          },
+          {
+            "type": "raw_text",
+            "text": "EMEA"
+          },
+          {
+            "type": "raw_text",
+            "text": "$356K"
+          },
+          {
+            "type": "raw_text",
+            "text": "+31%"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "Kestrel Health"
+          },
+          {
+            "type": "raw_text",
+            "text": "EMEA"
+          },
+          {
+            "type": "raw_text",
+            "text": "$298K"
+          },
+          {
+            "type": "raw_text",
+            "text": "+27%"
+          }
+        ],
+        [
+          {
+            "type": "raw_text",
+            "text": "Meridian Freight"
+          },
+          {
+            "type": "raw_text",
+            "text": "APAC"
+          },
+          {
+            "type": "raw_text",
+            "text": "$241K"
+          },
+          {
+            "type": "raw_text",
+            "text": "+9%"
+          }
+        ]
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open dashboard",
+            "emoji": true
+          },
+          "action_id": "link-https://example.com/dashboard",
+          "url": "https://example.com/dashboard"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Export CSV",
+            "emoji": true
+          },
+          "action_id": "link-https://example.com/q3.csv",
+          "url": "https://example.com/q3.csv"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Source: billing warehouse · Updated 2:41 PM"
+        }
+      ]
+    }
+  ],
+  "fallbackText": "*Q3 revenue at a glance*\nRevenue: $4.2M (+18%)\nNew customers: 64\nARR: $16.8M (+12%)\nAvg deal: $65.6K\nNet retention: 118%\nWin rate: 31%\nMonthly revenue (2026, USD M)\n    | Revenue\n----|--------\nJan | 1.02\nFeb | 1.08\nMar | 1.15\nApr | 1.2\nMay | 1.26\nJun | 1.31\nJul | 1.38\nAug | 1.45\nSep | 1.52\nRevenue by region (Q3, USD M)\n      | Revenue\n------|--------\nNA    | 1.7\nEMEA  | 1.3\nAPAC  | 0.8\nLATAM | 0.4\nRevenue by plan: Enterprise 52%, Team 31%, Self-serve 17%\nAccount          | Region | Revenue | QoQ\n-----------------|--------|---------|-----\nHalcyon Labs     | NA     | $412K   | +22%\nBrightline       | EMEA   | $356K   | +31%\nKestrel Health   | EMEA   | $298K   | +27%\nMeridian Freight | APAC   | $241K   | +9%\nSource: billing warehouse · Updated 2:41 PM"
+}
