@@ -48,14 +48,17 @@ export function subscriptionSavings(
     .filter((row) => row.subscription)
     .sort(byCost)
     .map((row) => {
-      const plan = plans.find((p) => p.id === row.plan && p.keyType === row.keyType) ?? null;
+      const plan =
+        row.planSource === "estimated"
+          ? null
+          : (plans.find((p) => p.id === row.plan && p.keyType === row.keyType) ?? null);
       if (!plan) return { key: credentialKey(row), row, plan, planCost: null, saved: null };
       const billedFrom = Math.max(windowStartMs, Date.parse(row.firstSessionAt));
       const billedDays = Math.max(1, (now - billedFrom) / DAY_MS);
       const planCost = (plan.monthlyUsd * billedDays) / DAYS_PER_MONTH;
       return { key: credentialKey(row), row, plan, planCost, saved: row.costUsd - planCost };
     });
-  const payg = rows.filter((row) => !row.subscription).sort(byCost);
+  const payg = rows.filter((row) => !row.subscription && row.keyType !== null).sort(byCost);
   const counted = lines.filter((line) => line.plan);
   const apiValue = counted.reduce((sum, line) => sum + line.row.costUsd, 0);
   const plansCost = counted.reduce((sum, line) => sum + (line.planCost ?? 0), 0);

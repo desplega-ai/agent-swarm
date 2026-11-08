@@ -57,6 +57,7 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
     keyType: "CODEX_OAUTH",
     isRateLimitFallback: false,
     // The ChatGPT plan rides in the token itself (`chatgpt_plan_type`).
+    planRaw: extractChatgptPlanType(auth.tokens.access_token),
     plan: codexPlanFromClaim(extractChatgptPlanType(auth.tokens.access_token)),
   };
 }

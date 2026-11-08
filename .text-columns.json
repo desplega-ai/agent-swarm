@@ -535,6 +535,7 @@
     }
   },
   "api_key_status": {
+    "detectedPlanRaw": "scrubbed",
     "id": {
       "exempt": "identifier"
     },
@@ -574,6 +575,7 @@
     "provider": {
       "exempt": "enum or fixed-format value"
     },
+    "providerAccount": "scrubbed",
     "rateLimitWindows": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
@@ -2653,6 +2655,9 @@
     }
   },
   "session_costs": {
+    "credentialKeyType": { "exempt": "credential type identifier" },
+    "credentialKeySuffix": { "exempt": "credential suffix identifier" },
+    "harness": { "exempt": "enum or fixed-format value" },
     "id": {
       "exempt": "identifier"
     },

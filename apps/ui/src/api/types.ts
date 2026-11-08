@@ -1467,10 +1467,13 @@ export interface SessionCost {
   sessionId: string;
   taskId?: string;
   agentId: string;
+  credentialKeyType?: string | null;
+  credentialKeySuffix?: string | null;
+  harness?: string | null;
   totalCostUsd: number;
   inputTokens: number;
   outputTokens: number;
-  cacheReadTokens: number;
+  cacheReadTokens: number | null;
   // Migration 063 nullable — adapters that can't honestly report this
   // (e.g. Codex SDK) leave it null instead of mixing fake-0 with real-0.
   cacheWriteTokens: number | null;
@@ -1517,6 +1520,9 @@ export interface UsageSummaryTotals {
   excludedTaskCount?: number;
   /** API-priced cost of sessions on subscription credentials (Claude OAuth, Codex OAuth). Older API servers omit it. */
   subscriptionCostUsd?: number;
+  /** Cost whose credential and billing type are unknown. */
+  credentialUnattributedCostUsd?: number;
+  credentialUnattributedSessions?: number;
 }
 
 /**
@@ -1546,6 +1552,9 @@ export interface UsageSummaryDailyRow {
   sessions: number;
   /** Part of `costUsd` on subscription credentials. Older API servers omit it. */
   subscriptionCostUsd?: number;
+  /** Cost whose credential and billing type are unknown. */
+  credentialUnattributedCostUsd?: number;
+  credentialUnattributedSessions?: number;
 }
 
 /** Spend per credential in the window (`groupBy=both` only). */
@@ -3183,6 +3192,123 @@ export interface TaskContextResponse {
 // API Key Status
 export type ApiKeyStatusType = "available" | "rate_limited";
 
+/**
+ * One provider quota window. `utilization` is a fraction and can exceed 1.
+ * `resetsAt` is in epoch seconds. `lastSeenAt` is when the utilization arrived;
+ * `fieldObservedAt` dates the metadata facts that can be older.
+ */
+export interface RateLimitWindow {
+  status: string;
+  utilization?: number;
+  resetsAt?: number;
+  isUsingOverage?: boolean;
+  surpassedThreshold?: number;
+  lastSeenAt: string;
+  fieldObservedAt?: Partial<
+    Record<"durationMins" | "resetsAt" | "label" | "normalModelSlug", string>
+  >;
+  durationMins?: number;
+  source?: "claude" | "codex";
+  limitId?: string;
+  label?: string;
+  /** Display metadata only: it does not prove which models the quota charges. */
+  normalModelSlug?: string;
+  overageStatus?: string;
+  overageDisabledReason?: string;
+}
+
+/** Facts per provider limit. Each field carries its own time in `fieldObservedAt`. */
+export interface ProviderLimitTelemetry {
+  observedAt: string;
+  fieldObservedAt?: Partial<
+    Record<
+      | "planRaw"
+      | "label"
+      | "normalModelSlug"
+      | "credits"
+      | "spend"
+      | "spendControlReached"
+      | "reachedType",
+      string
+    >
+  >;
+  /** Explicit removals of a Codex slot. An older window for that slot no longer applies. */
+  windowRemovedAt?: { primary?: string; secondary?: string };
+  planRaw?: string | null;
+  label?: string | null;
+  normalModelSlug?: string | null;
+  /** `balance` keeps the provider's unit. Null means not reported, never zero. */
+  credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
+  /** Raw provider units with no verified currency. */
+  spend?: { limit: string; used: string; remainingPercent: number; resetsAt: number } | null;
+  spendControlReached?: boolean | null;
+  reachedType?: string | null;
+}
+
+export interface ProviderAccountTelemetry {
+  source: "codex" | "claude";
+  /** The latest report. Not the age of every retained fact. */
+  observedAt: string;
+  fieldObservedAt?: Partial<Record<"ordinaryUsageAllowed" | "resetCreditsAvailable", string>>;
+  ordinaryUsageAllowed?: boolean | null;
+  resetCreditsAvailable?: number | null;
+  limits?: Record<string, ProviderLimitTelemetry>;
+}
+
+/** A Swarm-observed counter. A non-null value can sum only part of the sessions. */
+export interface WindowUsageCounter {
+  value: number | null;
+  measuredSessions: number;
+  missingSessions: number;
+}
+
+export type WindowUsageUnavailableReason =
+  | "missing_reset"
+  | "unknown_duration"
+  | "unknown_model_scope"
+  | "window_not_started";
+
+/** `GET /api/keys/window-usage`: Swarm runs inside one current provider window. */
+export interface KeyWindowUsage {
+  statusId: string;
+  keyType: string;
+  keySuffix: string;
+  scope: string;
+  scopeId: string | null;
+  windowKey: string;
+  durationMins: number | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  dataThrough: string;
+  observedAt: string;
+  observationAgeMs: number;
+  modelScope: { kind: "account" | "family" | "unknown"; model: string | null };
+  unavailableReason: WindowUsageUnavailableReason | null;
+  usage: {
+    sessions: number;
+    errorSessions: number;
+    completedTasks: number;
+    tokens: {
+      uncachedInput: WindowUsageCounter;
+      output: WindowUsageCounter;
+      cacheRead: WindowUsageCounter;
+      cacheWrite: WindowUsageCounter;
+      reasoning: WindowUsageCounter;
+      thinking: WindowUsageCounter;
+    };
+    modelUnattributedSessions: number;
+    /** Swarm-wide reports without a credential in this interval. Not this key's missing usage. */
+    swarmUnattributedSessions: number;
+  } | null;
+}
+
+export interface KeyWindowUsageResponse {
+  success: true;
+  asOf: string;
+  accounting: "session_cost_receipt_time";
+  windows: KeyWindowUsage[];
+}
+
 export interface ApiKeyStatus {
   id: string;
   keyType: string;
@@ -3203,20 +3329,13 @@ export interface ApiKeyStatus {
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: string | null;
   planSource: "manual" | "detected" | "estimated" | null;
+  detectedPlanRaw?: string | null;
   /** The provider rejected this key in a worker live test (`HTTP 401`), until it passes or leaves the pool. */
   lastValidationError?: string | null;
   lastValidationFailedAt?: string | null;
-  rateLimitWindows: Record<
-    string,
-    {
-      status: string;
-      utilization?: number;
-      resetsAt?: number;
-      isUsingOverage?: boolean;
-      surpassedThreshold?: number;
-      lastSeenAt: string;
-    }
-  >;
+  rateLimitWindows: Record<string, RateLimitWindow>;
+  /** Account facts from the provider (credits, spend control). Older API servers omit it. */
+  providerAccount?: ProviderAccountTelemetry | null;
   /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
   modelLimits: Array<{
     model: string;

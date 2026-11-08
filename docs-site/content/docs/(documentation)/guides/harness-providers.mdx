@@ -22,6 +22,37 @@ For an operator-facing comparison of the install choices, see the [Provider Capa
 
 ---
 
+## Native Codex quota telemetry
+
+Each native Codex session reads account limits once after thread startup, with a five-second timeout.
+Quota failures do not fail the task. Account notifications also apply between turns.
+The worker reports snapshots through the existing key telemetry endpoint when it knows the executing credential.
+Pi sessions do not collect Codex quota.
+
+Windows use `codex:<limitId>:<primary|secondary>` keys, utilization fractions, and epoch-second resets.
+Notifications use receipt timestamps. The initial read uses request time so concurrent notifications retain priority.
+Primary and secondary identify protocol slots. Their durations come from the provider.
+Explicit null windows remove only their reported slots. Sparse omissions preserve prior data.
+Sparse window metadata retains known duration, reset, label, and model scope.
+A recovery event without a new reset leaves the old reset expired.
+Each slot retains a separate removal timestamp in `limits[limitId].windowRemovedAt`.
+Delayed reports can fill missing facts, but cannot replace newer facts or restore removed slots.
+The initial read also fills facts omitted by concurrent notifications.
+Claude reports retain partial-update semantics and supported overage details.
+
+Account telemetry stores availability and bounded metadata by limit ID, including raw plans, credits, spend controls, and reasons.
+`fieldObservedAt` records actual fact ages at account, limit, and window levels.
+Account and limit `observedAt` values summarize events. They do not establish the age of retained facts.
+Availability, credits, plans, and spend retain their timestamps when an event changes only windows.
+Legacy facts without field timestamps use their containing record's timestamp.
+Missing metadata means unavailable data. Account identifiers, payment metadata, and raw responses are excluded.
+Spend-control strings retain provider units without an assumed currency. Monthly reset telemetry does not use routing cooldown ceilings.
+Unknown-duration display resets allow up to 400 days. Known durations allow their duration plus one day, with a seven-day minimum.
+The HTTP boundary bounds observations more than one minute into the future to server receipt time.
+These Codex snapshots do not change credential admission or assign subscription plans.
+Collection remains best-effort. Forced subprocess termination can lose telemetry before its final result reaches the parent.
+The worker's asynchronous report can also fail before delivery.
+
 ## Codex model availability
 
 The direct Codex picker includes `gpt-6-sol` and `gpt-6-luna`, verified against the
@@ -1465,3 +1496,18 @@ The Anthropic Beta SDK has a few non-obvious surface differences from the conven
 - [`CLAUDE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/CLAUDE.md) — project-wide rules, especially "Architecture invariants" (DB boundary) and "Secret scrubbing".
 - [`src/providers/types.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/types.ts) — canonical interface definitions.
 - [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) — the most feature-complete reference (OAuth + skills resolver + hooks + model resolver).
+
+## Subscription identity and session costs
+
+Claude Max and Ultra retain the IDs `claude_max_5x` and `claude_max_20x`.
+Manual ChatGPT Pro 100 and Pro 200 retain `chatgpt_pro_5x` and `chatgpt_pro`.
+Pro 500 uses `chatgpt_pro_500`.
+Raw Codex identities `pro`, `prolite`, and `promax` do not establish a price tier.
+The worker preserves the claim in `detectedPlanRaw`, independently of manual assignments.
+Native account telemetry also preserves raw provider identities.
+Manual assignments remain authoritative.
+New Claude estimates based on old capacity ratios are disabled.
+Existing estimates remain stored as uncertain, and savings reports omit their prices.
+This change preserves model routing and the existing Fable policy.
+Workers capture immutable session credentials and harness identity before execution, including Pi sessions that use Codex OAuth.
+Legacy reports and historical rows remain explicitly unattributed.

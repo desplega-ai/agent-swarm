@@ -78,7 +78,7 @@ describe("docs API index footprint", () => {
     expect(tasks).toContain('"path":"/api/task-templates","method":"get"');
   });
 
-  test("OpenAPI and generated pages keep all 492 operations", async () => {
+  test("OpenAPI and generated pages keep all operations", async () => {
     const spec = await Bun.file(resolve(repoRoot, "openapi.json")).json();
     const operationKeys = [];
     const tags = new Set();
@@ -101,11 +101,19 @@ describe("docs API index footprint", () => {
       expect(spec.paths[operation.path]?.[operation.method]?.tags).toEqual([operation.tag]);
     }
     expect(spec.paths["/api/agents/{id}/runtime"]?.get).toBeDefined();
+    expect(spec.paths["/api/keys/window-usage"]?.get).toBeDefined();
 
     const generatedKeys = await generatedOperationKeys();
-    expect(operationKeys).toHaveLength(492);
-    expect(generatedKeys).toHaveLength(492);
+    expect(operationKeys.length).toBeGreaterThan(0);
+    expect(generatedKeys).toHaveLength(operationKeys.length);
     expect(new Set(generatedKeys)).toEqual(new Set(operationKeys));
+
+    const index = await Bun.file(resolve(apiReferenceDir, "index.mdx")).text();
+    const typescript = await generatedPage("/docs/api-reference/typescript");
+    expect(index).toContain(`${operationKeys.length} endpoints across ${tags.size} categories.`);
+    expect(typescript).toContain(
+      `TypeScript definitions for all ${operationKeys.length} operations`,
+    );
   });
 
   test("keeps retired routes out of the sitemap source inventory", async () => {

@@ -137,6 +137,7 @@ value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
+value:SessionCostConflictError
 value:TASK_LINEAGE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
@@ -484,6 +485,7 @@ value:incrementPageViewCount
 value:initDb
 value:insertActiveSession
 value:insertPricingRow
+value:insertSessionCost
 value:insertTaskAttachment
 value:installMcpServer
 value:installSkill
