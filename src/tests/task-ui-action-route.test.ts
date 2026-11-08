@@ -144,6 +144,23 @@ describe("POST /api/tasks/{id}/ui-actions/{actionId}", () => {
     expect(await followUpCount(taskId)).toBe(1);
   });
 
+  test("with TRUST_BODY_REQUESTED_BY_USER_ID=false, an operator call that names the requester gets 403", async () => {
+    const previousTrust = process.env.TRUST_BODY_REQUESTED_BY_USER_ID;
+    process.env.TRUST_BODY_REQUESTED_BY_USER_ID = "false";
+    try {
+      const taskId = await taskWithButton();
+      expect((await click(taskId, { "x-swarm-user-id": requesterId })).status).toBe(403);
+      expect(await followUpCount(taskId)).toBe(0);
+      // A user token still clicks: the switch only stops trusting a named user.
+      const own = await click(taskId, { "x-test-user-id": requesterId });
+      expect(own.status).toBe(200);
+      expect(own.body.status).toBe("started");
+    } finally {
+      if (previousTrust === undefined) delete process.env.TRUST_BODY_REQUESTED_BY_USER_ID;
+      else process.env.TRUST_BODY_REQUESTED_BY_USER_ID = previousTrust;
+    }
+  });
+
   test("an agent that names the requester in X-Swarm-User-Id still gets 403", async () => {
     const taskId = await taskWithButton();
     const result = await click(taskId, {

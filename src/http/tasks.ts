@@ -2185,8 +2185,15 @@ export async function handleTasks(
     // Only a user clicks a card button: a user token, or a dashboard tab on the
     // operator key that names its user. An agent, or an operator call with no
     // picked user, resolves to no user, so the requester check refuses it.
+    // TRUST_BODY_REQUESTED_BY_USER_ID=false stops trusting a caller-named user
+    // on the shared key, so then only a user token can click.
     const actor = await resolveSessionActor(req, myAgentId);
-    const actorUserId = actor.kind === "user" ? (actor.userId ?? undefined) : undefined;
+    const tokenUserId = authUserId(getRequestAuth(req));
+    const trustsPickedUser = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
+    const actorUserId =
+      actor.kind === "user" && (tokenUserId || trustsPickedUser)
+        ? (actor.userId ?? undefined)
+        : undefined;
     const result = await runTaskUiAction({
       taskId: task.id,
       actionId: parsed.params.actionId,
