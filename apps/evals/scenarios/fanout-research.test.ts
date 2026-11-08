@@ -44,7 +44,15 @@ describe("fanout-research delegation rubric", () => {
       { search: "region: emea", includeFull: true },
     ],
     ["get-tasks tag filter", "mcp__agent-swarm__get-tasks", { tags: ["region:apac"] }],
+    ["get-tasks emea tag filter", "mcp__agent-swarm__get-tasks", { tags: ["region:emea"] }],
+    ["get-tasks incident-id search", "mcp__agent-swarm__get-tasks", { search: "INC-12" }],
     ["get-tasks paging the history", "mcp__agent-swarm__get-tasks", { limit: 100 }],
+    ["get-tasks paging 30 rows", "mcp__agent-swarm__get-tasks", { limit: 30 }],
+    [
+      "Codex get-tasks with nested arguments",
+      "mcp__agent-swarm__get-tasks",
+      { server: "agent-swarm", arguments: { search: "region: amer" } },
+    ],
     ["db-query", "mcp__agent-swarm__db-query", { sql: "SELECT task FROM agent_tasks" }],
     [
       "curl on the list endpoint",
@@ -60,6 +68,53 @@ describe("fanout-research delegation rubric", () => {
     );
     expect(res.score).toBe(0);
     expect(res.detail).toContain("queried the incident records itself");
+  });
+
+  // Observed on real runs: a lead reading its own shard tasks, by a tag it set itself or by
+  // words from its own shard briefs, was zeroed because the filter contained "region".
+  test.each([
+    ["its own shard tag", { tags: ["region-shard"], limit: 10 }],
+    ["a search for its shard tasks", { search: "region shard" }],
+    ["a search for its review task", { search: "incident review region" }],
+  ])("the lead reading its children with %s is not flagged", async (_label, input) => {
+    const res = await delegation(
+      ctxWith({
+        leadLogs: toolCallRows("task-0", "mcp__agent-swarm__get-tasks", input, "[]", "toolu_own"),
+      }),
+    );
+    expect(res.score).toBe(1);
+  });
+
+  test("a call whose result carries every record of a region is zeroed, whatever its filter", async () => {
+    const emeaIds = Array.from(
+      { length: 17 },
+      (_, i) => `fa0e7a5e-f000-4000-b000-${(i + 1).toString(16).padStart(12, "0")}`,
+    );
+    const rows = (ids: string[]) => JSON.stringify(ids.map((id) => ({ id, status: "completed" })));
+    const call = (result: string) =>
+      delegation(
+        ctxWith({
+          leadLogs: toolCallRows("task-0", "mcp__agent-swarm__get-tasks", {}, result, "toolu_all"),
+        }),
+      );
+    expect((await call(rows(emeaIds))).score).toBe(0);
+    // A few seeded rows in an unfiltered page of recent tasks are not a shard pulled.
+    expect((await call(rows(emeaIds.slice(0, 5)))).score).toBe(1);
+  });
+
+  test("a curl search for the lead's own shard tasks is not flagged", async () => {
+    const res = await delegation(
+      ctxWith({
+        leadLogs: toolCallRows(
+          "task-0",
+          "Bash",
+          { command: 'curl -s "$MCP_BASE_URL/api/tasks?search=region%20shard&limit=10"' },
+          "[]",
+          "toolu_curl_own",
+        ),
+      }),
+    );
+    expect(res.score).toBe(1);
   });
 
   test("the lead reading one child task over the API is not flagged", async () => {

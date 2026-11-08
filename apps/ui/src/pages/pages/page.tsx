@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Eye, Globe, KeyRound, Lock, type LucideIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
@@ -13,8 +13,12 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { SearchBox } from "@/components/shared/search-box";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -24,8 +28,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
+import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 /**
@@ -46,11 +53,34 @@ const authModeIcon: Record<PageAuthMode, LucideIcon> = {
   password: KeyRound,
 };
 
+function AuthBadge({ mode }: { mode: PageAuthMode }) {
+  const Icon = authModeIcon[mode];
+  return (
+    <Badge variant="outline" size="tag" className={cn("gap-1", authModeClass[mode])}>
+      <Icon className="size-3" />
+      {mode}
+    </Badge>
+  );
+}
+
+/** Short type label for a phone row ("text/html" is noise next to the title). */
+function contentTypeLabel(contentType: string): string {
+  if (contentType === "text/html") return "HTML";
+  if (contentType === "application/json") return "JSON";
+  if (contentType.includes("svg")) return "SVG";
+  return contentType;
+}
+
+/** Phone list page size; "Show more" adds another step. */
+const PHONE_PAGE_STEP = 30;
+
 const AUTH_FILTERS = ["all", "public", "authed", "password"] as const;
 const CONTENT_TYPE_FILTERS = ["all", "text/html", "application/json"] as const;
 
 export default function PagesListingPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const [phoneLimit, setPhoneLimit] = useState(PHONE_PAGE_STEP);
   const { searchParams, setParam, setParams } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
   const authParam = readStringParam(searchParams, "auth", "all");
@@ -94,6 +124,28 @@ export default function PagesListingPage() {
       }),
     [agentFilter, authFilter, contentTypeFilter, favoritesOnly, rows],
   );
+
+  // The grid searches through AG Grid's quick filter; the phone list has no
+  // grid, so it applies the same terms here (title, description, slug, agent).
+  const phoneRows = useMemo(() => {
+    if (!search.trim()) return filteredRows;
+    return filteredRows.filter((page) =>
+      matchesSearchTerms(
+        searchText([
+          page.title,
+          page.description,
+          page.slug,
+          agentNameById.get(page.agentId) ?? page.agentId,
+        ]),
+        search,
+      ),
+    );
+  }, [agentNameById, filteredRows, search]);
+  const activeFilterCount =
+    (authFilter !== "all" ? 1 : 0) +
+    (contentTypeFilter !== "all" ? 1 : 0) +
+    (agentFilter !== "all" ? 1 : 0) +
+    (favoritesOnly ? 1 : 0);
 
   const columnDefs = useMemo<ColDef<PageListItem>[]>(
     () => [
@@ -162,17 +214,7 @@ export default function PagesListingPage() {
         width: 120,
         getQuickFilterText: () => "",
         cellRenderer: (params: { value: PageAuthMode }) => {
-          const Icon = authModeIcon[params.value];
-          return (
-            <Badge
-              variant="outline"
-              size="tag"
-              className={cn("gap-1", authModeClass[params.value])}
-            >
-              <Icon className="size-3" />
-              {params.value}
-            </Badge>
-          );
+          return <AuthBadge mode={params.value} />;
         },
       },
       {
@@ -258,7 +300,112 @@ export default function PagesListingPage() {
       <PageHeader title="Pages" />
 
       {/* No filter chrome over a first-run empty state — nothing to filter. */}
-      {isEmpty ? null : (
+      {isEmpty ? null : isMobile ? (
+        // One row on a phone: search, then every facet behind Filters (n).
+        <div className="flex shrink-0 items-center gap-2">
+          <SearchBox
+            value={search}
+            onChange={(value) => {
+              setPhoneLimit(PHONE_PAGE_STEP);
+              setParam("search", value, { replace: false, reset: ["pagesPage"] });
+            }}
+            placeholder="Search pages…"
+            ariaLabel="Search pages"
+            className="flex-1"
+          />
+          <FiltersPopover
+            activeCount={activeFilterCount}
+            footer={
+              activeFilterCount > 0 || search !== "" ? (
+                <Button variant="ghost" size="sm" className="w-full" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          >
+            <FilterField label="Auth mode">
+              <Select
+                value={authFilter}
+                onValueChange={(value) =>
+                  setParam("auth", value, {
+                    defaultValue: "all",
+                    replace: false,
+                    reset: ["pagesPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Auth" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All auth modes</SelectItem>
+                  <SelectItem value="public">Public</SelectItem>
+                  <SelectItem value="authed">Authenticated</SelectItem>
+                  <SelectItem value="password">Password</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Content type">
+              <Select
+                value={contentTypeFilter}
+                onValueChange={(value) =>
+                  setParam("contentType", value, {
+                    defaultValue: "all",
+                    replace: false,
+                    reset: ["pagesPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Content type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All content types</SelectItem>
+                  <SelectItem value="text/html">HTML</SelectItem>
+                  <SelectItem value="application/json">JSON</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Agent">
+              <Select
+                value={agentFilter}
+                onValueChange={(value) =>
+                  setParam("agent", value, {
+                    defaultValue: "all",
+                    replace: false,
+                    reset: ["pagesPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All agents</SelectItem>
+                  {(agents ?? []).map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <label className="flex min-h-9 cursor-pointer select-none items-center justify-between gap-2 text-sm">
+              Favorites only
+              <Switch
+                size="sm"
+                checked={favoritesOnly}
+                onCheckedChange={(checked) =>
+                  setParam("favorites", checked ? "true" : "", {
+                    replace: false,
+                    reset: ["pagesPage"],
+                  })
+                }
+              />
+            </label>
+          </FiltersPopover>
+        </div>
+      ) : (
         <ListFilterBar
           searchValue={search}
           onSearchChange={(value) =>
@@ -352,6 +499,53 @@ export default function PagesListingPage() {
           entity="page"
           fullPage
         />
+      ) : isMobile ? (
+        <MobileList
+          label="Pages"
+          loading={isLoading}
+          emptyMessage="No pages match the current filters"
+          // Hug a short list; a long one still scrolls inside the card.
+          className="flex-initial"
+          footer={
+            phoneRows.length > phoneLimit ? (
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => setPhoneLimit((n) => n + PHONE_PAGE_STEP)}
+              >
+                Show more ({phoneRows.length - phoneLimit} left)
+              </Button>
+            ) : undefined
+          }
+        >
+          {phoneRows.slice(0, phoneLimit).map((page) => (
+            <MobileListRow
+              key={page.id}
+              to={`/pages/${page.id}`}
+              title={page.title}
+              status={page.authMode === "authed" ? null : <AuthBadge mode={page.authMode} />}
+              meta={[
+                page.description,
+                contentTypeLabel(page.contentType),
+                agentNameById.get(page.agentId) ?? null,
+                formatSmartTime(page.updatedAt),
+              ]}
+              controls={[
+                <FavoriteButton
+                  key="favorite"
+                  favorite={page.favorite}
+                  disabled={
+                    favoriteToggle.isPending && favoriteToggle.variables?.itemId === page.id
+                  }
+                  onToggle={() =>
+                    favoriteToggle.mutate({ itemId: page.id, favorite: !page.favorite })
+                  }
+                  className="size-11 [&_svg]:size-5"
+                />,
+              ]}
+            />
+          ))}
+        </MobileList>
       ) : (
         <DataGrid
           rowData={filteredRows}
