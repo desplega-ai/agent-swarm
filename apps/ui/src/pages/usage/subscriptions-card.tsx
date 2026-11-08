@@ -1,10 +1,11 @@
 import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
-import { type ReactNode, useMemo } from "react";
+import { ChevronRight } from "lucide-react";
+import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSubscriptionPlans } from "@/api/hooks/use-api-keys";
 import type { SubscriptionPlan, UsageSummaryByCredentialRow } from "@/api/types";
 import { PlanPicker } from "@/components/shared/plan-picker";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { DAY_MS, formatCount, formatDay, formatUsd } from "./usage-format";
 
@@ -58,7 +59,8 @@ function Suffix({ suffix }: { suffix: string | null }) {
 /**
  * What the subscription runs would cost at API prices, minus what their
  * plans cost over the same days. Only credentials with a known plan count.
- * Pay-as-you-go spend is listed below for the full picture.
+ * Pay-as-you-go spend is listed below for the full picture. The headline
+ * comes first; both lists start folded so the chart stays on the first screen.
  */
 export function SubscriptionsCard({
   rows,
@@ -102,16 +104,16 @@ export function SubscriptionsCard({
 
   return (
     <Card className="gap-5 py-5">
-      <CardHeader className="px-5">
-        <CardTitle>Subscriptions vs API</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5 px-5">
+      <CardContent className="relative space-y-4 px-5">
+        <h2 className="absolute top-0 right-5 text-xs font-normal text-muted-foreground">
+          Subscriptions vs API
+        </h2>
         {lines.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="pr-36 text-sm text-muted-foreground">
             No subscription runs in this window. All spend used pay-as-you-go keys.
           </p>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1 pr-36">
             {counted.length === 0 ? (
               <p className="text-sm">Pick a plan for each subscription to see what it saves.</p>
             ) : saved >= 0 ? (
@@ -167,33 +169,35 @@ export function SubscriptionsCard({
         )}
 
         {lines.length > 0 ? (
-          <div className="@container">
-            <div
-              className={cn(
-                "hidden gap-x-4 border-b border-border-subtle pb-2 text-xs whitespace-nowrap text-muted-foreground @3xl:grid",
-                ROW_GRID,
-              )}
-            >
-              <span>Subscription</span>
-              <span>Plan</span>
-              <span className="text-right">API value</span>
-              <span className="text-right">Plan cost</span>
-              <span className="text-right">Saved</span>
+          <FoldedList
+            title="Subscriptions"
+            count={lines.length}
+            total={formatUsd(lines.reduce((sum, line) => sum + line.row.costUsd, 0))}
+          >
+            <div className="@container">
+              <div
+                className={cn(
+                  "hidden gap-x-4 border-b border-border-subtle pb-2 text-xs whitespace-nowrap text-muted-foreground @3xl:grid",
+                  ROW_GRID,
+                )}
+              >
+                <span>Subscription</span>
+                <span>Plan</span>
+                <span className="text-right">API value</span>
+                <span className="text-right">Plan cost</span>
+                <span className="text-right">Saved</span>
+              </div>
+              <ul className="divide-y divide-border-subtle">
+                {lines.map((line) => (
+                  <SubscriptionRow key={line.key} line={line} />
+                ))}
+              </ul>
             </div>
-            <ul className="divide-y divide-border-subtle">
-              {lines.map((line) => (
-                <SubscriptionRow key={line.key} line={line} />
-              ))}
-            </ul>
-          </div>
+          </FoldedList>
         ) : null}
 
         {payg.length > 0 ? (
-          <div>
-            <div className="flex items-baseline justify-between gap-4 border-b border-border-subtle pb-2">
-              <span className="text-sm font-medium">Pay-as-you-go</span>
-              <span className="font-mono text-sm tabular-nums">{formatUsd(paygTotal)}</span>
-            </div>
+          <FoldedList title="Pay-as-you-go" count={payg.length} total={formatUsd(paygTotal)}>
             <ul className="divide-y divide-border-subtle">
               {payg.map((row) => (
                 <li
@@ -212,7 +216,7 @@ export function SubscriptionsCard({
                 </li>
               ))}
             </ul>
-          </div>
+          </FoldedList>
         ) : null}
 
         <p className="text-xs text-muted-foreground">
@@ -224,6 +228,49 @@ export function SubscriptionsCard({
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+/** A list behind a one-line toggle (title, count, total). Folded on load. */
+function FoldedList({
+  title,
+  count,
+  total,
+  children,
+}: {
+  title: string;
+  count: number;
+  total: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-baseline justify-between gap-4 border-b border-border-subtle pb-2 text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              "size-4 self-center text-muted-foreground transition-transform duration-150",
+              open && "rotate-90",
+            )}
+          />
+          {title}
+          <span className="font-mono text-xs font-normal text-muted-foreground tabular-nums">
+            {count}
+          </span>
+        </span>
+        <span className="font-mono text-sm tabular-nums">{total}</span>
+      </button>
+      {open ? <div id={bodyId}>{children}</div> : null}
+    </div>
   );
 }
 

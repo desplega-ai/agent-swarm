@@ -41,6 +41,7 @@ export function RankedSpendCard({
   rows,
   countLabel,
   valueLabel = "Cost",
+  valueTone,
 }: {
   title: string;
   /** Column header for the name, for example "Agent". */
@@ -50,6 +51,8 @@ export function RankedSpendCard({
   countLabel: string;
   /** Column header for `costUsd`. */
   valueLabel?: string;
+  /** `success` shows the value in green (a saving, not a cost). */
+  valueTone?: "success";
 }) {
   const [expanded, setExpanded] = useState(false);
   const sorted = [...rows].sort((a, b) => b.costUsd - a.costUsd);
@@ -105,7 +108,11 @@ export function RankedSpendCard({
                 <span className={cn(NUMBER, "text-xs text-muted-foreground")}>
                   {formatShare(share)}
                 </span>
-                <span className={NUMBER}>{formatUsd(row.costUsd)}</span>
+                <span
+                  className={cn(NUMBER, valueTone === "success" && "text-status-success-strong")}
+                >
+                  {formatUsd(row.costUsd)}
+                </span>
                 <span className={cn(NUMBER, "text-muted-foreground")}>
                   {formatCount(row.count)}
                 </span>
