@@ -241,7 +241,7 @@ export async function finishTaskUiScriptActionRun(
     `UPDATE task_ui_action_runs SET locked_until = NULL, last_run_at = ?,
       run_count = run_count + 1, last_error = ?, updated_at = ?
     WHERE task_id = ? AND action_id = ?`,
-    [now, error, now, taskId, actionId],
+    [now, error === null ? null : scrubSecrets(error), now, taskId, actionId],
   );
 }
 

@@ -3416,6 +3416,13 @@
     "updated_at": {
       "exempt": "timestamp"
     },
+    "locked_until": {
+      "exempt": "timestamp"
+    },
+    "last_run_at": {
+      "exempt": "timestamp"
+    },
+    "last_error": "scrubbed",
     "created_by": {
       "exempt": "identifier"
     },
