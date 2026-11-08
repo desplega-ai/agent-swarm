@@ -1294,36 +1294,38 @@ export function AppSurface({
   const shellSurface =
     shellItems && activePage ? (
       <JsonRenderThemeProvider value={appThemeAttr ?? null}>
-        <StateProvider store={store}>
-          <VisibilityProvider>
-            <ActionProvider handlers={compiled.handlers}>
-              <AppShell
-                items={shellItems}
-                activePage={activePageName}
-                onNavigate={(href) => navigate(href)}
-                // The dashboard header names the app in the default view only.
-                appName={mode === "default" ? undefined : app.name}
-                title={activePage.title ?? activePageName}
-                description={activePage.description}
-                crumbs={pageCrumbs}
-                actions={
-                  headerSpec ? (
-                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
-                  ) : null
-                }
-                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
-                scrollRef={scrollRef}
-              >
-                {actionError && (
-                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
-                    {actionError}
-                  </AlertCallout>
-                )}
-                {renderedSpec}
-              </AppShell>
-            </ActionProvider>
-          </VisibilityProvider>
-        </StateProvider>
+        <AppScopeProvider value={app.id}>
+          <StateProvider store={store}>
+            <VisibilityProvider>
+              <ActionProvider handlers={compiled.handlers}>
+                <AppShell
+                  items={shellItems}
+                  activePage={activePageName}
+                  onNavigate={(href) => navigate(href)}
+                  // The dashboard header names the app in the default view only.
+                  appName={mode === "default" ? undefined : app.name}
+                  title={activePage.title ?? activePageName}
+                  description={activePage.description}
+                  crumbs={pageCrumbs}
+                  actions={
+                    headerSpec ? (
+                      <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                    ) : null
+                  }
+                  surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                  scrollRef={scrollRef}
+                >
+                  {actionError && (
+                    <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                      {actionError}
+                    </AlertCallout>
+                  )}
+                  {renderedSpec}
+                </AppShell>
+              </ActionProvider>
+            </VisibilityProvider>
+          </StateProvider>
+        </AppScopeProvider>
       </JsonRenderThemeProvider>
     ) : null;
 

@@ -47,6 +47,7 @@
     "Timeline",
     "SchemaForm",
     "SessionThread",
+    "PageFrame",
     "ElementRef",
     "ElementSlot"
   ],
@@ -3486,6 +3487,30 @@
           }
         },
         "required": ["id", "sessionKey"],
+        "additionalProperties": false
+      }
+    },
+    "PageFrame": {
+      "description": "A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ \"$state\": \"/queries/<name>/data/0/pageId\" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: \"mobile\"` narrows the frame to 390 px, so the page's own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows \"No page selected\".",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          },
+          "device": {
+            "type": "string",
+            "enum": ["desktop", "mobile"]
+          },
+          "height": {
+            "type": "string"
+          },
+          "fill": {
+            "type": "boolean"
+          }
+        },
+        "required": ["pageId"],
         "additionalProperties": false
       }
     },
