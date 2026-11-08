@@ -177,6 +177,7 @@ import {
   type RateLimitReplacement,
   scrubProviderQuotaReport,
 } from "../utils/provider-account-telemetry";
+import { extractReasoning } from "../utils/reasoning-events";
 import { getCurrentRequestUserId, getCurrentRunProvenance } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
@@ -222,6 +223,7 @@ import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageSearchSql } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
+import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
   configureSessionMoveDependencies,
@@ -4875,7 +4877,7 @@ export async function createSessionLogs(logs: {
   for (let start = 0; start < logs.lines.length; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
     if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
-    const batch: string[] = [];
+    const batch: Array<{ content: string; reasoning: ReturnType<typeof extractReasoning> }> = [];
     const end = Math.min(start + BATCH_SIZE, logs.lines.length);
     for (let i = start; i < end; i++) {
       const line = logs.lines[i];
@@ -4884,7 +4886,9 @@ export async function createSessionLogs(logs: {
       // content that is already scrubbed at the adapter emit site. We scrub
       // again here so any future write path that bypasses the adapter still
       // lands clean text in the persistent session_logs table.
-      batch.push(scrubSecrets(line));
+      const content = scrubSecrets(line);
+      // Parsed here, next to the scrub, so the write lock covers inserts only.
+      batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
     }
     await getDbClient().transaction(async (tx) => {
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
@@ -4899,10 +4903,13 @@ export async function createSessionLogs(logs: {
         [logs.sessionId, logs.iteration],
       );
       let lineNumber = last ? last.lineNumber + 1 : 0;
-      for (const content of batch) {
+      // Consecutive Claude thinking lines of one message just before the current line.
+      let run = 0;
+      let runMessageId: string | undefined;
+      for (const [index, { content, reasoning }] of batch.entries()) {
         await tx.run(
-          `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+          `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt, reasoningChars, reasoningKind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)`,
           [
             crypto.randomUUID(),
             logs.taskId ?? null,
@@ -4910,9 +4917,29 @@ export async function createSessionLogs(logs: {
             logs.iteration,
             logs.cli,
             content,
-            lineNumber++,
+            lineNumber,
+            reasoning.reasoning?.chars ?? null,
+            reasoning.reasoning ? "reasoning" : null,
           ],
         );
+        const toolMessageId = reasoning.toolUseMessageId;
+        if (toolMessageId) {
+          const before = runMessageId === toolMessageId ? run : 0;
+          // Only a run of 2+ can hold an update. A run that reaches the batch
+          // start may continue in an earlier POST, so the DB decides that case.
+          if (before >= 2 || before === index) {
+            await classifyClaudeUpdate(tx, logs.sessionId, toolMessageId, lineNumber);
+          }
+        }
+        const messageId = reasoning.reasoning?.messageId;
+        if (logs.cli === "claude" && messageId) {
+          run = runMessageId === messageId ? run + 1 : 1;
+          runMessageId = messageId;
+        } else {
+          run = 0;
+          runMessageId = undefined;
+        }
+        lineNumber++;
       }
     });
   }

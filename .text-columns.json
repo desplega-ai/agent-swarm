@@ -2693,6 +2693,9 @@
     "content": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
+    },
+    "reasoningKind": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "session_shares": {
