@@ -860,6 +860,7 @@ Read a config value inside a script with \`ctx.swarm.config.get\`.
 ## Outputs
 
 Short answers: inline in the task output.
+Small table, chart or key figures for a chat thread: a \`card\` on \`slack-reply\` or \`chat-reply\` (max 1 table of 100 rows, 2 charts), not a file or Page. Bigger or document-shaped: a Markdown attachment.
 Documents: Markdown task attachments; agent-fs is not configured here.
 Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
