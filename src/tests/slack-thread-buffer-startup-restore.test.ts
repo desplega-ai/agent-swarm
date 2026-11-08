@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { pollUntil } from "../../scripts/e2e/http";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
 import { closeDb, createAgent, getSlackTasksInThread, initDb } from "../be/db";
@@ -22,10 +22,8 @@ beforeAll(async () => {
   initDb(":memory:");
   Object.assign(process.env, slack.mock.env);
   process.env.SLACK_DISABLE = "false";
-  process.env.SLACK_MODE = "socket";
+  process.env.SLACK_SIGNING_SECRET = "startup-restore-signing-secret";
   process.env.STEERING_ENABLED = "false";
-  // A file sharing this process may already have run the once-per-process restore.
-  resetSlackBufferRestoreForTests();
   // The flush routes new tasks to the Lead.
   await createAgent({
     name: "startup-restore-lead",
@@ -36,6 +34,10 @@ beforeAll(async () => {
   });
 });
 
+afterEach(async () => {
+  await stopSlackApp();
+});
+
 afterAll(async () => {
   await stopSlackApp();
   process.env = saved;
@@ -43,12 +45,15 @@ afterAll(async () => {
   closeDb();
 });
 
-describe("Slack startup restores the thread buffer", () => {
+describe.each(["socket", "http"] as const)("Slack startup in %s mode", (mode) => {
   test("a reply persisted before the restart becomes one task after Slack connects", async () => {
+    process.env.SLACK_MODE = mode;
+    // Each boot is a fresh process: the once-per-process restore has not run.
+    resetSlackBufferRestoreForTests();
     // The thread exists in Slack; the previous process buffered the reply and
     // died before the flush. Seeded straight into the store: no event reaches the app.
     const human = slack.mock.addUser({ name: "restart-human" });
-    const channelId = slack.mock.addChannel({ name: "boot-restore", withBot: true }).id;
+    const channelId = slack.mock.addChannel({ name: `boot-restore-${mode}`, withBot: true }).id;
     const root = slack.mock.store.addMessage({ channel: channelId, user: human.id, text: "root" });
     const threadTs = root.ts;
     const reply = slack.mock.store.addMessage({
@@ -67,7 +72,7 @@ describe("Slack startup restores the thread buffer", () => {
     expect(isThreadBuffered(channelId, threadTs)).toBe(false);
 
     expect(await runSlackLifecycleExclusive(() => startSlackApp())).toBe(true);
-    await slack.mock.waitForConnection(10_000);
+    if (mode === "socket") await slack.mock.waitForConnection(10_000);
 
     // Nothing but the boot path re-buffers the row.
     expect(await pollUntil(() => isThreadBuffered(channelId, threadTs), 5_000, 25)).toBe(true);

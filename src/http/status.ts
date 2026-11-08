@@ -509,9 +509,6 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
       hint = "Slack is explicitly disabled (SLACK_DISABLE=true).";
     } else if (!config.mode) {
       hint = "Invalid SLACK_MODE. Use socket or http.";
-    } else if (config.mode === "http" && config.missingCredentials.length === 0) {
-      hint =
-        "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed.";
     } else {
       hint = `Set ${config.missingCredentials.join(" + ")} for Slack ${config.mode} mode.`;
     }
@@ -524,7 +521,7 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     };
   }
 
-  if (config.mode === "socket" && getSlackConnectionState() === "connected") {
+  if (getSlackConnectionState() === "connected") {
     return {
       id: "slack",
       label: "Slack configured",
@@ -539,7 +536,7 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     state: "configured",
     hint:
       config.mode === "http"
-        ? "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed."
+        ? "HTTP credentials are configured, but the receiver is not ready (workspace not verified yet)."
         : "Socket Mode credentials are configured, but the bot is not connected to Slack.",
     action_url: automationIntegrationFixUrl("slack"),
   };
