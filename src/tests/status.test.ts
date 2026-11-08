@@ -550,8 +550,8 @@ describe("setup milestones", () => {
     delete process.env.SLACK_APP_TOKEN;
     process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
     const http = await buildStatusPayload();
-    expect(getMilestone(http, "slack").state).toBe("unverified");
-    expect(getMilestone(http, "slack").hint).toContain("unavailable");
+    expect(getMilestone(http, "slack").state).toBe("configured");
+    expect(getMilestone(http, "slack").hint).toContain("receiver is not ready");
 
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
