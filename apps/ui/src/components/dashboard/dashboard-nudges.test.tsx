@@ -68,6 +68,7 @@ mock.module("@/components/ui/button", () => ({
       </button>
     ),
 }));
+mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => null }));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ user: { role } }),
 }));
@@ -81,6 +82,7 @@ mock.module("@/hooks/use-dismissible-card-key", () =>
   require("../../hooks/use-dismissible-card-key"),
 );
 mock.module("@/lib/telemetry-banner", () => require("../../lib/telemetry-banner"));
+mock.module("@/lib/semver", () => require("../../lib/semver"));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 

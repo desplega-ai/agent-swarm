@@ -117,6 +117,7 @@ function DesktopHeader() {
   const openCommandMenu = useOpenCommandMenu();
 
   const isHealthy = health && !isError;
+  const devMode = Boolean(isHealthy && !stats.isError && stats.data?.devMode === true);
   // Both `/status` and `/health` share the same failure (unreachable host, bad
   // key, CORS, ...) — prefer the `/status` error since it's the richer probe,
   // fall back to `/health`'s. `null` here means "still loading", not "ok".
@@ -138,17 +139,14 @@ function DesktopHeader() {
         <Breadcrumbs />
       </div>
 
-      {/* Tighter below sm so the breadcrumb keeps room on a phone. */}
-      <div className="flex items-center gap-1 sm:gap-3">
-        {isHealthy && !stats.isError && stats.data?.devMode === true && (
-          <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
-            Dev
-          </Badge>
-        )}
-        {/* Phase 2: aggregate health badge (components/layout/health-badge.tsx).
-            `/status` 404 (older API) → fall back to the binary /health probe. */}
+      {/* Two groups: status and search, then one tight cluster of icon
+          buttons. Tighter below sm so the breadcrumb keeps room on a phone. */}
+      <div className="flex items-center gap-1 sm:gap-2">
+        {/* Aggregate health (components/layout/health-badge.tsx), with dev
+            mode folded in. `/status` 404 (older API) → fall back to the
+            binary /health probe. */}
         {status ? (
-          <HealthBadge status={status} />
+          <HealthBadge status={status} devMode={devMode} />
         ) : (
           // Fallback for older API servers that don't expose /status — keep
           // the binary green/red dot driven by /health alone, but surface the
@@ -176,6 +174,11 @@ function DesktopHeader() {
             </TooltipContent>
           </Tooltip>
         )}
+        {!status && devMode ? (
+          <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
+            Dev
+          </Badge>
+        ) : null}
 
         <SetupPill />
         {/* Cmd+K's visible door: the only one on a phone. */}
@@ -193,6 +196,9 @@ function DesktopHeader() {
             {modKeyLabel()}K
           </Kbd>
         </Button>
+      </div>
+
+      <div className="flex items-center gap-0.5">
         <ImprovementHeaderButton />
         <NotificationBell />
         <ContextPanelToggle />

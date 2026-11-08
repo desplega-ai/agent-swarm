@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { ApiKeyStatus, UsageSummaryDailyRow } from "../api/types";
-import { cacheShare, percentDelta, planUsage, spendStats, usageDay } from "./home-metrics";
+import type { UsageSummaryDailyRow } from "../api/types";
+import { cacheShare, percentDelta, spendStats, usageDay } from "./home-metrics";
 
 const day = (date: string, costUsd: number): UsageSummaryDailyRow => ({
   date,
@@ -9,9 +9,6 @@ const day = (date: string, costUsd: number): UsageSummaryDailyRow => ({
   outputTokens: 0,
   sessions: 0,
 });
-
-const key = (windows: ApiKeyStatus["rateLimitWindows"]) =>
-  ({ rateLimitWindows: windows }) as ApiKeyStatus;
 
 describe("home metrics", () => {
   test("today's spend against the average of the earlier days", () => {
@@ -26,18 +23,6 @@ describe("home metrics", () => {
   test("a day with no row yet is zero, and no history means no average", () => {
     expect(spendStats([], "2026-11-06")).toEqual({ today: 0, average: null, series: [0] });
     expect(percentDelta(5, null)).toBeNull();
-  });
-
-  test("plan use is the busiest key's windows", () => {
-    const usage = planUsage([
-      key({ five_hour: { status: "allowed", utilization: 0.2, resetsAt: 100, lastSeenAt: "" } }),
-      key({
-        five_hour: { status: "allowed", utilization: 0.62, resetsAt: 200, lastSeenAt: "" },
-        seven_day: { status: "allowed", utilization: 0.41, lastSeenAt: "" },
-      }),
-    ]);
-    expect(usage).toEqual({ fiveHour: 62, sevenDay: 41, fiveHourResetsAt: 200_000 });
-    expect(planUsage([key({})])).toBeNull();
   });
 
   test("cache share and the usage day", () => {

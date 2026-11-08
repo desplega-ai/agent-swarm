@@ -1,23 +1,24 @@
 /**
  * The Home metrics strip: the few numbers worth a glance, each a link to the
  * page behind it. Spend today against the 7-day average, sessions today and
- * the failures of the last 24 hours, cost per session, tokens and the cache
- * share, the subscription plan use (when a key reports it), and what runs now.
- * No vanity counts (agents online, totals of everything).
+ * the failures of the last 24 hours (with what code saved today), cost per
+ * session, tokens and the cache share, what workflows and scripts saved in 30
+ * days, and what runs now. No vanity counts (agents online, totals of
+ * everything). Plan use lives on Connect › AI providers.
  */
 
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useApiKeyStatuses } from "@/api/hooks/use-api-keys";
 import { useDashboardCosts, useUsageSummary } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useMetrics } from "@/api/hooks/use-metrics";
+import { useHomeSavings } from "@/api/hooks/use-savings";
 import { useTasks } from "@/api/hooks/use-tasks";
+import { formatHours } from "@/components/savings/workflow-savings";
 import { useMinuteClock } from "@/hooks/use-minute-clock";
 import { formatCost } from "@/lib/cost-format";
-import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
-import { cacheShare, percentDelta, planUsage, spendStats, usageDay } from "@/lib/home-metrics";
+import { cacheShare, percentDelta, spendStats, usageDay } from "@/lib/home-metrics";
 import { summarizeRecentFailures } from "@/lib/recent-failures";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +40,7 @@ function HomeMetricsStrip({ className }: { className?: string }) {
   const todaySummary = useUsageSummary({ startDate: today }, QUERY);
   const costs = useDashboardCosts();
   const metrics = useMetrics();
-  const keys = useApiKeyStatuses();
+  const savings = useHomeSavings();
   const failed = useTasks({ status: "failed", limit: FAILURE_PAGE, orderBy: "lastUpdatedAt" });
 
   const spend = spendStats(week.data?.daily ?? [], today);
@@ -52,7 +53,10 @@ function HomeMetricsStrip({ className }: { className?: string }) {
   const failedCount = failed.data
     ? `${failures.tasks.length}${failures.complete ? "" : "+"}`
     : null;
-  const plan = planUsage(keys.data ?? []);
+  const savedTotal = savings.summary.data?.valid ? savings.summary.data.total : null;
+  const savedToday = savings.daily.data?.valid
+    ? (savings.daily.data.points.find((point) => point.day === today)?.savingUsd ?? 0)
+    : null;
   const running = metrics.data?.tasks.by_status.in_progress;
   const share = totals
     ? cacheShare(totals.totalInputTokens, totals.totalCacheReadTokens, totals.totalCacheWriteTokens)
@@ -75,6 +79,13 @@ function HomeMetricsStrip({ className }: { className?: string }) {
           delta && spend.average !== null
             ? `${delta} vs 7-day avg ${formatCost(spend.average, { placeholder: "$0" })}`
             : "At API prices"
+        }
+        note={
+          savedToday ? (
+            <span className="text-status-success-strong">
+              Code saved {formatCost(savedToday, { placeholder: "$0" })} today
+            </span>
+          ) : null
         }
       />
       <Metric
@@ -105,23 +116,24 @@ function HomeMetricsStrip({ className }: { className?: string }) {
         value={totals ? formatTokens(totals.totalInputTokens + totals.totalOutputTokens) : null}
         detail={share === null ? null : `${share}% from cache reads`}
       />
-      {plan ? (
+      {savings.summary.isError ? null : (
         <Metric
-          label="Plan use"
-          to="/integrations/ai"
+          label="Code saved (30d)"
+          to="/usage/savings"
           value={
-            <span className="flex flex-col gap-1 pt-1">
-              <PlanBar label="5h" pct={plan.fiveHour} />
-              <PlanBar label="7d" pct={plan.sevenDay} />
-            </span>
-          }
-          detail={
-            plan.fiveHourResetsAt && plan.fiveHourResetsAt > now
-              ? `5h resets in ${formatDurationMs(plan.fiveHourResetsAt - now)}`
+            savings.summary.data
+              ? formatCost(savedTotal?.savingUsd.p50 ?? 0, { placeholder: "$0" })
               : null
           }
+          detail={
+            savedTotal
+              ? `${formatHours(savedTotal.hoursSaved.p50)} of agent time`
+              : savings.summary.data
+                ? "No workflow or script runs yet"
+                : null
+          }
         />
-      ) : null}
+      )}
       <Metric
         label="Running now"
         to="/tasks?status=in_progress"
@@ -139,12 +151,15 @@ function Metric({
   to,
   value,
   detail,
+  note,
   aside,
 }: {
   label: string;
   to: string;
   value: ReactNode | null;
   detail: ReactNode | null;
+  /** A second line under the detail. */
+  note?: ReactNode;
   aside?: ReactNode;
 }) {
   return (
@@ -162,26 +177,8 @@ function Metric({
         {aside}
       </span>
       <span className="truncate text-xs text-muted-foreground">{detail ?? " "}</span>
+      {note ? <span className="truncate text-xs">{note}</span> : null}
     </Link>
-  );
-}
-
-function PlanBar({ label, pct }: { label: string; pct: number | null }) {
-  if (pct === null) return null;
-  return (
-    <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-      <span className="w-5">{label}</span>
-      <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-        <span
-          className={cn(
-            "block h-full rounded-full",
-            pct >= 90 ? "bg-status-error" : pct >= 70 ? "bg-status-warning" : "bg-foreground/60",
-          )}
-          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-        />
-      </span>
-      <span className="w-8 text-right tabular-nums text-foreground">{pct}%</span>
-    </span>
   );
 }
 

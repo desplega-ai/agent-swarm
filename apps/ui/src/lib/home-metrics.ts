@@ -1,6 +1,6 @@
-// Numbers for the Home metrics strip, from the Usage summary and the key pool.
+// Numbers for the Home metrics strip, from the Usage summary.
 
-import type { ApiKeyStatus, UsageSummaryDailyRow } from "../api/types";
+import type { UsageSummaryDailyRow } from "../api/types";
 
 /** The UTC day (`YYYY-MM-DD`) the usage summary groups `ms` under. */
 export function usageDay(ms: number): string {
@@ -31,47 +31,6 @@ export function percentDelta(value: number, base: number | null): string | null 
   if (base === null || base <= 0) return null;
   const pct = Math.round(((value - base) / base) * 100);
   return `${pct > 0 ? "+" : ""}${pct}%`;
-}
-
-export interface PlanUsage {
-  /** Highest 5-hour window use across the keys, as a whole percent. */
-  fiveHour: number | null;
-  /** Highest 7-day window use across the keys, as a whole percent. */
-  sevenDay: number | null;
-  /** When the busiest 5-hour window resets (ms since epoch). */
-  fiveHourResetsAt: number | null;
-}
-
-function windowUse(
-  key: ApiKeyStatus,
-  name: string,
-): { pct: number; resetsAt: number | null } | null {
-  const window = key.rateLimitWindows?.[name];
-  if (!window || typeof window.utilization !== "number") return null;
-  // The API sends `resetsAt` in seconds.
-  const resetsAt = typeof window.resetsAt === "number" ? window.resetsAt * 1000 : null;
-  return { pct: Math.round(window.utilization * 100), resetsAt };
-}
-
-/**
- * The subscription plan use the swarm is closest to running out of: the
- * busiest key's 5-hour and 7-day windows. Null when no key reports a window.
- */
-export function planUsage(keys: ApiKeyStatus[]): PlanUsage | null {
-  let fiveHour: { pct: number; resetsAt: number | null } | null = null;
-  let sevenDay: number | null = null;
-  for (const key of keys) {
-    const five = windowUse(key, "five_hour");
-    if (five && (!fiveHour || five.pct > fiveHour.pct)) fiveHour = five;
-    const seven = windowUse(key, "seven_day");
-    if (seven && (sevenDay === null || seven.pct > sevenDay)) sevenDay = seven.pct;
-  }
-  if (!fiveHour && sevenDay === null) return null;
-  return {
-    fiveHour: fiveHour?.pct ?? null,
-    sevenDay,
-    fiveHourResetsAt: fiveHour?.resetsAt ?? null,
-  };
 }
 
 /** Share of the prompt tokens served from the cache, as a whole percent. */

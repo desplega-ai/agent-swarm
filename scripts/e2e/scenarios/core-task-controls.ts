@@ -92,6 +92,41 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
     "title of an unknown task",
   );
 
+  // PATCH /api/tasks/{id}/tags: add, remove (remove wins), empty body, 404.
+  const before = await readTask(ctx, taskId);
+  response = await ctx.api("PATCH", `/api/tasks/${taskId}/tags`, {
+    body: { add: ["ui:dismissed", "e2e:keep"] },
+  });
+  expectStatus(response, [200], "add tags");
+  let tags = asRecord(asRecord(response.json).task).tags;
+  expect(
+    Array.isArray(tags) && tags.includes("ui:dismissed") && tags.includes("e2e:keep"),
+    "Tags not added",
+  );
+  expect(
+    (await readTask(ctx, taskId)).lastUpdatedAt === before.lastUpdatedAt,
+    "A tag write moved lastUpdatedAt",
+  );
+  response = await ctx.api("PATCH", `/api/tasks/${taskId}/tags`, {
+    body: { add: ["ui:dismissed"], remove: ["ui:dismissed"] },
+  });
+  expectStatus(response, [200], "remove a tag");
+  tags = (await readTask(ctx, taskId)).tags;
+  expect(
+    Array.isArray(tags) && !tags.includes("ui:dismissed") && tags.includes("e2e:keep"),
+    "Tag not removed, or another tag lost",
+  );
+  expectStatus(
+    await ctx.api("PATCH", `/api/tasks/${taskId}/tags`, { body: {} }),
+    [400],
+    "tags with nothing to change",
+  );
+  expectStatus(
+    await ctx.api("PATCH", `/api/tasks/${GHOST}/tags`, { body: { add: ["x"] } }),
+    [404],
+    "tags of an unknown task",
+  );
+
   // PATCH /api/tasks/{id}/vcs
   const vcs = {
     vcsProvider: "github",
