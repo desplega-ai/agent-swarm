@@ -7,7 +7,8 @@
  * main column: Needs you (up to half the height, scrolling inside; one quiet
  * line when nothing waits) over the swarm activity, which takes the rest. The
  * side column: Favorites, then "Getting started" (Set up, then Get the swarm
- * working). Breakpoints follow the page's own width (container `home`), so a
+ * working). Once setup is complete, "Getting started" leaves and Favorites
+ * lists every favorite. Breakpoints follow the page's own width (container `home`), so a
  * wide side panel narrows Home like a narrow window: from `@5xl` the strip
  * stays put and the columns scroll on their own; below it the page scrolls as
  * one column.
@@ -24,7 +25,10 @@ import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { PostOnboardingChecklistCard } from "@/components/checklist/post-onboarding-checklist-card";
+import {
+  PostOnboardingChecklistCard,
+  useSetupComplete,
+} from "@/components/checklist/post-onboarding-checklist-card";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { ActivityDensity } from "@/components/home/activity-density";
@@ -46,6 +50,8 @@ const MAIN_COLUMN = "flex min-w-0 flex-col gap-4 @5xl/home:min-h-0 @5xl/home:pb-
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
   const { config, pendingConnection } = useConfig();
+  // Setup done: the checklist card hides itself and Favorites lists everything.
+  const setupComplete = useSetupComplete();
 
   // The greeting lives in the top bar's breadcrumb slot (Breadcrumbs renders
   // it on `/`).
@@ -75,7 +81,7 @@ export function UnifiedHome() {
             </div>
           </div>
           <div className={SIDE_COLUMN}>
-            <Favorites />
+            <Favorites showAll={setupComplete} />
             <PostOnboardingChecklistCard />
           </div>
         </div>

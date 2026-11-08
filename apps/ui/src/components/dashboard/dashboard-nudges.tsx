@@ -4,10 +4,12 @@ import { type ReactNode, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
+import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
+import { compareSemver } from "@/lib/semver";
 import {
   readTelemetryBannerDismissedAt,
   showTelemetryBanner,
@@ -19,12 +21,36 @@ import { AutomationSetupRows } from "./automation-setup-rows";
 import { TelemetryBenchmarkBanner } from "./telemetry-benchmark-banner";
 
 const CURRENT_VERSION = __APP_VERSION__;
+/** The agent-fs version this release pins. Guarded: test runs do not define it. */
+const PINNED_AGENT_FS_VERSION =
+  typeof __AGENT_FS_VERSION__ === "string" ? __AGENT_FS_VERSION__ : null;
+
+/** "v1.150.0 → v1.152.0": the running version, then the one this dashboard expects. */
+function versionStep(from: string, to: string): string {
+  return `v${from.replace(/^v/, "")} → v${to.replace(/^v/, "")}`;
+}
+
+function ReleaseNotesLink({ href }: { href: string }) {
+  return (
+    <Button asChild size="sm" variant="outline">
+      <a href={href} target="_blank" rel="noreferrer">
+        <span className="hidden sm:inline">Release notes</span>
+        <span className="sm:hidden">Notes</span>
+        <ExternalLink aria-hidden="true" />
+      </a>
+    </Button>
+  );
+}
 
 export function DashboardNudges() {
   const { user } = useCurrentUser();
   const { data: status } = useStatusContext();
   const upgradeGate = useFeatureGate(CURRENT_VERSION);
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
+  const agentFsVersion = useOptionalAgentFs()?.serverVersion ?? null;
+  const agentFsCard = useDismissibleCard(
+    `dashboard-agent-fs-upgrade:${PINNED_AGENT_FS_VERSION ?? "unknown"}`,
+  );
   const { config } = useConfig();
   const telemetryKey = deriveStorageKey(config.apiUrl, TELEMETRY_BANNER_CARD_KEY);
   const [telemetryDismissedAt, setTelemetryDismissedAt] = useState(() =>
@@ -54,12 +80,18 @@ export function DashboardNudges() {
 
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
+  // The connected agent-fs runs an older version than this release pins.
+  const showAgentFsUpgrade =
+    PINNED_AGENT_FS_VERSION !== null &&
+    agentFsVersion !== null &&
+    compareSemver(agentFsVersion, PINNED_AGENT_FS_VERSION) < 0 &&
+    !agentFsCard.dismissed;
   const waitingAutomations = status?.automations?.filter(
     (automation) => automation.state === "needs_setup",
   );
   const showAutomations = (waitingAutomations?.length ?? 0) > 0;
 
-  if (!showUpgrade && !showAutomations && !showTelemetry) return null;
+  if (!showUpgrade && !showAgentFsUpgrade && !showAutomations && !showTelemetry) return null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -77,20 +109,36 @@ export function DashboardNudges() {
           priority="secondary"
           icon={ArrowUpCircle}
           title="Update available"
+          description={
+            <span className="font-mono text-xs tabular-nums">
+              API {versionStep(upgradeGate.currentVersion, CURRENT_VERSION)}
+            </span>
+          }
           action={
-            <Button asChild size="sm" variant="outline">
-              <a
-                href={`https://github.com/desplega-ai/agent-swarm/releases/tag/v${CURRENT_VERSION}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span className="hidden sm:inline">Release notes</span>
-                <span className="sm:hidden">Notes</span>
-                <ExternalLink aria-hidden="true" />
-              </a>
-            </Button>
+            <ReleaseNotesLink
+              href={`https://github.com/desplega-ai/agent-swarm/releases/tag/v${CURRENT_VERSION}`}
+            />
           }
           onDismiss={upgradeCard.dismiss}
+        />
+      )}
+
+      {showAgentFsUpgrade && agentFsVersion && PINNED_AGENT_FS_VERSION && (
+        <NudgeBanner
+          priority="secondary"
+          icon={ArrowUpCircle}
+          title="agent-fs update available"
+          description={
+            <span className="font-mono text-xs tabular-nums">
+              {versionStep(agentFsVersion, PINNED_AGENT_FS_VERSION)}
+            </span>
+          }
+          action={
+            <ReleaseNotesLink
+              href={`https://github.com/desplega-ai/agent-fs/releases/tag/v${PINNED_AGENT_FS_VERSION}`}
+            />
+          }
+          onDismiss={agentFsCard.dismiss}
         />
       )}
 

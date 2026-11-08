@@ -38502,6 +38502,97 @@
         }
       }
     },
+    "/api/tasks/{id}/tags": {
+      "patch": {
+        "summary": "Add or remove task tags",
+        "description": "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tags updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/pages": {
       "post": {
         "summary": "Create a new page",

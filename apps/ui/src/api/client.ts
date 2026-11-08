@@ -3904,6 +3904,22 @@ class ApiClient {
     return data.task;
   }
 
+  /** Add and remove task tags. A tag in both lists is removed. */
+  async updateTaskTags(
+    id: string,
+    change: { add?: string[]; remove?: string[] },
+  ): Promise<AgentTask> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/tags`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(change),
+    });
+    if (!res.ok) throw new Error(`Failed to update task tags: ${res.status}`);
+    const data = (await res.json()) as { task: AgentTask };
+    return data.task;
+  }
+
   // ─── Task Templates (Phase 6 ≥1.76.0) ─────────────────────────────────────
 
   async listTaskTemplates(opts?: {

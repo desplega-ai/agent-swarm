@@ -282,12 +282,8 @@ test("a member sees swarm items without actions", async () => {
   expect(container.textContent).not.toContain("Add another channel");
 });
 
-test("all done collapses to one line with a Show toggle", async () => {
+test("all done hides the card", async () => {
   const items = DEFAULTS.map((entry) => ({ ...entry, done: true, signal: true }));
   const container = await mount({ items, canEditSwarm: true });
-  expect(container.textContent).toContain("Setup complete");
-  expect(container.textContent).toContain("3 of 3");
-  expect(container.querySelectorAll("li").length).toBe(0);
-  await act(async () => button(container, "Show").click());
-  expect(container.querySelectorAll("li").length).toBe(3);
+  expect(container.textContent).toBe("");
 });

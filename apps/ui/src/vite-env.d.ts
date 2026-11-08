@@ -12,3 +12,5 @@ interface ImportMeta {
 }
 
 declare const __APP_VERSION__: string;
+/** The agent-fs version this release pins; null when the build could not read it. */
+declare const __AGENT_FS_VERSION__: string | null;
