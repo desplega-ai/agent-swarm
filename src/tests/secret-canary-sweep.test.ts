@@ -802,9 +802,10 @@ describe("drive every write path", () => {
     const uiSpecFlags = ["UI_SPEC_ENABLED", "UI_SPEC_ACTIONS_ENABLED"] as const;
     const previousUiSpecFlags = uiSpecFlags.map((key) => process.env[key]);
     for (const key of uiSpecFlags) process.env[key] = "true";
-    initLinearOutboundSync();
-    initJiraOutboundSync();
     try {
+      // Inside the try: a throw here must still restore the flags.
+      initLinearOutboundSync();
+      initJiraOutboundSync();
       for (const provider of ["linear", "jira"] as const) {
         const task = await createTaskExtended(payload(`${provider} task brief`), {
           agentId: workerId,
