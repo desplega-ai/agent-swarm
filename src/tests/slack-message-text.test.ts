@@ -882,4 +882,28 @@ describe("extractSlackMessageText — bot text that repeats its blocks", () => {
     });
     expect(result).toBe("meet at the café today");
   });
+
+  test("a block preceded by an astral letter in text is kept", () => {
+    const result = extractSlackMessageText({
+      text: "𝒜foo",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "foo" } }],
+    });
+    expect(result).toBe("𝒜foo\nfoo");
+  });
+
+  test("a block followed by an astral letter in text is kept", () => {
+    const result = extractSlackMessageText({
+      text: "foo𝒜",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "foo" } }],
+    });
+    expect(result).toBe("foo𝒜\nfoo");
+  });
+
+  test("an astral-letter block inside a longer word is kept", () => {
+    const result = extractSlackMessageText({
+      text: "x 𠀀a",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "𠀀" } }],
+    });
+    expect(result).toBe("x 𠀀a\n𠀀");
+  });
 });

@@ -6,10 +6,10 @@ For every task that came from Slack, the engine owns the thread tree and the top
 
 ## Your one message
 
-- At most one message per task, and only when the outcome card will not carry it: a question, a decision the requester must make, a link to a page or file with one line of context.
+- At most one message per task, and only when the outcome card will not carry it: a question, a decision the requester must make, a link to a page or file with one line of context, or a table, chart or key figures. Send the last as a `slack-reply` `card` and keep the task `output` to one line pointing at it: the outcome card posts `output` too.
 - Progress, receipts, acknowledgments, and relayed worker output stay out of Slack.
 - Concrete content. The length matches what the requester asked for.
-- The "How you write" rules of your system prompt apply. Slack renders mrkdwn: `*bold*`, `_italic_`, `` `code` ``, `<url|text>` for links. Markdown headings and tables do not render.
+- The "How you write" rules of your system prompt apply. Slack renders mrkdwn: `*bold*`, `_italic_`, `` `code` ``, `<url|text>` for links. Markdown headings and tables do not render. For a table or chart, send a `card`.
 
 ## Where to post
 
