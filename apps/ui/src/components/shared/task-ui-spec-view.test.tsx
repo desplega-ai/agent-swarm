@@ -33,9 +33,23 @@ mock.module("@/components/ui/button", () => ({
     return <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>;
   },
 }));
-const runTaskUiAction = mock(async () => ({ status: "started" as const, taskId: "child" }));
+const runTaskUiAction = mock(async () => ({
+  status: "started" as "started" | "already_done",
+  taskId: "child",
+}));
 mock.module("@/api/client", () => ({ api: { runTaskUiAction } }));
-mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
+const navigate = mock(() => {});
+mock.module("react-router-dom", () => ({ useNavigate: () => navigate }));
+const toastSuccess = mock(
+  (
+    _message: string,
+    _options?: {
+      action: { label: string; onClick: () => void };
+      actionButtonStyle?: { pointerEvents: string };
+    },
+  ) => {},
+);
+mock.module("sonner", () => ({ toast: { success: toastSuccess, error: () => {} } }));
 mock.module("@/components/ui/card", () => ({
   Card: stub("section"),
   CardHeader: stub("header"),
@@ -136,6 +150,30 @@ describe("TaskUiSpecView", () => {
     expect(lastButtonClick).toBeDefined();
     lastButtonClick?.();
     expect(runTaskUiAction).toHaveBeenCalledWith("task-1", "rerun");
+  });
+
+  test("a started action offers Open to the spawned task", async () => {
+    toastSuccess.mockClear();
+    navigate.mockClear();
+    render(specWith("Button", { id: "rerun", label: "Re-run" }));
+    lastButtonClick?.();
+    await Promise.resolve();
+    const [message, options] = toastSuccess.mock.calls[0]!;
+    expect(message).toBe("Follow-up started.");
+    expect(options?.action.label).toBe("Open");
+    expect(options?.actionButtonStyle?.pointerEvents).toBe("auto");
+    expect(navigate).not.toHaveBeenCalled();
+    options?.action.onClick();
+    expect(navigate).toHaveBeenCalledWith("/tasks/child");
+  });
+
+  test("an already-run action offers no new task navigation", async () => {
+    toastSuccess.mockClear();
+    runTaskUiAction.mockResolvedValueOnce({ status: "already_done", taskId: "child" });
+    render(specWith("Button", { id: "rerun", label: "Re-run" }));
+    lastButtonClick?.();
+    await Promise.resolve();
+    expect(toastSuccess.mock.calls[0]).toEqual(["This button already ran.", undefined]);
   });
 
   test("the plan example renders its field, table rows and link", () => {

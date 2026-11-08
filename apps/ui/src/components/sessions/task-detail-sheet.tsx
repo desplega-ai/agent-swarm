@@ -23,6 +23,7 @@ import { JsonTree } from "@/components/shared/json-tree";
 import { ShowMore } from "@/components/shared/show-more";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
 import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
 import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
 import { Button } from "@/components/ui/button";
@@ -94,6 +95,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
           </div>
         </ShowMore>
       )}
+      {task?.uiSpec ? <TaskUiSpecView task={task} /> : null}
     </div>
   ) : reason ? (
     <div data-slot="transcript-outcome" className="min-w-0 px-1">

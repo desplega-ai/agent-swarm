@@ -12,6 +12,7 @@
  */
 
 import { Component, type ReactNode, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Area,
   AreaChart,
@@ -225,6 +226,7 @@ function UiSpecActionButton({
   label: string;
   variant: "default" | "destructive" | "outline";
 }) {
+  const navigate = useNavigate();
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const run = async () => {
     setState("running");
@@ -232,6 +234,13 @@ function UiSpecActionButton({
       const result = await api.runTaskUiAction(taskId, actionId);
       toast.success(
         result.status === "started" ? "Follow-up started." : "This button already ran.",
+        result.status === "started"
+          ? {
+              action: { label: "Open", onClick: () => navigate(`/tasks/${result.taskId}`) },
+              // The task sheet disables pointer events outside its modal.
+              actionButtonStyle: { pointerEvents: "auto" },
+            }
+          : undefined,
       );
       setState("done");
     } catch (error) {
