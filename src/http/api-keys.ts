@@ -14,8 +14,14 @@ import {
   setApiKeyName,
   setApiKeyPlan,
 } from "../be/db";
-import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
+import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
+import {
+  type ProviderQuotaReport,
+  providerAccountTelemetrySchema,
+  rateLimitReplacementSchema,
+  windowFieldObservedAtSchema,
+} from "../utils/provider-account-telemetry";
 import {
   isSubscriptionPlanId,
   SUBSCRIPTION_PLANS,
@@ -153,37 +159,111 @@ export const rateLimitWindowSchema = z.object({
   // .finite() rejects NaN/Infinity at the report boundary; sanitizeReportedWindowResets
   // below still has to guard a finite-but-out-of-range or implausibly far-future value.
   resetsAt: z.number().finite().optional(),
+  fieldObservedAt: windowFieldObservedAtSchema.optional(),
+  durationMins: z.number().int().positive().max(576000).optional(),
+  source: z.enum(["claude", "codex"]).optional(),
+  limitId: z.string().min(1).max(128).optional(),
+  label: z.string().max(256).optional(),
+  normalModelSlug: z.string().max(256).optional(),
+  overageStatus: z.string().max(256).optional(),
+  overageDisabledReason: z.string().max(256).optional(),
   isUsingOverage: z.boolean().optional(),
   surpassedThreshold: z.number().optional(),
   lastSeenAt: z.string().datetime(),
 });
 
 /**
- * Clamps a reported window's `resetsAt` (seconds) to `[now, now+7d]`, the
- * same 7-day ceiling used for the key-wide cooldown (`MAX_RATE_LIMIT_RESET_MS`).
- * Guards two failure modes at the report boundary, in either direction: a
- * finite-but-out-of-Date-range value (e.g. 1e20 or -1e20) that would
- * otherwise throw when rendered via `new Date(resetsAt * 1000).toISOString()`
- * downstream in `computeModelLimits`, and a representable but implausible
- * value (far-future, or negative/past — a freshly reported window can't
- * reset in the past) that would otherwise read as bogus. NaN/Infinity are
- * already rejected upstream by the route's `.finite()` schema. Applied
- * before storage, so `computeModelLimits` never sees an out-of-range value
- * from data reported through this endpoint.
+ * A finite reset can still exceed Date's range and crash status rendering.
+ * Bound display resets separately from routing. Unknown durations can be monthly.
+ * Known durations allow one day of provider clock skew. Never extend an expired
+ * reset into a new quota period because sparse updates do not establish one.
  */
+export const MAX_DISPLAY_RESET_MS = 400 * 86400000;
 export function sanitizeReportedWindowResets(
   windows: RateLimitWindowTelemetry,
 ): RateLimitWindowTelemetry {
   const nowSec = Math.floor(Date.now() / 1000);
-  const maxResetsAtSec = Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000);
+
   const sanitized: RateLimitWindowTelemetry = {};
   for (const [key, window] of Object.entries(windows)) {
+    const duration =
+      window.durationMins ??
+      (key === "five_hour" ? 300 : key.startsWith("seven_day") ? 10080 : undefined);
+    const horizonMs =
+      duration === undefined
+        ? MAX_DISPLAY_RESET_MS
+        : Math.min(MAX_DISPLAY_RESET_MS, Math.max(7 * 86400000, duration * 60000 + 86400000));
+    const maxResetsAtSec = Math.floor((Date.now() + horizonMs) / 1000);
     sanitized[key] =
       window.resetsAt === undefined
         ? window
-        : { ...window, resetsAt: Math.min(Math.max(window.resetsAt, nowSec), maxResetsAtSec) };
+        : {
+            ...window,
+            resetsAt: Math.min(
+              window.resetsAt < nowSec - MAX_DISPLAY_RESET_MS / 1000 ? nowSec : window.resetsAt,
+              maxResetsAtSec,
+            ),
+          };
   }
   return sanitized;
+}
+
+/** Future clocks can otherwise prevent every subsequent report from taking effect. */
+export function sanitizeReportedQuotaObservations(
+  report: ProviderQuotaReport,
+  nowMs = Date.now(),
+): ProviderQuotaReport {
+  const bound = (at: string) =>
+    Date.parse(at) > nowMs + 60000 ? new Date(nowMs).toISOString() : at;
+  const times = <K extends string>(
+    values: Partial<Record<K, string>> | undefined,
+  ): Partial<Record<K, string>> | undefined =>
+    values &&
+    (Object.fromEntries(Object.entries(values).map(([key, at]) => [key, bound(at as string)])) as
+      | Partial<Record<K, string>>
+      | undefined);
+  return {
+    windows: Object.fromEntries(
+      Object.entries(report.windows).map(([key, window]) => [
+        key,
+        {
+          ...window,
+          lastSeenAt: bound(window.lastSeenAt),
+          ...(window.fieldObservedAt ? { fieldObservedAt: times(window.fieldObservedAt) } : {}),
+        },
+      ]),
+    ),
+    account: report.account && {
+      ...report.account,
+      observedAt: bound(report.account.observedAt),
+      ...(report.account.fieldObservedAt
+        ? { fieldObservedAt: times(report.account.fieldObservedAt) }
+        : {}),
+      ...(report.account.limits
+        ? {
+            limits: Object.fromEntries(
+              Object.entries(report.account.limits).map(([id, limit]) => [
+                id,
+                {
+                  ...limit,
+                  observedAt: bound(limit.observedAt),
+                  ...(limit.fieldObservedAt
+                    ? { fieldObservedAt: times(limit.fieldObservedAt) }
+                    : {}),
+                  ...(limit.windowRemovedAt
+                    ? { windowRemovedAt: times(limit.windowRemovedAt) }
+                    : {}),
+                },
+              ]),
+            ),
+          }
+        : {}),
+    },
+    replace: report.replace?.map((replacement) => ({
+      ...replacement,
+      observedAt: bound(replacement.observedAt),
+    })),
+  };
 }
 
 const reportRateLimitWindows = route({
@@ -197,6 +277,8 @@ const reportRateLimitWindows = route({
     keySuffix: z.string().min(1).max(10),
     keyIndex: z.number().int().min(0),
     windows: z.record(z.string(), rateLimitWindowSchema),
+    account: providerAccountTelemetrySchema.optional(),
+    replace: z.array(rateLimitReplacementSchema).max(128).optional(),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
   }),
@@ -209,6 +291,9 @@ const reportRateLimitWindows = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated: "worker credential telemetry, same posture as POST /api/keys/report-rate-limit",
+  },
 });
 
 const reportSeatMismatch = route({
@@ -312,6 +397,7 @@ const ApiKeyStatusSchema = z.object({
   provider: z.string(),
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: z.record(z.string(), rateLimitWindowSchema),
+  providerAccount: providerAccountTelemetrySchema.nullable(),
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: z.string().nullable(),
   planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
@@ -648,8 +734,17 @@ export async function handleApiKeys(
     const parsed = await reportRateLimitWindows.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
+    const { keyType, keySuffix, keyIndex, scope, scopeId } = parsed.body;
+    const { windows, account, replace } = sanitizeReportedQuotaObservations(parsed.body);
     try {
+      // Spend strings retain provider units. Validate their reset independently of routing.
+      for (const limit of Object.values(account?.limits ?? {})) {
+        if (limit.spend)
+          limit.spend.resetsAt = Math.min(
+            limit.spend.resetsAt,
+            Math.floor(Date.now() / 1000) + 400 * 86400,
+          );
+      }
       const { planChanged } = await recordKeyRateLimitWindows(
         keyType,
         keySuffix,
@@ -657,6 +752,8 @@ export async function handleApiKeys(
         sanitizeReportedWindowResets(windows),
         scope,
         scopeId ?? null,
+        account ?? undefined,
+        replace,
       );
       if (planChanged) clearUsageCache();
       reportRateLimitWindows.respond(res, 200, {

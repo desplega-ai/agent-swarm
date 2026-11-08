@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   computeModelLimits,
   rateLimitWindowSchema,
+  sanitizeReportedQuotaObservations,
   sanitizeReportedWindowResets,
 } from "../http/api-keys";
 import { MAX_RATE_LIMIT_RESET_MS } from "../utils/error-tracker";
@@ -142,10 +143,10 @@ describe("sanitizeReportedWindowResets", () => {
     const resetsAt = sanitized.seven_day_overage_included?.resetsAt;
     expect(resetsAt).toBeDefined();
     expect(() => new Date(resetsAt! * 1000).toISOString()).not.toThrow();
-    expect(resetsAt).toBeLessThanOrEqual(Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000));
+    expect(resetsAt).toBeLessThanOrEqual(Math.floor((Date.now() + 8 * 86400000) / 1000));
   });
 
-  test("clamps a representable but implausibly far-future resetsAt to the 7-day ceiling", () => {
+  test("clamps a representable but implausibly far-future resetsAt to the duration plus one day", () => {
     const farFutureSec = Math.floor(new Date("3000-01-01T00:00:00Z").getTime() / 1000);
     const windows = {
       seven_day_opus: {
@@ -157,7 +158,7 @@ describe("sanitizeReportedWindowResets", () => {
     const sanitized = sanitizeReportedWindowResets(windows);
     expect(sanitized.seven_day_opus?.resetsAt).toBeLessThan(farFutureSec);
     expect(sanitized.seven_day_opus?.resetsAt).toBeLessThanOrEqual(
-      Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000),
+      Math.floor((Date.now() + 8 * 86400000) / 1000),
     );
   });
 
@@ -203,4 +204,95 @@ describe("sanitizeReportedWindowResets", () => {
       Math.floor(Date.now() / 1000),
     );
   });
+});
+
+test("monthly provider display resets survive without changing the routing ceiling", () => {
+  const resetsAt = Math.floor(Date.now() / 1000) + 30 * 86400;
+  const windows = {
+    "codex:monthly:primary": {
+      status: "allowed",
+      durationMins: 43200,
+      resetsAt,
+      lastSeenAt: new Date().toISOString(),
+    },
+  };
+  expect(sanitizeReportedWindowResets(windows)).toEqual(windows);
+  expect(MAX_RATE_LIMIT_RESET_MS).toBe(7 * 86400000);
+});
+
+test.each([
+  "overage",
+  "codex:codex:primary",
+])("unknown-duration monthly %s resets survive validation", (key) => {
+  const resetsAt = Math.floor(Date.now() / 1000) + 31 * 86400;
+  const window = { status: "allowed", resetsAt, lastSeenAt: new Date().toISOString() };
+  expect(sanitizeReportedWindowResets({ [key]: window })[key]?.resetsAt).toBe(resetsAt);
+  expect(
+    sanitizeReportedWindowResets({ [key]: { ...window, resetsAt: 1e20 } })[key]!.resetsAt!,
+  ).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 400 * 86400);
+  expect(MAX_RATE_LIMIT_RESET_MS).toBe(7 * 86400000);
+});
+
+test("future observation times are bounded for window facts, account facts, and removals", () => {
+  const future = "3000-01-01T00:00:00.000Z";
+  const past = "2026-11-01T01:00:00.000Z";
+  const now = "2026-11-08T01:00:00.000Z";
+  const report = sanitizeReportedQuotaObservations(
+    {
+      windows: {
+        "codex:codex:primary": {
+          status: "allowed",
+          lastSeenAt: future,
+          fieldObservedAt: { resetsAt: future, durationMins: past },
+        },
+      },
+      account: {
+        source: "codex",
+        observedAt: future,
+        ordinaryUsageAllowed: false,
+        fieldObservedAt: { ordinaryUsageAllowed: future },
+        limits: {
+          codex: {
+            observedAt: future,
+            planRaw: "pro",
+            fieldObservedAt: { planRaw: future, credits: past },
+            windowRemovedAt: { secondary: future },
+          },
+        },
+      },
+      replace: [{ source: "codex", limitId: "codex", observedAt: future, slots: ["secondary"] }],
+    },
+    Date.parse(now),
+  );
+  expect(report.windows["codex:codex:primary"]).toMatchObject({
+    lastSeenAt: now,
+    fieldObservedAt: { resetsAt: now, durationMins: past },
+  });
+  expect(report.account).toMatchObject({
+    observedAt: now,
+    fieldObservedAt: { ordinaryUsageAllowed: now },
+    limits: {
+      codex: {
+        observedAt: now,
+        fieldObservedAt: { planRaw: now, credits: past },
+        windowRemovedAt: { secondary: now },
+      },
+    },
+  });
+  expect(report.replace?.[0]?.observedAt).toBe(now);
+});
+
+test("a valid expired reset remains expired after a sparse recovery", () => {
+  const expired = Math.floor(Date.now() / 1000) - 7 * 86400;
+  const window = {
+    status: "allowed",
+    utilization: 0.1,
+    resetsAt: expired,
+    durationMins: 10080,
+    lastSeenAt: new Date().toISOString(),
+  };
+  expect(
+    sanitizeReportedWindowResets({ "codex:codex:primary": window })["codex:codex:primary"]
+      ?.resetsAt,
+  ).toBe(expired);
 });

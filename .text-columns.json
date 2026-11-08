@@ -571,6 +571,7 @@
     "provider": {
       "exempt": "enum or fixed-format value"
     },
+    "providerAccount": "scrubbed",
     "rateLimitWindows": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },

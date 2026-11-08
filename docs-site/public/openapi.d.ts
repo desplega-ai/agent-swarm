@@ -6682,12 +6682,96 @@ export interface paths {
                                 status: string;
                                 utilization?: number;
                                 resetsAt?: number;
+                                fieldObservedAt?: {
+                                    /** Format: date-time */
+                                    durationMins?: string;
+                                    /** Format: date-time */
+                                    resetsAt?: string;
+                                    /** Format: date-time */
+                                    label?: string;
+                                    /** Format: date-time */
+                                    normalModelSlug?: string;
+                                };
+                                durationMins?: number;
+                                /** @enum {string} */
+                                source?: "claude" | "codex";
+                                limitId?: string;
+                                label?: string;
+                                normalModelSlug?: string;
+                                overageStatus?: string;
+                                overageDisabledReason?: string;
                                 isUsingOverage?: boolean;
                                 surpassedThreshold?: number;
                                 /** Format: date-time */
                                 lastSeenAt: string;
                             };
                         };
+                        account?: {
+                            /** @enum {string} */
+                            source: "codex" | "claude";
+                            /** Format: date-time */
+                            observedAt: string;
+                            fieldObservedAt?: {
+                                /** Format: date-time */
+                                ordinaryUsageAllowed?: string;
+                                /** Format: date-time */
+                                resetCreditsAvailable?: string;
+                            };
+                            ordinaryUsageAllowed?: boolean | null;
+                            resetCreditsAvailable?: number | null;
+                            limits?: {
+                                [key: string]: {
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        planRaw?: string;
+                                        /** Format: date-time */
+                                        label?: string;
+                                        /** Format: date-time */
+                                        normalModelSlug?: string;
+                                        /** Format: date-time */
+                                        credits?: string;
+                                        /** Format: date-time */
+                                        spend?: string;
+                                        /** Format: date-time */
+                                        spendControlReached?: string;
+                                        /** Format: date-time */
+                                        reachedType?: string;
+                                    };
+                                    windowRemovedAt?: {
+                                        /** Format: date-time */
+                                        primary?: string;
+                                        /** Format: date-time */
+                                        secondary?: string;
+                                    };
+                                    planRaw?: string | null;
+                                    label?: string | null;
+                                    normalModelSlug?: string | null;
+                                    credits?: {
+                                        hasCredits: boolean;
+                                        unlimited: boolean;
+                                        balance?: string | null;
+                                    } | null;
+                                    spend?: {
+                                        limit: string;
+                                        used: string;
+                                        remainingPercent: number;
+                                        resetsAt: number;
+                                    } | null;
+                                    spendControlReached?: boolean | null;
+                                    reachedType?: string | null;
+                                };
+                            };
+                        };
+                        replace?: {
+                            /** @enum {string} */
+                            source: "codex";
+                            limitId: string;
+                            /** Format: date-time */
+                            observedAt: string;
+                            slots: ("primary" | "secondary")[];
+                        }[];
                         scope?: string;
                         scopeId?: string;
                     };
@@ -6924,12 +7008,88 @@ export interface paths {
                                         status: string;
                                         utilization?: number;
                                         resetsAt?: number;
+                                        fieldObservedAt?: {
+                                            /** Format: date-time */
+                                            durationMins?: string;
+                                            /** Format: date-time */
+                                            resetsAt?: string;
+                                            /** Format: date-time */
+                                            label?: string;
+                                            /** Format: date-time */
+                                            normalModelSlug?: string;
+                                        };
+                                        durationMins?: number;
+                                        /** @enum {string} */
+                                        source?: "claude" | "codex";
+                                        limitId?: string;
+                                        label?: string;
+                                        normalModelSlug?: string;
+                                        overageStatus?: string;
+                                        overageDisabledReason?: string;
                                         isUsingOverage?: boolean;
                                         surpassedThreshold?: number;
                                         /** Format: date-time */
                                         lastSeenAt: string;
                                     };
                                 };
+                                providerAccount: {
+                                    /** @enum {string} */
+                                    source: "codex" | "claude";
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        ordinaryUsageAllowed?: string;
+                                        /** Format: date-time */
+                                        resetCreditsAvailable?: string;
+                                    };
+                                    ordinaryUsageAllowed?: boolean | null;
+                                    resetCreditsAvailable?: number | null;
+                                    limits?: {
+                                        [key: string]: {
+                                            /** Format: date-time */
+                                            observedAt: string;
+                                            fieldObservedAt?: {
+                                                /** Format: date-time */
+                                                planRaw?: string;
+                                                /** Format: date-time */
+                                                label?: string;
+                                                /** Format: date-time */
+                                                normalModelSlug?: string;
+                                                /** Format: date-time */
+                                                credits?: string;
+                                                /** Format: date-time */
+                                                spend?: string;
+                                                /** Format: date-time */
+                                                spendControlReached?: string;
+                                                /** Format: date-time */
+                                                reachedType?: string;
+                                            };
+                                            windowRemovedAt?: {
+                                                /** Format: date-time */
+                                                primary?: string;
+                                                /** Format: date-time */
+                                                secondary?: string;
+                                            };
+                                            planRaw?: string | null;
+                                            label?: string | null;
+                                            normalModelSlug?: string | null;
+                                            credits?: {
+                                                hasCredits: boolean;
+                                                unlimited: boolean;
+                                                balance?: string | null;
+                                            } | null;
+                                            spend?: {
+                                                limit: string;
+                                                used: string;
+                                                remainingPercent: number;
+                                                resetsAt: number;
+                                            } | null;
+                                            spendControlReached?: boolean | null;
+                                            reachedType?: string | null;
+                                        };
+                                    };
+                                } | null;
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;

@@ -15,6 +15,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,8 +131,18 @@ async function runSessionWithThrowingThread(
  */
 
 // Build a ProviderSessionConfig for tests.
+const fixtureCodexHome = mkdtempSync(join(tmpdir(), "provider-usage-codex-home-"));
+const fixtureLogs = new Set<string>();
+afterAll(async () => {
+  rmSync(fixtureCodexHome, { recursive: true, force: true });
+  for (const path of fixtureLogs)
+    await Bun.file(path)
+      .delete()
+      .catch(() => {});
+});
+
 function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
-  return {
+  const config: ProviderSessionConfig = {
     prompt: "hello",
     systemPrompt: "",
     model: "gpt-5.4",
@@ -143,7 +154,18 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
     cwd: "/tmp",
     logFile: `/tmp/codex-adapter-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
     ...overrides,
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+      ...overrides.env,
+      CODEX_HOME: fixtureCodexHome,
+    },
   };
+  fixtureLogs.add(config.logFile);
+  return config;
 }
 
 function makeFakeAppServer(
@@ -276,6 +298,10 @@ describe("Codex app-server session", () => {
     let starts = 0;
     const fake = makeFakeAppServer((method, _params, emit) => {
       if (method === "thread/start") return { thread: { id: "queued-thread" } };
+      if (method === "account/rateLimits/read")
+        return {
+          rateLimits: { primary: { usedPercent: 25, windowDurationMins: 10080 }, secondary: null },
+        };
       if (method === "turn/start") {
         if (++starts > 1) throw new Error("queued turn rejected");
         started.resolve();
@@ -314,7 +340,11 @@ describe("Codex app-server session", () => {
         },
       });
     expect(await queued).toMatchObject({ delivered: false });
-    expect((await session.waitForCompletion()).isError).toBe(true);
+    const result = await session.waitForCompletion();
+    expect(result.isError).toBe(true);
+    expect(result.rateLimitWindows?.["codex:codex:primary"]?.durationMins).toBe(10080);
+    expect(result.providerAccount?.limits?.codex?.observedAt).toBeDefined();
+    expect(result.rateLimitReplacements?.[0]?.slots).toEqual(["secondary"]);
     expect(starts).toBe(ending === "start-rejected" ? 2 : 1);
   });
 
@@ -2838,4 +2868,267 @@ describe("CodexSession context-bound note", () => {
     // Control: ready while the turn is still open.
     expect(await lateSteers(true)).toEqual([HELD_NOTE_TEXT]);
   });
+});
+
+describe("Codex account quota lifecycle", () => {
+  test.each([
+    false,
+    true,
+  ])("startup read preserves concurrent notifications, read failure=%p", async (failRead) => {
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      if (method === "thread/start") return { thread: { id: "quota-thread" } };
+      if (method === "account/rateLimits/read") {
+        // No active turn exists. Account events can also carry an unrelated thread ID.
+        emit("account/rateLimits/updated", {
+          threadId: "other-thread",
+          rateLimits: {
+            limitId: "codex",
+            primary: { usedPercent: 60, windowDurationMins: 10080 },
+            secondary: null,
+            planType: "promax",
+            credits: { hasCredits: false, unlimited: false },
+          },
+        });
+        if (failRead) throw new Error("quota network failure");
+        return {
+          ordinaryUsageAllowed: false,
+          rateLimitResetCredits: { availableCount: 2, credits: [{ id: "excluded" }] },
+          accountId: "excluded",
+          rateLimits: { primary: { usedPercent: 99 } },
+          rateLimitsByLimitId: {
+            codex: {
+              primary: { usedPercent: 10 },
+              secondary: { usedPercent: 20 },
+              planType: "plus",
+            },
+            model: {
+              primary: { usedPercent: 80, windowDurationMins: 43200 },
+              secondary: null,
+              planType: "pro",
+            },
+          },
+        };
+      }
+      if (method === "turn/start") {
+        queueMicrotask(() =>
+          emit("turn/completed", {
+            threadId: "quota-thread",
+            turn: { id: "quota-turn", status: "completed" },
+          }),
+        );
+        return { turn: { id: "quota-turn" } };
+      }
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const result = await session.waitForCompletion();
+    expect(result.isError).toBe(false);
+    expect(result.rateLimitWindows?.["codex:codex:primary"]?.utilization).toBe(0.6);
+    expect(result.rateLimitWindows?.["codex:codex:secondary"]).toBeUndefined();
+    expect(result.providerAccount?.limits?.codex?.planRaw).toBe("promax");
+    if (!failRead) {
+      expect(result.rateLimitWindows?.["codex:model:primary"]?.durationMins).toBe(43200);
+      expect(result.providerAccount?.ordinaryUsageAllowed).toBe(false);
+      expect(result.providerAccount?.resetCreditsAvailable).toBe(2);
+    }
+    expect(JSON.stringify(result.providerAccount)).not.toContain("excluded");
+  });
+
+  test("legacy read and sparse notifications preserve metadata and observation time", async () => {
+    const started = Promise.withResolvers<void>();
+    const fake = makeFakeAppServer((method) => {
+      if (method === "thread/start") return { thread: { id: "quota-legacy" } };
+      if (method === "account/rateLimits/read")
+        return {
+          rateLimits: {
+            primary: { usedPercent: 12, windowDurationMins: 10080 },
+            secondary: { usedPercent: 30 },
+            planType: "pro",
+            credits: { hasCredits: true, unlimited: false, balance: "7" },
+          },
+        };
+      if (method === "turn/start") {
+        started.resolve();
+        return { turn: { id: "turn" } };
+      }
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    await started.promise;
+    const beforeCompletion = new Date().toISOString();
+    fake.emit("account/rateLimits/updated", {
+      rateLimits: { secondary: null, credits: null, planType: null },
+    });
+    fake.emit("turn/completed", {
+      threadId: "quota-legacy",
+      turn: { id: "turn", status: "completed" },
+    });
+    const result = await session.waitForCompletion();
+    expect(result.rateLimitWindows?.["codex:codex:secondary"]).toBeUndefined();
+    expect(
+      (result.rateLimitWindows?.["codex:codex:primary"]?.lastSeenAt ?? "missing") <=
+        beforeCompletion,
+    ).toBe(true);
+    expect(result.providerAccount?.limits?.codex?.credits?.balance).toBe("7");
+    expect(result.providerAccount?.limits?.codex?.planRaw).toBe("pro");
+  });
+});
+
+test("account notifications between queued turns do not require an active turn", async () => {
+  const started = Promise.withResolvers<void>();
+  let turns = 0;
+  let reads = 0;
+  const fake = makeFakeAppServer((method, _params, emit) => {
+    if (method === "thread/start") return { thread: { id: "between-turns" } };
+    if (method === "account/rateLimits/read") {
+      reads++;
+      return undefined;
+    }
+    if (method === "turn/start") {
+      turns++;
+      if (turns === 1) started.resolve();
+      else
+        queueMicrotask(() =>
+          emit("turn/completed", {
+            threadId: "between-turns",
+            turn: { id: "turn-2", status: "completed" },
+          }),
+        );
+      return { turn: { id: `turn-${turns}` } };
+    }
+  });
+  const session = await new CodexAdapter({
+    bypassSubprocess: true,
+    appServerFactory: () => fake.client as never,
+  }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+  await started.promise;
+  const queued = session.deliverSteering!({ mode: "queue", text: "second turn" });
+  fake.emit("turn/completed", {
+    threadId: "between-turns",
+    turn: { id: "turn-1", status: "completed" },
+  });
+  fake.emit("account/rateLimits/updated", {
+    rateLimits: { primary: { usedPercent: 42, windowDurationMins: 10080 }, secondary: null },
+  });
+  expect(await queued).toMatchObject({ delivered: true });
+  const result = await session.waitForCompletion();
+  expect(result.rateLimitWindows?.["codex:codex:primary"]?.utilization).toBe(0.42);
+  expect(reads).toBe(1);
+  expect(turns).toBe(2);
+});
+
+test.each([
+  "window",
+  "metadata",
+  "removal",
+] as const)("startup read fills facts omitted by a concurrent %s notification", async (kind) => {
+  const fake = makeFakeAppServer((method, _params, emit) => {
+    if (method === "thread/start") return { thread: { id: "quota-race" } };
+    if (method === "account/rateLimits/read") {
+      emit("account/rateLimits/updated", {
+        rateLimits:
+          kind === "window"
+            ? {
+                primary: { usedPercent: 80, resetsAt: null, windowDurationMins: null },
+                limitName: null,
+                normalModelSlug: null,
+                credits: null,
+                planType: null,
+              }
+            : kind === "metadata"
+              ? { planType: "promax" }
+              : { primary: null },
+      });
+      return {
+        rateLimits: {
+          limitName: "Monthly model",
+          normalModelSlug: "model-a",
+          primary: { usedPercent: 10, windowDurationMins: 43200, resetsAt: 1796000000 },
+          secondary: { usedPercent: 20 },
+          planType: "pro",
+          credits: { hasCredits: true, unlimited: false, balance: "8" },
+        },
+      };
+    }
+    if (method === "turn/start") {
+      queueMicrotask(() =>
+        emit("turn/completed", {
+          threadId: "quota-race",
+          turn: { id: "turn", status: "completed" },
+        }),
+      );
+      return { turn: { id: "turn" } };
+    }
+  });
+  const config = testConfig({ taskId: "", apiUrl: "", apiKey: "" });
+  expect(config.env?.CODEX_HOME).toBe(fixtureCodexHome);
+  const session = await new CodexAdapter({
+    bypassSubprocess: true,
+    appServerFactory: () => fake.client as never,
+  }).createSession(config);
+  const result = await session.waitForCompletion();
+  if (kind === "removal") expect(result.rateLimitWindows?.["codex:codex:primary"]).toBeUndefined();
+  else
+    expect(result.rateLimitWindows?.["codex:codex:primary"]).toMatchObject({
+      utilization: kind === "window" ? 0.8 : 0.1,
+      durationMins: 43200,
+      resetsAt: 1796000000,
+      label: "Monthly model",
+      normalModelSlug: "model-a",
+    });
+  expect(result.rateLimitWindows?.["codex:codex:secondary"]?.utilization).toBe(0.2);
+  expect(result.providerAccount?.limits?.codex?.credits?.balance).toBe("8");
+  expect(result.providerAccount?.limits?.codex?.planRaw).toBe(
+    kind === "metadata" ? "promax" : "pro",
+  );
+});
+
+test("native fixture pruning uses its CODEX_HOME and leaves an unrelated temporary home intact", async () => {
+  const otherHome = mkdtempSync(join(tmpdir(), "provider-usage-corrections-other-home-"));
+  const ownSessions = join(fixtureCodexHome, "sessions");
+  const otherSessions = join(otherHome, ".codex", "sessions");
+  mkdirSync(ownSessions, { recursive: true });
+  mkdirSync(otherSessions, { recursive: true });
+  const ownRollout = join(ownSessions, "rollout-old-fixture.jsonl");
+  const otherRollout = join(otherSessions, "rollout-unrelated-fixture.jsonl");
+  try {
+    for (const path of [ownRollout, otherRollout]) {
+      await Bun.write(path, "fixture");
+      utimesSync(path, new Date(0), new Date(0));
+    }
+    const config = testConfig({
+      env: { HOME: otherHome, CODEX_HOME: "must-be-overridden" },
+      taskId: "",
+      apiUrl: "",
+      apiKey: "",
+    });
+    expect(config.env?.CODEX_HOME).toBe(fixtureCodexHome);
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      if (method === "thread/start") return { thread: { id: "isolation" } };
+      if (method === "turn/start") {
+        queueMicrotask(() =>
+          emit("turn/completed", {
+            threadId: "isolation",
+            turn: { id: "turn", status: "completed" },
+          }),
+        );
+        return { turn: { id: "turn" } };
+      }
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(config);
+    await session.waitForCompletion();
+    for (let tries = 0; tries < 100 && (await Bun.file(ownRollout).exists()); tries++)
+      await Bun.sleep(10);
+    expect(await Bun.file(ownRollout).exists()).toBe(false);
+    expect(await Bun.file(otherRollout).text()).toBe("fixture");
+  } finally {
+    rmSync(otherHome, { recursive: true, force: true });
+  }
 });

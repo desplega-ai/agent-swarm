@@ -160,6 +160,13 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
+import {
+  applyProviderQuotaReport,
+  type ProviderAccountTelemetry,
+  providerAccountTelemetrySchema,
+  type RateLimitReplacement,
+  scrubProviderQuotaReport,
+} from "../utils/provider-account-telemetry";
 import { getCurrentRequestUserId, getCurrentRunProvenance } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
@@ -11896,6 +11903,7 @@ export interface ApiKeyStatus {
   provider: string;
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: RateLimitWindowTelemetry;
+  providerAccount: ProviderAccountTelemetry | null;
   /** Subscription plan id (`SUBSCRIPTION_PLANS`), when known. */
   plan: string | null;
   planSource: PlanSource | null;
@@ -11912,7 +11920,10 @@ export interface ApiKeyStatus {
   updatedAt: string;
 }
 
-type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows"> & { rateLimitWindows: string | null };
+type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows" | "providerAccount"> & {
+  rateLimitWindows: string | null;
+  providerAccount: string | null;
+};
 
 function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitWindowTelemetry {
   if (!value) return {};
@@ -11927,8 +11938,21 @@ function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitW
   return {};
 }
 
+function parseProviderAccount(value: string | null | undefined): ProviderAccountTelemetry | null {
+  try {
+    const parsed = providerAccountTelemetrySchema.safeParse(value ? JSON.parse(value) : null);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
-  return { ...row, rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows) };
+  return {
+    ...row,
+    rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows),
+    providerAccount: parseProviderAccount(row.providerAccount),
+  };
 }
 
 export interface AvailableKeyIndicesResult {
@@ -12251,34 +12275,6 @@ export async function recordKeyAuthFailure(
 }
 
 /**
- * Merges reported window snapshots into the stored ones, one window type at a
- * time. A reported entry replaces the stored entry unless the stored entry was
- * observed strictly later (`lastSeenAt`), so an older `allowed` snapshot that
- * arrives after a terminal rejection cannot reopen an exhausted window. An
- * unparseable `lastSeenAt` on either side falls back to "reported wins".
- */
-function mergeRateLimitWindowTelemetry(
-  stored: RateLimitWindowTelemetry,
-  reported: RateLimitWindowTelemetry,
-): RateLimitWindowTelemetry {
-  const merged: RateLimitWindowTelemetry = { ...stored };
-  for (const [type, entry] of Object.entries(reported)) {
-    const current = merged[type];
-    const currentSeenMs = current ? Date.parse(current.lastSeenAt) : Number.NaN;
-    const reportedSeenMs = Date.parse(entry.lastSeenAt);
-    if (
-      Number.isFinite(currentSeenMs) &&
-      Number.isFinite(reportedSeenMs) &&
-      currentSeenMs > reportedSeenMs
-    ) {
-      continue;
-    }
-    merged[type] = entry;
-  }
-  return merged;
-}
-
-/**
  * Persists reported window snapshots for a key. Admission
  * (`getAvailableKeyIndices`) reads these windows, so the read-merge-write
  * runs in one `BEGIN IMMEDIATE` transaction: two concurrent reports for the
@@ -12292,34 +12288,52 @@ export async function recordKeyRateLimitWindows(
   windows: RateLimitWindowTelemetry,
   scope = "global",
   scopeId: string | null = null,
+  account?: ProviderAccountTelemetry,
+  replace: RateLimitReplacement[] = [],
 ): Promise<{ planChanged: boolean }> {
-  if (Object.keys(windows).length === 0) return { planChanged: false };
+  if (Object.keys(windows).length === 0 && !account && !replace.length)
+    return { planChanged: false };
 
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
   const merged = await getDbClient().transaction(async (tx) => {
-    const existing = await tx.get<{ rateLimitWindows: string | null }>(
-      `SELECT rateLimitWindows FROM api_key_status
+    const existing = await tx.get<{
+      rateLimitWindows: string | null;
+      providerAccount: string | null;
+    }>(
+      `SELECT rateLimitWindows, providerAccount FROM api_key_status
          WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
       [keyType, keySuffix, scope, effectiveScopeId],
     );
-    const mergedWindows = mergeRateLimitWindowTelemetry(
-      parseRateLimitWindowsJson(existing?.rateLimitWindows),
-      windows,
+    const { windows: mergedWindows, account: mergedAccount } = applyProviderQuotaReport(
+      {
+        windows: parseRateLimitWindowsJson(existing?.rateLimitWindows),
+        account: parseProviderAccount(existing?.providerAccount),
+      },
+      scrubProviderQuotaReport({ windows, account, replace }),
     );
-    const serialized = JSON.stringify(mergedWindows);
-
     await tx.run(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, provider, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, providerAccount, provider, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(keyType, keySuffix, scope, scopeId)
          DO UPDATE SET
            rateLimitWindows = excluded.rateLimitWindows,
+           providerAccount = excluded.providerAccount,
            keyIndex = excluded.keyIndex,
            provider = excluded.provider,
            updatedAt = excluded.updatedAt`,
-      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, serialized, provider, now],
+      [
+        keyType,
+        keySuffix,
+        keyIndex,
+        scope,
+        effectiveScopeId,
+        JSON.stringify(mergedWindows),
+        mergedAccount ? JSON.stringify(mergedAccount) : null,
+        provider,
+        now,
+      ],
     );
     return mergedWindows;
   });

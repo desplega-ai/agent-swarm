@@ -20157,6 +20157,60 @@
                         "resetsAt": {
                           "type": "number"
                         },
+                        "fieldObservedAt": {
+                          "type": "object",
+                          "properties": {
+                            "durationMins": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "resetsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "label": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "normalModelSlug": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "durationMins": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 576000
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "claude",
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "normalModelSlug": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageStatus": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageDisabledReason": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
                         "isUsingOverage": {
                           "type": "boolean"
                         },
@@ -20173,6 +20227,252 @@
                         "lastSeenAt"
                       ]
                     }
+                  },
+                  "account": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "codex",
+                          "claude"
+                        ]
+                      },
+                      "observedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "fieldObservedAt": {
+                        "type": "object",
+                        "properties": {
+                          "ordinaryUsageAllowed": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resetCreditsAvailable": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      },
+                      "ordinaryUsageAllowed": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "resetCreditsAvailable": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "limits": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "properties": {
+                            "observedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "fieldObservedAt": {
+                              "type": "object",
+                              "properties": {
+                                "planRaw": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "credits": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spend": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spendControlReached": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "reachedType": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            },
+                            "windowRemovedAt": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "secondary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "planRaw": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "label": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "normalModelSlug": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "credits": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "hasCredits": {
+                                  "type": "boolean"
+                                },
+                                "unlimited": {
+                                  "type": "boolean"
+                                },
+                                "balance": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "maxLength": 256
+                                }
+                              },
+                              "required": [
+                                "hasCredits",
+                                "unlimited"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spend": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "limit": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "used": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "remainingPercent": {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8640000000000
+                                }
+                              },
+                              "required": [
+                                "limit",
+                                "used",
+                                "remainingPercent",
+                                "resetsAt"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spendControlReached": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "reachedType": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "observedAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "observedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "replace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "observedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "slots": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "primary",
+                              "secondary"
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 2
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "limitId",
+                        "observedAt",
+                        "slots"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 128
                   },
                   "scope": {
                     "type": "string"
@@ -20623,6 +20923,60 @@
                                 "resetsAt": {
                                   "type": "number"
                                 },
+                                "fieldObservedAt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "durationMins": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "resetsAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "normalModelSlug": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                },
+                                "durationMins": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 576000
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex"
+                                  ]
+                                },
+                                "limitId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageStatus": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageDisabledReason": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
                                 "isUsingOverage": {
                                   "type": "boolean"
                                 },
@@ -20639,6 +20993,212 @@
                                 "lastSeenAt"
                               ]
                             }
+                          },
+                          "providerAccount": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "codex",
+                                  "claude"
+                                ]
+                              },
+                              "observedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "fieldObservedAt": {
+                                "type": "object",
+                                "properties": {
+                                  "ordinaryUsageAllowed": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "resetCreditsAvailable": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              },
+                              "ordinaryUsageAllowed": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "resetCreditsAvailable": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "limits": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "observedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "fieldObservedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "planRaw": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "normalModelSlug": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "credits": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spend": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spendControlReached": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "reachedType": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      }
+                                    },
+                                    "windowRemovedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "primary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "secondary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "planRaw": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "label": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "normalModelSlug": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "credits": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "hasCredits": {
+                                          "type": "boolean"
+                                        },
+                                        "unlimited": {
+                                          "type": "boolean"
+                                        },
+                                        "balance": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ],
+                                          "maxLength": 256
+                                        }
+                                      },
+                                      "required": [
+                                        "hasCredits",
+                                        "unlimited"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spend": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "limit": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "used": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "remainingPercent": {
+                                          "type": "integer",
+                                          "minimum": -2147483648,
+                                          "maximum": 2147483647
+                                        },
+                                        "resetsAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 8640000000000
+                                        }
+                                      },
+                                      "required": [
+                                        "limit",
+                                        "used",
+                                        "remainingPercent",
+                                        "resetsAt"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spendControlReached": {
+                                      "type": [
+                                        "boolean",
+                                        "null"
+                                      ]
+                                    },
+                                    "reachedType": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    }
+                                  },
+                                  "required": [
+                                    "observedAt"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "observedAt"
+                            ],
+                            "additionalProperties": false
                           },
                           "plan": {
                             "type": [
@@ -20744,6 +21304,7 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "providerAccount",
                           "plan",
                           "planSource",
                           "lastSeatMismatchAt",
