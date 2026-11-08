@@ -493,6 +493,10 @@
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
     },
+    "task-ui-actions": {
+      "description": "Complete a task with a card Button that declares a follow_up action, then click it twice over HTTP: started, then already_done",
+      "scenarios": ["task-ui-actions"]
+    },
     "task-steering": {
       "description": "Steer outcomes per harness, worker callbacks, accept-steer, promotion of undelivered steering",
       "scenarios": ["core-steering"]

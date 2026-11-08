@@ -98,6 +98,7 @@ import {
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
+import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -784,6 +785,31 @@ const resumeTaskRoute = route({
     400: { description: "Task not paused" },
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
+  },
+});
+
+const runTaskUiActionRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/ui-actions/{actionId}",
+  pattern: ["api", "tasks", null, "ui-actions", null],
+  session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
+  summary: "Run the action a task card Button declares",
+  description:
+    "Runs the task card action once per task and action, for the task requester. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string(), actionId: z.string() }),
+  responses: {
+    200: {
+      description: "The action started, or it already ran",
+      schema: z.object({
+        status: z.enum(["started", "already_done"]),
+        taskId: z.string().optional(),
+      }),
+    },
+    403: { description: "Only the task requester may run the action" },
+    404: { description: "Task or action not found" },
+    409: { description: "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)" },
   },
 });
 
@@ -2142,6 +2168,46 @@ export async function handleTasks(
     }
     updateTaskTagsRoute.respond(res, 200, { task });
     return true;
+  }
+
+  if (runTaskUiActionRoute.match(req.method, pathSegments)) {
+    const parsed = await runTaskUiActionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await getTaskById(parsed.params.id);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!(await canActOnOwnTask(req, myAgentId, task))) {
+      jsonError(res, "Not authorized to act on this task", 403);
+      return true;
+    }
+    // A user acts as themself. An operator or agent that passed
+    // task.action.own acts for the requester.
+    const actorUserId = authUserId(getRequestAuth(req)) ?? task.requestedByUserId;
+    const result = await runTaskUiAction({
+      taskId: task.id,
+      actionId: parsed.params.actionId,
+      surface: "web",
+      actorUserId,
+    });
+    switch (result.status) {
+      case "forbidden":
+        jsonError(res, "Only the task requester may run this action", 403);
+        return true;
+      case "unknown_action":
+        jsonError(res, "This task declares no such action", 404);
+        return true;
+      case "disabled":
+        jsonError(res, "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)", 409);
+        return true;
+      case "already_done":
+        runTaskUiActionRoute.respond(res, 200, { status: "already_done" });
+        return true;
+      case "started":
+        runTaskUiActionRoute.respond(res, 200, result);
+        return true;
+    }
   }
 
   if (resumeTaskRoute.match(req.method, pathSegments)) {
