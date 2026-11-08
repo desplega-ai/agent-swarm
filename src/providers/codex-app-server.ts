@@ -1,5 +1,6 @@
 import pkg from "../../package.json";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { resolveCodexCommand } from "./runtime-dependencies";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const CLOSE_GRACE_MS = 250;
@@ -98,7 +99,7 @@ export class CodexAppServer {
     }
     this.onStderr = options.onStderr;
 
-    const codexPath = options.codexPath ?? resolveCodexPath(options.env.PATH);
+    const codexPath = options.codexPath ?? resolveCodexCommand(options.env);
     const command = [
       codexPath,
       ...configOverrideArgs(options.configOverrides),
@@ -406,16 +407,6 @@ async function readLines(
     }
   } finally {
     reader.releaseLock();
-  }
-}
-
-function resolveCodexPath(path: string | undefined): string {
-  const fromPath = Bun.which("codex", { PATH: path ?? process.env.PATH });
-  if (fromPath) return fromPath;
-  try {
-    return Bun.resolveSync("@openai/codex/bin/codex.js", import.meta.dir);
-  } catch {
-    return "codex";
   }
 }
 
