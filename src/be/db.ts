@@ -171,6 +171,7 @@ import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-wi
 import { isEffectiveOutputSchema } from "../utils/output-schema";
 import {
   applyProviderQuotaReport,
+  assertProviderQuotaCapacity,
   type ProviderAccountTelemetry,
   parseProviderAccount,
   type RateLimitReplacement,
@@ -12208,6 +12209,7 @@ export async function recordKeyRateLimitWindows(
       },
       scrubProviderQuotaReport({ windows, account, replace }),
     );
+    assertProviderQuotaCapacity({ windows: mergedWindows, account: mergedAccount });
     await tx.run(
       `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, providerAccount, provider, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

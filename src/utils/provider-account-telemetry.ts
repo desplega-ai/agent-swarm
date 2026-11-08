@@ -2,6 +2,25 @@ import { z } from "zod";
 import type { RateLimitWindowTelemetry } from "./error-tracker";
 import { scrubSecrets } from "./secret-scrubber";
 
+export const MAX_PROVIDER_QUOTA_ENTRIES = 64;
+
+export class ProviderQuotaCapacityError extends Error {
+  constructor() {
+    super(
+      `A credential can store at most ${MAX_PROVIDER_QUOTA_ENTRIES} windows and account limits.`,
+    );
+  }
+}
+
+/** Reject cumulative growth without evicting routing facts or removal timestamps. */
+export function assertProviderQuotaCapacity(report: ProviderQuotaReport): void {
+  if (
+    Object.keys(report.windows).length > MAX_PROVIDER_QUOTA_ENTRIES ||
+    Object.keys(report.account?.limits ?? {}).length > MAX_PROVIDER_QUOTA_ENTRIES
+  )
+    throw new ProviderQuotaCapacityError();
+}
+
 const accountFields = ["ordinaryUsageAllowed", "resetCreditsAvailable"] as const;
 const limitFields = [
   "planRaw",

@@ -25,7 +25,7 @@ import {
   type KeyWindowUsage,
   keyWindowUsageSchema,
 } from "../be/key-window-usage";
-import { handleApiKeys } from "../http/api-keys";
+import { _resetKeyWindowUsageRateLimitForTests, handleApiKeys } from "../http/api-keys";
 import { clearUsageCache } from "../http/usage-cache";
 import { codexWindowKey } from "../utils/provider-account-telemetry";
 import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
@@ -70,6 +70,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   setSystemTime(now);
+  _resetKeyWindowUsageRateLimitForTests();
   clearUsageCache();
   await getDbClient().run("DELETE FROM session_costs");
   await getDbClient().run("DELETE FROM api_key_status");
@@ -622,6 +623,179 @@ test("scope rows preserve separate identities without multiplying per-window usa
   expect(windows).toHaveLength(2);
   expect(new Set(windows.map((window) => window.statusId)).size).toBe(2);
   expect(windows.map((window) => window.usage!.sessions)).toEqual([1, 1]);
+});
+
+test("rejects a caller-selected 400-day usage scan before reading session costs", async () => {
+  await quota("key-a", {
+    [windowKey]: {
+      status: "allowed",
+      source: "codex",
+      limitId: "codex",
+      durationMins: 576000,
+      resetsAt: end,
+      lastSeenAt: new Date(now).toISOString(),
+    },
+  });
+  const query = spyOn(getDbClient(), "query");
+  try {
+    const response = await fetch(`${base}/api/keys/window-usage`);
+    expect(response.status).toBe(422);
+    expect(query.mock.calls.filter(([sql]) => sql === KEY_WINDOW_USAGE_SQL)).toHaveLength(0);
+  } finally {
+    query.mockRestore();
+  }
+});
+
+test("groups credential rows once instead of scanning every credential for every window", async () => {
+  for (let index = 0; index < 40; index++) {
+    const suffix = `key-${index}`;
+    await quota(suffix);
+    await quota(suffix, undefined, "agent", agentId);
+    await cost({ credentialKeySuffix: suffix });
+    await cost({ credentialKeyType: null, credentialKeySuffix: null });
+  }
+  const client = getDbClient();
+  const original = client.query.bind(client);
+  let identityReads = 0;
+  let counterReads = 0;
+  const query = spyOn(client, "query").mockImplementation(async (sql, params) => {
+    const rows = await original(sql, params);
+    if (sql !== KEY_WINDOW_USAGE_SQL) return rows;
+    return rows.map(
+      (row) =>
+        new Proxy(row, {
+          get(target, property, receiver) {
+            if (property === "credentialKeySuffix") identityReads++;
+            if (property === "inputTokens") counterReads++;
+            return Reflect.get(target, property, receiver);
+          },
+        }),
+    );
+  });
+  try {
+    const result = await read();
+    expect(result.windows).toHaveLength(80);
+    for (const window of result.windows) {
+      expect(window.usage).toMatchObject({ sessions: 1, swarmUnattributedSessions: 40 });
+    }
+    // An operation count catches quadratic work without a machine-dependent timer.
+    expect(identityReads).toBeLessThanOrEqual(80 * 5);
+    expect(counterReads).toBe(40);
+  } finally {
+    query.mockRestore();
+  }
+});
+
+test("rejects an oversized telemetry map and cumulative growth without losing stored facts", async () => {
+  const entry = { status: "allowed", lastSeenAt: new Date(now).toISOString() };
+  const windows = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`custom-${i}`, entry]));
+  const response = await fetch(`${base}/api/keys/report-rate-limit-windows`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keyType, keySuffix: "large", keyIndex: 0, windows }),
+  });
+  expect(response.status).toBe(400);
+  delete windows["custom-64"];
+  await recordKeyRateLimitWindows(keyType, "large", 0, windows);
+  await expect(recordKeyRateLimitWindows(keyType, "large", 0, { extra: entry })).rejects.toThrow();
+  const stored = await getDbClient().get<{ rateLimitWindows: string }>(
+    "SELECT rateLimitWindows FROM api_key_status WHERE keySuffix = ?",
+    ["large"],
+  );
+  expect(Object.keys(JSON.parse(stored!.rateLimitWindows))).toHaveLength(64);
+});
+
+test("rejects oversized telemetry bytes before recording a key", async () => {
+  const response = await fetch(`${base}/api/keys/report-rate-limit-windows`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      keyType,
+      keySuffix: "huge",
+      keyIndex: 0,
+      windows: {},
+      padding: "x".repeat(256 * 1024),
+    }),
+  });
+  expect(response.status).toBe(413);
+  expect(
+    await getDbClient().get("SELECT 1 FROM api_key_status WHERE keySuffix = ?", ["huge"]),
+  ).toBeNull();
+});
+
+test("bounds the number of windows before querying session history", async () => {
+  for (let index = 0; index < 257; index++) await quota(`key-${index}`);
+  const query = spyOn(getDbClient(), "query");
+  try {
+    const response = await fetch(`${base}/api/keys/window-usage`);
+    expect(response.status).toBe(422);
+    expect(query.mock.calls.filter(([sql]) => sql === KEY_WINDOW_USAGE_SQL)).toHaveLength(0);
+    expect((await read("?keySuffix=key-0")).windows).toHaveLength(1);
+  } finally {
+    query.mockRestore();
+  }
+});
+
+test("bounds distinct periods for a credential while reusing duplicate scope totals", async () => {
+  for (let index = 0; index < 17; index++) {
+    await quota(
+      "key-a",
+      {
+        [windowKey]: {
+          status: "allowed",
+          source: "codex",
+          limitId: "codex",
+          durationMins: 120,
+          resetsAt: end + index,
+          lastSeenAt: new Date(now).toISOString(),
+        },
+      },
+      "agent",
+      crypto.randomUUID(),
+    );
+  }
+  const query = spyOn(getDbClient(), "query");
+  try {
+    expect((await fetch(`${base}/api/keys/window-usage`)).status).toBe(422);
+    expect(query.mock.calls.filter(([sql]) => sql === KEY_WINDOW_USAGE_SQL)).toHaveLength(0);
+  } finally {
+    query.mockRestore();
+  }
+});
+
+test("fails explicitly when the bounded query reaches its row ceiling", async () => {
+  await quota();
+  await cost();
+  const client = getDbClient();
+  const original = client.query.bind(client);
+  const query = spyOn(client, "query").mockImplementation(async (sql, params) => {
+    const rows = await original(sql, params);
+    return sql === KEY_WINDOW_USAGE_SQL ? Array(100_001).fill(rows[0]) : rows;
+  });
+  try {
+    const response = await fetch(`${base}/api/keys/window-usage`);
+    expect(response.status).toBe(422);
+    expect(await response.json()).not.toHaveProperty("windows");
+  } finally {
+    query.mockRestore();
+  }
+});
+
+test("changing filters cannot bypass the query budget, while cached reads remain available", async () => {
+  for (let index = 0; index < 9; index++) await quota(`key-${index}`);
+  for (let index = 0; index < 8; index++) await read(`?keySuffix=key-${index}`);
+  const query = spyOn(getDbClient(), "query");
+  try {
+    const response = await fetch(`${base}/api/keys/window-usage?keySuffix=key-8`);
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("1");
+    expect(query.mock.calls.filter(([sql]) => sql === KEY_WINDOW_USAGE_SQL)).toHaveLength(0);
+    expect((await read("?keySuffix=key-0")).windows).toHaveLength(1);
+    setSystemTime(now + 1000);
+    expect((await read("?keySuffix=key-8")).windows).toHaveLength(1);
+  } finally {
+    query.mockRestore();
+  }
 });
 
 test("keeps cached data bounds while quota observations advance", async () => {

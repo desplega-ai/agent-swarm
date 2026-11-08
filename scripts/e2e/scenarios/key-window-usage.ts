@@ -142,6 +142,71 @@ export const keyWindowUsage: Scenario = {
     );
     const empty = await ctx.api("GET", `${path}?keyType=${keyType}&scope=agent&scopeId=${agentId}`);
     expect(asRecords(empty.json, "windows").length === 0, "scope does not reuse global cache");
+    expectStatus(
+      await ctx.api("POST", "/api/keys/report-rate-limit-windows", {
+        body: {
+          keyType,
+          keySuffix,
+          keyIndex: 0,
+          windows: Object.fromEntries(
+            Array.from({ length: 65 }, (_, index) => [
+              `custom-${index}`,
+              { status: "allowed", lastSeenAt: new Date().toISOString() },
+            ]),
+          ),
+        },
+      }),
+      [400],
+      "reject oversized telemetry maps",
+    );
+    expectStatus(
+      await ctx.api("POST", "/api/keys/report-rate-limit-windows", {
+        body: {
+          keyType,
+          keySuffix,
+          keyIndex: 0,
+          windows: {
+            "codex:codex:primary": {
+              source: "codex",
+              limitId: "codex",
+              status: "allowed",
+              durationMins: 576000,
+              resetsAt,
+              lastSeenAt: new Date().toISOString(),
+            },
+          },
+        },
+      }),
+      [200],
+      "retain long provider display windows",
+    );
+    const oversized = await ctx.api("GET", `${path}?keyType=${keyType}`);
+    expectStatus(oversized, [422], "reject oversized lookback without partial usage");
+    expect(
+      !("windows" in asRecord(oversized.json)),
+      "an incomplete total never appears as complete",
+    );
+    expectStatus(
+      await ctx.api("POST", "/api/keys/report-rate-limit-windows", {
+        body: {
+          keyType,
+          keySuffix,
+          keyIndex: 0,
+          windows: {
+            "codex:codex:primary": {
+              source: "codex",
+              limitId: "codex",
+              status: "allowed",
+              durationMins: 120,
+              resetsAt,
+              lastSeenAt: new Date().toISOString(),
+            },
+          },
+        },
+      }),
+      [200],
+      "restore ordinary usage bounds for later scenarios",
+    );
     await retireAgent(ctx, agentId);
   },
 };

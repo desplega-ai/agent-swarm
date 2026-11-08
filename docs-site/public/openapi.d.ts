@@ -6664,7 +6664,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record provider-emitted rate-limit window telemetry for an API key */
+        /**
+         * Record provider-emitted rate-limit window telemetry for an API key
+         * @description Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -6803,6 +6806,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Telemetry report exceeds 256 KiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7140,7 +7152,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Swarm-observed usage within current provider windows */
+        /**
+         * Get Swarm-observed usage within current provider windows
+         * @description Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.
+         */
         get: {
             parameters: {
                 query?: {
@@ -7241,6 +7256,24 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Requested usage exceeds the aggregation bounds */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Usage query budget exhausted. Retry after one second */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };

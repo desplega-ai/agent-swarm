@@ -327,6 +327,15 @@ Unknown durations, resets, or model scopes return `usage: null` and an explicit 
 Legacy Claude windows use known duration and family rules. Codex primary has no assumed duration.
 Windows without a reset remain unavailable records. They do not assert a current quota period.
 
+Usage calculations accept at most 256 windows and 16 distinct periods or model scopes per credential.
+The maximum lookback is 90 days. Queries stop after 100,001 session rows and reject results above 100,000 rows.
+Requests beyond these bounds return HTTP 422 without partial totals. Credential and scope filters can reduce the requested population.
+Longer provider limits remain visible on the Providers page, even when observed usage is unavailable.
+Cache misses share a process-wide budget: eight immediate calculations, then one additional calculation per second.
+HTTP 429 includes `Retry-After: 1`. Cached reads remain available when the calculation budget is exhausted.
+Telemetry reports accept at most 256 KiB, 64 windows, and 64 account limits.
+The database also rejects cumulative growth beyond those counts. It preserves existing facts and removal timestamps.
+
 `accounting: "session_cost_receipt_time"` describes an approximation.
 Tokens belong to the window containing the server insertion time of their session-cost report.
 A delayed report belongs to its receipt window, even when execution started before a reset.

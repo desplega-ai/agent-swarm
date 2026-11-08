@@ -20161,6 +20161,7 @@
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
+        "description": "Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.",
         "tags": [
           "API Keys"
         ],
@@ -20193,7 +20194,8 @@
                       "type": "object",
                       "properties": {
                         "status": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "utilization": {
                           "type": "number"
@@ -20580,6 +20582,16 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "Telemetry report exceeds 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -20959,7 +20971,8 @@
                               "type": "object",
                               "properties": {
                                 "status": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "utilization": {
                                   "type": "number"
@@ -21395,6 +21408,7 @@
     "/api/keys/window-usage": {
       "get": {
         "summary": "Get Swarm-observed usage within current provider windows",
+        "description": "Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.",
         "tags": [
           "API Keys"
         ],
@@ -21406,7 +21420,8 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 128
             },
             "required": false,
             "name": "keyType",
@@ -21424,7 +21439,8 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 64
             },
             "required": false,
             "name": "scope",
@@ -21432,7 +21448,8 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 128
             },
             "required": false,
             "name": "scopeId",
@@ -21770,6 +21787,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requested usage exceeds the aggregation bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Usage query budget exhausted. Retry after one second",
             "content": {
               "application/json": {
                 "schema": {

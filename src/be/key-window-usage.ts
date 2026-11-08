@@ -8,6 +8,20 @@ import {
 import { codexWindowKey } from "../utils/provider-account-telemetry";
 import { type ApiKeyStatus, getDbClient } from "./db";
 
+const MAX_USAGE_WINDOWS = 256;
+const MAX_USAGE_WINDOWS_PER_CREDENTIAL = 16;
+const MAX_USAGE_LOOKBACK_MS = 90 * 86400000;
+const MAX_USAGE_ROWS = 100_000;
+
+export class KeyWindowUsageLimitError extends Error {
+  constructor(
+    message: string,
+    readonly status: 422 | 429 = 422,
+  ) {
+    super(message);
+  }
+}
+
 const counterSchema = z.object({
   value: z.number().nullable(),
   measuredSessions: z.number().int(),
@@ -63,6 +77,11 @@ export function currentKeyWindows(statuses: ApiKeyStatus[], nowMs: number): KeyW
     for (const [windowKey, window] of Object.entries(key.rateLimitWindows)) {
       const resetMs = window.resetsAt === undefined ? null : window.resetsAt * 1000;
       if (resetMs !== null && (!Number.isFinite(resetMs) || resetMs <= nowMs)) continue;
+      if (result.length >= MAX_USAGE_WINDOWS) {
+        throw new KeyWindowUsageLimitError(
+          "Too many provider windows. Filter by credential or scope.",
+        );
+      }
       const legacyClaude = window.source ? window.source === "claude" : key.provider === "claude";
       const family = legacyClaude ? MODEL_SCOPED_WINDOWS[windowKey] : undefined;
       const durationMins =
@@ -162,7 +181,8 @@ export const KEY_WINDOW_USAGE_SQL = `
   SELECT NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, 0, 0, '', NULL, 0, sc.createdAt, NULL
   FROM session_costs sc
   WHERE (sc.credentialKeyType IS NULL OR sc.credentialKeySuffix IS NULL)
-    AND sc.createdAt >= ? AND sc.createdAt < ?`;
+    AND sc.createdAt >= ? AND sc.createdAt < ?
+  LIMIT ${MAX_USAGE_ROWS + 1}`;
 
 const emptyTokens = (): Tokens =>
   Object.fromEntries(
@@ -183,6 +203,9 @@ function add(tokens: Tokens, name: keyof Tokens, value: number | null): void {
 
 /** One batch for all credentials and windows. The caller caches this expensive aggregation. */
 export async function aggregateKeyWindowUsage(windows: KeyWindowUsage[], through: string) {
+  if (windows.length > MAX_USAGE_WINDOWS) {
+    throw new KeyWindowUsageLimitError("Too many provider windows. Filter by credential or scope.");
+  }
   const eligible = windows.filter(
     (w): w is KeyWindowUsage & { startsAt: string; endsAt: string; unavailableReason: null } =>
       w.unavailableReason === null && w.startsAt !== null && w.endsAt !== null,
@@ -193,6 +216,25 @@ export async function aggregateKeyWindowUsage(windows: KeyWindowUsage[], through
     (earliest, w) => (w.startsAt < earliest ? w.startsAt : earliest),
     first.startsAt,
   );
+  if (Date.parse(start) < Date.parse(through) - MAX_USAGE_LOOKBACK_MS) {
+    throw new KeyWindowUsageLimitError("Observed usage supports a maximum lookback of 90 days.");
+  }
+  const credentialKey = (key: { keyType: string; keySuffix: string }) =>
+    JSON.stringify([key.keyType, key.keySuffix]);
+  const windowIdentity = (window: (typeof eligible)[number]) =>
+    JSON.stringify([window.startsAt, window.endsAt, window.modelScope]);
+  const windowGroups = new Map<string, Set<string>>();
+  for (const window of eligible) {
+    const key = credentialKey(window);
+    const bounds = windowGroups.get(key) ?? new Set<string>();
+    bounds.add(windowIdentity(window));
+    if (bounds.size > MAX_USAGE_WINDOWS_PER_CREDENTIAL) {
+      throw new KeyWindowUsageLimitError(
+        "Too many distinct windows for one credential. Filter by scope.",
+      );
+    }
+    windowGroups.set(key, bounds);
+  }
   const credentials = [
     ...new Map(
       eligible.map((w) => [
@@ -211,24 +253,60 @@ export async function aggregateKeyWindowUsage(windows: KeyWindowUsage[], through
     start,
     through,
   ]);
+  if (rows.length > MAX_USAGE_ROWS) {
+    throw new KeyWindowUsageLimitError(
+      "Too many sessions for window usage. Filter by credential or scope.",
+    );
+  }
+  const rowsByCredential = new Map<string, UsageRow[]>();
+  const unattributedTimes: string[] = [];
+  for (const row of rows) {
+    if (row.credentialKeyType === null || row.credentialKeySuffix === null) {
+      unattributedTimes.push(row.createdAt);
+      continue;
+    }
+    const key = credentialKey({
+      keyType: row.credentialKeyType,
+      keySuffix: row.credentialKeySuffix,
+    });
+    const group = rowsByCredential.get(key) ?? [];
+    group.push(row);
+    rowsByCredential.set(key, group);
+  }
+  unattributedTimes.sort();
+  // Unknown historical credentials are one shared population, not a scan per window.
+  const unattributedSince = (start: string) => {
+    let lower = 0;
+    let upper = unattributedTimes.length;
+    while (lower < upper) {
+      const middle = Math.floor((lower + upper) / 2);
+      if (unattributedTimes[middle]! < start) lower = middle + 1;
+      else upper = middle;
+    }
+    return unattributedTimes.length - lower;
+  };
+  const computed = new Map<string, NonNullable<KeyWindowUsage["usage"]>>();
   return eligible.map((window) => {
+    const identity = JSON.stringify([credentialKey(window), windowIdentity(window)]);
+    const prior = computed.get(identity);
+    if (prior)
+      return {
+        statusId: window.statusId,
+        windowKey: window.windowKey,
+        dataThrough: through,
+        usage: prior,
+      };
     const usage = {
       sessions: 0,
       errorSessions: 0,
       completedTasks: 0,
       tokens: emptyTokens(),
       modelUnattributedSessions: 0,
-      swarmUnattributedSessions: 0,
+      swarmUnattributedSessions: unattributedSince(window.startsAt),
     };
     const completed = new Set<string>();
-    for (const row of rows) {
+    for (const row of rowsByCredential.get(credentialKey(window)) ?? []) {
       const inReceiptWindow = row.createdAt >= window.startsAt && row.createdAt < through;
-      if (row.credentialKeyType === null || row.credentialKeySuffix === null) {
-        if (inReceiptWindow) usage.swarmUnattributedSessions++;
-        continue;
-      }
-      if (row.credentialKeyType !== window.keyType || row.credentialKeySuffix !== window.keySuffix)
-        continue;
       let parts = [
         {
           model: row.model,
@@ -301,6 +379,7 @@ export async function aggregateKeyWindowUsage(windows: KeyWindowUsage[], through
       add(usage.tokens, "thinking", !scoped && row.thinkingTokens > 0 ? row.thinkingTokens : null);
     }
     usage.completedTasks = completed.size;
+    computed.set(identity, usage);
     return { statusId: window.statusId, windowKey: window.windowKey, dataThrough: through, usage };
   });
 }
