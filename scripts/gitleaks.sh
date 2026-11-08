@@ -56,7 +56,9 @@ mkdir -p "$cache_dir"
 if [ ! -f "$tarball" ]; then
   url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${asset}"
   tmp=$(mktemp "$cache_dir/.download.XXXXXX")
-  if ! curl -fsSL --retry 3 "$url" -o "$tmp"; then
+  # GitHub's release host returns 504s for over a minute at times. curl backs
+  # off 1, 2, 4... seconds between tries, so 6 retries ride out about 60s.
+  if ! curl -fsSL --retry 6 --retry-all-errors --retry-max-time 120 --connect-timeout 20 "$url" -o "$tmp"; then
     rm -f "$tmp"
     echo "gitleaks.sh: download failed: $url" >&2
     exit 2

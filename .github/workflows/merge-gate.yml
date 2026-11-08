@@ -1386,6 +1386,15 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      # The gitleaks tarball comes from a GitHub release URL that sometimes
+      # answers 504 for a minute or more. A cache hit skips the download;
+      # scripts/gitleaks.sh still verifies the SHA-256 on every run.
+      - name: Cache gitleaks
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/agent-swarm/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('scripts/gitleaks.sh') }}
+
       - name: Self-test the scanner
         run: bash scripts/gitleaks-selftest.sh
 
