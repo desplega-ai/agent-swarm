@@ -2,7 +2,7 @@
 // page.
 //
 // Each entry maps to a **non-secret** `swarm_config` row in the `global` scope
-// (the same store the Integrations UI writes to). Env vars win at boot; a value
+// (the same store the Integrations UI writes to). Stored values win over deployment env at boot; a value
 // saved here becomes effective after the server's debounced auto-reload (or the
 // explicit "Reload config" button). Entries flagged `restartRequired` are read
 // once at process start and need a full server restart.
@@ -135,6 +135,66 @@ export function withModelTierGroup(
 }
 
 export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
+  {
+    id: "resources",
+    title: "Resources",
+    description: "Capacity and finite provider leases.",
+    icon: Layers,
+    entries: [
+      {
+        key: "RESOURCE_TREE_CAP",
+        label: "Live resources per task tree",
+        kind: "number",
+        defaultValue: "3",
+        description: "Provisioning and unresolved termination count toward this limit.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "RESOURCE_SWARM_CAP",
+        label: "Live resources per swarm",
+        kind: "number",
+        defaultValue: "20",
+        description: "Reserve capacity before provider allocation.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "RESOURCE_IDLE_MS",
+        label: "Idle timeout",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "1800000",
+        description: "Pause sandboxes or stop browsers after authenticated activity stops.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "RESOURCE_EXPIRY_MS",
+        label: "Inactivity expiry",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "604800000",
+        description: "Destroy resources after seven days without authenticated activity.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "RESOURCE_LEASE_MS",
+        label: "Provider lease",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "1800000",
+        description: "Bound each lease by provider limits and available budget.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "RESOURCE_PREVIEW_ACCESS",
+        label: "Preview access",
+        kind: "enum",
+        options: ["public", "private"],
+        defaultValue: "public",
+        description: "Private access is unsupported and rejects allocation before provider calls.",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+    ],
+  },
   {
     id: "steering",
     title: "Steering",

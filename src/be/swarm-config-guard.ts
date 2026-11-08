@@ -20,6 +20,7 @@ import { kindForModelString } from "../utils/internal-ai/models";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
+import { RESOURCE_LIMITS, validateResourceConfig } from "./resources/config";
 
 /**
  * Guards against storing reserved keys in the swarm_config table.
@@ -381,6 +382,12 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  ...Object.fromEntries(
+    [...Object.keys(RESOURCE_LIMITS), "RESOURCE_PREVIEW_ACCESS"].map((key) => [
+      key,
+      (value: unknown) => validateResourceConfig(key, value),
+    ]),
+  ),
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
   DOCKER_RUNTIME: validateDockerRuntime,
   DOCKER_PIDS_LIMIT: validateDockerPidsLimit,

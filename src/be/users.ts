@@ -976,6 +976,7 @@ export async function resolveSessionToken(
       taskId: string | null;
       runtimeId: string | null;
       expiresAt: string;
+      sourceTaskId?: string | null;
       sourceStepId?: string | null;
       sourceScriptRunId?: string | null;
     }
@@ -994,11 +995,12 @@ export async function resolveSessionToken(
     placement: string | null;
     expiresAt: string;
     revokedAt: string | null;
+    sourceTaskId: string | null;
     sourceStepId: string | null;
     sourceScriptRunId: string | null;
   }>(
     `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     s.sourceTaskId, s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
      WHERE s.tokenHash = ?`,
     [hash],
   );
@@ -1035,6 +1037,7 @@ export async function resolveSessionToken(
     taskId: row.taskId,
     runtimeId: row.runtimeId,
     expiresAt: row.expiresAt,
+    sourceTaskId: row.sourceTaskId,
     ...(row.sourceStepId || row.sourceScriptRunId
       ? { sourceStepId: row.sourceStepId, sourceScriptRunId: row.sourceScriptRunId }
       : {}),

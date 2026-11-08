@@ -90,7 +90,7 @@ export async function canClaim(
   // 1. Global budget gate.
   const globalBudget = await getBudget("global", "");
   if (globalBudget !== null) {
-    const globalSpend = await getDailySpendGlobal(dateUtc);
+    const globalSpend = await getDailySpendGlobal(dateUtc, nowUtc);
     if (globalSpend >= globalBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -105,7 +105,7 @@ export async function canClaim(
   // 2. Per-agent budget gate.
   const agentBudget = await getBudget("agent", agentId);
   if (agentBudget !== null) {
-    const agentSpend = await getDailySpendForAgent(agentId, dateUtc);
+    const agentSpend = await getDailySpendForAgent(agentId, dateUtc, nowUtc);
     if (agentSpend >= agentBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -121,7 +121,7 @@ export async function canClaim(
   if (requestedByUserId) {
     const userBudget = await getBudget("user", requestedByUserId);
     if (userBudget !== null) {
-      const userSpend = await getDailySpendForUser(requestedByUserId, dateUtc);
+      const userSpend = await getDailySpendForUser(requestedByUserId, dateUtc, nowUtc);
       if (userSpend >= userBudget.dailyBudgetUsd) {
         return {
           allowed: false,

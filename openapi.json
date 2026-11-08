@@ -6889,6 +6889,132 @@
           "updatedAt"
         ],
         "additionalProperties": false
+      },
+      "Resource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "browser"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "e2b",
+              "browser-use",
+              "fake"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "provisioning",
+              "running",
+              "pausing",
+              "paused",
+              "stopping",
+              "stopped",
+              "resuming",
+              "destroying",
+              "destroyed",
+              "error"
+            ]
+          },
+          "generation": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "creatorAgentId": {
+            "type": "string"
+          },
+          "requestedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceTaskId": {
+            "type": "string"
+          },
+          "rootTaskId": {
+            "type": "string"
+          },
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "templateId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "templateVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lastActivityAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "runningLeaseExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destroyedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "provider",
+          "state",
+          "generation",
+          "creatorAgentId",
+          "requestedByUserId",
+          "sourceTaskId",
+          "rootTaskId",
+          "profileId",
+          "templateId",
+          "templateVersion",
+          "lastActivityAt",
+          "expiresAt",
+          "runningLeaseExpiresAt",
+          "lastError",
+          "destroyedAt",
+          "createdAt",
+          "updatedAt"
+        ]
       }
     },
     "parameters": {}
@@ -53548,6 +53674,28 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "resourceCosts": {
+                      "type": "object",
+                      "properties": {
+                        "estimatedCostUsd": {
+                          "type": "number"
+                        },
+                        "providerCostUsd": {
+                          "type": "number"
+                        },
+                        "totalCostUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "estimatedCostUsd",
+                        "providerCostUsd",
+                        "totalCostUsd"
+                      ]
+                    },
+                    "combinedCostUsd": {
+                      "type": "number"
+                    },
                     "totals": {
                       "type": "object",
                       "properties": {
@@ -53809,6 +53957,8 @@
                     }
                   },
                   "required": [
+                    "resourceCosts",
+                    "combinedCostUsd",
                     "totals",
                     "daily",
                     "byAgent",
@@ -74092,6 +74242,191 @@
           },
           "404": {
             "description": "Runtime pools disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources": {
+      "get": {
+        "operationId": "resources_list",
+        "summary": "List authorized resources",
+        "tags": [
+          "Resources"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sandbox",
+                "browser"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "provisioning",
+                "running",
+                "pausing",
+                "paused",
+                "stopping",
+                "stopped",
+                "resuming",
+                "destroying",
+                "destroyed",
+                "error"
+              ]
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized resources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Resource"
+                      }
+                    }
+                  },
+                  "required": [
+                    "resources"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A verified task context is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resources/{id}": {
+      "get": {
+        "operationId": "resources_get",
+        "summary": "Read an authorized resource",
+        "tags": [
+          "Resources"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resource": {
+                      "$ref": "#/components/schemas/Resource"
+                    }
+                  },
+                  "required": [
+                    "resource"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A verified task context is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
             "content": {
               "application/json": {
                 "schema": {

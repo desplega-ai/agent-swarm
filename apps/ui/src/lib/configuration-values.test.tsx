@@ -173,3 +173,10 @@ describe("model tier rows come from the API, not the static catalog", () => {
     expect(withModelTierGroup(CONFIGURATION_GROUPS, [])).toBe(CONFIGURATION_GROUPS);
   });
 });
+
+test("resource lease and idle defaults both use thirty minutes", () => {
+  const entries = CONFIGURATION_GROUPS.flatMap((group) => group.entries);
+  for (const key of ["RESOURCE_LEASE_MS", "RESOURCE_IDLE_MS"])
+    expect(entries.find((entry) => entry.key === key)?.defaultValue).toBe("1800000");
+  expect(entries.some((entry) => /RESOURCE.*(?:KEY|TOKEN|SECRET)/.test(entry.key))).toBe(false);
+});

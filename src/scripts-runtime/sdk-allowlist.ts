@@ -46,6 +46,9 @@ export const SDK_TOOL_NAME_MAP = {
   schedule_delete: "delete-schedule", // destructive
   schedule_runNow: "run-schedule-now",
 
+  // Resources
+  resource_list: "resource-list",
+
   // ── scripts ──
   script_search: "script-search",
   script_run: "script-run",

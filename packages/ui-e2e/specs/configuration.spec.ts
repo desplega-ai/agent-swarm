@@ -83,7 +83,8 @@ test("file link target saves dashboard and resets to not set", async ({
 
 test("configuration flips STEERING_ENABLED and persists it", async ({ page, api, clean, seed }) => {
   test.skip(!seed, "remote run without seed");
-  await page.goto("/settings/configuration");
+  // Search opens the matching group regardless of catalog order.
+  await page.goto("/settings/configuration?search=STEERING_ENABLED");
 
   const steering = page.getByRole("switch", { name: "Enable steering" });
   await expect(steering).toBeVisible();

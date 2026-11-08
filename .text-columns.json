@@ -2815,6 +2815,9 @@
     },
     "sourceScriptRunId": {
       "exempt": "identifier"
+    },
+    "sourceTaskId": {
+      "exempt": "verified source task provenance, separate from token binding"
     }
   },
   "skill_files": {
@@ -4205,5 +4208,320 @@
     "instructionsHash": { "exempt": "hash or digest" },
     "skillKeys": { "exempt": "JSON array of import item keys" },
     "createdAt": { "exempt": "timestamp" }
+  },
+  "browser_profiles": {
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "name": "scrubbed",
+    "provider": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "ownerScope": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "ownerUserId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "privateConfig": {
+      "sealed": "API-private resource configuration or provider handle"
+    },
+    "leaseOwner": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "leaseExpiresAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "deletedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    }
+  },
+  "sandbox_templates": {
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "name": "scrubbed",
+    "provider": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "privateConfig": {
+      "sealed": "API-private resource configuration or provider handle"
+    },
+    "deletedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    }
+  },
+  "resources": {
+    "cleanupNextAttemptAt": {
+      "exempt": "Server timestamp for durable cleanup retry backoff."
+    },
+    "continuousStartedAt": {
+      "exempt": "Server timestamp for the continuous provider lifetime limit."
+    },
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "kind": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "provider": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "state": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "creatorAgentId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "requestedByUserId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "rootTaskId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "profileId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "templateId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "privateConfig": {
+      "sealed": "API-private resource configuration or provider handle"
+    },
+    "providerHandle": {
+      "sealed": "API-private resource configuration or provider handle"
+    },
+    "lastActivityAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "expiresAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "leaseOwner": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "leaseExpiresAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "runningLeaseExpiresAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "lastError": "scrubbed",
+    "destroyedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createRequestKey": {
+      "exempt": "Non-secret create request idempotency key"
+    }
+  },
+  "resource_links": {
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "resourceId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "kind": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "targetId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    }
+  },
+  "resource_operations": {
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "resourceId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "kind": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "status": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "idempotencyKey": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "privateConfig": {
+      "sealed": "API-private resource configuration or provider handle"
+    },
+    "leaseOwner": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "leaseExpiresAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "startedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "finishedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "lastError": "scrubbed",
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "mutationStartedAt": {
+      "exempt": "Server-owned provider deadline or recovery timestamp."
+    },
+    "providerDeadlineAt": {
+      "exempt": "Server-owned provider deadline or recovery timestamp."
+    },
+    "nextAttemptAt": {
+      "exempt": "Server-owned provider deadline or recovery timestamp."
+    }
+  },
+  "resource_costs": {
+    "rateEffectiveAt": {
+      "exempt": "Immutable adapter rate effective timestamp."
+    },
+    "id": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "resourceId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "dimension": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "agentId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "requestedByUserId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "intervalStart": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "intervalEnd": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "costSource": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "checkpointKey": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "createdAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updatedAt": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "created_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    },
+    "updated_by": {
+      "exempt": "identifier, enum, timestamp, or idempotency key"
+    }
+  },
+  "resource_billing": {
+    "resourceId": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "dimension": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "rateEffectiveAt": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "agentId": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "requestedByUserId": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "sourceTaskId": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "checkpointAt": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "leaseEndsAt": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "createdAt": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "updatedAt": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "created_by": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "updated_by": {
+      "exempt": "Server-owned immutable identity, billing timestamp, or adapter dimension."
+    },
+    "reservationStartsAt": {
+      "exempt": "Server-owned reservation timestamp."
+    },
+    "billableEndsAt": {
+      "exempt": "Server-owned confirmed or uncertain execution deadline."
+    }
   }
 }

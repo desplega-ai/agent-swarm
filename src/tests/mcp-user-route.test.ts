@@ -287,7 +287,14 @@ describe("/mcp-user auth and tool surface", () => {
     };
     const names = result.result.tools.map((tool) => tool.name).sort();
     expect(names).toEqual(
-      ["cancel-task", "get-task-details", "get-tasks", "send-task", "steer-task"].sort(),
+      [
+        "cancel-task",
+        "get-task-details",
+        "get-tasks",
+        "resource-list",
+        "send-task",
+        "steer-task",
+      ].sort(),
     );
     const sendTask = result.result.tools.find((tool) => tool.name === "send-task");
     expect(Object.keys(sendTask?.inputSchema.properties ?? {}).sort()).toEqual(

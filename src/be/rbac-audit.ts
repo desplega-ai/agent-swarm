@@ -85,6 +85,10 @@ function resourceIdOf(resource: RbacCheck["resource"]): string | null {
       return resource.poolId ?? null;
     case "runtime_controller":
       return resource.controllerId ?? null;
+    case "resource":
+      return resource.resourceId ?? null;
+    case "browser_profile":
+      return null;
     case "none":
       return null;
   }

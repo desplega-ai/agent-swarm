@@ -115,7 +115,18 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 
 // The shared API key alone: dashboard users are denied too.
-const API_KEY_OPERATOR_VERBS: PermissionVerb[] = ["models.profiles.write"];
+const API_KEY_OPERATOR_VERBS: PermissionVerb[] = [
+  "models.profiles.write",
+  "resource.template.manage",
+];
+
+const VERIFIED_RESOURCE_VERBS: PermissionVerb[] = [
+  "resource.read",
+  "resource.create",
+  "resource.use",
+  "resource.destroy",
+  "resource.feedback",
+];
 
 const AGENT_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.harness-support.write"];
 
@@ -156,6 +167,7 @@ const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
 ];
 
 const COMPOSITE_VERBS: PermissionVerb[] = [
+  "resource.profile.manage",
   "memory.delete.any",
   "task.fs.mutate",
   "task.parent.attach",
@@ -227,6 +239,7 @@ describe("verb-group partition", () => {
       ...LEAD_OR_OPERATOR_VERBS,
       ...API_KEY_OPERATOR_VERBS,
       ...AGENT_OR_OPERATOR_VERBS,
+      ...VERIFIED_RESOURCE_VERBS,
     ];
     expect(new Set(grouped).size).toBe(grouped.length);
     expect(grouped.sort()).toEqual([...PERMISSION_VERBS].sort());
@@ -238,6 +251,54 @@ describe("verb-group partition", () => {
       expect(rule, verb).toBeDefined();
       expect(rule.name.length).toBeGreaterThan(0);
       expect(rule.denyReason.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("resource permissions", () => {
+  for (const verb of VERIFIED_RESOURCE_VERBS) {
+    test(`${verb} requires verified task and profile authorization`, () => {
+      for (const principal of Object.values(PRINCIPALS)) {
+        for (const resource of [
+          undefined,
+          { kind: "resource", contextAuthorized: false, profileAllowed: true },
+          { kind: "resource", contextAuthorized: true, profileAllowed: false },
+        ] as const) {
+          expect(can({ principal, verb, resource, source: "http" }).allow).toBe(false);
+        }
+        expect(
+          can({
+            principal,
+            verb,
+            resource: { kind: "resource", contextAuthorized: true, profileAllowed: true },
+            source: "http",
+          }).allow,
+        ).toBe(true);
+      }
+    });
+  }
+  test("personal profiles require their user owner and swarm profiles require the operator", () => {
+    for (const [name, principal] of Object.entries(PRINCIPALS)) {
+      expect(
+        can({
+          principal,
+          verb: "resource.profile.manage",
+          resource: {
+            kind: "browser_profile",
+            ownerScope: "user",
+            ownerUserId: REQUESTER_USER_ID,
+          },
+          source: "http",
+        }).allow,
+      ).toBe(name === "userRequester");
+      expect(
+        can({
+          principal,
+          verb: "resource.profile.manage",
+          resource: { kind: "browser_profile", ownerScope: "swarm", ownerUserId: null },
+          source: "http",
+        }).allow,
+      ).toBe(name === "operator");
     }
   });
 });

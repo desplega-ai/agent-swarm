@@ -160,7 +160,8 @@ test.describe("organization name gate", () => {
       await page.goto("/");
       await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
       await expect(page.getByRole("dialog", { name: "Name your organization" })).not.toBeVisible();
-      await page.goto("/settings/configuration");
+      // Search opens the matching group regardless of catalog order.
+      await page.goto("/settings/configuration?search=STEERING_ENABLED");
       await expect(page.getByRole("switch", { name: "Enable steering" })).toBeVisible();
       expect(errors).toEqual([]);
     });

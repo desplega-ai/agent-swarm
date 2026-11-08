@@ -42,6 +42,8 @@ export type RbacResource =
   | { kind: "extension"; extensionId?: string; createdByAgentId?: string | null }
   | { kind: "runtime_pool"; poolId?: string }
   | { kind: "runtime_controller"; controllerId?: string }
+  | { kind: "resource"; resourceId?: string; contextAuthorized: boolean; profileAllowed: boolean }
+  | { kind: "browser_profile"; ownerScope: "user" | "swarm"; ownerUserId?: string | null }
   | { kind: "none" };
 
 export type RbacDecision =

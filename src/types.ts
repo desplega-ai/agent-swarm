@@ -4290,3 +4290,124 @@ export const KvEntrySchema = z
   })
   .openapi("KvEntry");
 export type KvEntry = z.infer<typeof KvEntrySchema>;
+// Public resource records contain no provider handles or connection credentials.
+export const ResourceKindSchema = z.enum(["sandbox", "browser"]);
+export const ResourceProviderSchema = z.enum(["e2b", "browser-use", "fake"]);
+export const ResourceStateSchema = z.enum([
+  "provisioning",
+  "running",
+  "pausing",
+  "paused",
+  "stopping",
+  "stopped",
+  "resuming",
+  "destroying",
+  "destroyed",
+  "error",
+]);
+export const ResourceOperationStatusSchema = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "uncertain",
+]);
+export const ResourceOperationKindSchema = z.enum([
+  "create",
+  "pause",
+  "resume",
+  "stop",
+  "destroy",
+  "setup",
+  "refresh",
+  "exec",
+]);
+export const ResourceSchema = z
+  .object({
+    id: z.string(),
+    kind: ResourceKindSchema,
+    provider: ResourceProviderSchema,
+    state: ResourceStateSchema,
+    generation: z.number().int().positive(),
+    creatorAgentId: z.string(),
+    requestedByUserId: z.string().nullable(),
+    sourceTaskId: z.string(),
+    rootTaskId: z.string(),
+    profileId: z.string().nullable(),
+    templateId: z.string().nullable(),
+    templateVersion: z.number().int().nullable(),
+    lastActivityAt: z.string(),
+    expiresAt: z.string(),
+    runningLeaseExpiresAt: z.string().nullable(),
+    lastError: z.string().nullable(),
+    destroyedAt: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("Resource");
+export const BrowserProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  provider: z.enum(["browser-use", "fake"]),
+  ownerScope: z.enum(["user", "swarm"]),
+  ownerUserId: z.string().nullable(),
+  generation: z.number().int().positive(),
+  deletedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const SandboxTemplateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.number().int().positive(),
+  provider: z.enum(["e2b", "fake"]),
+  deletedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const ResourceLinkSchema = z.object({
+  id: z.string(),
+  resourceId: z.string(),
+  kind: z.enum(["task", "github-pr", "slack-thread", "workflow-run"]),
+  targetId: z.string(),
+  isPrimary: z.boolean(),
+});
+export const ResourceOperationSchema = z.object({
+  id: z.string(),
+  resourceId: z.string(),
+  generation: z.number().int().positive(),
+  kind: ResourceOperationKindSchema,
+  status: ResourceOperationStatusSchema,
+  lastError: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const ResourceCostSchema = z.object({
+  id: z.string(),
+  resourceId: z.string(),
+  generation: z.number().int().positive(),
+  dimension: z.string(),
+  agentId: z.string(),
+  requestedByUserId: z.string().nullable(),
+  sourceTaskId: z.string(),
+  intervalStart: z.string(),
+  intervalEnd: z.string(),
+  amountUsd: z.number().nonnegative(),
+  costSource: z.enum(["estimated", "provider"]),
+});
+export const ResourceListQuerySchema = z.object({
+  kind: ResourceKindSchema.optional(),
+  state: ResourceStateSchema.optional(),
+  taskId: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type Resource = z.infer<typeof ResourceSchema>;
+export type BrowserProfile = z.infer<typeof BrowserProfileSchema>;
+export type SandboxTemplate = z.infer<typeof SandboxTemplateSchema>;
+export type ResourceLink = z.infer<typeof ResourceLinkSchema>;
+export type ResourceOperation = z.infer<typeof ResourceOperationSchema>;
+export type ResourceCost = z.infer<typeof ResourceCostSchema>;
+export type ResourceListQuery = z.infer<typeof ResourceListQuerySchema>;

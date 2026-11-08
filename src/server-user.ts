@@ -22,6 +22,7 @@ import {
   getTaskDetailsOutputSchema,
 } from "./tools/get-task-details";
 import { getTasksHandler, getTasksInputSchema, getTasksOutputSchema } from "./tools/get-tasks";
+import { resourceListConfig, resourceListHandler } from "./tools/resource-list";
 import { checkOutputSchemaShape, sendTaskHandler, sendTaskOutputSchema } from "./tools/send-task";
 import {
   steerTaskHandler,
@@ -113,6 +114,13 @@ export function createUserServer(user: User): McpServer {
   );
 
   const registerTool = createToolRegistrar(server);
+
+  const resourceConfig = { ...resourceListConfig, rbac: permission("resource.read") };
+  registerTool("resource-list", resourceConfig, async (args, info) => {
+    const denied = await maybeDenyUserToolAdmission(user, "resource-list", resourceConfig);
+    if (denied) return denied;
+    return resourceListHandler(args, info);
+  });
 
   const sendTaskConfig = {
     title: "Send a task",

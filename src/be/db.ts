@@ -268,6 +268,7 @@ import {
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
+import { resourceSpend } from "./resources/costs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -5147,6 +5148,8 @@ export async function getSessionCostSummary(opts: {
   byAgent: SessionCostByAgentRow[];
   byUser: SessionCostByUserRow[];
   byCredential: SessionCostByCredentialRow[];
+  resourceCosts: { estimatedCostUsd: number; providerCostUsd: number; totalCostUsd: number };
+  combinedCostUsd: number;
 }> {
   // `session_costs` deliberately carries no `userId` column — a task can be
   // re-attributed after the fact, so the human requester is resolved by joining
@@ -5366,7 +5369,48 @@ export async function getSessionCostSummary(opts: {
     });
   }
 
-  return { totals, daily, byAgent, byUser, byCredential };
+  const resourceConditions: string[] = [];
+  const resourceParams: string[] = [];
+  if (opts.startDate) {
+    resourceConditions.push("intervalStart>=?");
+    resourceParams.push(opts.startDate);
+  }
+  if (opts.endDate) {
+    resourceConditions.push("intervalStart<=?");
+    resourceParams.push(opts.endDate);
+  }
+  if (opts.agentId) {
+    resourceConditions.push("agentId=?");
+    resourceParams.push(opts.agentId);
+  }
+  // Match the existing human-free Usage classification while retaining the
+  // resource's immutable requester when the source task is reassigned or deleted.
+  const resourceHumanFree = `EXISTS (SELECT 1 FROM agent_tasks t WHERE t.id=resource_costs.sourceTaskId AND ${HUMAN_FREE_SQL})`;
+  if (opts.userId === UNATTRIBUTED_USER_ID)
+    resourceConditions.push(`(requestedByUserId IS NULL OR ${resourceHumanFree})`);
+  else if (opts.userId) {
+    resourceConditions.push(`(requestedByUserId=? AND NOT ${resourceHumanFree})`);
+    resourceParams.push(opts.userId);
+  }
+  const resourceCosts = (await getDbClient().get<{
+    estimatedCostUsd: number;
+    providerCostUsd: number;
+    totalCostUsd: number;
+  }>(
+    `SELECT COALESCE(SUM(CASE WHEN costSource='estimated' THEN amountUsd ELSE 0 END),0) estimatedCostUsd,
+      COALESCE(SUM(CASE WHEN costSource='provider' THEN amountUsd ELSE 0 END),0) providerCostUsd,
+      COALESCE(SUM(amountUsd),0) totalCostUsd FROM resource_costs ${resourceConditions.length ? `WHERE ${resourceConditions.join(" AND ")}` : ""}`,
+    resourceParams,
+  ))!;
+  return {
+    totals,
+    daily,
+    byAgent,
+    byUser,
+    byCredential,
+    resourceCosts,
+    combinedCostUsd: totals.totalCostUsd + resourceCosts.totalCostUsd,
+  };
 }
 
 function credentialKey(keyType: string, keySuffix: string): string {
@@ -13397,12 +13441,16 @@ export async function deletePricingRow(
  * `idx_session_costs_agent_createdAt` index (verified via EXPLAIN QUERY PLAN
  * in the test suite).
  */
-export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
+export async function getDailySpendForAgent(
+  agentId: string,
+  dateUtc: string,
+  now = new Date(),
+): Promise<number> {
   const row = await getDbClient().get<CoalesceSumRow>(
     "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
     [agentId, dateUtc],
   );
-  return row?.total ?? 0;
+  return (row?.total ?? 0) + (await resourceSpend(dateUtc, { agentId }, now));
 }
 
 /**
@@ -13417,12 +13465,12 @@ export async function getDailySpendForAgent(agentId: string, dateUtc: string): P
  * for V1 daily-spend volumes; if it ever becomes a hotspot, a covering
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
-export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
+export async function getDailySpendGlobal(dateUtc: string, now = new Date()): Promise<number> {
   const row = await getDbClient().get<CoalesceSumRow>(
     "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
     [dateUtc],
   );
-  return row?.total ?? 0;
+  return (row?.total ?? 0) + (await resourceSpend(dateUtc, undefined, now));
 }
 
 /**
@@ -13431,7 +13479,11 @@ export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
  * `'YYYY-MM-DD'` (UTC). Costs are joined through `agent_tasks` deliberately;
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
-export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
+export async function getDailySpendForUser(
+  userId: string,
+  dateUtc: string,
+  now = new Date(),
+): Promise<number> {
   const row = await getDbClient().get<CoalesceSumRow>(
     `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
        FROM session_costs sc
@@ -13439,7 +13491,7 @@ export async function getDailySpendForUser(userId: string, dateUtc: string): Pro
        WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
     [userId, dateUtc],
   );
-  return row?.total ?? 0;
+  return (row?.total ?? 0) + (await resourceSpend(dateUtc, { userId }, now));
 }
 
 export interface RecordBudgetRefusalNotificationInput {

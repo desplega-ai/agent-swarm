@@ -225,6 +225,8 @@ export interface SwarmSdk {
   repo_list(args?: Record<string, unknown>): Promise<unknown>;
   // --- schedules ---
   schedule_list(args?: { enabled?: boolean; name?: string; scheduleType?: "recurring" | "one_time"; targetType?: "agent-task" | "workflow" | "script"; workflowId?: string; scriptName?: string; hideCompleted?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "failed" | "succeeded"; includeFull?: boolean }): Promise<unknown>;
+  // --- resources ---
+  resource_list(args?: { taskId?: string; kind?: "sandbox" | "browser"; state?: "provisioning" | "running" | "pausing" | "paused" | "stopping" | "stopped" | "resuming" | "destroying" | "destroyed" | "error"; limit?: number; offset?: number }): Promise<unknown>;
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
   script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;

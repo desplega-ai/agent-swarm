@@ -87,3 +87,5 @@ import "./x";
 
 import "./runtime-pools";
 import "./controllers-connect";
+
+import "./resources";

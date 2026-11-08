@@ -669,3 +669,52 @@ A website, team size, and use case enable the full fleet benchmark. The API send
 `POST /api/used-by` accepts `{granted, contactEmail?, contactFunction?, quote?}`. A grant requires a valid contact email. The optional quote allows at most 280 characters. Contact function accepts `engineer`, `eng_lead`, `founder`, `product`, `marketing`, `sales`, `research`, `ops`, or `other`.
 
 The explicit consent sends these details to Desplega, even when telemetry is off. The API stores them in `SWARM_USED_BY_CONTACT_EMAIL`, `SWARM_USED_BY_CONTACT_FUNCTION`, and `SWARM_USED_BY_QUOTE`. Revocation clears all three local values after the proxy accepts the request. Desplega keeps the earlier grant record because the proxy has no delete path. To request deletion of that record, contact [contact@desplega.sh](mailto:contact@desplega.sh).
+
+## Resource lifecycle limits
+
+Resource lifecycle admission uses these settings. Stored global values override deployment environment values, including after a restart.
+
+| Key | Default | Accepted range |
+| --- | --- | --- |
+| `RESOURCE_TREE_CAP` | 3 live resources per task tree | 1 to 1000 |
+| `RESOURCE_SWARM_CAP` | 20 live resources per swarm | 1 to 10000 |
+| `RESOURCE_IDLE_MS` | 1800000 (30 minutes) | 1000 to 86400000 |
+| `RESOURCE_EXPIRY_MS` | 604800000 (seven days) | 60000 to 31536000000 |
+| `RESOURCE_LEASE_MS` | 1800000 (thirty minutes) | 1000 to 1800000 |
+| `RESOURCE_PREVIEW_ACCESS` | `public` | `public` or `private` |
+
+Private preview access remains unsupported. Selecting `private` rejects creation and lease admission before any provider allocation.
+Provisioning and unresolved termination retain live capacity reservations. A failed stop does not prove remote termination.
+Invalid configuration prevents new admission. Cleanup of existing resources does not depend on admission-only settings; an invalid idle timeout produces a warning and uses the 30-minute default.
+
+Explicit authenticated use renews activity. Polling, status reads, public preview traffic, and native browser actions do not renew activity.
+An idle sandbox pauses. An idle browser stops and loses its tabs. Its profile remains available for a later session.
+Only one live resource can use a browser profile. A stopped browser reopens with a new generation.
+A running row whose lease has expired must reconcile before resume can admit another lease. A queued renewal cannot renew an already-expired previous lease.
+If new budget or configuration limits would shorten an existing running lease, renewal is rejected without reducing its reservation. Stop the resource explicitly before requesting a shorter lease.
+An uncertain create or resume from a paused/stopped state must reconcile before further lifecycle actions. For an uncertain renewal of the same known handle, users may destroy the resource or stop a browser; capacity is released only after confirmation. Sandbox pause remains blocked because a later resume reuses the handle and could receive the old renewal.
+Cleanup rechecks current activity and expiry inside its transaction, so a stale reaper page cannot override a successful renewal.
+Seven days without authenticated activity triggers destruction. Destruction is terminal.
+
+Each admitted lease has a finite provider timeout. Provider lifetime limits and available budget can shorten that lease. Admission reserves budget for each UTC day that the lease overlaps.
+The API pauses or stops resources at the admitted boundary. A provider timeout limits exposure when the API is unavailable.
+Provider billing latency prevents a guaranteed financial hard ceiling.
+
+Resource estimates use explicit adapter dimensions, rates in USD per millisecond, and an effective date.
+The server snapshots those rates and canonical attribution before execution. No current vendor price is assumed.
+The fake adapter uses a deterministic test rate. Live adapters remain unavailable in this phase.
+Provider API keys belong in encrypted secret configuration. They never belong in this catalog.
+
+Usage preserves existing session and credential totals. Its API adds `resourceCosts` with estimated, provider-reported, and resource totals.
+`combinedCostUsd` adds resource charges to session charges. Resource charges never increase token or credential totals.
+Provider reports replace estimates for equivalent periods. Conflicting provider periods require reconciliation rather than duplicate charges.
+Queued reservations do not accrue charges. Billing starts when the API dispatches provider work.
+Uncertain mutations retain bounded estimates until the provider confirms their outcome. An uncertain create can retain a full lease estimate even if the session never existed: absence after the timeout cannot establish whether it ran earlier. A provider report, including a zero-charge report, replaces that estimate.
+Fixed-deadline browser sessions reject renewal with reconnect instructions. Reconnection creates a new generation and loses open tabs.
+
+Billing intervals split at UTC midnight and survive task completion, deletion, and API restart.
+
+The reconciler stores work before provider execution. It reconciles uncertain creates through this swarm's ownership metadata.
+It never repeats an uncertain create automatically. Interrupted setup, refresh, or exec requires a deliberate retry.
+Cleanup failures before dispatch retry after 5, 10, 20, 40, then 60 seconds. That backoff survives API restarts and resets after a confirmed lifecycle outcome. Uncertain dispatched operations have their own durable recovery backoff.
+Shutdown rejects new resource work. Uncertain operations remain available for later inspection and reconciliation.

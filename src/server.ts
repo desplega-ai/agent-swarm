@@ -114,6 +114,7 @@ import {
 import { registerGetReposTool, registerUpdateRepoTool } from "./tools/repos";
 import { registerRequestHumanInputTool } from "./tools/request-human-input";
 import { registerResolveUserTool } from "./tools/resolve-user";
+import { registerResourceListTool } from "./tools/resource-list";
 import {
   registerRoomChangeTool,
   registerRoomDecodeTool,
@@ -489,6 +490,7 @@ export async function createServer(
     registerJoinSwarmTool(server);
     registerPollTaskTool(server);
     registerGetSwarmTool(server);
+    registerResourceListTool(server);
     registerGetTasksTool(server);
     registerGetMetricsTool(server);
     registerSendTaskTool(server);

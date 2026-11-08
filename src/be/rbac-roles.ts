@@ -44,6 +44,7 @@ export const BUILTIN_ROLES = [
       "task.steer.own",
       "comb.presence",
       "fs.join.own",
+      "resource.read",
     ],
   },
   {
@@ -58,6 +59,7 @@ export const BUILTIN_ROLES = [
       "session.presence",
       "comb.presence",
       "fs.join.own",
+      "resource.read",
     ],
   },
   {
