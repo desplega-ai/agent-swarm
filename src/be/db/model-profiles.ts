@@ -310,7 +310,7 @@ export function modelProfileRefError(error: unknown): "missing" | null {
 }
 
 /**
- * Whether migration 303's name-space trigger refused an insert: profiles and
+ * Whether migration 308's name-space trigger refused an insert: profiles and
  * model groups share one name space.
  */
 export function isModelNameTakenError(error: unknown): boolean {

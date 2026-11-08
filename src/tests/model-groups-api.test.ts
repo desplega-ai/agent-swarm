@@ -1,4 +1,4 @@
-// Model groups (migration 303): REST CRUD and its RBAC gate, the shared name
+// Model groups (migration 308): REST CRUD and its RBAC gate, the shared name
 // space with profiles, reference triggers and delete guards, the atomic member
 // rewrite, and the four seeded tier groups.
 
@@ -85,7 +85,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  // References first: migration 303's triggers and foreign keys refuse the rest.
+  // References first: migration 308's triggers and foreign keys refuse the rest.
   await getDbClient().run("DELETE FROM agent_tasks");
   await getDbClient().run("DELETE FROM scheduled_tasks");
   await getDbClient().run("DELETE FROM model_groups");

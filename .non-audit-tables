@@ -24,7 +24,7 @@ memory_rating
 memory_retrieval
 model_catalog          # system-written models.dev projection (173)
 model_catalog_meta     # single-row fetch state (173)
-model_group_members    # ordered child rows; audit columns live on model_groups (303)
+model_group_members    # ordered child rows; audit columns live on model_groups (308)
 oauth_apps
 oauth_authorizations   # attribution via connectedByUserId (117)
 oauth_pending          # ephemeral PKCE state, 10-min GC (117)

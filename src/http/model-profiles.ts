@@ -276,7 +276,7 @@ export async function handleModelProfiles(
         return { created: await createModelProfile(body, { userId }) };
       })
       .catch((error: unknown) => {
-        // Migration 303's trigger: a model group has this name.
+        // Migration 308's trigger: a model group has this name.
         if (isModelNameTakenError(error)) return { nameTaken: true as const };
         throw error;
       });
