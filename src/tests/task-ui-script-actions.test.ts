@@ -11,14 +11,17 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  deleteSwarmConfigByKey,
   getDbClient,
   getTaskById,
   initDb,
   startTask,
+  upsertSwarmConfig,
 } from "../be/db";
 import { insertScript, upsertScriptByName } from "../be/scripts/db";
 import * as runSavedModule from "../be/scripts/run-saved";
 import { acquireTaskUiScriptActionRun, getTaskUiSpec, upsertTaskUiSpec } from "../be/task-ui-spec";
+import { __resetInjectedEnvTracking, loadGlobalConfigsIntoEnv } from "../http/core";
 import { registerStoreProgressTool } from "../tools/store-progress";
 import { runTaskUiAction } from "../ui-spec/actions";
 import { scriptActionIssues } from "../ui-spec/script-actions";
@@ -330,6 +333,26 @@ describe("runTaskUiAction with a script action", () => {
     process.env.UI_SPEC_SCRIPT_ACTIONS = "";
     expect((await click(taskId)).status).toBe("not_allowlisted");
     expect(runSpy).not.toHaveBeenCalled();
+  });
+
+  test("the stored row is read at click time, so a pin removed elsewhere disarms here", async () => {
+    const taskId = await taskWithRefresh();
+    process.env.UI_SPEC_SCRIPT_ACTIONS = "";
+    // Another API process stores the pin: this process never reloaded its env.
+    await upsertSwarmConfig({ scope: "global", key: "UI_SPEC_SCRIPT_ACTIONS", value: pin() });
+    try {
+      expect((await click(taskId)).status).toBe("refreshed");
+      // This process loads the pin into its env, then another process deletes it.
+      await loadGlobalConfigsIntoEnv(true);
+      expect(process.env.UI_SPEC_SCRIPT_ACTIONS).toBe(pin());
+      await deleteSwarmConfigByKey("global", null, "UI_SPEC_SCRIPT_ACTIONS");
+      await expireCooldown(taskId);
+      expect((await click(taskId)).status).toBe("not_allowlisted");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await deleteSwarmConfigByKey("global", null, "UI_SPEC_SCRIPT_ACTIONS");
+      __resetInjectedEnvTracking();
+    }
   });
 
   test("an edited script disarms the card until it is re-pinned", async () => {

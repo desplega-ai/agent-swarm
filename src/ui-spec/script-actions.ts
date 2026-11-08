@@ -1,4 +1,4 @@
-import { createLogEntry, getDbClient } from "../be/db";
+import { createLogEntry, getDbClient, getSwarmConfigs } from "../be/db";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import {
@@ -37,6 +37,20 @@ type ResolvedScriptAction =
   | { ok: false; reason: "not_allowlisted" | "script_changed" | "missing"; issue: string };
 
 /**
+ * The live allowlist. The stored global row is read from the DB on every call,
+ * so a pin removed through any API process disarms clicks in every process
+ * sharing the DB, not only the one whose `process.env` was reloaded. With no
+ * row, the deployment env value, never a stale injected copy of a deleted row.
+ */
+async function readScriptActionAllowlist(): Promise<string | undefined> {
+  const [row] = await getSwarmConfigs({ scope: "global", key: UI_SPEC_SCRIPT_ACTIONS_KEY });
+  if (row) return row.value;
+  // Lazy: http/core reaches slack, which imports the ui-spec action path.
+  const { getDeploymentEnvValue } = await import("../http/core");
+  return getDeploymentEnvValue(UI_SPEC_SCRIPT_ACTIONS_KEY);
+}
+
+/**
  * The trust checks of one `script` action, at write time and again at click
  * time: the name is pinned in UI_SPEC_SCRIPT_ACTIONS, a global script with
  * that name exists, and its current contentHash matches a pin. A script edit
@@ -46,7 +60,7 @@ export async function resolveScriptAction(
   actionId: string,
   action: ScriptAction,
 ): Promise<ResolvedScriptAction> {
-  const pins = parseScriptActionAllowlist(process.env[UI_SPEC_SCRIPT_ACTIONS_KEY]).pins.filter(
+  const pins = parseScriptActionAllowlist(await readScriptActionAllowlist()).pins.filter(
     (pin) => pin.name === action.script,
   );
   if (pins.length === 0) {
