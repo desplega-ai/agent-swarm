@@ -177,8 +177,15 @@ describe("chat relay text", () => {
     const words = Array.from({ length: 2000 }, (_, i) => `word${i}`).join(" ");
     const chunks = splitChatMessage(words, 4096);
     expect(chunks.every((chunk) => chunk.length <= 4096)).toBe(true);
-    expect(chunks.join(" ")).toBe(words);
+    expect(chunks.join("")).toBe(words);
     expect(splitChatMessage("short", 4096)).toEqual(["short"]);
+  });
+
+  test("splitChatMessage keeps the separator at a split boundary", () => {
+    expect(splitChatMessage("hello world", 6)).toEqual(["hello ", "world"]);
+    expect(splitChatMessage("hello\nworld", 6)).toEqual(["hello\n", "world"]);
+    // Whitespace-only chunks are dropped rather than posted.
+    expect(splitChatMessage(`hello${" ".repeat(12)}`, 6)).toEqual(["hello "]);
   });
 
   test("splitChatMessage does not loop on a surrogate pair at a tiny limit", () => {

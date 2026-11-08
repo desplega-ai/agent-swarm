@@ -47,7 +47,8 @@ export const CHAT_FILES_PER_MESSAGE = 10;
  * Split `text` into chunks of at most `limit` characters. A chunk ends at the
  * last line break inside the window, else at the last space, else at the
  * limit. Breaks in the first half of the window are ignored, so chunks never
- * get very short.
+ * get very short. The break character stays at the end of its chunk, so
+ * joining the chunks gives back the original text.
  */
 export function splitChatMessage(text: string, limit: number): string[] {
   if (limit <= 0) throw new Error("splitChatMessage: limit must be positive");
@@ -58,7 +59,10 @@ export function splitChatMessage(text: string, limit: number): string[] {
     const minBreak = Math.floor(limit / 2);
     let cut = window.lastIndexOf("\n");
     if (cut < minBreak) cut = window.lastIndexOf(" ");
-    if (cut < minBreak) {
+    if (cut >= minBreak) {
+      // The separator ends this chunk, so the chunks joined are the input.
+      cut += 1;
+    } else {
       cut = limit;
       // Never split a surrogate pair (emoji and other astral characters).
       const code = rest.charCodeAt(cut - 1);
@@ -69,9 +73,10 @@ export function splitChatMessage(text: string, limit: number): string[] {
         cut = cut > 1 ? cut - 1 : cut + 1;
       }
     }
-    chunks.push(rest.slice(0, cut).trimEnd());
-    rest = rest.slice(cut).replace(/^[\n ]+/, "");
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
   }
   if (rest.length > 0 || chunks.length === 0) chunks.push(rest);
-  return chunks.filter((chunk, index) => chunk.length > 0 || index === 0);
+  // A platform rejects a whitespace-only message, so drop those chunks.
+  return chunks.filter((chunk, index) => chunk.trim().length > 0 || index === 0);
 }
