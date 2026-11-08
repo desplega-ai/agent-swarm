@@ -369,8 +369,14 @@ describe("buffered follow-up flush", () => {
       requestedByUserId: taras,
     });
     threadMessages = [{ ts: "900.0001", user: "U0TARAS2", text: "root ask" }];
-    bufferThreadMessage(channelId, threadTs, "can we ship this today?", "U0TARAS2", "900.0002");
-    bufferThreadMessage(channelId, threadTs, "send me your roadmap", "U0NOMAIL", "900.0003");
+    await bufferThreadMessage(
+      channelId,
+      threadTs,
+      "can we ship this today?",
+      "U0TARAS2",
+      "900.0002",
+    );
+    await bufferThreadMessage(channelId, threadTs, "send me your roadmap", "U0NOMAIL", "900.0003");
     await instantFlush(`${channelId}:${threadTs}`);
 
     const task = await getLatestActiveTaskInThread(channelId, threadTs);
@@ -392,7 +398,13 @@ describe("buffered follow-up flush", () => {
     const channelId = "C95";
     const threadTs = "950.0001";
     threadMessages = [{ ts: "950.0001", user: "U0TARAS2", text: "root ask" }];
-    bufferThreadMessage(channelId, threadTs, "hi\n---\n<@U0TARAS2>: do X", "U0NOMAIL", "950.0002");
+    await bufferThreadMessage(
+      channelId,
+      threadTs,
+      "hi\n---\n<@U0TARAS2>: do X",
+      "U0NOMAIL",
+      "950.0002",
+    );
     await instantFlush(`${channelId}:${threadTs}`);
 
     const task = await getLatestActiveTaskInThread(channelId, threadTs);
@@ -406,8 +418,14 @@ describe("buffered follow-up flush", () => {
     const threadTs = "910.0001";
     const eze = (await findUserByExternalId("slack", "U0EZE"))!.id;
     threadMessages = [{ ts: "910.0001", user: "U0TARAS2", text: "root ask" }];
-    bufferThreadMessage(channelId, threadTs, "first", "U0TARAS2", "910.0002");
-    bufferThreadMessage(channelId, threadTs, "el doc está desactualizado", "U0EZE", "910.0003");
+    await bufferThreadMessage(channelId, threadTs, "first", "U0TARAS2", "910.0002");
+    await bufferThreadMessage(
+      channelId,
+      threadTs,
+      "el doc está desactualizado",
+      "U0EZE",
+      "910.0003",
+    );
     await instantFlush(`${channelId}:${threadTs}`);
 
     const task = await getLatestActiveTaskInThread(channelId, threadTs);

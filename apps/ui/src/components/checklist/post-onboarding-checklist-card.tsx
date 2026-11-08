@@ -56,16 +56,16 @@ import { cn } from "@/lib/utils";
  * Self-contained, in the shared `HomeWidget` chrome. Wrapper `id="setup"` is
  * the `/#setup` anchor.
  */
-export function PostOnboardingChecklistCard({ className }: { className?: string }) {
+/**
+ * Phase 1 rows (the open wizard, then failing checks). Undefined while the
+ * status is unknown: the card then shows phase 2 only.
+ */
+function useSetupPhase(): SetupPhaseItem[] | undefined {
   const { data: onboarding } = useOnboarding();
   const steps = useVisibleOnboardingSteps();
   const status = useOptionalStatusContext()?.data;
   const canSetup = useCan("config.write.any");
-  const { data, isError } = useChecklist();
-  const mutation = useChecklistMutation();
-
-  if (isError || !data) return null;
-
+  if (!status) return undefined;
   const setup: SetupPhaseItem[] = [];
   if (canSetup && onboarding && isOnboardingOpen(onboarding)) {
     setup.push({
@@ -76,7 +76,7 @@ export function PostOnboardingChecklistCard({ className }: { className?: string 
       action: "Resume",
     });
   }
-  for (const check of status ? failingChecks(status) : []) {
+  for (const check of failingChecks(status)) {
     setup.push({
       id: check.milestone.id,
       label: check.milestone.label,
@@ -86,6 +86,32 @@ export function PostOnboardingChecklistCard({ className }: { className?: string 
       blocks: check.blocks,
     });
   }
+  return setup;
+}
+
+/** Every visible item done and nothing left to set up. */
+export function isSetupComplete(data: ChecklistResponse, setup: SetupPhaseItem[] | undefined) {
+  const visible = data.items.filter((item) => item.status !== "removed");
+  return visible.every((item) => item.done) && (!setup || setup.length === 0);
+}
+
+/**
+ * True once "Getting started" has nothing left. False while the checklist or
+ * the status (the Set up rows) is loading or failed, so Favorites does not
+ * take over the column before the setup rows are known.
+ */
+export function useSetupComplete(): boolean {
+  const setup = useSetupPhase();
+  const { data } = useChecklist();
+  return data && setup ? isSetupComplete(data, setup) : false;
+}
+
+export function PostOnboardingChecklistCard({ className }: { className?: string }) {
+  const setup = useSetupPhase();
+  const { data, isError } = useChecklist();
+  const mutation = useChecklistMutation();
+
+  if (isError || !data) return null;
 
   async function run(input: Parameters<typeof mutation.mutateAsync>[0]) {
     try {
@@ -98,7 +124,7 @@ export function PostOnboardingChecklistCard({ className }: { className?: string 
   return (
     <PostOnboardingChecklistView
       data={data}
-      setup={status ? setup : undefined}
+      setup={setup}
       busy={mutation.isPending}
       className={className}
       onAdd={(body) => run({ type: "add", body })}
@@ -167,7 +193,6 @@ export function PostOnboardingChecklistView({
   onAdd,
   onUpdate,
 }: PostOnboardingChecklistViewProps) {
-  const [expanded, setExpanded] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
   const [removing, setRemoving] = useState<ChecklistItem | null>(null);
 
@@ -175,8 +200,6 @@ export function PostOnboardingChecklistView({
   const removed = data.items.filter((item) => item.status === "removed");
   const doneCount = visible.filter((item) => item.done).length;
   const setupDone = !setup || setup.length === 0;
-  const allDone = doneCount === visible.length && setupDone;
-  const collapsed = allDone && !expanded;
   const count = `${doneCount} of ${visible.length}`;
 
   const addChannel = (adapter: (typeof CHANNEL_ADAPTERS)[number]) =>
@@ -188,139 +211,112 @@ export function PostOnboardingChecklistView({
       meta: { adapter: adapter.id },
     });
 
+  // Everything done: the card leaves Home, and Favorites takes the column.
+  if (isSetupComplete(data, setup)) return null;
+
   return (
     <HomeWidget
       className={className}
       id="setup"
-      title={allDone ? "Setup complete" : setup ? "Getting started" : "Get the swarm working"}
-      icon={
-        allDone ? (
-          <StatusIcon tone="success" focusable={false} />
-        ) : (
-          <ListTodo className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        )
-      }
+      title={setup ? "Getting started" : "Get the swarm working"}
+      icon={<ListTodo className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       meta={
         <>
           <HomeWidgetCount>{count}</HomeWidgetCount>
-          {allDone ? null : (
-            <Progress
-              value={visible.length ? (doneCount / visible.length) * 100 : 0}
-              aria-label={`${count} done`}
-              className="h-1 w-10 shrink-0 bg-muted [&_[data-slot=progress-indicator]]:bg-status-success"
-            />
-          )}
+          <Progress
+            value={visible.length ? (doneCount / visible.length) * 100 : 0}
+            aria-label={`${count} done`}
+            className="h-1 w-10 shrink-0 bg-muted [&_[data-slot=progress-indicator]]:bg-status-success"
+          />
         </>
       }
-      action={
-        allDone ? (
+    >
+      {setup ? (
+        <>
+          <PhaseHeader
+            step={1}
+            title="Set up"
+            note={setupDone ? "Done" : `${setup.length} to fix`}
+          />
+          {setupDone ? (
+            <p className="flex items-center gap-2 border-t border-border-subtle px-4 py-2.5 text-sm text-muted-foreground">
+              <StatusIcon tone="success" focusable={false} />
+              The swarm can run tasks.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border-subtle border-t border-border-subtle">
+              {setup.map((item) => (
+                <SetupRow key={item.id} item={item} />
+              ))}
+            </ul>
+          )}
+          <PhaseHeader step={2} title="Get the swarm working" note={count} />
+        </>
+      ) : null}
+      <ul className={cn("divide-y divide-border-subtle", setup && "border-t border-border-subtle")}>
+        {visible.map((item) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            busy={busy}
+            canAddChannel={data.canEditSwarm && item.kind === "channel"}
+            onRemove={() => setRemoving(item)}
+            onUpdate={(body) => onUpdate(item.id, body)}
+            onAddChannel={addChannel}
+          />
+        ))}
+      </ul>
+
+      {removed.length > 0 ? (
+        <div className="border-t border-border-subtle">
           <Button
             type="button"
             size="xs"
             variant="ghost"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((open) => !open)}
+            className="mx-2 my-1.5 text-muted-foreground"
+            aria-expanded={showRemoved}
+            onClick={() => setShowRemoved((open) => !open)}
           >
-            {expanded ? "Hide" : "Show"}
+            {showRemoved ? "Hide removed" : `Show removed (${removed.length})`}
           </Button>
-        ) : null
-      }
-    >
-      {collapsed ? null : (
-        <>
-          {setup ? (
-            <>
-              <PhaseHeader
-                step={1}
-                title="Set up"
-                note={setupDone ? "Done" : `${setup.length} to fix`}
-              />
-              {setupDone ? (
-                <p className="flex items-center gap-2 border-t border-border-subtle px-4 py-2.5 text-sm text-muted-foreground">
-                  <StatusIcon tone="success" focusable={false} />
-                  The swarm can run tasks.
-                </p>
-              ) : (
-                <ul className="divide-y divide-border-subtle border-t border-border-subtle">
-                  {setup.map((item) => (
-                    <SetupRow key={item.id} item={item} />
-                  ))}
-                </ul>
-              )}
-              <PhaseHeader step={2} title="Get the swarm working" note={count} />
-            </>
+          {showRemoved ? (
+            <ul className="divide-y divide-border-subtle border-t border-border-subtle">
+              {removed.map((item) => (
+                <li key={item.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-muted-foreground">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{removedNote(item)}</p>
+                  </div>
+                  {item.editable ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void onUpdate(item.id, { action: "restore" })}
+                    >
+                      Restore
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
           ) : null}
-          <ul
-            className={cn(
-              "divide-y divide-border-subtle",
-              setup && "border-t border-border-subtle",
-            )}
-          >
-            {visible.map((item) => (
-              <ChecklistRow
-                key={item.id}
-                item={item}
-                busy={busy}
-                canAddChannel={data.canEditSwarm && item.kind === "channel"}
-                onRemove={() => setRemoving(item)}
-                onUpdate={(body) => onUpdate(item.id, body)}
-                onAddChannel={addChannel}
-              />
-            ))}
-          </ul>
+        </div>
+      ) : null}
 
-          {removed.length > 0 ? (
-            <div className="border-t border-border-subtle">
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                className="mx-2 my-1.5 text-muted-foreground"
-                aria-expanded={showRemoved}
-                onClick={() => setShowRemoved((open) => !open)}
-              >
-                {showRemoved ? "Hide removed" : `Show removed (${removed.length})`}
-              </Button>
-              {showRemoved ? (
-                <ul className="divide-y divide-border-subtle border-t border-border-subtle">
-                  {removed.map((item) => (
-                    <li key={item.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-muted-foreground">{item.label}</p>
-                        <p className="text-xs text-muted-foreground">{removedNote(item)}</p>
-                      </div>
-                      {item.editable ? (
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void onUpdate(item.id, { action: "restore" })}
-                        >
-                          Restore
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-
-          <RemoveDialog
-            item={removing}
-            busy={busy}
-            onClose={() => setRemoving(null)}
-            onConfirm={async (reason) => {
-              const item = removing;
-              setRemoving(null);
-              if (item) {
-                await onUpdate(item.id, { action: "remove", ...(reason ? { reason } : {}) });
-              }
-            }}
-          />
-        </>
-      )}
+      <RemoveDialog
+        item={removing}
+        busy={busy}
+        onClose={() => setRemoving(null)}
+        onConfirm={async (reason) => {
+          const item = removing;
+          setRemoving(null);
+          if (item) {
+            await onUpdate(item.id, { action: "remove", ...(reason ? { reason } : {}) });
+          }
+        }}
+      />
     </HomeWidget>
   );
 }

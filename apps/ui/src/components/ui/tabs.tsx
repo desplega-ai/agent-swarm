@@ -38,15 +38,37 @@ const tabsListVariants = cva(
 function TabsList({
   className,
   variant = "default",
+  sticky = false,
   ...props
-}: React.ComponentProps<typeof TabsPrimitive.List> & VariantProps<typeof tabsListVariants>) {
-  return (
+}: React.ComponentProps<typeof TabsPrimitive.List> &
+  VariantProps<typeof tabsListVariants> & {
+    /**
+     * Pin the tabs to the top of the page's
+     * scroll area and let a long tab row scroll sideways instead of wrapping
+     * or clipping, so every tab stays one tap away at any scroll depth.
+     */
+    sticky?: boolean;
+  }) {
+  const list = (
     <TabsPrimitive.List
       data-slot="tabs-list"
       data-variant={variant}
-      className={cn(tabsListVariants({ variant }), className)}
+      className={cn(
+        tabsListVariants({ variant }),
+        sticky && "max-w-full shrink-0 justify-start overflow-x-auto [scrollbar-width:none]",
+        className,
+      )}
       {...props}
     />
+  );
+  if (!sticky) return list;
+  return (
+    <div
+      data-slot="tabs-sticky"
+      className="sticky top-0 z-20 -mx-4 bg-background px-4 py-1 md:static md:mx-0 md:bg-transparent md:p-0"
+    >
+      {list}
+    </div>
   );
 }
 

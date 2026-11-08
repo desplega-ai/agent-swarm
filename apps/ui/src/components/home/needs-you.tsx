@@ -15,6 +15,7 @@ import {
   Eye,
   KeyRound,
   MessageCircle,
+  X,
 } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -22,7 +23,7 @@ import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { useSessions } from "@/api/hooks/use-sessions";
-import { useRetryTask, useTasks } from "@/api/hooks/use-tasks";
+import { DISMISSED_TAG, useRetryTask, useTasks, useUpdateTaskTags } from "@/api/hooks/use-tasks";
 import type {
   AgentTask,
   ApprovalRequestSummary,
@@ -109,7 +110,24 @@ export function NeedsYou({ className }: { className?: string }) {
   const labels = useSessionLabels();
   const now = useMinuteClock();
   const retry = useRetryTask();
+  const tags = useUpdateTaskTags();
   const navigate = useNavigate();
+  // Dismiss tags the task, so the choice follows the user to every device.
+  const onDismiss = (task: AgentTask) =>
+    tags.mutate(
+      { id: task.id, add: [DISMISSED_TAG] },
+      {
+        onSuccess: () =>
+          toast.success("Dismissed", {
+            // Longer than the 4 s default: Undo is the only way back from Home.
+            duration: 8_000,
+            action: {
+              label: "Undo",
+              onClick: () => tags.mutate({ id: task.id, remove: [DISMISSED_TAG] }),
+            },
+          }),
+      },
+    );
   const onRetry = (task: AgentTask) =>
     retry.mutate(
       { task, userId: userId ?? null },
@@ -139,6 +157,7 @@ export function NeedsYou({ className }: { className?: string }) {
       groupName={(key) => groupLabel(key, userId ?? null, labels) || "No group"}
       now={now}
       onRetry={onRetry}
+      onDismiss={onDismiss}
       retrying={retry.isPending ? (retry.variables?.task.id ?? null) : null}
       review={sessionsToReview(unread.data?.sessions ?? [], sessions.data?.sessions ?? [], now)}
     />
@@ -158,6 +177,8 @@ export interface NeedsYouViewProps {
   now: number;
   /** Retry a failed task; without it a failure row links to the task. */
   onRetry?: (task: AgentTask) => void;
+  /** Hide a failed task from this list (tags it `ui:dismissed`). */
+  onDismiss?: (task: AgentTask) => void;
   /** The failed task a retry is running for. */
   retrying?: string | null;
   /** Finished, unread sessions of the last days (`sessionsToReview`). Not counted in the badge. */
@@ -176,6 +197,7 @@ export function NeedsYouView({
   groupName,
   now,
   onRetry,
+  onDismiss,
   retrying = null,
   review = [],
 }: NeedsYouViewProps) {
@@ -184,7 +206,10 @@ export function NeedsYouView({
     () => summarizeRecentFailures(failed.data?.tasks ?? [], FAILURE_PAGE, now),
     [failed.data, now],
   );
-  const failures = failuresNotListed(recent.tasks, items.sessions);
+  const failures = failuresNotListed(
+    recent.tasks.filter((task) => !task.tags?.includes(DISMISSED_TAG)),
+    items.sessions,
+  );
   const loading =
     (approvals.isLoading && !approvals.data) ||
     (sessions.isLoading && !sessions.data) ||
@@ -221,6 +246,7 @@ export function NeedsYouView({
     <HomeWidget
       className={className}
       bodyClassName="min-h-0 flex-1 overflow-y-auto"
+      collapse={{ id: "needs-you" }}
       title="Needs you"
       icon={<CircleAlert className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
       meta={
@@ -310,6 +336,7 @@ export function NeedsYouView({
                         task={task}
                         agent={agentName(task.agentId)}
                         onRetry={onRetry}
+                        onDismiss={onDismiss}
                         retrying={retrying === task.id}
                       />
                     ))}
@@ -627,37 +654,64 @@ function FailureRow({
   task,
   agent,
   onRetry,
+  onDismiss,
   retrying,
 }: {
   task: AgentTask;
   agent: string | null;
   onRetry?: (task: AgentTask) => void;
+  onDismiss?: (task: AgentTask) => void;
   retrying: boolean;
 }) {
   const to = `/tasks/${task.id}`;
+  const title = taskListTitle(task);
+  const dismiss = onDismiss ? (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      onClick={() => onDismiss(task)}
+      aria-label={`Dismiss ${title}`}
+      title="Dismiss"
+      className="text-muted-foreground"
+    >
+      <X aria-hidden />
+    </Button>
+  ) : null;
   return (
     <NeedsRow
       icon={CircleX}
       tone="failed"
       kind="Failed"
-      title={taskListTitle(task)}
+      title={title}
       meta={[agent, formatRelativeTime(task.finishedAt ?? task.lastUpdatedAt)]
         .filter(Boolean)
         .join(" · ")}
       why={firstLine(task.failureReason)}
       to={to}
       action={
-        onRetry ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            disabled={retrying}
-            onClick={() => onRetry(task)}
-            aria-label={`Retry ${taskListTitle(task)}`}
-          >
-            {retrying ? "Retrying…" : "Retry"}
-          </Button>
+        onRetry || dismiss ? (
+          <span className="flex items-center gap-1">
+            {onRetry ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={retrying}
+                onClick={() => onRetry(task)}
+                aria-label={`Retry ${title}`}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </Button>
+            ) : (
+              <Button asChild size="xs" variant="outline">
+                <Link to={to} tabIndex={-1} aria-hidden>
+                  Open
+                </Link>
+              </Button>
+            )}
+            {dismiss}
+          </span>
         ) : (
           "Open"
         )

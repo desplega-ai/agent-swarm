@@ -242,6 +242,7 @@ registerTemplate({
 ## Outputs
 
 Short answers: inline in the task output.
+Small table, chart or key figures for a chat thread: a \`card\` on \`slack-reply\` or \`chat-reply\` (max 1 table of 100 rows, 2 charts), not a file or Page. Bigger or document-shaped: agent-fs.
 agent-fs is the shared drive between agents and people. Deliver results as files. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
 Use-case results go under the task's asset key (\`key\` in \`get-task-details\`) in the shared drive. The drive path equals the key string, for example \`shared/<slug>/report-<YYYY-MM-DD>.md\`. Later runs read the earlier reports in that folder and compare.
 Pages: make a Page only when the requester asks for one; see \`pages\` skill.
@@ -271,6 +272,7 @@ registerTemplate({
 ## Outputs
 
 Short answers: inline in the task output.
+Small table, chart or key figures for a chat thread: a \`card\` on \`slack-reply\` or \`chat-reply\` (max 1 table of 100 rows, 2 charts), not a file or Page. Bigger or document-shaped: a Markdown attachment.
 Documents: Markdown task attachments; agent-fs is not configured here.
 Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.

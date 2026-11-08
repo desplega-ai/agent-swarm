@@ -25,17 +25,17 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
   "script-authoring": 1,
   "delegation-chain": 2,
   "tool-routing": 1,
-  "fanout-research": 1,
-  "fanout-research-solo": 1,
+  "fanout-research": 2,
+  "fanout-research-solo": 2,
   "worker-recovery": 1,
   "worker-recovery-solo": 1,
-  "implement-review": 1,
-  "implement-review-solo": 1,
+  "implement-review": 2,
+  "implement-review-solo": 2,
   "capability-routing": 1,
   "human-in-loop": 1,
   "human-in-loop-solo": 1,
   "real-diff-agent-fs": 1,
-  "docs-suggestion": 2,
+  "docs-suggestion": 3,
 };
 
 /**

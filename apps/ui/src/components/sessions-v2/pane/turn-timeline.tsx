@@ -1,6 +1,6 @@
 import { MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { TaskCard } from "@/components/sessions/task-card";
@@ -15,6 +15,7 @@ import {
   buildTurns,
   foldWaits,
   isDeferral,
+  keepSeenApprovals,
   onlyWaits,
   partSteps,
   type TurnPart,
@@ -87,7 +88,17 @@ export function TurnTimeline({
     () => buildTurns(chain, { personText: requestText }),
     [chain, requestText],
   );
-  const placed = useMemo(() => approvalsByPart(turns, approvals), [turns, approvals]);
+  const seen = useRef<{ rootTaskId: string; approvals: SessionApproval[] }>({
+    rootTaskId,
+    approvals: [],
+  });
+  const placed = useMemo(() => {
+    const before = seen.current.rootTaskId === rootTaskId ? seen.current.approvals : [];
+    const shown = keepSeenApprovals(before, approvals);
+    seen.current = { rootTaskId, approvals: shown };
+    return approvalsByPart(turns, shown);
+  }, [rootTaskId, turns, approvals]);
+  const pendingIds = useMemo(() => new Set(approvals.map((approval) => approval.id)), [approvals]);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
   const blocks = useStepBlocks(rootTaskId, showHandoffs);
@@ -150,6 +161,7 @@ export function TurnTimeline({
                 card={run.part === turn.parts[0] && !turn.person}
                 summary={workerSummary(run.part, now)}
                 approvals={placed.get(run.part.id) ?? []}
+                pendingIds={pendingIds}
                 showHandoffs={showHandoffs}
                 open={blocks.isOpen(run.part.id)}
                 onToggle={() => toggle(run.part.id)}
@@ -163,7 +175,7 @@ export function TurnTimeline({
         </Fragment>
       ))}
       {placed.get(null)?.map((approval) => (
-        <ApprovalLine key={approval.id} approval={approval} />
+        <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
       {rest.length > 0 ? (
         <section aria-label="Other tasks" className="flex min-w-0 flex-col">
@@ -182,6 +194,7 @@ function PartView({
   card,
   summary,
   approvals,
+  pendingIds,
   showHandoffs,
   open,
   onToggle,
@@ -194,6 +207,8 @@ function PartView({
   card: boolean;
   summary: WorkerSummary | null;
   approvals: SessionApproval[];
+  /** Approval ids still in the session detail's pending list. */
+  pendingIds: Set<string>;
   showHandoffs: boolean;
   open: boolean;
   onToggle: () => void;
@@ -259,11 +274,11 @@ function PartView({
           <Reply task={part.result} onToggle={onStepToggle} />
         </div>
       ) : null}
+      {approvals.map((approval) => (
+        <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
+      ))}
       {/* The lead works again: a live line under the latest answer, never in its place. */}
       {part.live ? <SwarmReply task={part.live} /> : null}
-      {approvals.map((approval) => (
-        <ApprovalLine key={approval.id} approval={approval} />
-      ))}
     </div>
   );
 }

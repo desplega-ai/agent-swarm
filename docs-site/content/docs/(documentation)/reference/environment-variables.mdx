@@ -66,6 +66,10 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SCRIPT_WORKFLOW_DEBUG` | `false` | When `true`, logs verbose debug output (auth override flag, resolved API key length) each time the script-run supervisor spawns a durable script-workflow subprocess. |
 | `WORKFLOW_MAX_ITERATIONS` | `100` | Max times a single workflow node may execute within one run before the engine aborts with an infinite-loop circuit-breaker error. |
 | `WORKFLOW_MAX_STEPS_PER_RUN` | `500` | Max total steps (across all nodes) allowed in a single workflow run before the engine's circuit breaker aborts it. |
+| `SEED_AUTOMATIONS_ENABLED` | `true` | Whether a freshly seeded zero-config workflow or schedule arrives enabled instead of disabled-but-inventoried. Read at boot. See [UI configuration](/docs/ui/configuration). |
+| `SEED_SCRIPTS_ENABLED` / `SEED_SKILLS_ENABLED` / `SEED_WORKFLOWS_ENABLED` / `SEED_SCHEDULES_ENABLED` | `true` | Set one to `false` to skip creating that kind's bundled catalog at all, at boot and by the seed CLI. Storage provisioning always runs. See [Per-kind seed suppression](/docs/ui/configuration#seed-suppression). |
+| `SWARM_IMPORT_SOURCES` | — | JSON array of file-import sources (workflows, skills, scripts, agent instructions) read at boot. Unset means no import. See [File import](/docs/guides/file-import). |
+| `SWARM_IMPORT_SOURCES_FILE` | — | Path to a JSON or YAML file holding the `SWARM_IMPORT_SOURCES` array. |
 | `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
 | `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
 | `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. Azure / Microsoft Foundry: `https://<resource>.services.ai.azure.com/openai/v1` (see [Embedding endpoints](/docs/architecture/memory#embedding-endpoints)). |
@@ -329,7 +333,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. HTTP is configuration-only until its receiver is installed and never falls back to Socket Mode. |
+| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. `http` serves signed requests at `POST /api/integrations/slack/events` and never falls back to Socket Mode. |
 | `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`), required in both modes |
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |

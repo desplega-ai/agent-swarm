@@ -1,6 +1,8 @@
 import Editor, { type Monaco } from "@monaco-editor/react";
 import { useCallback, useEffect, useRef } from "react";
 import type { ScriptTypeDefs } from "@/api/types";
+import { CodeViewer } from "@/components/shared/code-viewer";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { cn } from "@/lib/utils";
@@ -60,8 +62,10 @@ export function ScriptSourceEditor({
   readOnly = true,
   className,
   height = "100%",
-}: ScriptSourceEditorProps) {
+  label,
+}: ScriptSourceEditorProps & { label?: string }) {
   const { theme } = useTheme();
+  const isPhone = useIsPhone();
   const monacoRef = useRef<Monaco | null>(null);
 
   const handleBeforeMount = useCallback(
@@ -78,6 +82,13 @@ export function ScriptSourceEditor({
   useEffect(() => {
     if (monacoRef.current && typeDefs) registerScriptTypeDefs(monacoRef.current, typeDefs);
   }, [typeDefs]);
+
+  // Monaco on a phone is a fixed-height scroll
+  // box inside the page scroll, and touch-scrolling it fights the page. A
+  // read-only phone view renders the plain highlighted source at full height.
+  if (isPhone && readOnly) {
+    return <CodeViewer source={source} label={label ?? "typescript"} />;
+  }
 
   return (
     <div className={cn("min-h-0 overflow-hidden rounded-md border bg-card", className)}>

@@ -24,6 +24,7 @@ mock.module("@/components/home/activity-density", () => ({ ActivityDensity: stub
 mock.module("@/components/ui/segmented-control", () => ({ SegmentedControl: () => null }));
 mock.module("@/components/checklist/post-onboarding-checklist-card", () => ({
   PostOnboardingChecklistCard: stub("checklist"),
+  useSetupComplete: () => false,
 }));
 mock.module("@/components/dashboard/agent-activity-timeline", () => ({
   AgentActivityTimeline: stub("timeline"),

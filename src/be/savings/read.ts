@@ -430,10 +430,11 @@ export async function readWorkflowSavings(opts: {
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
   const calendarDays = daysBetween(firstDay, lastDay);
   const marker = await client.get<{ n: number; at: string | null }>(
-    "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='workflow' AND modelVersion=? AND day>=? AND day<=?",
-    [MODEL_VERSION, firstDay, lastDay],
+    "SELECT count(CASE WHEN day<? THEN 1 END) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='workflow' AND modelVersion=? AND day>=? AND day<=?",
+    [lastDay, MODEL_VERSION, firstDay, lastDay],
   );
-  const complete = Number(marker?.n) >= calendarDays.length;
+  // Today is still open; only closed calendar days need rollup markers.
+  const complete = Number(marker?.n) >= calendarDays.length - 1;
   const markerAt = marker?.at ?? null;
   const scope = {
     days: opts.days,
@@ -805,14 +806,15 @@ export async function readScriptSavings(opts: {
   // two queued at once wait about once.
   const [marker, scheduledRows] = await Promise.all([
     client.get<{ n: number; at: string | null }>(
-      "SELECT count(*) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
-      [MODEL_VERSION, firstDay, lastDay],
+      "SELECT count(CASE WHEN day<? THEN 1 END) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
+      [lastDay, MODEL_VERSION, firstDay, lastDay],
     ),
     client.query<{ scriptName: string }>(
       "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL ORDER BY scriptName",
     ),
   ]);
-  const complete = Number(marker?.n) >= calendarDays.length;
+  // Today is still open; only closed calendar days need rollup markers.
+  const complete = Number(marker?.n) >= calendarDays.length - 1;
   const scheduled = scheduledRows.map((r) => r.scriptName);
   const scope = {
     days: opts.days,

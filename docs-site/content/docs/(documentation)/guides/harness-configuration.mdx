@@ -510,7 +510,7 @@ Any ACP-speaking agent works. A few starting points:
     The adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` option. It also merges the model into `OPENCODE_CONFIG_CONTENT` before spawn as a fallback. OpenCode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the preset's allowlisted provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.).
   </Tab>
   <Tab value="GitHub Copilot CLI">
-    [GitHub Copilot CLI](https://github.com/github/copilot-cli) runs as `copilot --acp`. The full worker image ships it, pinned. On a slim or custom image, install it first (`npm install -g @github/copilot`); the entrypoint fails boot with that hint when the binary is missing.
+    [GitHub Copilot CLI](https://github.com/github/copilot-cli) runs as `copilot --acp`. The full worker image ships it, pinned. On a slim or custom image, install it first (`npm install -g @github/copilot`); the runner fails an affected task with that hint when the binary is missing. The worker can join before the missing dependency is discovered.
 
     With a Copilot subscription, give it a token that has the **Copilot Requests** permission:
 

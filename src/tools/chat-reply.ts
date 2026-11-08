@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentCurrentTask, getTaskById } from "@/be/db";
+import { cardIssuesMessage, cardSpecInputSchema, renderCardFor } from "@/integrations/cards";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import {
   ChatAdapterUnavailableError,
@@ -18,10 +19,16 @@ export const registerChatReplyTool = (server: McpServer) => {
     {
       title: "Reply in the chat thread of this task",
       description:
-        "Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.",
+        "Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.",
       annotations: { openWorldHint: true },
       inputSchema: z.object({
-        text: z.string().min(1).max(20_000).describe("Markdown text to post to the thread."),
+        text: z
+          .string()
+          .min(1)
+          .max(20_000)
+          .optional()
+          .describe("Markdown text to post to the thread. Required unless card is given."),
+        card: cardSpecInputSchema.optional(),
         attachments: chatAttachmentsSchema,
       }),
       outputSchema: swarmToolOutputSchema({
@@ -34,9 +41,10 @@ export const registerChatReplyTool = (server: McpServer) => {
           .optional(),
       }),
     },
-    async ({ text, attachments }, requestInfo) => {
+    async ({ text, card, attachments }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr("Agent ID not found.");
       const data = { yourAgentId: requestInfo.agentId };
+      if (!text && !card) return toolErr("Provide text or a card.", { data });
 
       // The header names the task this session works on; without it, the
       // agent's current in-progress task.
@@ -55,6 +63,13 @@ export const registerChatReplyTool = (server: McpServer) => {
           { data },
         );
       }
+      // Validated for the thread's adapter, before anything is sent.
+      const rendered = card ? await renderCardFor(thread.adapter, card) : undefined;
+      if (rendered && "issues" in rendered) {
+        return toolErr(cardIssuesMessage(rendered.issues), {
+          data: { ...data, issues: rendered.issues },
+        });
+      }
 
       const resolved = await resolveChatAttachmentRefs(
         attachments ?? [],
@@ -67,7 +82,8 @@ export const registerChatReplyTool = (server: McpServer) => {
         const sent = await postChatMessage({
           adapter: thread.adapter,
           threadId: thread.threadId,
-          text,
+          text: text ?? [],
+          card: rendered?.card,
           taskId: task.id,
           files: resolved.files,
           // Same anchor as the final answer: the message that started this task.

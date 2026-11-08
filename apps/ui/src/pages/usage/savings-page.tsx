@@ -173,7 +173,11 @@ export function SavingsPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatPanel
             label={`Saved (${data.window.days}d)`}
-            value={<span className="font-mono tabular-nums">{formatUsd(total.savingUsd.p50)}</span>}
+            value={
+              <span className="font-mono tabular-nums text-status-success-strong">
+                {formatUsd(total.savingUsd.p50)}
+              </span>
+            }
             detail={`${formatUsd(total.savingUsd.p10)} to ${formatUsd(total.savingUsd.p90)}`}
             info={`What every workflow and script run would have cost as agent tasks, minus their estimated cost. The range is the fleet's 80% band. ${note}`}
           />
@@ -217,6 +221,7 @@ export function SavingsPage() {
             nameLabel="Workflow"
             rows={workflowRows}
             valueLabel="Saved"
+            valueTone="success"
             countLabel="Runs"
           />
           <RankedSpendCard
@@ -224,6 +229,7 @@ export function SavingsPage() {
             nameLabel="Script"
             rows={scriptRows}
             valueLabel="Saved"
+            valueTone="success"
             countLabel="Runs"
           />
         </div>
