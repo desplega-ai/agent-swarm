@@ -79,8 +79,14 @@ test("runtime supervisor and Docker fallbacks are operator settings", () => {
     "DOCKER_HOST",
     "DOCKER_NETWORK",
     "DOCKER_EXTRA_HOSTS",
+    "DOCKER_RUNTIME",
+    "DOCKER_PIDS_LIMIT",
   ])
     expect(entries.find((entry) => entry.key === key)).toMatchObject({ kind: "string" });
+  expect(entries.find((entry) => entry.key === "DOCKER_HARDENED")).toMatchObject({
+    kind: "boolean",
+    defaultValue: "false",
+  });
 });
 
 test("CSV empty selections and unknown entries survive editing", () => {

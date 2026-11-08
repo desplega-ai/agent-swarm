@@ -717,6 +717,35 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "DOCKER_RUNTIME",
+        label: "Docker OCI runtime",
+        description:
+          "OCI runtime name for provisioned Docker workers, such as runsc or kata. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "runsc",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_HARDENED",
+        label: "Docker hardened workers",
+        description:
+          "Drop all capabilities except the worker entrypoint set, forbid privilege escalation, and disable swap for provisioned Docker workers. Controller configuration overrides this fallback.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_PIDS_LIMIT",
+        label: "Docker PID limit",
+        description:
+          "Maximum number of processes in each provisioned Docker worker. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "512",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:

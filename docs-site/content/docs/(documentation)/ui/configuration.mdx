@@ -619,6 +619,9 @@ The **Harness & tools** group also exposes these API settings for provisioned wo
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Unix socket for built-in Docker controllers. Restart the API to seed a new controller. |
 | `DOCKER_NETWORK` | Unset | Docker network for provisioned workers. |
 | `DOCKER_EXTRA_HOSTS` | Unset | Comma-separated `host:address` entries. Docker also includes `host.docker.internal:host-gateway`. |
+| `DOCKER_RUNTIME` | Unset | OCI runtime name for provisioned workers, such as `runsc` or `kata`. |
+| `DOCKER_HARDENED` | `false` | `true` or `1` drops all capabilities except the worker entrypoint set, forbids privilege escalation, and disables swap. |
+| `DOCKER_PIDS_LIMIT` | Unset | Maximum number of processes in each provisioned worker. |
 
 Stored global settings override deployment environment values after configuration reload.
 Built-in controllers read the API process environment as their Docker fallback.
