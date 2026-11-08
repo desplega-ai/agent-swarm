@@ -83,6 +83,15 @@ export const appActionActionSchema = z.object({
   input: z.record(z.string(), z.unknown()).optional(),
   /** Task-kind actions only — chains the new task off an existing one. Usually bound from chain scope (`{ "$chain": "leafTaskId" }`) by a component that runs a task chain; a literal or `$state` task id works too. Forwarded to the server unchanged; the server rejects it (400) for script and sync actions. */
   parentTaskId: z.string().optional(),
+  session: z
+    .object({
+      key: z.string(),
+      scope: z.enum(["user", "shared"]).optional(),
+    })
+    .optional()
+    .describe(
+      'Task-kind actions only — start or join the viewer\'s SessionThread session from any chain, e.g. a create form that sends the idea as the chat\'s first message. `key` is the SessionThread `sessionKey` to file the task under: a plain token (^[A-Za-z0-9_-]{1,128}$) or a binding such as { "$state": "/mutations/<model>/rowId" } (the row a create step in the same chain just made). The server keys the task as task:app:<appId>:<key>:user:<viewer>, the exact key a SessionThread with that `sessionKey` reads, so the thread shows it as its first message. `scope` "user" (default); "shared" is rejected today. A session step defaults to `followUp: false`. Inside a SessionThread `onDispatch` the thread\'s own session replaces this param.',
+    ),
 });
 
 /**
@@ -1521,7 +1530,7 @@ export const swarmCatalogSpec = {
     SessionThread: {
       props: sessionThreadProps,
       description:
-        'A chat on an app page, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). The session is found by key, not stored in a row: the server keys each task an `app.action` step creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer\'s newest session with that key. The viewer must have an identity: with none picked the composer is disabled. `scope: "shared"` (one session for everyone) comes in a follow-up PR and is rejected today. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no session yet → run `onDispatch`, whose `app.action` creates the session\'s root task; a task in the session not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` when there is no session, and a null `$chain` key drops the param, so one `onDispatch` covers the first message and follow-ups. Each `app.action` step is sent with the session and `followUp: false` (unless it sets `followUp` itself), so the Lead adds no review task. Messages are text only (no attachments or mic). After each send the composer stays busy until the new task shows up (at most 30 s). "New session" starts over: the next message creates a new root, and the older session is no longer shown. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
+        'A chat on an app page, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). The session is found by key, not stored in a row: the server keys each task an `app.action` step creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer\'s newest session with that key. The viewer must have an identity: with none picked the composer is disabled. `scope: "shared"` (one session for everyone) comes in a follow-up PR and is rejected today. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no session yet → run `onDispatch`, whose `app.action` creates the session\'s root task; a task in the session not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` when there is no session, and a null `$chain` key drops the param, so one `onDispatch` covers the first message and follow-ups. Each `app.action` step is sent with the session and `followUp: false` (unless it sets `followUp` itself), so the Lead adds no review task. A chain elsewhere can start the session for the viewer before the thread mounts: an `app.action` step with `session: { key: <this sessionKey> }` (e.g. a create form that sends the idea, then navigates here) creates the root, and the thread shows it as its first message with no second send. Messages are text only (no attachments or mic). After each send the composer stays busy until the new task shows up (at most 30 s). "New session" starts over: the next message creates a new root, and the older session is no longer shown. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
     },
     PageFrame: {
       props: pageFrameProps,
@@ -1556,7 +1565,7 @@ export const swarmCatalogSpec = {
     "app.mutate": {
       params: appMutateActionSchema,
       description:
-        "Create / update / delete a swarm-app row, then refetch every named query on the same model.",
+        'Create / update / delete a swarm-app row, then refetch every named query on the same model. After a successful create, `/mutations/<model>/rowId` holds the new row\'s id, so a later step in the same chain can bind it (`{ "$state": "/mutations/<model>/rowId" }`), e.g. an `app.navigate` to the new row or an `app.action` session key.',
     },
     "app.refresh": {
       params: appRefreshActionSchema,
@@ -1565,7 +1574,7 @@ export const swarmCatalogSpec = {
     "app.action": {
       params: appActionActionSchema,
       description:
-        "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`.",
+        "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`. `session: { key, scope? }` files a task-kind action's task under a SessionThread session for the viewer (see that param), so a chain like create row → `app.action` with `session.key` bound to `/mutations/<model>/rowId` → `app.navigate` to the page whose SessionThread uses that id starts the chat in one click.",
     },
     "app.navigate": {
       params: appNavigateActionSchema,

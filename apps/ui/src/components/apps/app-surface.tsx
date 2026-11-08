@@ -1002,8 +1002,20 @@ export function AppSurface({
             typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
           try {
             if (params.op === "create") {
-              setLastResponse(
-                await api.createAppRow(targetAppId, params.model, params.values ?? {}),
+              const created = await api.createAppRow(
+                targetAppId,
+                params.model,
+                params.values ?? {},
+              );
+              setLastResponse(created);
+              // The new row's id, for later steps of the same chain (a navigate
+              // to it, an `app.action` session key). Same consumer-local slot
+              // rule as `/actions/<name>`.
+              ctx.store.set(
+                targetAppId === ctx.app.id
+                  ? `/mutations/${params.model}`
+                  : `/refs/${targetAppId}/mutations/${params.model}`,
+                { rowId: created.row.id },
               );
               // The Form injects its own id, so a successful create resets the
               // fields the user just submitted. Inside an element instance
@@ -1103,8 +1115,14 @@ export function AppSurface({
               params?.input,
               parentTaskId,
               {
-                // `followUp: false` (SessionThread sets it) skips the Lead review.
-                followUp: typeof followUp === "boolean" ? followUp : undefined,
+                // `followUp: false` (SessionThread sets it) skips the Lead review;
+                // any session step defaults to it, one task per message.
+                followUp:
+                  typeof followUp === "boolean"
+                    ? followUp
+                    : isThreadSession(session)
+                      ? false
+                      : undefined,
                 // A SessionThread's session; the server builds the context key.
                 session: isThreadSession(session) ? session : undefined,
                 requestedByUserId: ctx.userId ?? undefined,

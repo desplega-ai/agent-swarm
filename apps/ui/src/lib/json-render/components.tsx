@@ -2885,10 +2885,11 @@ function FormComponent({ props }: { props: FormProps }) {
         }
         Object.assign(values, resolved.values);
       }
-      const scope = { form: values, state: getSnapshot() };
       let mutated = false;
       for (const binding of props.onSubmit as ActionChain) {
-        const params = resolveScopedParams(binding.params, scope);
+        // Live state per step (as `on` chains read it), so a step can bind
+        // what an earlier one wrote, e.g. `/mutations/<model>/rowId`.
+        const params = resolveScopedParams(binding.params, { form: values, state: getSnapshot() });
         // Every mutate in the chain carries the originating form's id: a
         // successful create clears the form, and a failure lands inline at
         // `/forms/<id>/$error` instead of the page banner.

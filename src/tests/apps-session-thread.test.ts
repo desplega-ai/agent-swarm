@@ -164,6 +164,92 @@ describe("SessionThread validation", () => {
   });
 });
 
+/** A create form whose chain starts the new project's session, then opens it. */
+function startSessionDefinition(session: unknown) {
+  return {
+    models: { project: { columns: { name: { kind: "string" } } } },
+    actions: { build: { kind: "task", prompt: "Build the page" } },
+    pages: {
+      home: {
+        root: "form",
+        elements: {
+          form: {
+            type: "Form",
+            props: {
+              id: "newProject",
+              fields: [{ name: "name", label: "Name", kind: "string" }],
+              onSubmit: [
+                {
+                  action: "app.mutate",
+                  params: { model: "project", op: "create", values: { name: { $form: "name" } } },
+                },
+                {
+                  action: "app.action",
+                  params: { name: "build", input: { message: { $form: "name" } }, session },
+                },
+                {
+                  action: "app.navigate",
+                  params: {
+                    page: "studio",
+                    params: { projectId: { $state: "/mutations/project/rowId" } },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+      studio: {
+        params: { projectId: { kind: "string" } },
+        root: "thread",
+        elements: {
+          thread: {
+            type: "SessionThread",
+            props: { id: "chat", sessionKey: { $state: "/route/params/projectId" } },
+          },
+        },
+      },
+    },
+    defaultPage: "home",
+  };
+}
+
+describe("app.action session", () => {
+  test("accepts a session key bound to the row a create step just made", async () => {
+    const parsed = await parseAppDefinition(
+      startSessionDefinition({ key: { $state: "/mutations/project/rowId" } }),
+    );
+    if (!parsed.success) console.error(parsed.issues);
+    expect(parsed.success).toBe(true);
+  });
+
+  test("accepts a literal plain-token key with scope user", async () => {
+    const parsed = await parseAppDefinition(startSessionDefinition({ key: "main", scope: "user" }));
+    expect(parsed.success).toBe(true);
+  });
+
+  test("rejects a literal key that is not a plain token", async () => {
+    await expectParseIssue(
+      startSessionDefinition({ key: "a:b" }),
+      "session key must match ^[A-Za-z0-9_-]{1,128}$",
+    );
+  });
+
+  test('rejects scope "shared" until shared sessions land', async () => {
+    await expectParseIssue(
+      startSessionDefinition({ key: "main", scope: "shared" }),
+      'scope "shared" is not supported yet',
+    );
+  });
+
+  test("rejects a /mutations ref to an undeclared model", async () => {
+    await expectParseIssue(
+      startSessionDefinition({ key: { $state: "/mutations/ghost/rowId" } }),
+      'state reference targets unknown model "ghost"',
+    );
+  });
+});
+
 describe("SessionThread turn text", () => {
   test("shows only input.message for a prompt rendered from the task.app.action template", () => {
     const input = { screenId: "s1", message: 'Add a card titled "Hello"\nwith two lines' };
