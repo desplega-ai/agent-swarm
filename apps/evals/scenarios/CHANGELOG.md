@@ -42,22 +42,50 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 | script-authoring | 1 | Fixed `script-created` / `script-run-output` (Phase 1). |
 | delegation-chain | 2 | See below. |
 | tool-routing | 1 | Structured-output gate, partial hop order (Phase 2). |
-| fanout-research | 1 | Lead + 3 workers, 45 seeded incidents in 3 region shards (Phase 7). |
-| fanout-research-solo | 1 | Single-agent baseline of fanout-research (Phase 7, plan Q6). |
+| fanout-research | 2 | See below. Lead + 3 workers, 45 seeded incidents in 3 region shards (Phase 7). |
+| fanout-research-solo | 2 | Single-agent baseline of fanout-research (Phase 7, plan Q6). v2: bumped with fanout-research; solo rubric unchanged. |
 | worker-recovery | 1 | Lead + 2 workers, clerk-2's ledger poisoned at seed time (Phase 7). |
 | worker-recovery-solo | 1 | Single-agent baseline of worker-recovery (Phase 7, plan Q6). |
-| implement-review | 1 | Lead + coder + reviewer; reviewer alone holds the spec exposing a planted bug (Phase 8). |
-| implement-review-solo | 1 | Single-agent baseline of implement-review (Phase 8, plan Q6). |
+| implement-review | 2 | See below. Lead + coder + reviewer; reviewer alone holds the spec exposing a planted bug (Phase 8). |
+| implement-review-solo | 2 | Single-agent baseline of implement-review (Phase 8, plan Q6). v2: bumped with implement-review; solo rubric unchanged. |
 | capability-routing | 1 | Lead + 3 workers with declared profiles; each input on one worker only (Phase 8). |
 | human-in-loop | 1 | Ambiguous export, canned reply to request-human-input (Phase 8). |
 | human-in-loop-solo | 1 | Single-agent baseline of human-in-loop (Phase 8, plan Q6). |
 | real-diff-agent-fs | 1 | A real merged fix (agent-fs PR #73), pushed to a sandbox remote, graded by its hidden tests on a fresh clone. |
-| docs-suggestion | 2 | See below. Lead + 1 worker; three setup asks that each match one docs playbook, a typo fix that matches none, a reminder the scheduling skill covers. |
+| docs-suggestion | 3 | See below. Lead + 1 worker; three setup asks that each match one docs playbook, a typo fix that matches none, a reminder the scheduling skill covers. |
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.
 
 ## Changes
+
+### docs-suggestion v3
+
+`replyFor` found a request's task by `title === request.title`. The runner sends
+no title (only the task text `<title>\n\n<description>`), and the API leaves it
+null or auto-titles it, so no live task ever matched: every reply read as empty,
+`lead-replied-to-every-request` failed and `docs-offer` scored 0.4 (the two
+negatives) for every model. Tasks are now found by the text the runner sent
+(`scenarioTaskText`, shared with the runner). `nullTasks` fixtures now carry the
+live shape (empty title, full task text), which is what hid the bug.
+
+### implement-review v2
+
+`verdictOf` read only a `VERDICT: X` line. A lead that asked the reviewer to
+answer in JSON got `{"verdict":"REQUEST_CHANGES",...}` then
+`{"verdict":"APPROVE"}`, and the grader saw no review at all: review 0, process 0,
+attempt score 0.444. A JSON `verdict` field with the same two values (also
+JSON-escaped) now counts. The first verdict in the text still wins.
+
+### fanout-research v2
+
+The lead-pulled-the-data check matched `region` anywhere in a get-tasks call, so a
+lead reading its own shard tasks by a tag it set (`tags: ["region-shard"]`) or by
+words from its own briefs (`search: "region shard"`) was zeroed on delegation. Tags
+now count only when they are seeded tags (`incident`, `region:<r>`), and a search
+only when it names an incident field or id, or is a bare `region` / `region: <r>`.
+Limits of 30+ and `db-query` are still flagged. New: any call whose result holds
+every seeded record of a region is flagged, whatever its filter.
 
 ### docs-suggestion v2
 
