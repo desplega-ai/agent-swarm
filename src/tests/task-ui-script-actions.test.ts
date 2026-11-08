@@ -21,8 +21,9 @@ import * as runSavedModule from "../be/scripts/run-saved";
 import { acquireTaskUiScriptActionRun, getTaskUiSpec, upsertTaskUiSpec } from "../be/task-ui-spec";
 import { registerStoreProgressTool } from "../tools/store-progress";
 import { runTaskUiAction } from "../ui-spec/actions";
-import { scriptActionIssues, TASK_UI_SPEC_UPDATED_EVENT } from "../ui-spec/script-actions";
+import { scriptActionIssues } from "../ui-spec/script-actions";
 import type { TaskUiSpec, TaskUiSpecDocument } from "../utils/task-ui-spec";
+import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 
 const dbPath = `/tmp/test-task-ui-script-actions-${crypto.randomUUID()}.sqlite`;

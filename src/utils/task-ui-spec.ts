@@ -15,6 +15,9 @@ export const UI_SPEC_MAX_ACTIONS_ROW_ELEMENTS = 25;
 /** Prefix on the Slack `action_id` of every spec Button. */
 export const UI_SPEC_ACTION_PREFIX = "swarm_ui:";
 
+/** Emitted after a script action replaced a task's card. Data: `{ taskId }`. */
+export const TASK_UI_SPEC_UPDATED_EVENT = "task.ui_spec_updated";
+
 /** Allowed id of a declared action, and of the Button that names it. */
 export const UI_SPEC_ACTION_ID = /^[a-z][a-z0-9_]{0,39}$/;
 

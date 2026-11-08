@@ -33,8 +33,16 @@ mock.module("@/components/ui/button", () => ({
     return <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>;
   },
 }));
-const runTaskUiAction = mock(async () => ({ status: "started" as const, taskId: "child" }));
+const runTaskUiAction = mock(
+  async (): Promise<{ status: string; taskId?: string; uiSpec?: TaskUiSpec }> => ({
+    status: "started",
+    taskId: "child",
+  }),
+);
 mock.module("@/api/client", () => ({ api: { runTaskUiAction } }));
+const invalidateQueries = mock(async (_filters: { queryKey: unknown[] }) => {});
+mock.module("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries }) }));
+mock.module("lucide-react", () => ({ Loader2: () => <i /> }));
 mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
 mock.module("@/components/ui/card", () => ({
   Card: stub("section"),
@@ -54,7 +62,9 @@ mock.module("@/components/ui/table", () => ({
   TableCell: stub("td"),
 }));
 
-const { TaskUiSpecView, uiSpecPieSlices } = await import("./task-ui-spec-view");
+const { TaskUiSpecView, renderUiSpecElement, uiSpecPieSlices } = await import(
+  "./task-ui-spec-view"
+);
 const { distinctSeriesColor } = await import("../../lib/json-render/chart-model");
 
 const FALLBACK = "FALLBACK TEXT";
@@ -136,6 +146,38 @@ describe("TaskUiSpecView", () => {
     expect(lastButtonClick).toBeDefined();
     lastButtonClick?.();
     expect(runTaskUiAction).toHaveBeenCalledWith("task-1", "rerun");
+  });
+
+  test("a script Button stays enabled, hands over the new card and invalidates task queries", async () => {
+    const fresh = specWith("Text", { content: "Fresh" });
+    runTaskUiAction.mockImplementationOnce(async () => ({ status: "refreshed", uiSpec: fresh }));
+    invalidateQueries.mockClear();
+    const onRefreshed = mock((_uiSpec: TaskUiSpec) => {});
+    lastButtonClick = undefined;
+    const html = renderToStaticMarkup(
+      <>
+        {renderUiSpecElement(
+          "Button",
+          { type: "Button", props: { id: "refresh", label: "Refresh" }, children: [] },
+          {
+            taskId: "task-1",
+            elements: {},
+            actions: { refresh: { kind: "script", script: "deploy-stats" } },
+            onRefreshed,
+          },
+        )}
+      </>,
+    );
+    expect(html).toContain('data-button="enabled"');
+    lastButtonClick?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runTaskUiAction).toHaveBeenCalledWith("task-1", "refresh");
+    expect(onRefreshed).toHaveBeenCalledWith(fresh);
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters.queryKey)).toEqual([
+      ["task", "task-1"],
+      ["session"],
+      ["sessions"],
+    ]);
   });
 
   test("the plan example renders its field, table rows and link", () => {

@@ -12,6 +12,7 @@ import type { AgentTask, ScriptRecord } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
+  TASK_UI_SPEC_UPDATED_EVENT,
   type TaskUiSpec,
   type TaskUiSpecAction,
   UI_SPEC_SCRIPT_ARGS_MAX_BYTES,
@@ -28,9 +29,6 @@ export const UI_SPEC_SCRIPT_ACTION_TIMEOUT_MS = 30_000;
 export const UI_SPEC_SCRIPT_ACTION_LEASE_MS = UI_SPEC_SCRIPT_ACTION_TIMEOUT_MS + 15_000;
 /** Minimum gap between two runs of one action on one task. */
 export const UI_SPEC_SCRIPT_ACTION_COOLDOWN_MS = 30_000;
-
-/** Emitted after a script action replaced a task's card. Data: `{ taskId }`. */
-export const TASK_UI_SPEC_UPDATED_EVENT = "task.ui_spec_updated";
 
 type ScriptAction = Extract<TaskUiSpecAction, { kind: "script" }>;
 

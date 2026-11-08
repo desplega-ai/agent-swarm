@@ -77,7 +77,12 @@ The engine checks every spec when you store it. It refuses a spec that breaks a 
 
 A `Button` needs `UI_SPEC_ACTIONS_ENABLED=true`. When that flag is off, the engine refuses a spec with a `Button`. Use `LinkButton` instead.
 
-When the flag is on, each `Button.props.id` matches `^[a-z][a-z0-9_]{0,39}$` and names a key of `uiSpec.actions`. Each action is `{ "kind": "follow_up", "prompt": "<at most 4000 characters>" }`.
+When the flag is on, each `Button.props.id` matches `^[a-z][a-z0-9_]{0,39}$` and names a key of `uiSpec.actions`. An action is one of:
+
+- `{ "kind": "follow_up", "prompt": "<at most 4000 characters>" }`: a click starts one Lead task with the prompt. It runs once.
+- `{ "kind": "script", "script": "<global script name>", "args": { ... } }`: a click re-runs the script with these frozen args (at most 4 KB, checked against the script's args schema) and replaces the card with its result. No Lead task. The requester can click again after a 30-second cooldown.
+
+A `script` action needs the script pinned in `UI_SPEC_SCRIPT_ACTIONS` (`name@<contentHash prefix>`). Only a human admin can pin one; an edited script stays refused until it is re-pinned. The script returns `{ spec, actions? }`, the same shape as `uiSpec`. When it omits `actions`, the stored actions carry over, so a Refresh button keeps working. Put an "Updated HH:MM" `Text` in the card so readers can tell when it ran.
 
 ## Which card a Slack thread shows
 

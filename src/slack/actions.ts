@@ -12,7 +12,6 @@ import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispat
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 
-/** The ephemeral reply to a card Button click that did not start its action. */
 /** The ephemeral reply to a card click, or `null` when the click needs none. */
 function uiActionReply(result: TaskUiActionResult, renderV2: boolean): string | null {
   switch (result.status) {
