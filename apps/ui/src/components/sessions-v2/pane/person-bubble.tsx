@@ -55,6 +55,12 @@ export function PersonBubble({
   const name = personId ? userName(users, personId) : (prompt.speaker ?? "Someone");
   const via = viaNote(task, rootSource);
   const external = givenText === undefined && task.source !== "ui";
+  const actions = (
+    <>
+      {prompt.ask.trim() ? <MessageRawToggle raw={raw} onRawChange={setRaw} hover /> : null}
+      <MessageCopyButton text={text} hover />
+    </>
+  );
   return (
     <section
       aria-label={mine ? "Your message" : `Message from ${name}`}
@@ -67,7 +73,8 @@ export function PersonBubble({
         className={cn("mt-2", mine && "@max-[30rem]/turns:hidden")}
       />
       <div className={cn("flex max-w-[85%] min-w-0 flex-col gap-1.5", mine && "items-end")}>
-        <TaskPromptAttachments taskId={task.id} attachments={task.attachments} />
+        {/* Only what the person sent: the agent's files show with its reply (`SwarmReply`). */}
+        <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="person" />
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
@@ -91,14 +98,15 @@ export function PersonBubble({
               {name} ·
             </span>
           )}
+          {/* Mine: the hover actions sit left of the time, so the hidden buttons leave no gap at the bubble edge. */}
+          {mine ? actions : null}
           <MessageTime at={task.createdAt} />
           {via ? (
             <span className="min-w-0 truncate text-meta" title={via}>
               · {via}
             </span>
           ) : null}
-          {prompt.ask.trim() ? <MessageRawToggle raw={raw} onRawChange={setRaw} hover /> : null}
-          <MessageCopyButton text={text} hover />
+          {mine ? null : actions}
         </div>
       </div>
     </section>

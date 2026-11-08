@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { cardIssuesMessage, cardSpecInputSchema, renderCardFor } from "@/integrations/cards";
 import { CHAT_SDK_ADAPTER_NAMES } from "@/integrations/chat-sdk/config";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import {
@@ -17,7 +18,7 @@ export const registerChatPostTool = (server: McpServer) => {
     {
       title: "Post to a chat thread or channel",
       description:
-        "Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.",
+        "Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.",
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         adapter: z.enum(CHAT_SDK_ADAPTER_NAMES).describe("Chat SDK adapter name."),
@@ -31,7 +32,13 @@ export const registerChatPostTool = (server: McpServer) => {
           .min(1)
           .optional()
           .describe("Full SDK channel id, such as slack:C123. Ignored when threadId is set."),
-        text: z.string().min(1).max(20_000).describe("Markdown text to post."),
+        text: z
+          .string()
+          .min(1)
+          .max(20_000)
+          .optional()
+          .describe("Markdown text to post. Required unless card is given."),
+        card: cardSpecInputSchema.optional(),
         attachments: chatAttachmentsSchema,
       }),
       outputSchema: swarmToolOutputSchema({
@@ -45,10 +52,11 @@ export const registerChatPostTool = (server: McpServer) => {
           .optional(),
       }),
     },
-    async ({ adapter, threadId, channelId, text, attachments }, requestInfo) => {
+    async ({ adapter, threadId, channelId, text, card, attachments }, requestInfo) => {
       const data = { yourAgentId: requestInfo.agentId };
       const target = threadId ?? channelId;
       if (!target) return toolErr("Give a threadId or a channelId.", { data });
+      if (!text && !card) return toolErr("Provide text or a card.", { data });
       if (adapterOfChatId(target) !== adapter) {
         return toolErr(`The id ${target} does not belong to the ${adapter} adapter.`, { data });
       }
@@ -57,6 +65,12 @@ export const registerChatPostTool = (server: McpServer) => {
           "Permission denied. Only the lead can post outside the thread of its task. Use chat-reply for the thread of your current task.",
           { data },
         );
+      }
+      const rendered = card ? await renderCardFor(adapter, card) : undefined;
+      if (rendered && "issues" in rendered) {
+        return toolErr(cardIssuesMessage(rendered.issues), {
+          data: { ...data, issues: rendered.issues },
+        });
       }
       const resolved = await resolveChatAttachmentRefs(
         attachments ?? [],
@@ -68,7 +82,8 @@ export const registerChatPostTool = (server: McpServer) => {
         const sent = await postChatMessage({
           adapter,
           ...(threadId ? { threadId } : { channelId }),
-          text,
+          text: text ?? [],
+          card: rendered?.card,
           taskId: requestInfo.sourceTaskId,
           files: resolved.files,
         });

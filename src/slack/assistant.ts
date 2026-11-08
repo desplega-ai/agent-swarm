@@ -62,12 +62,22 @@ export function createAssistant(
 ): Assistant {
   return new Assistant({
     ...(options.threadContextStore ? { threadContextStore: options.threadContextStore } : {}),
-    threadStarted: async ({ event, body, client, say, setSuggestedPrompts, saveThreadContext }) => {
+    threadStarted: async ({
+      event,
+      body,
+      context,
+      client,
+      say,
+      setSuggestedPrompts,
+      saveThreadContext,
+    }) => {
       // The greeting is not idempotent: a redelivery after a tolerated socket ack
       // failure must not post it twice.
       const eventId = body?.event_id;
       if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
-        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        console.log(
+          `[Slack] dropping Slack retry: event_id=${eventId ?? "unknown"} channel=${event.assistant_thread.channel_id ?? "unknown"} ts=${event.event_ts ?? "unknown"} thread_ts=${event.assistant_thread.thread_ts ?? "unknown"} retry_num=${context?.retryNum ?? "unknown"} retry_reason=${context?.retryReason ?? "unknown"}`,
+        );
         return ignoreSlackInbound("duplicate_event");
       }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
@@ -95,11 +105,13 @@ export function createAssistant(
       }
     },
 
-    threadContextChanged: async ({ event, body, client, saveThreadContext }) => {
+    threadContextChanged: async ({ event, body, context, client, saveThreadContext }) => {
       // Saves are order-dependent: a stale redelivery would overwrite newer context.
       const eventId = body?.event_id;
       if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
-        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        console.log(
+          `[Slack] dropping Slack retry: event_id=${eventId ?? "unknown"} channel=${event.assistant_thread.channel_id ?? "unknown"} ts=${event.event_ts ?? "unknown"} thread_ts=${event.assistant_thread.thread_ts ?? "unknown"} retry_num=${context?.retryNum ?? "unknown"} retry_reason=${context?.retryReason ?? "unknown"}`,
+        );
         return ignoreSlackInbound("duplicate_event");
       }
       if (await isExternalAssistantThread(client, event.assistant_thread.channel_id, body)) {
@@ -108,13 +120,27 @@ export function createAssistant(
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, body, say, setStatus, setTitle, getThreadContext, client }) => {
+    userMessage: async ({
+      message,
+      body,
+      context,
+      say,
+      setStatus,
+      setTitle,
+      getThreadContext,
+      client,
+    }) => {
+      console.log(
+        `[Slack] assistant message channel=${message.channel ?? "unknown"} ts=${message.ts ?? "unknown"} thread=${("thread_ts" in message ? message.thread_ts : undefined) ?? "unknown"} event_id=${body?.event_id ?? "unknown"}`,
+      );
       // Slack retries deliveries on 3s timeout / 5xx. Drop duplicates before
       // any task-creation work runs (DES-293). A delivery admitted from a
       // durable receipt was already deduplicated by its unique key.
       const eventId = body?.event_id;
       if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
-        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        console.log(
+          `[Slack] dropping Slack retry: event_id=${eventId ?? "unknown"} channel=${message.channel ?? "unknown"} ts=${message.ts ?? "unknown"} thread_ts=${("thread_ts" in message ? message.thread_ts : undefined) ?? "unknown"} retry_num=${context?.retryNum ?? "unknown"} retry_reason=${context?.retryReason ?? "unknown"}`,
+        );
         return ignoreSlackInbound("duplicate_event");
       }
 
