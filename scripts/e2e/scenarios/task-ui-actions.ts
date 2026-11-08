@@ -7,7 +7,9 @@ import {
   createAssignedTask,
   createUser,
   expectToolOk,
+  registerLead,
   registerWorker,
+  retireAgent,
   withMcp,
 } from "./core-helpers";
 
@@ -129,6 +131,163 @@ export const taskUiActions: Scenario = {
       for (const id of configIds) {
         expectStatus(await ctx.api("DELETE", `/api/config/${id}`), [200], "delete a card flag");
       }
+      await waitForFlags(ctx, false);
+    }
+  },
+};
+
+const SCRIPT_FLAGS = [...FLAGS, "UI_SPEC_SCRIPT_ACTIONS"] as const;
+
+/** Returns a fresh card that keeps the stored Refresh button. */
+const REFRESH_SOURCE = `export default async function main(args: { label?: string }) {
+  return {
+    spec: {
+      root: "c",
+      elements: {
+        c: { type: "Card", props: { title: \`Refreshed \${args.label ?? ""}\` }, children: ["a"] },
+        a: { type: "Actions", props: {}, children: ["b"] },
+        b: { type: "Button", props: { id: "refresh", label: "Refresh" }, children: [] },
+      },
+    },
+  };
+}
+`;
+
+/**
+ * A card `script` action. The allowlist pins the script's contentHash, and
+ * only a user token may write it: the operator key gets 403. The first click
+ * re-runs the script and replaces the card; the second is inside the cooldown.
+ */
+export const taskUiScriptActions: Scenario = {
+  name: "task-ui-script-actions",
+  order: 142,
+  async run(ctx) {
+    const configIds: string[] = [];
+    let taskId: string | undefined;
+    let leadId: string | undefined;
+    let allowlistId: string | undefined;
+    let adminToken: string | undefined;
+    try {
+      for (const key of FLAGS) {
+        const upsert = await ctx.api("PUT", "/api/config", {
+          body: { scope: "global", scopeId: null, key, value: "true", isSecret: false },
+        });
+        expectStatus(upsert, [200], `enable ${key}`);
+        configIds.push(String(asRecord(upsert.json).id));
+      }
+
+      // A lead writes the global script the card runs.
+      leadId = await registerLead(ctx, "ui-script");
+      const scriptName = `e2e-card-refresh-${ctx.nonce}`;
+      const upserted = await ctx.api("POST", "/api/scripts/upsert", {
+        agentId: leadId,
+        body: {
+          name: scriptName,
+          scope: "global",
+          description: "Card refresh fixture",
+          intent: "Return a fresh card",
+          source: REFRESH_SOURCE,
+        },
+      });
+      expectStatus(upserted, [200], "upsert the card script");
+      const row = ctx.db.get<{ contentHash: string }>(
+        "SELECT contentHash FROM scripts WHERE name = ? AND scope = 'global'",
+        [scriptName],
+      );
+      expect(Boolean(row?.contentHash), "The card script has no contentHash");
+      const allowlist = `${scriptName}@${row?.contentHash.slice(0, 12)}`;
+
+      // The allowlist is human-only: the shared key is refused, a user token writes it.
+      const operatorWrite = await ctx.api("PUT", "/api/config", {
+        body: { scope: "global", key: "UI_SPEC_SCRIPT_ACTIONS", value: allowlist },
+      });
+      expectStatus(operatorWrite, [403], "operator writes UI_SPEC_SCRIPT_ACTIONS");
+      const admin = await createUser(ctx, "ui-script-admin");
+      const minted = await ctx.api("POST", `/api/users/${admin}/mcp-tokens`, {
+        body: { label: `e2e ${ctx.nonce}` },
+      });
+      expectStatus(minted, [200], "mint an admin user token");
+      adminToken = String(asRecord(minted.json).plaintext);
+      const userWrite = await ctx.api("PUT", "/api/config", {
+        apiKey: adminToken,
+        body: { scope: "global", key: "UI_SPEC_SCRIPT_ACTIONS", value: allowlist },
+      });
+      expectStatus(userWrite, [200], "admin user writes UI_SPEC_SCRIPT_ACTIONS");
+      allowlistId = String(asRecord(userWrite.json).id);
+      const live = await pollUntil(async () => {
+        const response = await ctx.api(
+          "GET",
+          `/api/config/env-presence?keys=${SCRIPT_FLAGS.join(",")}`,
+        );
+        const presence = asRecord(response.json).presence as Record<string, boolean> | undefined;
+        return SCRIPT_FLAGS.every((key) => presence?.[key] === true);
+      }, 10_000);
+      expect(live, "The script card flags never went live within 10 seconds");
+
+      const worker = await registerWorker(ctx, "ui-script");
+      const requester = await createUser(ctx, "ui-script-requester");
+      taskId = await createAssignedTask(ctx, worker, `card refresh ${ctx.nonce}`, {
+        requestedByUserId: requester,
+      });
+      await claimTask(ctx, worker, taskId);
+      await withMcp(ctx, worker, (conn) =>
+        expectToolOk(conn, "store-progress", {
+          taskId,
+          status: "completed",
+          output: "Card ready.",
+          uiSpec: {
+            spec: {
+              root: "c",
+              elements: {
+                c: { type: "Card", props: { title: "Original" }, children: ["a"] },
+                a: { type: "Actions", props: {}, children: ["b"] },
+                b: leaf("Button", { id: "refresh", label: "Refresh" }),
+              },
+            },
+            actions: {
+              refresh: { kind: "script", script: scriptName, args: { label: ctx.nonce } },
+            },
+          },
+        }),
+      );
+
+      const path = `/api/tasks/${taskId}/ui-actions/refresh`;
+      const asRequester = { headers: asUser(requester) };
+      const first = await ctx.api("POST", path, asRequester);
+      expectStatus(first, [200], "first refresh click");
+      const refreshed = asRecord(first.json);
+      const title = asRecord(
+        asRecord(asRecord(asRecord(asRecord(refreshed.uiSpec).spec).elements).c).props,
+      ).title;
+      expect(
+        refreshed.status === "refreshed" && title === `Refreshed ${ctx.nonce}`,
+        `The click did not refresh the card: ${JSON.stringify(refreshed)}`,
+      );
+      const stored = asRecord((await ctx.api("GET", `/api/tasks/${taskId}`)).json);
+      expect(
+        String(asRecord(stored.uiSpec).fallbackText).includes(`Refreshed ${ctx.nonce}`),
+        `The stored card was not replaced: ${JSON.stringify(stored.uiSpec)}`,
+      );
+
+      const second = await ctx.api("POST", path, asRequester);
+      expectStatus(second, [429], "refresh click inside the cooldown");
+    } finally {
+      if (taskId) {
+        const children = ctx.db.query<{ id: string }>(
+          "SELECT id FROM agent_tasks WHERE parentTaskId = ?",
+          [taskId],
+        );
+        for (const child of children) await cancelQuietly(ctx, child.id);
+      }
+      if (allowlistId && adminToken) {
+        // The allowlist row is human-only, so the shared key cannot delete it.
+        const del = await ctx.api("DELETE", `/api/config/${allowlistId}`, { apiKey: adminToken });
+        expectStatus(del, [200], "delete UI_SPEC_SCRIPT_ACTIONS");
+      }
+      for (const id of configIds) {
+        expectStatus(await ctx.api("DELETE", `/api/config/${id}`), [200], "delete a card flag");
+      }
+      if (leadId) await retireAgent(ctx, leadId);
       await waitForFlags(ctx, false);
     }
   },
