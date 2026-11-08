@@ -341,6 +341,7 @@ export const getBasePromptWithParts = async (
   if (hasMcp && !scriptsOnlyMode && isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
     const uiSpecResult = await resolveTemplateAsync("system.agent.ui_spec", {});
     prompt += uiSpecResult.text;
+    section("system.agent.ui_spec", grown());
   }
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
