@@ -29,7 +29,12 @@ mock.module("@/api/hooks/use-session-tree", () => ({
   useSessionLabels: () => ({}),
   useSessionTree: () => ({}),
 }));
-mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({}), useRetryTask: () => ({}) }));
+mock.module("@/api/hooks/use-tasks", () => ({
+  DISMISSED_TAG: "ui:dismissed",
+  useTasks: () => ({}),
+  useRetryTask: () => ({}),
+  useUpdateTaskTags: () => ({}),
+}));
 mock.module("@/contexts/current-user-context", () => ({ useCurrentUser: () => ({}) }));
 mock.module("@/hooks/use-needs-you", () => ({ useNeedsYou: () => ({}) }));
 mock.module("@/hooks/use-minute-clock", () => ({ useMinuteClock: () => 0 }));
@@ -150,6 +155,19 @@ describe("NeedsYouView", () => {
     const html = render({});
     expect(html).toContain("All good. Nothing waits on you.");
     expect(html).not.toContain("needs you</span>");
+  });
+
+  test("a failure has a Dismiss button, and a dismissed failure leaves the list", () => {
+    const withButton = render({
+      failed: [failedTask],
+      overrides: { onRetry: () => {}, onDismiss: () => {} },
+    });
+    expect(withButton).toContain('aria-label="Dismiss Scrape the pricing page"');
+    expect(withButton).toContain('aria-label="Retry Scrape the pricing page"');
+
+    const dismissed = render({ failed: [{ ...failedTask, tags: ["ui:dismissed"] }] });
+    expect(dismissed).not.toContain("Scrape the pricing page");
+    expect(dismissed).toContain("All good. Nothing waits on you.");
   });
 
   test("a failed read is never an all clear", () => {

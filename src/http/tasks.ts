@@ -37,6 +37,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskTags,
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
@@ -849,6 +850,46 @@ const updateTaskTitleRoute = route({
   }),
   responses: {
     200: { description: "Title updated", schema: z.object({ task: AgentTaskSchema }) },
+    404: { description: "Task not found" },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "task.action.own" },
+});
+
+/**
+ * Only dashboard presentation tags (`ui:` namespace). Every other tag drives
+ * behaviour (classification such as `heartbeat`, routing, follow-ups) and is
+ * set by the server, never through this route.
+ */
+const TaskTagListSchema = z
+  .array(
+    z
+      .string()
+      .regex(/^ui:[a-z0-9][a-z0-9-]{0,60}$/, "Only ui: presentation tags can be changed here"),
+  )
+  .max(20);
+
+const updateTaskTagsRoute = route({
+  method: "patch",
+  path: "/api/tasks/{id}/tags",
+  pattern: ["api", "tasks", null, "tags"],
+  session: { taskParam: "id" },
+  summary: "Add or remove task tags",
+  description:
+    "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z
+    .object({
+      add: TaskTagListSchema.optional(),
+      remove: TaskTagListSchema.optional(),
+    })
+    .refine((body) => (body.add?.length ?? 0) + (body.remove?.length ?? 0) > 0, {
+      message: "Give at least one tag to add or remove",
+    }),
+  responses: {
+    200: { description: "Tags updated", schema: z.object({ task: AgentTaskSchema }) },
+    403: { description: "Task belongs to another user" },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -2076,6 +2117,27 @@ export async function handleTasks(
       return true;
     }
     updateTaskTitleRoute.respond(res, 200, { task });
+    return true;
+  }
+
+  if (updateTaskTagsRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskTagsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const existing = await getTaskById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (await deniesNonOwnerTaskWrite(req, existing)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+    const task = await updateTaskTags(parsed.params.id, parsed.body);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    updateTaskTagsRoute.respond(res, 200, { task });
     return true;
   }
 

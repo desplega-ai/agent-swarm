@@ -441,6 +441,7 @@ export {
   supersedeTask,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskTags,
   updateTaskTitle,
 } from "./db/tasks/write";
 
