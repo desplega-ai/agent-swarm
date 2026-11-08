@@ -19,8 +19,12 @@ import {
   currentKeyWindows,
   keyWindowUsageSchema,
 } from "../be/key-window-usage";
-import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
-import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
+import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
+import {
+  activeModelBlocks,
+  isModelScopedWindow,
+  MODEL_SCOPED_WINDOWS,
+} from "../utils/model-rate-limit-windows";
 import {
   type ProviderQuotaReport,
   providerAccountTelemetrySchema,
@@ -180,26 +184,32 @@ export const rateLimitWindowSchema = z.object({
 
 /**
  * A finite reset can still exceed Date's range and crash status rendering.
- * Bound display resets separately from routing. Unknown durations can be monthly.
- * Known durations allow one day of provider clock skew. Never extend an expired
- * reset into a new quota period because sparse updates do not establish one.
+ * Model blocks retain the fixed routing ceiling regardless of reported duration.
+ * Display-only windows can be monthly and allow one day of provider clock skew.
+ * Never extend an expired reset into a new quota period.
+ * Sparse updates do not establish a new period.
  */
 export const MAX_DISPLAY_RESET_MS = 400 * 86400000;
 export function sanitizeReportedWindowResets(
   windows: RateLimitWindowTelemetry,
 ): RateLimitWindowTelemetry {
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
 
   const sanitized: RateLimitWindowTelemetry = {};
   for (const [key, window] of Object.entries(windows)) {
     const duration =
       window.durationMins ??
       (key === "five_hour" ? 300 : key.startsWith("seven_day") ? 10080 : undefined);
-    const horizonMs =
-      duration === undefined
+    const horizonMs = isModelScopedWindow(key)
+      ? MAX_RATE_LIMIT_RESET_MS
+      : duration === undefined
         ? MAX_DISPLAY_RESET_MS
-        : Math.min(MAX_DISPLAY_RESET_MS, Math.max(7 * 86400000, duration * 60000 + 86400000));
-    const maxResetsAtSec = Math.floor((Date.now() + horizonMs) / 1000);
+        : Math.min(
+            MAX_DISPLAY_RESET_MS,
+            Math.max(MAX_RATE_LIMIT_RESET_MS, duration * 60000 + 86400000),
+          );
+    const maxResetsAtSec = Math.floor((nowMs + horizonMs) / 1000);
     sanitized[key] =
       window.resetsAt === undefined
         ? window

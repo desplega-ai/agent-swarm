@@ -143,10 +143,10 @@ describe("sanitizeReportedWindowResets", () => {
     const resetsAt = sanitized.seven_day_overage_included?.resetsAt;
     expect(resetsAt).toBeDefined();
     expect(() => new Date(resetsAt! * 1000).toISOString()).not.toThrow();
-    expect(resetsAt).toBeLessThanOrEqual(Math.floor((Date.now() + 8 * 86400000) / 1000));
+    expect(resetsAt).toBeLessThanOrEqual(Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000));
   });
 
-  test("clamps a representable but implausibly far-future resetsAt to the duration plus one day", () => {
+  test("clamps a far-future model reset to the fixed routing ceiling", () => {
     const farFutureSec = Math.floor(new Date("3000-01-01T00:00:00Z").getTime() / 1000);
     const windows = {
       seven_day_opus: {
@@ -158,7 +158,7 @@ describe("sanitizeReportedWindowResets", () => {
     const sanitized = sanitizeReportedWindowResets(windows);
     expect(sanitized.seven_day_opus?.resetsAt).toBeLessThan(farFutureSec);
     expect(sanitized.seven_day_opus?.resetsAt).toBeLessThanOrEqual(
-      Math.floor((Date.now() + 8 * 86400000) / 1000),
+      Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000),
     );
   });
 
