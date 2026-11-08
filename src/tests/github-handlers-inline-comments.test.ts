@@ -111,6 +111,7 @@ function makeReviewEvent(opts: {
       state: opts.state,
       html_url: `https://github.com/test/repo/pull/99#pullrequestreview-${id}`,
       user: { login: "reviewer" },
+      author_association: "COLLABORATOR",
       submitted_at: "2026-01-01T00:00:00Z",
       commit_id: opts.commitId ?? HEAD_OID,
     },
@@ -386,6 +387,7 @@ describe("inline review comment surfacing", () => {
         body: SAMPLE_INLINE_COMMENTS[0].body, // no @agent-swarm mention
         html_url: SAMPLE_INLINE_COMMENTS[0].html_url,
         user: { login: "reviewer" },
+        author_association: "COLLABORATOR",
       },
       pull_request: {
         number: 99,
