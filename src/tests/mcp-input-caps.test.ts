@@ -173,13 +173,18 @@ function postChunked(
   totalBytes: number,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
+    let responseEnded = false;
     const req = httpRequest(
       {
         host: "127.0.0.1",
         port,
         path,
         method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
+        headers: {
+          "Content-Type": "application/json",
+          "Transfer-Encoding": "chunked",
+          ...headers,
+        },
       },
       (res) => {
         let body = "";
@@ -187,28 +192,28 @@ function postChunked(
         res.on("data", (chunk: string) => {
           body += chunk;
         });
-        res.on("error", reject);
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        res.on("error", (error) => {
+          reject(error);
+          req.destroy();
+        });
+        res.on("end", () => {
+          responseEnded = true;
+          resolve({ status: res.statusCode ?? 0, body });
+          req.destroy();
+        });
       },
     );
-    // The server can answer 413 before the upload finishes. Still require its response after EPIPE.
-    req.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "EPIPE") return;
-      reject(error);
+    req.on("error", reject);
+    req.on("close", () => {
+      if (!responseEnded) reject(new Error("Chunked request closed before the complete response"));
     });
-    const chunk = Buffer.alloc(64 * 1024, 0x20);
-    let sent = 0;
-    const pump = () => {
-      while (sent < totalBytes) {
-        sent += chunk.byteLength;
-        if (!req.write(chunk)) {
-          req.once("drain", pump);
-          return;
-        }
-      }
-      req.end();
-    };
-    pump();
+    req.setTimeout(5000, () => {
+      req.destroy(new Error("Timed out waiting for the chunked-body rejection"));
+    });
+    // Cross the cap by one byte, then leave the upload open. A drain pump that
+    // keeps sending after the early 413 races Connection: close (EPIPE/ECONNRESET).
+    // No end() means the server must reject while reading, not wait for EOF.
+    req.write(Buffer.alloc(totalBytes, 0x20));
   });
 }
 
@@ -282,7 +287,7 @@ for (const surface of surfaces) {
       const { status, body } = await postChunked(
         surface.path,
         headers,
-        MCP_MAX_REQUEST_BODY_BYTES + 128 * 1024,
+        MCP_MAX_REQUEST_BODY_BYTES + 1,
       );
       expect(status).toBe(413);
       expect(JSON.parse(body)).toEqual({
