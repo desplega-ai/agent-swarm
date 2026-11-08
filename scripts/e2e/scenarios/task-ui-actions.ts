@@ -1,6 +1,7 @@
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  asUser,
   cancelQuietly,
   claimTask,
   createAssignedTask,
@@ -80,7 +81,12 @@ export const taskUiActions: Scenario = {
       );
 
       const path = `/api/tasks/${taskId}/ui-actions/rerun`;
-      const first = await ctx.api("POST", path);
+      const asRequester = { headers: asUser(requester) };
+      // Only a user principal runs a card action; the operator key gets 403.
+      const operator = await ctx.api("POST", path);
+      expectStatus(operator, [403], "operator ui-action click");
+
+      const first = await ctx.api("POST", path, asRequester);
       expectStatus(first, [200], "first ui-action click");
       const started = asRecord(first.json);
       expect(
@@ -96,7 +102,7 @@ export const taskUiActions: Scenario = {
         `The follow-up task is wrong: ${JSON.stringify(followUp)}`,
       );
 
-      const second = await ctx.api("POST", path);
+      const second = await ctx.api("POST", path, asRequester);
       expectStatus(second, [200], "second ui-action click");
       expect(
         asRecord(second.json).status === "already_done",
@@ -109,7 +115,7 @@ export const taskUiActions: Scenario = {
       );
       expect(children?.count === 1, `The clicks created ${children?.count} follow-up tasks`);
 
-      const unknown = await ctx.api("POST", `/api/tasks/${taskId}/ui-actions/missing`);
+      const unknown = await ctx.api("POST", `/api/tasks/${taskId}/ui-actions/missing`, asRequester);
       expectStatus(unknown, [404], "click on an undeclared action");
     } finally {
       // Cancel the follow-up and the completion's lead task: later scenarios need an idle lead.

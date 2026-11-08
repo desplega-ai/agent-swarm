@@ -15932,7 +15932,7 @@ export interface paths {
         put?: never;
         /**
          * Run the action a task card Button declares
-         * @description Runs the task card action once per task and action, for the task requester. Needs UI_SPEC_ACTIONS_ENABLED=true.
+         * @description Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.
          */
         post: {
             parameters: {

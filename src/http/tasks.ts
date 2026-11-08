@@ -796,7 +796,7 @@ const runTaskUiActionRoute = route({
   rbac: { permission: "task.action.own" },
   summary: "Run the action a task card Button declares",
   description:
-    "Runs the task card action once per task and action, for the task requester. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+    "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
   tags: ["Tasks"],
   params: z.object({ id: z.string(), actionId: z.string() }),
   responses: {
@@ -2182,9 +2182,11 @@ export async function handleTasks(
       jsonError(res, "Not authorized to act on this task", 403);
       return true;
     }
-    // A user acts as themself. An operator or agent that passed
-    // task.action.own acts for the requester.
-    const actorUserId = authUserId(getRequestAuth(req)) ?? task.requestedByUserId;
+    // Only a user clicks a card button: a user token, or a dashboard tab on the
+    // operator key that names its user. An agent, or an operator call with no
+    // picked user, resolves to no user, so the requester check refuses it.
+    const actor = await resolveSessionActor(req, myAgentId);
+    const actorUserId = actor.kind === "user" ? (actor.userId ?? undefined) : undefined;
     const result = await runTaskUiAction({
       taskId: task.id,
       actionId: parsed.params.actionId,
