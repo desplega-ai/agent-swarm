@@ -447,6 +447,7 @@ export {
   getPausedTasksForAgent,
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
+  markWorkflowStepTaskSuperseded,
   overwriteTerminalTaskResultText,
   pauseTask,
   recordTaskProviderIfUnset,
