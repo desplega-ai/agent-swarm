@@ -322,6 +322,24 @@ declare module "swarm-sdk" {
       lastRunStatus?: "failed" | "succeeded";
       includeFull?: boolean;
     }): Promise<unknown>;
+    // --- resources ---
+    resource_list(args?: {
+      taskId?: string;
+      kind?: "sandbox" | "browser";
+      state?:
+        | "provisioning"
+        | "running"
+        | "pausing"
+        | "paused"
+        | "stopping"
+        | "stopped"
+        | "resuming"
+        | "destroying"
+        | "destroyed"
+        | "error";
+      limit?: number;
+      offset?: number;
+    }): Promise<unknown>;
     // --- scripts ---
     script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
     script_run(args: {

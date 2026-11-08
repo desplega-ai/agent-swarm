@@ -17,6 +17,28 @@
 import * as z from "zod";
 
 export const PERMISSIONS = {
+  "resource.read": { description: "Read authorized resources.", namespace: "resource" },
+  "resource.create": {
+    description: "Create a resource for an authorized task.",
+    namespace: "resource",
+  },
+  "resource.use": {
+    description: "Use a resource in an authorized task tree.",
+    namespace: "resource",
+  },
+  "resource.destroy": { description: "Destroy an authorized resource.", namespace: "resource" },
+  "resource.feedback": {
+    description: "Submit feedback for an authorized resource.",
+    namespace: "resource",
+  },
+  "resource.template.manage": {
+    description: "Manage sandbox templates as the operator.",
+    namespace: "resource",
+  },
+  "resource.profile.manage": {
+    description: "Manage your user profiles or manage swarm profiles as the operator.",
+    namespace: "resource",
+  },
   "user.manage": {
     description: "Create, update, or deactivate user profiles.",
     namespace: "user",

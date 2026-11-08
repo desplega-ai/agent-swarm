@@ -27,6 +27,7 @@ export type HttpRequestAuth = (
        * swarm-script workflow step that started the run, and the run's own
        * `script_runs` row. Rows the request creates are stamped with them.
        */
+      sourceTaskId?: string | null;
       sourceStepId?: string | null;
       sourceScriptRunId?: string | null;
     }

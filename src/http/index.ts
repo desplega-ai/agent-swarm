@@ -129,6 +129,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRanking } from "./ranking";
 import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
+import { handleResources } from "./resources";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
@@ -419,6 +420,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+        () => handleResources(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),

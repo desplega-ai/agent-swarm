@@ -19,6 +19,7 @@ WORKER_PATHS=(
   src/hooks/
   src/providers/
   src/runtime-providers/
+  src/resource-providers/
   src/prompts/
   src/scripts-runtime/
   src/utils/

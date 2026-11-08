@@ -66,6 +66,12 @@ export function assertSingleStatement(sql: string): void {
  * secret values are ciphertext and agents query its non-secret keys.
  */
 export const DB_QUERY_DENIED_TABLES: ReadonlySet<string> = new Set([
+  "resources",
+  "browser_profiles",
+  "sandbox_templates",
+  "resource_links",
+  "resource_operations",
+  "resource_costs",
   "oauth_authorizations",
   "oauth_apps",
   "oauth_pending",

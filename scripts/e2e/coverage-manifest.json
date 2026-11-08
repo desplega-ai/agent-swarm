@@ -358,6 +358,10 @@
       "description": "Register, update, gate allowMerge, list and delete repo records over HTTP and MCP",
       "scenarios": ["platformb-repos"]
     },
+    "resource-read-authorization": {
+      "description": "Authenticated REST and MCP reads require explicit verified tasks and deny forged ownership. Phase 1 has no allocation API.",
+      "scenarios": ["resources-read"]
+    },
     "runtime-pools-flag-off": {
       "description": "Runtime pools, controllers and the worker socket under MULTI_RUNTIME_ENABLED=false",
       "scenarios": ["runtime-pools", "platformb-runtime"]

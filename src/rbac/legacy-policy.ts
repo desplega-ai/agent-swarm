@@ -268,7 +268,32 @@ export const LEGACY_RULES = {
 
 // ── Verb → rule table ────────────────────────────────────────────────────────
 
+const resourceAccess: LegacyRule = {
+  name: "verified-resource-context",
+  denyReason: "Resource access requires an authorized task tree and profile.",
+  evaluate: (_principal, resource) =>
+    resource?.kind === "resource" && resource.contextAuthorized && resource.profileAllowed,
+};
+const resourceProfileManage: LegacyRule = {
+  name: "resource-profile-owner",
+  denyReason:
+    "Only the profile owner can manage user profiles. Only the operator can manage swarm profiles.",
+  evaluate: (principal, resource) =>
+    resource?.kind === "browser_profile" &&
+    ((resource.ownerScope === "swarm" && principal.kind === "operator") ||
+      (resource.ownerScope === "user" &&
+        principal.kind === "user" &&
+        resource.ownerUserId === principal.userId)),
+};
+
 export const LEGACY_POLICY = {
+  "resource.read": resourceAccess,
+  "resource.create": resourceAccess,
+  "resource.use": resourceAccess,
+  "resource.destroy": resourceAccess,
+  "resource.feedback": resourceAccess,
+  "resource.template.manage": operatorOnly,
+  "resource.profile.manage": resourceProfileManage,
   "user.manage": leadOnly,
   "agent.profile.update.any": leadOnly,
   "agent.act.any": leadOnly,

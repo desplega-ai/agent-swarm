@@ -25,6 +25,11 @@ const SEALED_PREFIX = "sealed:v1:";
  * never open them. Add a column here when a writer starts sealing it.
  */
 export const SEALED_REPLAY_COLUMNS: readonly { table: string; column: string }[] = [
+  { table: "resources", column: "privateConfig" },
+  { table: "resources", column: "providerHandle" },
+  { table: "browser_profiles", column: "privateConfig" },
+  { table: "sandbox_templates", column: "privateConfig" },
+  { table: "resource_operations", column: "privateConfig" },
   { table: "script_runs", column: "args" },
   { table: "script_run_journal", column: "result" },
   { table: "workflow_run_steps", column: "output_replay" },
