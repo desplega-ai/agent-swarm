@@ -15,6 +15,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Component, type ReactNode, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Area,
   AreaChart,
@@ -35,6 +36,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
+import { useOptionalContextPanel } from "@/components/context-panel/context-panel-state";
+import { useLinkPreviewScope } from "@/components/link-preview/link-preview-scope";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -244,6 +247,11 @@ function UiSpecActionButton({
   variant: "default" | "destructive" | "outline";
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  // On the task and session pages the spawned task opens in the split screen;
+  // elsewhere (no preview scope) Open navigates to its page.
+  const openPreview = useOptionalContextPanel()?.openPreview;
+  const inScope = useLinkPreviewScope() !== null;
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const run = async () => {
     setState("running");
@@ -257,8 +265,23 @@ function UiSpecActionButton({
         setState(kind === "script" ? "idle" : "done");
         return;
       }
+      const spawned = result.status === "started" ? result.taskId : undefined;
       toast.success(
         result.status === "started" ? "Follow-up started." : "This button already ran.",
+        spawned
+          ? {
+              action: {
+                label: "Open",
+                onClick: () =>
+                  inScope && openPreview
+                    ? openPreview({ kind: "task", taskId: spawned })
+                    : navigate(`/tasks/${spawned}`),
+              },
+              // A sheet (the mobile preview, the task sheet) is modal: Radix sets
+              // `pointer-events: none` on the body, and the toast lives there.
+              actionButtonStyle: { pointerEvents: "auto" },
+            }
+          : undefined,
       );
       setState("done");
     } catch (error) {

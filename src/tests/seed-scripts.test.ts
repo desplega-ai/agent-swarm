@@ -26,6 +26,7 @@ import swarmUpdateCheck, {
 } from "../be/seed-scripts/catalog/swarm-update-check";
 import taskContextGathering from "../be/seed-scripts/catalog/task-context-gathering";
 import taskFailureAudit from "../be/seed-scripts/catalog/task-failure-audit";
+import waitForTask from "../be/seed-scripts/catalog/wait-for-task";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
@@ -2138,5 +2139,27 @@ describe("swarm-update-check", () => {
       agents: [{ id: "worker-1", isLead: false }],
     });
     await expect(swarmUpdateCheck({}, ctx)).rejects.toThrow("no lead to notify");
+  });
+});
+
+describe("wait-for-task", () => {
+  const ctxFor = (task: Record<string, unknown>) => ({
+    swarm: { task_get: async () => ({ data: task }) },
+  });
+
+  test("a workflow-step cut superseded by its queued retry is done", async () => {
+    const result = await waitForTask(
+      { taskId: "t1", budgetSec: 1 },
+      ctxFor({ status: "superseded", failureReason: "superseded_workflow_task", output: null }),
+    );
+    expect(result).toMatchObject({ done: true, status: "superseded" });
+  });
+
+  test("an ordinary superseded task still waits for its resume", async () => {
+    const result = await waitForTask(
+      { taskId: "t1", budgetSec: 0.1 },
+      ctxFor({ status: "superseded", failureReason: "manual_supersede", output: null }),
+    );
+    expect(result).toMatchObject({ done: false, status: "superseded" });
   });
 });

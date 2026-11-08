@@ -13,7 +13,7 @@ import type {
   RuntimePool,
   TaskAttachment,
 } from "../../../types";
-import { isTerminalTaskStatus } from "../../../types";
+import { isTerminalTaskStatus, SUPERSEDED_WORKFLOW_TASK_REASON } from "../../../types";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { publishWorkerNudge } from "../../worker-nudges";
@@ -999,6 +999,38 @@ export async function supersedeTask(
   }
 
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Move a workflow-step task that a supersede cut failed (`failed` with
+ * `SUPERSEDED_WORKFLOW_TASK_REASON`) to `superseded` once the engine has
+ * queued a retry for its step, so it no longer counts as a real failure. The
+ * engine still sees `failed` first: its retry path runs off `task.failed`.
+ * Keeps `failureReason` and `finishedAt`; emits no `task.superseded` event
+ * (there is no resume task, and the failure listeners already ran). No-op
+ * unless the row is still exactly that failure. Returns whether it moved.
+ */
+export async function markWorkflowStepTaskSuperseded(id: string): Promise<boolean> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
+       SET status = 'superseded',
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'failed' AND failureReason = ?
+       RETURNING *`,
+    [id, SUPERSEDED_WORKFLOW_TASK_REASON],
+  );
+  if (!row) return false;
+  try {
+    await dependencies.createLogEntry({
+      eventType: "task_superseded",
+      taskId: id,
+      agentId: row.agentId ?? undefined,
+      oldValue: "failed",
+      newValue: "superseded",
+      metadata: { reason: SUPERSEDED_WORKFLOW_TASK_REASON, resumeTaskId: null },
+    });
+  } catch {}
+  return true;
 }
 
 /**

@@ -542,6 +542,7 @@ value:markSteeringHandled
 value:markSteeringPromoted
 value:markTaskSlackReplySent
 value:markTasksNotified
+value:markWorkflowStepTaskSuperseded
 value:maskSecrets
 value:moveAssetKey
 value:moveTaskChainKeyInTx
@@ -667,6 +668,7 @@ value:getOrphanedInProgressTasksForAgent
 value:getPausedTasksForAgent
 value:getPendingTaskForAgent
 value:getRecentlyCancelledTasksForAgent
+value:markWorkflowStepTaskSuperseded
 value:overwriteTerminalTaskResultText
 value:pauseTask
 value:recordTaskProviderIfUnset

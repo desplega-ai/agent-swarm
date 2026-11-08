@@ -9,7 +9,7 @@ const SQL_TOOLS = new Set(["db-query"]);
 const manifest = {
   name: "sql-admin-only",
   description: "Blocks db-query tool calls on tasks created by a non-admin user",
-  version: "1.0.0",
+  version: "1.1.0",
   runtime: "api",
   assets: { hooks: "hooks.ts" },
   config,
@@ -64,7 +64,7 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
     const taskId = event.requestInfo?.sourceTaskId;
     if (!taskId) return;
 
-    // Creator lookup. Any failure blocks this SQL call only (fail closed).
+    // Creator lookup. A failed lookup blocks this SQL call only (fail closed).
     let creator: string;
     let role: string;
     try {
@@ -74,7 +74,11 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
       )) as Envelope;
       if (q?.success === false) throw new Error("db-query lookup returned success=false");
       const row = (q?.data?.rows ?? q?.rows ?? [])[0];
-      if (!row) throw new Error(`task ${taskId} not found`);
+      // A successful lookup with no row: the id is not a task. The runner sends a
+      // random correlation id for sessions with no task (pool or channel-message
+      // triggers, src/commands/runner.ts effectiveTaskId). No task means no creator:
+      // allow, the same as a missing header. Errors and timeouts above still block.
+      if (!row) return;
       creator = String(cell(row, 0, "requestedByUserId") ?? "");
       role = String(cell(row, 1, "role") ?? "");
     } catch (err) {

@@ -6,7 +6,7 @@ import {
   updateScheduledTask,
 } from "@/be/db";
 import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
-import type { AgentTask, ScheduledTask } from "@/types";
+import { type AgentTask, type ScheduledTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "@/types";
 import { workflowEventBus } from "@/workflows/event-bus";
 import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
 
@@ -22,6 +22,18 @@ type TaskWait = {
 type WaitMember = { taskId: string; taskStatus: string | null; deferred: number };
 
 type WakeReason = "ceiling" | "task.completed" | "task.failed" | "task.cancelled" | "task.skipped";
+
+/**
+ * A member's status as waits see it. A workflow step cut by a supersede is
+ * `failed` first and moves to `superseded` once its retry is queued. It has no
+ * resume child (the retry is a fresh task the wait never named), so it keeps
+ * reading as the failure it settled as. Reading it from the row, not the
+ * event, keeps restart reconciliation and either commit order of the retry
+ * move and the wait's reconcile on the same answer.
+ */
+const WAIT_MEMBER_STATUS_SQL = `CASE
+  WHEN t.status = 'superseded' AND t.failureReason = '${SUPERSEDED_WORKFLOW_TASK_REASON}' THEN 'failed'
+  ELSE t.status END`;
 
 /**
  * Read the wait row and its member set and decide whether the wait is ready.
@@ -46,7 +58,7 @@ async function resolveWaitCause(
     return undefined;
   if (reason === "ceiling") return { wait, cause: "ceiling expired", matchedTaskIds: [] };
   const members = await client.query<WaitMember>(
-    `SELECT m.taskId, t.status AS taskStatus, EXISTS (
+    `SELECT m.taskId, ${WAIT_MEMBER_STATUS_SQL} AS taskStatus, EXISTS (
        SELECT 1 FROM scheduled_tasks d
        WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
      ) AS deferred
@@ -228,16 +240,17 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
   const rows = await client.query<
     TaskWait & { taskStatus: "completed" | "failed" | "cancelled" | "skipped" }
   >(
-    `SELECT DISTINCT w.*, t.status AS taskStatus FROM deferred_task_waits w
+    `SELECT DISTINCT w.*, ${WAIT_MEMBER_STATUS_SQL} AS taskStatus FROM deferred_task_waits w
      JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
      JOIN agent_tasks t ON t.id = m.taskId
      JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed', 'cancelled', 'skipped')
+     WHERE w.status = 'pending' AND s.enabled = 1
+       AND ${WAIT_MEMBER_STATUS_SQL} IN ('completed', 'failed', 'cancelled', 'skipped')
        AND NOT EXISTS (
          SELECT 1 FROM scheduled_tasks d
          WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
        )
-       AND (w.eventName = 'settled' OR w.eventName = 'task.' || t.status)
+       AND (w.eventName = 'settled' OR w.eventName = 'task.' || ${WAIT_MEMBER_STATUS_SQL})
        ${taskId ? "AND m.taskId = ?" : ""}`,
     taskId ? [taskId] : [],
   );
