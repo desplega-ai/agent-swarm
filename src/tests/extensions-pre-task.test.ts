@@ -222,7 +222,7 @@ describe("extension task boundaries", () => {
       } else if (origin === "slack") {
         requester = { slackUserId: "U_BLOCKED_EVENT" };
         await createAgent({ name: "blocked-slack-lead", isLead: true, status: "idle" });
-        bufferThreadMessage(
+        await bufferThreadMessage(
           "C_BLOCKED_EVENT",
           "1000.0001",
           "blocked Slack task",
@@ -568,8 +568,8 @@ export default extension;
     const recorder = await installAndEnable("record-task-create");
     const channelId = "C_EVENT_METADATA";
     const threadTs = "3000.0001";
-    bufferThreadMessage(channelId, threadTs, "first request", "U_FIRST", "3000.0002");
-    bufferThreadMessage(channelId, threadTs, "second request", "U_SECOND", "3000.0003");
+    await bufferThreadMessage(channelId, threadTs, "first request", "U_FIRST", "3000.0002");
+    await bufferThreadMessage(channelId, threadTs, "second request", "U_SECOND", "3000.0003");
 
     await instantFlush(`${channelId}:${threadTs}`);
 
