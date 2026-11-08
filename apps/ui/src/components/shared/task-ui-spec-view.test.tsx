@@ -17,11 +17,25 @@ const stub =
     const Tag = tag as "div";
     return <Tag>{children}</Tag>;
   };
+// The Button stub keeps the last click handler, so a test can click it without a DOM.
+let lastButtonClick: (() => void) | undefined;
 mock.module("@/components/ui/button", () => ({
-  Button: ({ children, disabled }: { children?: ReactNode; disabled?: boolean }) => (
-    <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>
-  ),
+  Button: ({
+    children,
+    disabled,
+    onClick,
+  }: {
+    children?: ReactNode;
+    disabled?: boolean;
+    onClick?: () => void;
+  }) => {
+    if (onClick) lastButtonClick = onClick;
+    return <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>;
+  },
 }));
+const runTaskUiAction = mock(async () => ({ status: "started" as const, taskId: "child" }));
+mock.module("@/api/client", () => ({ api: { runTaskUiAction } }));
+mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
 mock.module("@/components/ui/card", () => ({
   Card: stub("section"),
   CardHeader: stub("header"),
@@ -79,7 +93,7 @@ function specWith(type: string, props: Record<string, unknown>): TaskUiSpec {
 }
 
 const render = (uiSpec: TaskUiSpec | null) =>
-  renderToStaticMarkup(<TaskUiSpecView task={{ uiSpec }} />);
+  renderToStaticMarkup(<TaskUiSpecView task={{ id: "task-1", uiSpec }} />);
 
 describe("TaskUiSpecView", () => {
   test.each([...UI_SPEC_COMPONENTS])("the switch renders %s without the fallback", (type) => {
@@ -108,11 +122,19 @@ describe("TaskUiSpecView", () => {
     expect(html).not.toContain("Bad");
   });
 
-  test("a Button renders disabled only when its action is declared", () => {
+  test("a Button renders only when its action is declared", () => {
     expect(render(specWith("Button", { id: "rerun", label: "Re-run" }))).toContain(
-      'data-button="disabled"',
+      'data-button="enabled"',
     );
     expect(render(specWith("Button", { id: "other", label: "Nope" }))).not.toContain("Nope");
+  });
+
+  test("a Button click posts the task ui-action route for its action", () => {
+    lastButtonClick = undefined;
+    render(specWith("Button", { id: "rerun", label: "Re-run" }));
+    expect(lastButtonClick).toBeDefined();
+    lastButtonClick?.();
+    expect(runTaskUiAction).toHaveBeenCalledWith("task-1", "rerun");
   });
 
   test("the plan example renders its field, table rows and link", () => {

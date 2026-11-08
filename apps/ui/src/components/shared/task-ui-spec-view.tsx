@@ -5,13 +5,13 @@
  * stored spec was already validated server-side.
  *
  * - Every URL passes `safeHttpUrl`; an unsafe one drops the link or image.
- * - A Button renders only when `uiSpec.actions` declares its id, and stays
- *   disabled until the task ui-action endpoint exists.
+ * - A Button renders only when `uiSpec.actions` declares its id. A click
+ *   POSTs the task ui-action route, which runs the action once.
  * - An unknown type, a missing element, or a render error shows
  *   `uiSpec.fallbackText` as prose instead of a partial card.
  */
 
-import { Component, type ReactNode } from "react";
+import { Component, type ReactNode, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -29,6 +29,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { toast } from "sonner";
+import { api } from "@/api/client";
 import type { AgentTask } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,7 +100,7 @@ export function isRenderableUiSpec(uiSpec: TaskUiSpec): boolean {
   return walk(root);
 }
 
-type RenderCtx = { elements: Elements; actions: TaskUiSpec["actions"] };
+type RenderCtx = { taskId: string; elements: Elements; actions: TaskUiSpec["actions"] };
 
 function renderChildren(el: SpecElement, ctx: RenderCtx): ReactNode[] {
   return el.children.map((id) => <UiSpecNode key={id} id={id} ctx={ctx} />);
@@ -181,19 +183,16 @@ export function renderUiSpecElement(
       return <div className="flex flex-wrap gap-2">{renderChildren(el, ctx)}</div>;
     case "Button": {
       const actionId = text(p.id);
-      if (!actionId || !ctx.actions?.[actionId]) return null;
-      // The click lands with the task ui-action endpoint; until then the
-      // button shows the declared action without running it.
+      if (!actionId || !ctx.actions || !Object.hasOwn(ctx.actions, actionId)) return null;
       return (
-        <Button
-          size="sm"
+        <UiSpecActionButton
+          taskId={ctx.taskId}
+          actionId={actionId}
+          label={text(p.label)}
           variant={
             p.style === "primary" ? "default" : p.style === "danger" ? "destructive" : "outline"
           }
-          disabled
-        >
-          {text(p.label)}
-        </Button>
+        />
       );
     }
     case "LinkButton": {
@@ -212,6 +211,45 @@ export function renderUiSpecElement(
       throw new Error(`Unknown uiSpec component ${String(unknownType)}`);
     }
   }
+}
+
+/** A declared card action. One click runs it; the server refuses a second run. */
+function UiSpecActionButton({
+  taskId,
+  actionId,
+  label,
+  variant,
+}: {
+  taskId: string;
+  actionId: string;
+  label: string;
+  variant: "default" | "destructive" | "outline";
+}) {
+  const [state, setState] = useState<"idle" | "running" | "done">("idle");
+  const run = async () => {
+    setState("running");
+    try {
+      const result = await api.runTaskUiAction(taskId, actionId);
+      toast.success(
+        result.status === "started" ? "Follow-up started." : "This button already ran.",
+      );
+      setState("done");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      setState("idle");
+    }
+  };
+  return (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={state !== "idle"}
+      data-slot="ui-spec-action"
+      onClick={() => void run()}
+    >
+      {label}
+    </Button>
+  );
 }
 
 function UiSpecTable({ props }: { props: Record<string, unknown> }) {
@@ -392,12 +430,16 @@ class UiSpecBoundary extends Component<
   }
 }
 
-export function TaskUiSpecView({ task }: { task: Pick<AgentTask, "uiSpec"> }) {
+export function TaskUiSpecView({ task }: { task: Pick<AgentTask, "id" | "uiSpec"> }) {
   const uiSpec = task.uiSpec;
   if (!uiSpec) return null;
   const fallbackText = uiSpec.fallbackText ?? "";
   if (!isRenderableUiSpec(uiSpec)) return <UiSpecFallback text={fallbackText} />;
-  const ctx: RenderCtx = { elements: uiSpec.spec.elements, actions: uiSpec.actions };
+  const ctx: RenderCtx = {
+    taskId: task.id,
+    elements: uiSpec.spec.elements,
+    actions: uiSpec.actions,
+  };
   return (
     <div data-slot="task-ui-spec" className="min-w-0 mt-3">
       <UiSpecBoundary fallbackText={fallbackText}>
