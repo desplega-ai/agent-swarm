@@ -246,8 +246,11 @@ async function main(): Promise<number> {
     async restartSut() {
       if (!activeSut || !activeSlack) throw new Error("E2E harness is not running");
       const connectionCalls = activeSlack.mock.apiCalls("apps.connections.open").length;
+      // A scenario that moved Slack to HTTP mode has no socket to come back.
+      const hadSocket = activeSlack.mock.connectionCount > 0;
       activeDb?.close();
       await restartSut(activeSut);
+      if (!hadSocket) return;
       const reconnected = await pollUntil(
         () => activeSlack!.mock.apiCalls("apps.connections.open").length > connectionCalls,
         60_000,

@@ -14,7 +14,8 @@ test("script executor selection persists and resets to native", async ({
   seed,
 }) => {
   test.skip(!seed, "remote run without seed");
-  await page.goto("/settings/configuration");
+  // Groups start collapsed; a search opens every group with a hit.
+  await page.goto("/settings/configuration?search=SCRIPT_EXECUTOR");
   const executor = page.locator("#setting-SCRIPT_EXECUTOR").getByRole("combobox");
   await expect(executor).toHaveText("Default (native)");
 
@@ -49,7 +50,8 @@ test("file link target saves dashboard and resets to not set", async ({
   seed,
 }) => {
   test.skip(!seed, "remote run without seed");
-  await page.goto("/settings/configuration");
+  // Groups start collapsed; a search opens every group with a hit.
+  await page.goto("/settings/configuration?search=AGENT_FS_LINK_TARGET");
   const target = page.locator("#setting-AGENT_FS_LINK_TARGET").getByRole("combobox");
   await expect(target).toHaveText("Not set");
 
@@ -127,7 +129,8 @@ test("duration units save native values and blank resets the setting", async ({
     value: "600000",
     isSecret: false,
   });
-  await page.goto("/settings/configuration");
+  // Groups start collapsed; a search opens every group with a hit.
+  await page.goto("/settings/configuration?search=HEARTBEAT_INTERVAL_MS");
   const row = page.locator("#setting-HEARTBEAT_INTERVAL_MS");
   const amount = row.getByRole("spinbutton");
   await expect(amount).toHaveValue("10");
@@ -164,7 +167,8 @@ test("multi-select can save no raters and preserves unknown saved names", async 
     value: "llm,future-rater",
     isSecret: false,
   });
-  await page.goto("/settings/configuration");
+  // Groups start collapsed; a search opens every group with a hit.
+  await page.goto("/settings/configuration?search=MEMORY_RATERS");
   const row = page.locator("#setting-MEMORY_RATERS");
   await row.getByRole("button", { name: "Active memory raters", exact: true }).click();
   await expect(

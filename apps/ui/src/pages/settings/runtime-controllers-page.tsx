@@ -18,7 +18,7 @@ import {
   recordFromRows,
   rowsFromRecord,
 } from "@/components/shared/key-value-editor";
-import { MobileList } from "@/components/shared/mobile-list";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -539,27 +539,29 @@ function RuntimeControllersList() {
           action={newController}
         />
       ) : isMobile ? (
-        <MobileList label="Runtime controllers" emptyMessage="No controllers">
+        // `flex-none` so the card hugs its rows instead of filling the screen
+        <MobileList label="Runtime controllers" emptyMessage="No controllers" className="flex-none">
           {rows.map((controller) => (
-            <li key={controller.id}>
-              <button
-                type="button"
-                onClick={() => setEditing(controller)}
-                className="flex min-h-11 w-full flex-col gap-1 px-4 py-3 text-left outline-none hover:bg-accent/40 focus-visible:bg-accent/50"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {controller.name}
+            // Shared row (chevron) plus the last error under the meta line
+            <MobileListRow
+              key={controller.id}
+              onClick={() => setEditing(controller)}
+              title={controller.name}
+              titleLines={1}
+              status={<StatusChip controller={controller} />}
+              meta={[
+                RUNTIME_KIND_LABEL[controller.kind],
+                placementLabel(controller.placement),
+                `${controller.secretConfigKeys.length} secret${controller.secretConfigKeys.length === 1 ? "" : "s"}`,
+              ]}
+              extras={
+                controller.lastError ? (
+                  <span className="line-clamp-1 text-xs text-status-error-strong">
+                    {controller.lastError}
                   </span>
-                  <StatusChip controller={controller} />
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {RUNTIME_KIND_LABEL[controller.kind]} · {placementLabel(controller.placement)} ·{" "}
-                  {controller.secretConfigKeys.length} secret
-                  {controller.secretConfigKeys.length === 1 ? "" : "s"}
-                </span>
-              </button>
-            </li>
+                ) : null
+              }
+            />
           ))}
         </MobileList>
       ) : (

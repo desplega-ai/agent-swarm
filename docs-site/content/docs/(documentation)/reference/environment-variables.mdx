@@ -329,7 +329,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. HTTP is configuration-only until its receiver is installed and never falls back to Socket Mode. |
+| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. `http` serves signed requests at `POST /api/integrations/slack/events` and never falls back to Socket Mode. |
 | `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`), required in both modes |
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |

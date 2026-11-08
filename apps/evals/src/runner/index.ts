@@ -78,6 +78,7 @@ import {
   type SandboxInfo,
   type Scenario,
   type SwarmTask,
+  scenarioTaskText,
   scenarioWorkerCount,
   scenarioWorkerSpec,
   type TaskSpec,
@@ -1505,7 +1506,7 @@ async function runAttemptOnce(opts: {
       // created WITHOUT agentId (v7 §12.2): the swarm API routes agentId-less
       // tasks to the lead — the lead-orchestration entry point.
       const created = await client.createTask({
-        task: `${spec.title}\n\n${spec.description}`,
+        task: scenarioTaskText(spec),
         ...(toLead ? {} : { agentId: w.agentId }),
         ...(deps.length > 0 ? { dependsOn: deps } : {}),
         ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),

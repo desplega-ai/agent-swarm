@@ -24,6 +24,7 @@ mock.module("@/components/shared/status-icon", () =>
 mock.module("@/components/shared/user-chip", () => require("../../../components/shared/user-chip"));
 mock.module("@/components/ui/tooltip", () => require("../../../components/ui/tooltip"));
 mock.module("@/hooks/use-user-name", () => require("../../../hooks/use-user-name"));
+mock.module("@/hooks/use-mobile", () => require("../../../hooks/use-mobile"));
 mock.module("@/hooks/use-copy-to-clipboard", () => require("../../../hooks/use-copy-to-clipboard"));
 mock.module("@/lib/approval-format", () => require("../../../lib/approval-format"));
 mock.module("@/lib/status-labels", () => require("../../../lib/status-labels"));

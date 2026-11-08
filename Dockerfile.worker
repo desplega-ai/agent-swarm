@@ -231,7 +231,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.22
+ARG AGENT_FS_VERSION=0.18.23
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -398,7 +398,6 @@ FROM worker-base AS worker-slim
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
-COPY src/commands/entrypoint-provider-binary.ts /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)
@@ -819,7 +818,6 @@ FROM worker-full-base AS worker-full
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
-COPY src/commands/entrypoint-provider-binary.ts /usr/local/lib/agent-swarm/entrypoint-provider-binary.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)

@@ -37,12 +37,12 @@ Token rotation is off (`settings.token_rotation_enabled: false`) because the app
 ## Configuration
 
 ```bash
-# Socket Mode (default and currently available)
+# Socket Mode (default)
 SLACK_MODE=socket
 SLACK_BOT_TOKEN=xoxb-...      # Bot User OAuth Token
 SLACK_APP_TOKEN=xapp-...      # App-Level Token
 
-# HTTP credential contract (receiver not available yet)
+# Signed HTTP ingress (no Socket Mode, no app token)
 # SLACK_MODE=http
 # SLACK_BOT_TOKEN=xoxb-...
 # SLACK_SIGNING_SECRET=...
@@ -51,7 +51,9 @@ SLACK_APP_TOKEN=xapp-...      # App-Level Token
 SLACK_DISABLE=true
 ```
 
-`SLACK_MODE` accepts only `socket` or `http` and defaults to `socket`. Invalid values fail closed. In the current phase, selecting `http` validates the bot token and signing-secret configuration but deliberately leaves Slack unavailable; it does not open a Socket Mode fallback, HTTP route, listener, or ingress. Keep `socket` selected until the signed HTTP receiver is installed.
+`SLACK_MODE` accepts only `socket` or `http` and defaults to `socket`. Invalid values fail closed and never fall back to a socket.
+
+With `http`, the API serves `POST /api/integrations/slack/events` for Events API deliveries, slash commands and interactivity. Point the app's event, interactivity and slash-command request URLs at it and set `socket_mode_enabled` to `false` in the manifest. Every request is verified with `SLACK_SIGNING_SECRET` (HMAC v0 over the raw body, timestamp within 5 minutes) before any work, and a delivery for another workspace is refused with 403. Events are stored before the 200 response, so a Slack retry never creates a second task, even across a restart. Slack also verifies the URL with a `url_verification` challenge when you save it; the route answers it once the signature checks out.
 
 A socket watchdog restarts the Slack app when the Socket Mode link stays down for 60 seconds, for example after `@slack/socket-mode` gives up on a failed reconnect. Retries back off exponentially from 30 seconds to 5 minutes, and a restart never overlaps a config reload. Each down and restart transition is logged.
 
