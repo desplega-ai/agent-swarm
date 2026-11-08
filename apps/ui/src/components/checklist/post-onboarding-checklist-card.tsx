@@ -95,11 +95,15 @@ export function isSetupComplete(data: ChecklistResponse, setup: SetupPhaseItem[]
   return visible.every((item) => item.done) && (!setup || setup.length === 0);
 }
 
-/** True once "Getting started" has nothing left; false while it loads or fails. */
+/**
+ * True once "Getting started" has nothing left. False while the checklist or
+ * the status (the Set up rows) is loading or failed, so Favorites does not
+ * take over the column before the setup rows are known.
+ */
 export function useSetupComplete(): boolean {
   const setup = useSetupPhase();
   const { data } = useChecklist();
-  return data ? isSetupComplete(data, setup) : false;
+  return data && setup ? isSetupComplete(data, setup) : false;
 }
 
 export function PostOnboardingChecklistCard({ className }: { className?: string }) {

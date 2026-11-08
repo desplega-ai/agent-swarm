@@ -16129,7 +16129,7 @@ export interface paths {
         head?: never;
         /**
          * Add or remove task tags
-         * @description Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.
+         * @description Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.
          */
         patch: {
             parameters: {

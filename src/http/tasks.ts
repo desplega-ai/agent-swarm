@@ -856,7 +856,18 @@ const updateTaskTitleRoute = route({
   rbac: { permission: "task.action.own" },
 });
 
-const TaskTagListSchema = z.array(z.string().trim().min(1).max(64)).max(20);
+/**
+ * Only dashboard presentation tags (`ui:` namespace). Every other tag drives
+ * behaviour (classification such as `heartbeat`, routing, follow-ups) and is
+ * set by the server, never through this route.
+ */
+const TaskTagListSchema = z
+  .array(
+    z
+      .string()
+      .regex(/^ui:[a-z0-9][a-z0-9-]{0,60}$/, "Only ui: presentation tags can be changed here"),
+  )
+  .max(20);
 
 const updateTaskTagsRoute = route({
   method: "patch",
@@ -865,7 +876,7 @@ const updateTaskTagsRoute = route({
   session: { taskParam: "id" },
   summary: "Add or remove task tags",
   description:
-    "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+    "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z

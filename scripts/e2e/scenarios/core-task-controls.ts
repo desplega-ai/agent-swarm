@@ -95,12 +95,12 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
   // PATCH /api/tasks/{id}/tags: add, remove (remove wins), empty body, 404.
   const before = await readTask(ctx, taskId);
   response = await ctx.api("PATCH", `/api/tasks/${taskId}/tags`, {
-    body: { add: ["ui:dismissed", "e2e:keep"] },
+    body: { add: ["ui:dismissed", "ui:e2e-keep"] },
   });
   expectStatus(response, [200], "add tags");
   let tags = asRecord(asRecord(response.json).task).tags;
   expect(
-    Array.isArray(tags) && tags.includes("ui:dismissed") && tags.includes("e2e:keep"),
+    Array.isArray(tags) && tags.includes("ui:dismissed") && tags.includes("ui:e2e-keep"),
     "Tags not added",
   );
   expect(
@@ -113,7 +113,7 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
   expectStatus(response, [200], "remove a tag");
   tags = (await readTask(ctx, taskId)).tags;
   expect(
-    Array.isArray(tags) && !tags.includes("ui:dismissed") && tags.includes("e2e:keep"),
+    Array.isArray(tags) && !tags.includes("ui:dismissed") && tags.includes("ui:e2e-keep"),
     "Tag not removed, or another tag lost",
   );
   expectStatus(
@@ -122,7 +122,12 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
     "tags with nothing to change",
   );
   expectStatus(
-    await ctx.api("PATCH", `/api/tasks/${GHOST}/tags`, { body: { add: ["x"] } }),
+    await ctx.api("PATCH", `/api/tasks/${taskId}/tags`, { body: { add: ["heartbeat"] } }),
+    [400],
+    "a behaviour tag outside the ui: namespace",
+  );
+  expectStatus(
+    await ctx.api("PATCH", `/api/tasks/${GHOST}/tags`, { body: { add: ["ui:x"] } }),
     [404],
     "tags of an unknown task",
   );
