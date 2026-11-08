@@ -72,7 +72,9 @@ function DayTooltip({ active, payload, split }: TooltipContentProps & { split: b
         <>
           <TooltipRow label="Subscription" value={formatUsd(point.subscription)} />
           <TooltipRow label="Pay-as-you-go" value={formatUsd(point.payg)} />
-          <TooltipRow label="Unattributed" value={formatUsd(point.unattributed)} />
+          {point.unattributed > 0 ? (
+            <TooltipRow label="Unattributed" value={formatUsd(point.unattributed)} />
+          ) : null}
         </>
       ) : null}
       <TooltipRow label="Sessions" value={formatCount(point.sessions)} />
@@ -156,6 +158,8 @@ export function DailySpendChart({
             {split ? (
               <>
                 <Bar dataKey="subscription" stackId="spend" fill={SUBSCRIPTION_FILL} />
+                {/* Under pay-as-you-go, so the top segment keeps its rounded corners. */}
+                <Bar dataKey="unattributed" stackId="spend" fill={UNATTRIBUTED_FILL} />
                 <Bar
                   dataKey="payg"
                   stackId="spend"
@@ -163,7 +167,6 @@ export function DailySpendChart({
                   fillOpacity={PAYG_OPACITY}
                   radius={[2, 2, 0, 0]}
                 />
-                <Bar dataKey="unattributed" stackId="spend" fill={UNATTRIBUTED_FILL} />
               </>
             ) : (
               <Bar dataKey="total" fill={SUBSCRIPTION_FILL} radius={[2, 2, 0, 0]} />

@@ -48,7 +48,10 @@ export function subscriptionSavings(
     .filter((row) => row.subscription)
     .sort(byCost)
     .map((row) => {
-      const plan = plans.find((p) => p.id === row.plan && p.keyType === row.keyType) ?? null;
+      const plan =
+        row.planSource === "estimated"
+          ? null
+          : (plans.find((p) => p.id === row.plan && p.keyType === row.keyType) ?? null);
       if (!plan) return { key: credentialKey(row), row, plan, planCost: null, saved: null };
       const billedFrom = Math.max(windowStartMs, Date.parse(row.firstSessionAt));
       const billedDays = Math.max(1, (now - billedFrom) / DAY_MS);

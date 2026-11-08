@@ -169,6 +169,8 @@ describe("status roll-up", () => {
             seven_day: { status: "allowed", utilization: 0.41, lastSeenAt: "" },
           },
         }),
+        status("CLAUDE_CODE_OAUTH_TOKEN", "a91f2", { id: "agent-row", scope: "agent" }),
+        status("CLAUDE_CODE_OAUTH_TOKEN", "other", { id: "other-row" }),
       ],
       usageToday: [usage("CLAUDE_CODE_OAUTH_TOKEN", "a91f2", 18.4)],
       usage7d: [
@@ -182,10 +184,17 @@ describe("status roll-up", () => {
     expect(claude?.health).toBe("limited");
     expect(healthLabel(claude!)).toBe("1 rate limited");
     expect(claude?.reason).toMatch(/^Key ending 77c2a is back at /);
-    expect(claude?.keys[0]).toMatchObject({ label: "team-max", window5h: 62, window7d: 41 });
+    expect(claude?.keys[0]).toMatchObject({ label: "team-max", planRaw: null });
+    // Every scope row of the credential travels with the key; the selector dedupes them.
+    expect(claude?.keys[0]?.statuses.map((s) => s.scope)).toEqual(["global", "agent"]);
+    expect(claude?.keys[0]?.status?.scope).toBe("global");
     expect(claude?.costToday).toBeCloseTo(18.4);
     expect(claude?.cost7d).toBeCloseTo(309.1);
-    expect(codex).toMatchObject({ health: "ok", keys: [{ label: "taras@acme.dev" }] });
+    // The stored login's raw claim (`pro`) is kept, never mapped to a price tier.
+    expect(codex).toMatchObject({
+      health: "ok",
+      keys: [{ label: "taras@acme.dev", plan: null, planRaw: "pro" }],
+    });
     expect(healthLabel(deepseek!)).toBe("Failing");
     expect(deepseek?.reason).toBe("Key ending 4f1cc: HTTP 401");
   });

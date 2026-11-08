@@ -72,6 +72,7 @@ export function SubscriptionsCard({
   const missing = lines.length - counted.length;
   const paygTotal = payg.reduce((sum, row) => sum + row.costUsd, 0);
   const unattributed = rows.filter((row) => row.keyType === null);
+  const unattributedSessions = unattributed.reduce((sum, row) => sum + row.sessions, 0);
 
   return (
     <Card className="gap-5 py-5">
@@ -194,8 +195,9 @@ export function SubscriptionsCard({
           <p className="text-sm text-muted-foreground">
             Unattributed: {formatUsd(unattributed.reduce((sum, row) => sum + row.costUsd, 0))}
             {" across "}
-            {formatCount(unattributed.reduce((sum, row) => sum + row.sessions, 0))}
-            {" sessions. Their billing type is unknown."}
+            {formatCount(unattributedSessions)}
+            {unattributedSessions === 1 ? " session" : " sessions"}
+            {". They reported no credential, so their billing type is unknown."}
           </p>
         )}
         <p className="text-xs text-muted-foreground">

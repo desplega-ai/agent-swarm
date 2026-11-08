@@ -70,6 +70,17 @@ export const providerAccountTelemetrySchema = z.strictObject({
 });
 export type ProviderAccountTelemetry = z.infer<typeof providerAccountTelemetrySchema>;
 
+export function parseProviderAccount(
+  value: string | null | undefined,
+): ProviderAccountTelemetry | null {
+  try {
+    const parsed = providerAccountTelemetrySchema.safeParse(value ? JSON.parse(value) : null);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 // Slot timestamps persist removal watermarks, including snapshots with no windows.
 export const rateLimitReplacementSchema = z.strictObject({
   source: z.literal("codex"),

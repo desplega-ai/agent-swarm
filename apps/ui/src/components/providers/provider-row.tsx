@@ -139,7 +139,7 @@ export function ProviderListRow({
             <span className="md:col-span-2">
               {provider.group === "subscription" ? "Plan" : "Billing"}
             </span>
-            <span>{keys.some((k) => k.window5h !== null) ? "Usage limits" : ""}</span>
+            <span>{provider.group === "subscription" ? "Usage limits" : ""}</span>
             <span />
             <span />
             <span />
