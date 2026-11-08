@@ -576,6 +576,22 @@ function actionParams(
         issue(appendPath(paramsPath, "name"), `unknown app action "${String(params.name)}"`),
       );
     }
+    // Same rules as `SessionThread.sessionKey` / `scope`: the key lands in a
+    // server-built context key; a bound key is checked at send time.
+    const session = params.session;
+    if (isPlainObject(session)) {
+      const sessionPath = appendPath(paramsPath, "session");
+      if (typeof session.key === "string" && !SESSION_KEY.test(session.key)) {
+        result.issues.push(
+          issue(appendPath(sessionPath, "key"), "session key must match ^[A-Za-z0-9_-]{1,128}$"),
+        );
+      }
+      if (session.scope === "shared") {
+        result.issues.push(
+          issue(appendPath(sessionPath, "scope"), 'scope "shared" is not supported yet'),
+        );
+      }
+    }
   } else if (step.action === "ui.toast") {
     // The Undo chain runs through the same handlers as any other chain, so
     // its steps get the same per-action checks (models, queries, actions).
