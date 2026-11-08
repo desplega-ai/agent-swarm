@@ -1,5 +1,4 @@
 import { Github, Search } from "lucide-react";
-import { useState } from "react";
 import { useHealth, useStats } from "@/api/hooks/use-stats";
 import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
@@ -110,32 +109,16 @@ function PhoneDisconnected({ message }: { message: string | null }) {
 }
 
 /**
- * Header layouts under review on PR #2866. Pick one with
- * `localStorage["agent-swarm:header-variant"] = "a" | "b" | "c"`. The switch
- * goes away once one is chosen.
- * - a: health pill and search, then the icons in one bordered toolbar.
- * - b: a wide search in the centre; health as a dot with the icons on the right.
- * - c: compact: health as a dot, search as an icon, ghost icons only.
+ * The desktop bar: the trail on the left, a wide search in the centre, then
+ * health (a dot, its label on hover) and the icon buttons in one bordered
+ * group on the right.
  */
-type HeaderVariant = "a" | "b" | "c";
-const HEADER_VARIANT_KEY = "agent-swarm:header-variant";
-
-function readHeaderVariant(): HeaderVariant {
-  try {
-    const value = window.localStorage.getItem(HEADER_VARIANT_KEY);
-    return value === "b" || value === "c" ? value : "a";
-  } catch {
-    return "a";
-  }
-}
-
 function DesktopHeader() {
   const { data: health, isError, error: healthError } = useHealth();
   const stats = useStats();
   const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
   const openCommandMenu = useOpenCommandMenu();
-  const [variant] = useState(readHeaderVariant);
 
   const isHealthy = health && !isError;
   const devMode = Boolean(isHealthy && !stats.isError && stats.data?.devMode === true);
@@ -143,12 +126,11 @@ function DesktopHeader() {
   // key, CORS, ...) — prefer the `/status` error since it's the richer probe,
   // fall back to `/health`'s. `null` here means "still loading", not "ok".
   const connectionErrorMessage = statusError?.message || healthError?.message || null;
-  const compactHealth = variant !== "a";
 
   // Aggregate health (components/layout/health-badge.tsx), with dev mode
   // folded in. `/status` 404 (older API) → the binary /health probe.
   const healthEl = status ? (
-    <HealthBadge status={status} devMode={devMode} compact={compactHealth} />
+    <HealthBadge status={status} devMode={devMode} compact />
   ) : (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -159,9 +141,6 @@ function DesktopHeader() {
               isHealthy ? "bg-status-success" : "bg-status-error",
             )}
           />
-          {compactHealth ? null : (
-            <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
-          )}
           {devMode ? (
             <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
               Dev
@@ -189,44 +168,23 @@ function DesktopHeader() {
     </>
   );
 
-  const searchLabel = variant === "b" ? "Search tasks, sessions, pages…" : "Search";
-  const search =
-    variant === "c" ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={openCommandMenu}
-            aria-label="Search"
-            aria-keyshortcuts="Meta+K Control+K"
-            className="size-8"
-          >
-            <Search className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Search {modKeyLabel()}K</TooltipContent>
-      </Tooltip>
-    ) : (
-      // Cmd+K's visible door.
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={openCommandMenu}
-        aria-label="Search"
-        aria-keyshortcuts="Meta+K Control+K"
-        className={cn(
-          "h-8 gap-2 px-2 text-muted-foreground max-sm:size-8 sm:justify-start",
-          variant === "b" ? "w-full max-w-md" : "sm:w-44",
-        )}
-      >
-        <Search className="size-4" />
-        <span className="truncate max-sm:hidden">{searchLabel}</span>
-        <Kbd aria-hidden className="ml-auto max-sm:hidden">
-          {modKeyLabel()}K
-        </Kbd>
-      </Button>
-    );
+  // Cmd+K's visible door.
+  const search = (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={openCommandMenu}
+      aria-label="Search"
+      aria-keyshortcuts="Meta+K Control+K"
+      className="h-8 w-full max-w-md gap-2 px-2 text-muted-foreground max-sm:size-8 sm:justify-start"
+    >
+      <Search className="size-4" />
+      <span className="truncate max-sm:hidden">Search tasks, sessions, pages…</span>
+      <Kbd aria-hidden className="ml-auto max-sm:hidden">
+        {modKeyLabel()}K
+      </Kbd>
+    </Button>
+  );
 
   const lead = (
     <>
@@ -245,35 +203,17 @@ function DesktopHeader() {
     </>
   );
 
-  if (variant === "b") {
-    return (
-      <header className="grid h-14 grid-cols-[minmax(0,1fr)_minmax(0,28rem)_minmax(0,1fr)] items-center gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2">{lead}</div>
-        <div className="flex justify-center">{search}</div>
-        <div className="flex items-center justify-end gap-0.5">
-          <SetupPill />
-          <div className="mr-1">{healthEl}</div>
-          {icons}
-        </div>
-      </header>
-    );
-  }
-
   return (
-    <header className="flex h-14 items-center gap-2 px-4">
-      {lead}
-      <div className="flex items-center gap-1 sm:gap-2">
-        {healthEl}
+    <header className="grid h-14 grid-cols-[minmax(10rem,1fr)_minmax(0,28rem)_minmax(max-content,1fr)] items-center gap-3 px-4">
+      <div className="flex min-w-0 items-center gap-2">{lead}</div>
+      <div className="flex justify-center">{search}</div>
+      <div className="flex items-center justify-end gap-2">
         <SetupPill />
-        {search}
-      </div>
-      {variant === "a" ? (
+        {healthEl}
         <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5 shadow-xs">
           {icons}
         </div>
-      ) : (
-        <div className="flex items-center gap-0.5">{icons}</div>
-      )}
+      </div>
     </header>
   );
 }
