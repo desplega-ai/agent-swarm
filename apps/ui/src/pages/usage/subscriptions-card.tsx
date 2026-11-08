@@ -1,5 +1,5 @@
 import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
-import { ChevronRight, CircleAlert, RotateCcw } from "lucide-react";
+import { ChevronRight, CircleAlert, Info, RotateCcw } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApiKeyStatuses, useSubscriptionPlans } from "@/api/hooks/use-api-keys";
@@ -10,7 +10,6 @@ import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { InfoTip } from "@/components/ui/info-tip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMinuteClock } from "@/hooks/use-minute-clock";
@@ -157,7 +156,8 @@ export function SubscriptionsCard({
               <span aria-hidden>·</span>
               plans
               <span className="font-mono tabular-nums text-foreground">{formatUsd(plansCost)}</span>
-              <InfoTip
+              <ExplainTip
+                label="How savings are counted"
                 content={`API value of the subscription runs minus their plans at list price (checked ${formatDay(catalog.checkedAt, true)}), prorated per day from each credential's first session in the window.`}
               />
             </p>
@@ -226,7 +226,10 @@ export function SubscriptionsCard({
               </span>
               · {formatCount(unattributedSessions)}
               {unattributedSessions === 1 ? " session" : " sessions"}
-              <InfoTip content="These sessions reported no credential, so their billing type is unknown." />
+              <ExplainTip
+                label="About unattributed spend"
+                content="These sessions reported no credential, so their billing type is unknown."
+              />
             </span>
           ) : (
             <span />
@@ -240,12 +243,37 @@ export function SubscriptionsCard({
   );
 }
 
-/** A short muted note whose explanation sits in a tooltip. */
+/**
+ * An info icon that opens its explanation in a popover. Unlike `InfoTip`, the
+ * trigger takes focus and opens on tap, so keyboard and touch users can read it.
+ */
+function ExplainTip({ label, content }: { label: string; content: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        type="button"
+        aria-label={label}
+        className="inline-flex shrink-0 cursor-help items-center rounded-sm text-muted-foreground/70 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <Info aria-hidden className="size-3" />
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        collisionPadding={16}
+        className="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs"
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A short muted note whose explanation opens from its info icon. */
 function NoteBadge({ label, tip }: { label: string; tip: string }) {
   return (
     <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
       {label}
-      <InfoTip content={tip} />
+      <ExplainTip label={`About ${label}`} content={tip} />
     </Badge>
   );
 }
