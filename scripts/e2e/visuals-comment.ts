@@ -53,8 +53,28 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+// escapeHtml stops HTML, not Markdown: a fork could still post links, tracking images,
+// @mentions or autolinks under the bot's identity. Fork-derived free text (scenario names,
+// status, error) therefore goes into a code span, where GitHub renders none of those. Code spans
+// show `<` literally, so no HTML escaping inside. The fence is longer than any backtick run in
+// the text, and whitespace collapses because a table cell cannot hold a newline.
+function codeSpan(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim() || "-";
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence} ${text} ${fence}`;
+}
+
+// Profile names come from this workflow's own --profile arguments, not from the artifact.
 function markdownCell(value: string): string {
   return escapeHtml(value).replaceAll("|", "\\|").replaceAll("\n", "<br>");
+}
+
+// GFM splits table cells on `|` even inside a code span. Escaping it as `\|` is not enough: a
+// fork can put a backslash in front (`\\|`) and split the cell, which ends the code span. So a
+// pipe becomes a look-alike box-drawing bar instead.
+function codeCell(value: string): string {
+  return codeSpan(value.replaceAll("|", "\u2502"));
 }
 
 // Keeps a fork-supplied filename to a single safe path segment (no traversal, no query/fragment
@@ -103,7 +123,7 @@ function scenarioCell(
     .join("<br>");
   if (scenario.status !== "pass") {
     // A failed scenario may still have frames from the steps that ran before the failure.
-    const status = `**${escapeHtml(scenario.status.toUpperCase())}**: ${markdownCell(scenario.error ?? "No error reported")}`;
+    const status = `**${codeCell(scenario.status.toUpperCase())}**: ${codeCell(scenario.error ?? "No error reported")}`;
     return files.length === 0 ? status : `${status}<br>${images}`;
   }
   if (files.length === 0) return "not recorded";
@@ -126,7 +146,7 @@ function mainSection(
 
   for (const name of scenarioNames) {
     lines.push(
-      `#### ${escapeHtml(name)}`,
+      `#### ${codeSpan(name)}`,
       "",
       ...table(profiles, (profile) =>
         scenarioCell(profile, scenarioFor(profile, name), baseUrl, (thread) => thread.finalThread),
@@ -160,7 +180,7 @@ function desktopSection(profiles: Profile[], scenarioNames: string[], baseUrl: s
   const lines = ["<details><summary>Desktop layout and channel</summary>", ""];
   for (const name of scenarioNames) {
     lines.push(
-      `##### ${escapeHtml(name)}`,
+      `##### ${codeSpan(name)}`,
       "",
       ...table(profiles, (profile) =>
         scenarioCell(profile, scenarioFor(profile, name), baseUrl, (thread) => thread.finalDesktop),
