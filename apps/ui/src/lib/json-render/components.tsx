@@ -178,6 +178,7 @@ import { AccordionComponent, type AccordionProps } from "./accordion";
 import { resolveScopedParams } from "./action-params";
 import { applyTemplate } from "./apply-template";
 import { ApprovalComponent } from "./approval";
+import { OUTCOME_PARAM } from "./assemble";
 import {
   CARD_GRID_PAGE_SIZE,
   cardGridCapText,
@@ -2885,19 +2886,32 @@ function FormComponent({ props }: { props: FormProps }) {
         }
         Object.assign(values, resolved.values);
       }
+      // `$chain.createdRowId` is the row the newest create step of this submit
+      // made (`null` before one ran), so a later step can open it or key a
+      // session on it. `$state` cannot carry it: the renderer resolves the
+      // chain's `$state` reads when the form renders, before the row exists.
+      const chain: { createdRowId: string | null } = { createdRowId: null };
+      const scope = { form: values, state: getSnapshot(), chain };
+      const outcomePath = `${basePath}/$outcome`;
       let mutated = false;
       for (const binding of props.onSubmit as ActionChain) {
-        // Live state per step (as `on` chains read it), so a step can bind
-        // what an earlier one wrote, e.g. `/mutations/<model>/rowId`.
-        const params = resolveScopedParams(binding.params, { form: values, state: getSnapshot() });
+        const params = resolveScopedParams(binding.params, scope);
         // Every mutate in the chain carries the originating form's id: a
         // successful create clears the form, and a failure lands inline at
         // `/forms/<id>/$error` instead of the page banner.
         if (binding.action === "app.mutate" && !params.formId) {
           params.formId = props.id;
         }
-        if (binding.action === "app.mutate") mutated = true;
+        if (binding.action === "app.mutate") {
+          mutated = true;
+          set(outcomePath, null);
+          params[OUTCOME_PARAM] = outcomePath;
+        }
         await execute({ ...binding, params });
+        if (binding.action === "app.mutate") {
+          const rowId = getByPath(getSnapshot(), `${outcomePath}/rowId`);
+          if (typeof rowId === "string" && rowId !== "") chain.createdRowId = rowId;
+        }
         // A failed mutate resolves normally (its error lands in the form's
         // `$error` slot, not a throw) — stop the chain here, or a following
         // `app.navigate` would tear down the form that is displaying the

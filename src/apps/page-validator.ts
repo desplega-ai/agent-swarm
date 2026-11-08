@@ -690,7 +690,7 @@ function validateStateRef(
     );
   }
 
-  const match = /^\/(queries|forms|actions|ui|mutations)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+  const match = /^\/(queries|forms|actions|ui)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (!match) return issue(ref.path, `invalid state reference "${ref.value}"`);
 
   const [, namespace, name] = match;
@@ -698,9 +698,7 @@ function validateStateRef(
     (namespace === "queries" && Object.hasOwn(definition.queries ?? {}, name!)) ||
     (namespace === "forms" && formIds.has(name!)) ||
     (namespace === "actions" && Object.hasOwn(definition.actions ?? {}, name!)) ||
-    (namespace === "ui" && uiIds.has(name!)) ||
-    // `app.mutate` create writes the new row's id to `/mutations/<model>/rowId`.
-    (namespace === "mutations" && Object.hasOwn(definition.models, name!));
+    (namespace === "ui" && uiIds.has(name!));
   const targetKind =
     namespace === "queries"
       ? "query"
@@ -708,9 +706,7 @@ function validateStateRef(
         ? "form"
         : namespace === "actions"
           ? "action"
-          : namespace === "mutations"
-            ? "model"
-            : "UI control";
+          : "UI control";
   if (!exists) return issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
 
   if (namespace === "queries") {

@@ -191,7 +191,7 @@ function startSessionDefinition(session: unknown) {
                   action: "app.navigate",
                   params: {
                     page: "studio",
-                    params: { projectId: { $state: "/mutations/project/rowId" } },
+                    params: { projectId: { $chain: "createdRowId" } },
                   },
                 },
               ],
@@ -217,7 +217,7 @@ function startSessionDefinition(session: unknown) {
 describe("app.action session", () => {
   test("accepts a session key bound to the row a create step just made", async () => {
     const parsed = await parseAppDefinition(
-      startSessionDefinition({ key: { $state: "/mutations/project/rowId" } }),
+      startSessionDefinition({ key: { $chain: "createdRowId" } }),
     );
     if (!parsed.success) console.error(parsed.issues);
     expect(parsed.success).toBe(true);
@@ -239,13 +239,6 @@ describe("app.action session", () => {
     await expectParseIssue(
       startSessionDefinition({ key: "main", scope: "shared" }),
       'scope "shared" is not supported yet',
-    );
-  });
-
-  test("rejects a /mutations ref to an undeclared model", async () => {
-    await expectParseIssue(
-      startSessionDefinition({ key: { $state: "/mutations/ghost/rowId" } }),
-      'state reference targets unknown model "ghost"',
     );
   });
 });

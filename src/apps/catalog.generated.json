@@ -2213,7 +2213,7 @@
       }
     },
     "Form": {
-      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs. `kind: \"file\"` attaches agent-fs files with the VIEWER's own agent-fs key (swarm default drive): `source: \"upload\"` (default) picks local files and uploads them on submit, before the chain, to `<dir>/<timestamp>-<id>-<n>-<name>` (unique per file, across fields and submits); `\"pick\"` opens a browser of `dir` (or `/`) to attach a file that already exists; `\"both\"` offers both. `$form.<name>` is the path, or an array of paths with `multiple: true`. `accept` filters the file picker. An upload failure stops the chain and keeps the values. Without an agent-fs connection the field shows a \"Connect agent-fs\" card, and a required file field disables submit.",
+      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs. `kind: \"file\"` attaches agent-fs files with the VIEWER's own agent-fs key (swarm default drive): `source: \"upload\"` (default) picks local files and uploads them on submit, before the chain, to `<dir>/<timestamp>-<id>-<n>-<name>` (unique per file, across fields and submits); `\"pick\"` opens a browser of `dir` (or `/`) to attach a file that already exists; `\"both\"` offers both. `$form.<name>` is the path, or an array of paths with `multiple: true`. `accept` filters the file picker. An upload failure stops the chain and keeps the values. After an `app.mutate` create step, later steps read the new row's id as `{ \"$chain\": \"createdRowId\" }` (to open it, or as an `app.action` session key); before one runs the key is null and its param is dropped. Use it, not `$state`: the renderer resolves a chain's `$state` reads when the form renders. Without an agent-fs connection the field shows a \"Connect agent-fs\" card, and a required file field disables submit.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -3686,7 +3686,7 @@
       }
     },
     "app.mutate": {
-      "description": "Create / update / delete a swarm-app row, then refetch every named query on the same model. After a successful create, `/mutations/<model>/rowId` holds the new row's id, so a later step in the same chain can bind it (`{ \"$state\": \"/mutations/<model>/rowId\" }`), e.g. an `app.navigate` to the new row or an `app.action` session key.",
+      "description": "Create / update / delete a swarm-app row, then refetch every named query on the same model.",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -3730,7 +3730,7 @@
       }
     },
     "app.action": {
-      "description": "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`. `session: { key, scope? }` files a task-kind action's task under a SessionThread session for the viewer (see that param), so a chain like create row → `app.action` with `session.key` bound to `/mutations/<model>/rowId` → `app.navigate` to the page whose SessionThread uses that id starts the chat in one click.",
+      "description": "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`. `session: { key, scope? }` files a task-kind action's task under a SessionThread session for the viewer (see that param), so a Form chain like create row → `app.action` with `session: { key: { $chain: \"createdRowId\" } }` → `app.navigate` to the page whose SessionThread uses that id starts the chat in one click.",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -3749,7 +3749,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Task-kind actions only — start or join the viewer's SessionThread session from any chain, e.g. a create form that sends the idea as the chat's first message. `key` is the SessionThread `sessionKey` to file the task under: a plain token (^[A-Za-z0-9_-]{1,128}$) or a binding such as { \"$state\": \"/mutations/<model>/rowId\" } (the row a create step in the same chain just made). The server keys the task as task:app:<appId>:<key>:user:<viewer>, the exact key a SessionThread with that `sessionKey` reads, so the thread shows it as its first message. `scope` \"user\" (default); \"shared\" is rejected today. A session step defaults to `followUp: false`. Inside a SessionThread `onDispatch` the thread's own session replaces this param.",
+            "description": "Task-kind actions only — start or join the viewer's SessionThread session from any chain, e.g. a create form that sends the idea as the chat's first message. `key` is the SessionThread `sessionKey` to file the task under: a plain token (^[A-Za-z0-9_-]{1,128}$) or a binding such as { \"$chain\": \"createdRowId\" } (in a Form chain, the row an earlier create step just made). The server keys the task as task:app:<appId>:<key>:user:<viewer>, the exact key a SessionThread with that `sessionKey` reads, so the thread shows it as its first message. `scope` \"user\" (default); \"shared\" is rejected today. A session step defaults to `followUp: false`. Inside a SessionThread `onDispatch` the thread's own session replaces this param.",
             "type": "object",
             "properties": {
               "key": {

@@ -20,8 +20,8 @@
  *   - **element props** — `{"$state": "/props/<p>"}` is substituted with the
  *     consumer-supplied value (a literal, or the consumer's own binding, or
  *     the declared default);
- *   - **bound data refs** — `/queries/…`, `/actions/…` and `/mutations/…` inside an element
- *     borrowed from ANOTHER app become `/refs/<definingAppId>/<namespace>/…`,
+ *   - **bound data refs** — `/queries/…` and `/actions/…` inside an element
+ *     borrowed from ANOTHER app become `/refs/<definingAppId>/queries|actions/…`,
  *     which is app-relative and therefore resolves through the consuming app's
  *     plain prefixing `StoreView` (there is no absolute escape hatch). The
  *     surface mirrors the defining app's query results into those slots.
@@ -329,13 +329,13 @@ interface AssemblyState {
 function rewriteStatePath(path: string, scope: Scope, state: AssemblyState): string {
   if (scope.mode === "page" || !path.startsWith("/")) return path;
 
-  const match = /^\/(queries|actions|mutations|forms|ui)\/([^/]+)(\/.*)?$/.exec(path);
+  const match = /^\/(queries|actions|forms|ui)\/([^/]+)(\/.*)?$/.exec(path);
   if (!match) return path; // `/route/...` and anything unrecognised: consumer-relative.
   const namespace = match[1]!;
   const name = match[2]!;
   const rest = match[3] ?? "";
 
-  if (namespace === "queries" || namespace === "actions" || namespace === "mutations") {
+  if (namespace === "queries" || namespace === "actions") {
     // Same-app elements keep reading the consuming app's own slots; only a
     // BORROWED bound element is mirrored under `/refs/<definingAppId>`.
     if (!scope.foreign) return path;

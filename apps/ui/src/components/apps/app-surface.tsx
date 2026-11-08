@@ -217,7 +217,11 @@ interface RuntimeCtx {
 function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
   if (typeof value !== "object" || value === null) return false;
   const { key, scope } = value as { key?: unknown; scope?: unknown };
-  return typeof key === "string" && (scope === undefined || scope === "user" || scope === "shared");
+  return (
+    typeof key === "string" &&
+    key !== "" &&
+    (scope === undefined || scope === "user" || scope === "shared")
+  );
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -1000,6 +1004,7 @@ export function AppSurface({
           const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
           const outcomePath =
             typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          let createdRowId: string | undefined;
           try {
             if (params.op === "create") {
               const created = await api.createAppRow(
@@ -1008,15 +1013,7 @@ export function AppSurface({
                 params.values ?? {},
               );
               setLastResponse(created);
-              // The new row's id, for later steps of the same chain (a navigate
-              // to it, an `app.action` session key). Same consumer-local slot
-              // rule as `/actions/<name>`.
-              ctx.store.set(
-                targetAppId === ctx.app.id
-                  ? `/mutations/${params.model}`
-                  : `/refs/${targetAppId}/mutations/${params.model}`,
-                { rowId: created.row.id },
-              );
+              createdRowId = created.row.id;
               // The Form injects its own id, so a successful create resets the
               // fields the user just submitted. Inside an element instance
               // that id is already `instances/<key>/<origId>`.
@@ -1036,7 +1033,16 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
-            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
+            // A create also reports the new row's id: a Form publishes it to
+            // the rest of its chain as `$chain.createdRowId`.
+            if (outcomePath) {
+              ctx.store.set(
+                outcomePath,
+                createdRowId === undefined
+                  ? { status: "ok" }
+                  : { status: "ok", rowId: createdRowId },
+              );
+            }
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
@@ -1105,10 +1111,20 @@ export function AppSurface({
             report({ status: "error", error: message });
             haltChain(message, reportStepFailure);
           }
+          // Same rule for a session: a key that did not resolve (a `$chain`
+          // sentinel, a dropped `$chain` key, an empty `$state` read) would
+          // create a task outside the session the next page reads.
+          const session: unknown = (params as Record<string, unknown>).session;
+          if (session !== undefined && !isThreadSession(session)) {
+            const message =
+              "app.action session.key must resolve to a session key; with no row id yet, put the create step before this one";
+            ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
+          }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
             const followUp: unknown = (params as Record<string, unknown>).followUp;
-            const session: unknown = (params as Record<string, unknown>).session;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
