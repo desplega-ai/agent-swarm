@@ -45,7 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { safeHttpUrl } from "@/lib/json-render/card-grid-model";
-import { seriesColor } from "@/lib/json-render/chart-model";
+import { distinctSeriesColor, toPieSlices } from "@/lib/json-render/chart-model";
 import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
 import { cn } from "@/lib/utils";
 import {
@@ -305,23 +305,27 @@ function UiSpecChart({ props }: { props: Record<string, unknown> }) {
   );
 }
 
+/** Pie segments → slices with a distinct color each (zero and negative values draw nothing). */
+export function uiSpecPieSlices(chart: Record<string, unknown>) {
+  const segments = (Array.isArray(chart.segments) ? chart.segments : []).filter(isRecord);
+  return toPieSlices(segments, "label", "value");
+}
+
 function pieChart(chart: Record<string, unknown>) {
-  const segments = (Array.isArray(chart.segments) ? chart.segments : [])
-    .filter(isRecord)
-    .map((s) => ({ label: text(s.label), value: typeof s.value === "number" ? s.value : 0 }));
+  const slices = uiSpecPieSlices(chart);
   return (
     <PieChart>
       <Tooltip contentStyle={rechartsTooltipStyle} />
       <Legend wrapperStyle={{ fontSize: 11 }} />
       <Pie
-        data={segments}
+        data={slices}
         dataKey="value"
         nameKey="label"
         outerRadius="80%"
         isAnimationActive={false}
       >
-        {segments.map((s, i) => (
-          <Cell key={s.label + i} fill={seriesColor(undefined, i)} />
+        {slices.map((s, i) => (
+          <Cell key={s.label + i} fill={s.color} />
         ))}
       </Pie>
     </PieChart>
@@ -359,7 +363,7 @@ function seriesChart(chart: Record<string, unknown>) {
             key={j}
             dataKey={`s${j}`}
             name={s.name}
-            fill={seriesColor(undefined, j)}
+            fill={distinctSeriesColor(j)}
             isAnimationActive={false}
           />
         ))}
@@ -375,8 +379,8 @@ function seriesChart(chart: Record<string, unknown>) {
             key={j}
             dataKey={`s${j}`}
             name={s.name}
-            stroke={seriesColor(undefined, j)}
-            fill={seriesColor(undefined, j)}
+            stroke={distinctSeriesColor(j)}
+            fill={distinctSeriesColor(j)}
             fillOpacity={0.2}
             isAnimationActive={false}
           />
@@ -392,7 +396,7 @@ function seriesChart(chart: Record<string, unknown>) {
           key={j}
           dataKey={`s${j}`}
           name={s.name}
-          stroke={seriesColor(undefined, j)}
+          stroke={distinctSeriesColor(j)}
           dot={false}
           isAnimationActive={false}
         />

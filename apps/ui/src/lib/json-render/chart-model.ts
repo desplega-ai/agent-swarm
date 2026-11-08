@@ -47,6 +47,15 @@ export function seriesColor(color: ChartColor | undefined, index: number): strin
   return COLOR_VARS[color ?? (PALETTE[index % PALETTE.length] as ChartColor)];
 }
 
+/**
+ * CSS color for series `index` when series sit side by side and carry no
+ * `color` of their own. The series palette repeats the brand color as
+ * chart-3 in the dark theme, so the 3rd series would match the 1st.
+ */
+export function distinctSeriesColor(index: number): string {
+  return COLOR_VARS[PIE_PALETTE[index % PIE_PALETTE.length] as ChartColor];
+}
+
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "" || typeof value === "boolean") {
     return null;

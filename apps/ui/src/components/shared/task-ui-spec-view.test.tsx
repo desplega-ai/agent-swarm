@@ -54,7 +54,8 @@ mock.module("@/components/ui/table", () => ({
   TableCell: stub("td"),
 }));
 
-const { TaskUiSpecView } = await import("./task-ui-spec-view");
+const { TaskUiSpecView, uiSpecPieSlices } = await import("./task-ui-spec-view");
+const { distinctSeriesColor } = await import("../../lib/json-render/chart-model");
 
 const FALLBACK = "FALLBACK TEXT";
 
@@ -180,5 +181,29 @@ describe("TaskUiSpecView", () => {
 
   test("no uiSpec renders nothing", () => {
     expect(render(null)).toBe("");
+  });
+});
+
+// Regression: the dark theme sets chart-3 to the brand color, so the 3rd series
+// or slice of a card chart matched the 1st (seen on a 3-plan pie and area chart).
+describe("TaskUiSpecView chart colors", () => {
+  test("a 3-segment pie gives each slice its own color", () => {
+    const slices = uiSpecPieSlices({
+      type: "pie",
+      segments: [
+        { label: "Enterprise", value: 52 },
+        { label: "Team", value: 31 },
+        { label: "Self-serve", value: 17 },
+      ],
+    });
+    expect(slices.map((s) => s.label)).toEqual(["Enterprise", "Team", "Self-serve"]);
+    expect(new Set(slices.map((s) => s.color)).size).toBe(3);
+    expect(slices.map((s) => s.color)).not.toContain("var(--color-chart-3)");
+  });
+
+  test("the first 3 series of a bar, line or area chart get distinct colors", () => {
+    const colors = [0, 1, 2].map(distinctSeriesColor);
+    expect(new Set(colors).size).toBe(3);
+    expect(colors).not.toContain("var(--color-chart-3)");
   });
 });
