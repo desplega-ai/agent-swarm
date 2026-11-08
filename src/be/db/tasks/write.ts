@@ -395,6 +395,40 @@ export async function updateTaskTitle(
 }
 
 /**
+ * Adds and removes tags on a task. A tag in both lists is removed. Like
+ * `updateTaskTitle`, it does not bump `lastUpdatedAt`: a tag is a label, not
+ * progress, and lists that sort by recency (Needs you failures) must not move.
+ */
+export async function updateTaskTags(
+  taskId: string,
+  change: { add?: string[]; remove?: string[] },
+): Promise<AgentTask | null> {
+  const row = await getDbClient().transaction(async () => {
+    const current = await getDbClient().get<Pick<AgentTaskRow, "tags">>(
+      "SELECT tags FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    if (!current) return null;
+    const previousTagsJson = current.tags;
+    const existing: string[] = previousTagsJson ? JSON.parse(previousTagsJson) : [];
+    const removed = new Set(change.remove ?? []);
+    const nextTags = Array.from(new Set([...existing, ...(change.add ?? [])])).filter(
+      (tag) => !removed.has(tag),
+    );
+    const nextTagsJson = JSON.stringify(nextTags);
+    const updated = await getDbClient().get<AgentTaskRow>(
+      "UPDATE agent_tasks SET tags = ? WHERE id = ? RETURNING *",
+      [nextTagsJson, taskId],
+    );
+    if (updated && tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
+      await reclassifyTaskHumanFree([taskId]);
+    }
+    return updated;
+  });
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
  * Sets a generated display title only while the task has none. A rename that
  * landed first (a person, or another API replica) wins: the row is left alone
  * and `null` comes back. Like `updateTaskTitle`, it does not bump

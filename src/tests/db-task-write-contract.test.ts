@@ -635,6 +635,7 @@ value:updateSlackMessageRecord
 value:updateSwarmRepo
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
+value:updateTaskTags
 value:updateTaskTitle
 value:updateTaskVcs
 value:updateUser
@@ -676,6 +677,7 @@ value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
+value:updateTaskTags
 value:updateTaskTitle`.split("\n");
 const internal = ["value:configureTaskWriteDependencies"];
 

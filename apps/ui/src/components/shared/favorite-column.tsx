@@ -22,6 +22,9 @@ export const FAVORITE_COLUMN = {
   headerName: "Favorite",
   headerComponent: FavoriteColumnHeader,
   width: 52,
+  // Centred cell and header (ag-grid.css): the star sits under the header star.
+  cellClass: "favorite-cell",
+  headerClass: "favorite-header",
   sortable: false,
   filter: false,
   resizable: false,

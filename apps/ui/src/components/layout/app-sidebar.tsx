@@ -345,8 +345,15 @@ function FooterNavItem({ item, isActive, badge, entryBadges = {} }: FooterNavIte
   const link = <NavIconLink item={item} isActive={isActive} tooltip={item.title} />;
 
   // Right-aligned live count: auto-hidden in icon-collapsed mode by the
-  // primitive's own `group-data-[collapsible=icon]:hidden`.
-  const badgeEl = badge != null ? <SidebarMenuBadge>{badge}</SidebarMenuBadge> : null;
+  // primitive's own `group-data-[collapsible=icon]:hidden`. With a flyout the
+  // link sits in a wrapper, so the primitive's `peer-*` top offsets never
+  // match: centre the badge on the row instead.
+  const badgeEl =
+    badge != null ? (
+      <SidebarMenuBadge className={item.flyout ? "top-1/2 -translate-y-1/2" : undefined}>
+        {badge}
+      </SidebarMenuBadge>
+    ) : null;
 
   if (!item.flyout) {
     return (
