@@ -61,6 +61,7 @@ import "./savings";
 import "./savings-calibration";
 import "./sessions";
 import "./skills";
+import "./slack-events";
 import "./slack-inbound";
 import "./scripts";
 import "./mcp-bridge";
