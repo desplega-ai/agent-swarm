@@ -11,7 +11,9 @@ import {
   Mail,
   Maximize2,
   MessageSquare,
+  MoreHorizontal,
   Play,
+  Star,
   Trash2,
   User,
   Webhook,
@@ -74,6 +76,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -82,6 +90,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { useIsPhone } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import {
   readBooleanParam,
@@ -95,6 +104,14 @@ import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { defineGithubThemes, MONACO_GITHUB_THEME } from "@/lib/monaco-themes";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import {
+  PhoneDefinition,
+  PhoneDescription,
+  PhoneGraphDialog,
+  PhoneNodeSheet,
+} from "./phone-definition";
+import { PhoneRunsList } from "./phone-runs";
+import { ScrollTabsList } from "./scroll-tabs-list";
 
 const RUNS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const DEFAULT_RUNS_PAGE_SIZE = 20;
@@ -102,7 +119,8 @@ const DEFAULT_RUNS_PAGE_SIZE = 20;
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { searchParams, setParam } = useUrlSearchState();
+  const isPhone = useIsPhone();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
   const runsPage = readNumberParam(searchParams, "workflowRunsPage", 0, { min: 0 });
   const runsPageSize = readNumberParam(
     searchParams,
@@ -279,74 +297,173 @@ export default function WorkflowDetailPage() {
     return <p className="text-muted-foreground">Workflow not found.</p>;
   }
 
+  const tabTriggers = (
+    <>
+      <TabsTrigger value="definition">Definition</TabsTrigger>
+      <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
+      <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
+      <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
+      <TabsTrigger value="savings">Savings</TabsTrigger>
+      <TabsTrigger value="versions">Versions</TabsTrigger>
+    </>
+  );
+
   return (
     <div ref={workflowVersion.scopeRef} className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
       <div className="shrink-0 space-y-3">
-        <button
-          type="button"
-          onClick={() => navigate("/workflows")}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to Workflows
-        </button>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold">{workflow.name}</h1>
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={workflow.enabled}
-              onCheckedChange={(checked) =>
-                updateWorkflow.mutate({
-                  id: workflow.id,
-                  data: { enabled: checked },
-                })
-              }
-            />
-            <span className="text-xs text-muted-foreground">
-              {workflow.enabled ? "Enabled" : "Disabled"}
-            </span>
+        {isPhone ? (
+          // Phone: back, name, Trigger and one overflow menu on a single row
+          // (star and Delete live in the menu), then one status row. Was four
+          // stacked rows of back link, title, badges and buttons.
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="-ml-2 size-9 shrink-0"
+                onClick={() => navigate("/workflows")}
+                aria-label="Back to Workflows"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <h1 className="min-w-0 flex-1 text-lg font-semibold leading-tight line-clamp-2 break-words">
+                {workflow.name}
+              </h1>
+              <TopBarTriggerButton
+                workflowId={workflow.id}
+                enabled={workflow.enabled}
+                triggerSchema={workflow.triggerSchema}
+                triggerWorkflow={triggerWorkflow}
+                onSchemaRequired={() => setActiveTab("triggers")}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-9 shrink-0"
+                    aria-label="More actions"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={favoriteToggle.isPending}
+                    onSelect={() =>
+                      favoriteToggle.mutate({
+                        itemId: workflow.id,
+                        favorite: !workflow.favorite,
+                      })
+                    }
+                  >
+                    <Star className={workflow.favorite ? "fill-current" : undefined} />
+                    {workflow.favorite ? "Remove favorite" : "Add favorite"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+                    <Trash2 className="h-4 w-4" /> Delete workflow
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Switch
+                checked={workflow.enabled}
+                aria-label={workflow.enabled ? "Disable workflow" : "Enable workflow"}
+                onCheckedChange={(checked) =>
+                  updateWorkflow.mutate({
+                    id: workflow.id,
+                    data: { enabled: checked },
+                  })
+                }
+              />
+              <span className="text-xs text-muted-foreground">
+                {workflow.enabled ? "Enabled" : "Disabled"}
+              </span>
+              <Badge variant="outline" size="tag">
+                {workflow.definition.nodes.length} nodes · {workflow.definition.edges?.length ?? 0}{" "}
+                edges
+              </Badge>
+              <WorkflowSavingsHeaderAmount
+                workflowId={workflow.id}
+                onOpen={() => setActiveTab("savings")}
+              />
+            </div>
           </div>
-          <Badge variant="outline" size="tag">
-            {workflow.definition.nodes.length} nodes
-          </Badge>
-          <Badge variant="outline" size="tag">
-            {workflow.definition.edges?.length ?? 0} edges
-          </Badge>
-          <WorkflowSavingsHeaderAmount
-            workflowId={workflow.id}
-            onOpen={() => setActiveTab("savings")}
-          />
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            <FavoriteButton
-              favorite={workflow.favorite}
-              disabled={favoriteToggle.isPending}
-              onToggle={() =>
-                favoriteToggle.mutate({
-                  itemId: workflow.id,
-                  favorite: !workflow.favorite,
-                })
-              }
-            />
-            <TopBarTriggerButton
-              workflowId={workflow.id}
-              enabled={workflow.enabled}
-              triggerSchema={workflow.triggerSchema}
-              triggerWorkflow={triggerWorkflow}
-              onSchemaRequired={() => setActiveTab("triggers")}
-            />
-            <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="h-3 w-3 mr-1" /> Delete
-            </Button>
-          </div>
-        </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => navigate("/workflows")}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back to Workflows
+            </button>
 
-        {workflow.description && (
-          <CollapsibleDescription
-            text={workflow.description}
-            textClassName="text-muted-foreground"
-          />
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-xl font-semibold">{workflow.name}</h1>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={workflow.enabled}
+                  onCheckedChange={(checked) =>
+                    updateWorkflow.mutate({
+                      id: workflow.id,
+                      data: { enabled: checked },
+                    })
+                  }
+                />
+                <span className="text-xs text-muted-foreground">
+                  {workflow.enabled ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+              <Badge variant="outline" size="tag">
+                {workflow.definition.nodes.length} nodes
+              </Badge>
+              <Badge variant="outline" size="tag">
+                {workflow.definition.edges?.length ?? 0} edges
+              </Badge>
+              <WorkflowSavingsHeaderAmount
+                workflowId={workflow.id}
+                onOpen={() => setActiveTab("savings")}
+              />
+              <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                <FavoriteButton
+                  favorite={workflow.favorite}
+                  disabled={favoriteToggle.isPending}
+                  onToggle={() =>
+                    favoriteToggle.mutate({
+                      itemId: workflow.id,
+                      favorite: !workflow.favorite,
+                    })
+                  }
+                />
+                <TopBarTriggerButton
+                  workflowId={workflow.id}
+                  enabled={workflow.enabled}
+                  triggerSchema={workflow.triggerSchema}
+                  triggerWorkflow={triggerWorkflow}
+                  onSchemaRequired={() => setActiveTab("triggers")}
+                />
+                <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
+                  <Trash2 className="h-3 w-3 mr-1" /> Delete
+                </Button>
+              </div>
+            </div>
+          </>
         )}
+
+        {workflow.description &&
+          (isPhone ? (
+            <PhoneDescription text={workflow.description} />
+          ) : (
+            <CollapsibleDescription
+              text={workflow.description}
+              textClassName="text-muted-foreground"
+            />
+          ))}
 
         {/* Created by + Workspace info */}
         {(workflow.createdByAgentId || workflow.dir || workflow.vcsRepo) && (
@@ -378,79 +495,97 @@ export default function WorkflowDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
-        <TabsList className="shrink-0">
-          <TabsTrigger value="definition">Definition</TabsTrigger>
-          <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
-          <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
-          <TabsTrigger value="savings">Savings</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
-        </TabsList>
+        {isPhone ? (
+          <ScrollTabsList activeValue={activeTab}>{tabTriggers}</ScrollTabsList>
+        ) : (
+          <TabsList className="shrink-0">{tabTriggers}</TabsList>
+        )}
 
         {/* Definition tab */}
         <TabsContent value="definition" className="flex flex-col flex-1 min-h-0 gap-4">
-          {/* Single-line summary; full detail lives in the Triggers tab */}
-          <WorkflowMetaSummary
-            triggers={workflow.triggers}
-            cooldown={workflow.cooldown}
-            input={workflow.input}
-            triggerSchema={workflow.triggerSchema}
-          />
-
-          {/* Split view: graph + inspector */}
-          <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
-            {/* Graph panel */}
-            <div className="relative flex-[3] min-w-0 min-h-[300px] md:min-h-0">
-              <WorkflowGraph
-                definition={workflow.definition}
-                onNodeClick={handleNodeClick}
-                selectedNodeId={selectedNodeId}
-                className="h-full min-h-[300px]"
+          {isPhone ? (
+            // Phone: one card fills the screen (graph or step list); the node
+            // inspector is a bottom sheet (see PhoneNodeSheet below).
+            <PhoneDefinition
+              definition={workflow.definition}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={setSelectedNodeId}
+              onExpand={() => setGraphMaximized(true)}
+              footer={
+                <WorkflowMetaSummary
+                  triggers={workflow.triggers}
+                  cooldown={workflow.cooldown}
+                  input={workflow.input}
+                  triggerSchema={workflow.triggerSchema}
+                />
+              }
+            />
+          ) : (
+            <>
+              {/* Single-line summary; full detail lives in the Triggers tab */}
+              <WorkflowMetaSummary
+                triggers={workflow.triggers}
+                cooldown={workflow.cooldown}
+                input={workflow.input}
+                triggerSchema={workflow.triggerSchema}
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => setGraphMaximized(true)}
-                aria-label="Expand graph"
-                title="Expand graph"
-                className="absolute top-2 right-2 h-7 w-7 bg-background/80 backdrop-blur-sm shadow-sm"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
 
-            {/* Node inspector panel */}
-            <div className="flex-[2] min-w-0 min-h-0 flex flex-col overflow-hidden rounded-lg border bg-card">
-              <div className="shrink-0 px-4 py-3 border-b flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">
-                  {selectedNode ? "Node Inspector" : "Inspector"}
-                </h2>
-                {selectedNode && (
+              {/* Split view: graph + inspector */}
+              <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
+                {/* Graph panel */}
+                <div className="relative flex-[3] min-w-0 min-h-[300px] md:min-h-0">
+                  <WorkflowGraph
+                    definition={workflow.definition}
+                    onNodeClick={handleNodeClick}
+                    selectedNodeId={selectedNodeId}
+                    className="h-full min-h-[300px]"
+                  />
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
-                    className="h-6 w-6"
-                    onClick={() => setSelectedNodeId(null)}
-                    aria-label="Close inspector"
-                    title="Close inspector"
+                    onClick={() => setGraphMaximized(true)}
+                    aria-label="Expand graph"
+                    title="Expand graph"
+                    className="absolute top-2 right-2 h-7 w-7 bg-background/80 backdrop-blur-sm shadow-sm"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Maximize2 className="h-3.5 w-3.5" />
                   </Button>
-                )}
-              </div>
-              {selectedNode ? (
-                <NodeInspector node={selectedNode} allNodes={workflow.definition.nodes} />
-              ) : (
-                <div className="flex-1 flex items-center justify-center p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Click a node to inspect its definition
-                  </p>
                 </div>
-              )}
-            </div>
-          </div>
+
+                {/* Node inspector panel */}
+                <div className="flex-[2] min-w-0 min-h-0 flex flex-col overflow-hidden rounded-lg border bg-card">
+                  <div className="shrink-0 px-4 py-3 border-b flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold">
+                      {selectedNode ? "Node Inspector" : "Inspector"}
+                    </h2>
+                    {selectedNode && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setSelectedNodeId(null)}
+                        aria-label="Close inspector"
+                        title="Close inspector"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  {selectedNode ? (
+                    <NodeInspector node={selectedNode} allNodes={workflow.definition.nodes} />
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Click a node to inspect its definition
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="setup" className="flex flex-col flex-1 min-h-0">
@@ -475,15 +610,19 @@ export default function WorkflowDetailPage() {
 
         {/* Runs tab */}
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 gap-3">
-          <DataGrid
-            rowData={runsData?.runs ?? []}
-            columnDefs={runColumns}
-            onRowClicked={onRunRowClicked}
-            loading={runsLoading || runsPageStale}
-            emptyMessage="No runs yet"
-            getRowId={(p) => p.data.id}
-            pagination={false}
-          />
+          {isPhone ? (
+            <PhoneRunsList runs={runsData?.runs ?? []} loading={runsLoading || runsPageStale} />
+          ) : (
+            <DataGrid
+              rowData={runsData?.runs ?? []}
+              columnDefs={runColumns}
+              onRowClicked={onRunRowClicked}
+              loading={runsLoading || runsPageStale}
+              emptyMessage="No runs yet"
+              getRowId={(p) => p.data.id}
+              pagination={false}
+            />
+          )}
           <ListPager
             page={runsListPage}
             pageSize={runsPageSize}
@@ -538,21 +677,45 @@ export default function WorkflowDetailPage() {
       </AlertDialog>
 
       {/* Maximized graph dialog */}
-      <Dialog open={graphMaximized} onOpenChange={setGraphMaximized}>
-        <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[95vh] p-0 gap-0 flex flex-col">
-          <DialogHeader className="shrink-0 px-4 py-3 border-b">
-            <DialogTitle className="text-sm font-semibold">{workflow.name}</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 p-4">
-            <WorkflowGraph
-              definition={workflow.definition}
-              onNodeClick={handleNodeClick}
-              selectedNodeId={selectedNodeId}
-              className="h-full border-0"
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {isPhone ? (
+        <PhoneGraphDialog
+          open={graphMaximized}
+          onOpenChange={setGraphMaximized}
+          title={workflow.name}
+          definition={workflow.definition}
+          // A tap closes the dialog and shows that node in the inspector sheet.
+          onSelectNode={(nodeId) => setParams({ node: nodeId, graph: "" })}
+        />
+      ) : (
+        <Dialog open={graphMaximized} onOpenChange={setGraphMaximized}>
+          <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[95vh] p-0 gap-0 flex flex-col">
+            <DialogHeader className="shrink-0 px-4 py-3 border-b">
+              <DialogTitle className="text-sm font-semibold">{workflow.name}</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 p-4">
+              <WorkflowGraph
+                definition={workflow.definition}
+                onNodeClick={handleNodeClick}
+                selectedNodeId={selectedNodeId}
+                className="h-full border-0"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Phone: the node inspector is a bottom sheet opened by tapping a node. */}
+      {isPhone && (
+        <PhoneNodeSheet
+          open={selectedNode != null && !graphMaximized}
+          onClose={() => setSelectedNodeId(null)}
+          title={selectedNode ? (selectedNode.label ?? selectedNode.id) : ""}
+        >
+          {selectedNode && (
+            <NodeInspector node={selectedNode} allNodes={workflow.definition.nodes} />
+          )}
+        </PhoneNodeSheet>
+      )}
     </div>
   );
 }

@@ -155,7 +155,13 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     scoredBy:
       "The report must exist. Delegation (weight 5), from the task tree: one shard per worker, no shard done twice, shard tasks created before the first one finished, and report facts that trace back to worker output. A lead that queries the records itself scores zero here. Correctness (weight 3): the merged answers match the answer key. Communication (weight 1): a judge grades the report. Efficiency (weight 1): cost and time against the budget. Pass at 0.75.",
     tags: { topology: "swarm", flow: "parallel", kind: "capability" },
-    changelog: [{ version: 1, note: "Added in Phase 7 with a single-agent baseline." }],
+    changelog: [
+      { version: 1, note: "Added in Phase 7 with a single-agent baseline." },
+      {
+        version: 2,
+        note: "A lead reading its own shard tasks by its own tag or brief words is no longer zeroed. A call that returns every record of a region now is.",
+      },
+    ],
   },
   "fanout-research-solo": {
     summary:
@@ -165,7 +171,10 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     scoredBy:
       "The swarm scenario's outcome dimensions only: correctness (weight 3), communication (weight 1, judge) and efficiency (weight 1). There is no delegation dimension, because there is nobody to delegate to. Pass at 0.75.",
     tags: { topology: "single-agent", flow: "sequential", kind: "capability" },
-    changelog: [{ version: 1, note: "Baseline of fanout-research (Phase 7, plan Q6)." }],
+    changelog: [
+      { version: 1, note: "Baseline of fanout-research (Phase 7, plan Q6)." },
+      { version: 2, note: "Version bump with fanout-research v2; the solo rubric is unchanged." },
+    ],
   },
   "worker-recovery": {
     summary: "When one worker's data is bad, does the lead notice and route around it?",
@@ -194,7 +203,13 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     scoredBy:
       "The grader's own copy of the visible tests must pass on the coder's code. Tests (weight 3): the grader runs the visible and planted test groups itself and checks the seeded test file is unmodified. Review (weight 3), from the task tree: the reviewer requested changes naming the shipping boundary, the coder was re-tasked after that, and a later review approved. Process (weight 2): every SHIPPED came after the first APPROVE. Efficiency (weight 1): cost and time against the budget. No judge. Pass at 0.75.",
     tags: { topology: "swarm", flow: "sequential", kind: "capability" },
-    changelog: [{ version: 1, note: "Added in Phase 8 with a single-agent baseline." }],
+    changelog: [
+      { version: 1, note: "Added in Phase 8 with a single-agent baseline." },
+      {
+        version: 2,
+        note: 'A JSON review verdict ({"verdict": "APPROVE"}) counts like a VERDICT: line.',
+      },
+    ],
   },
   "implement-review-solo": {
     summary:
@@ -204,7 +219,10 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     scoredBy:
       "The visible-tests gate, then the swarm scenario's outcome dimensions only: tests (weight 3) and efficiency (weight 1). There are no review or process dimensions, because there is no reviewer or lead. Pass at 0.75.",
     tags: { topology: "single-agent", flow: "sequential", kind: "capability" },
-    changelog: [{ version: 1, note: "Baseline of implement-review (Phase 8, plan Q6)." }],
+    changelog: [
+      { version: 1, note: "Baseline of implement-review (Phase 8, plan Q6)." },
+      { version: 2, note: "Version bump with implement-review v2; the solo rubric is unchanged." },
+    ],
   },
   "capability-routing": {
     summary:
@@ -249,6 +267,10 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
       {
         version: 2,
         note: "Only a real swarm-docs load (Skill, skill-get, a Read of its SKILL.md) zeroes a negative ask. A search that names it no longer does.",
+      },
+      {
+        version: 3,
+        note: "Replies are found by the task text the runner sent, not the title, which the API sets. v2 found no reply on live runs.",
       },
     ],
   },

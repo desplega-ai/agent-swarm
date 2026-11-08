@@ -5,6 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { usePromptTemplates } from "@/api/hooks/use-prompt-templates";
 import type { PromptTemplate } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { SearchBox } from "@/components/shared/search-box";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +20,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { formatSmartTime } from "@/lib/utils";
 
 const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -26,8 +32,14 @@ const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "dest
   skip_event: "outline",
 };
 
+/** The "enabled" state is the norm, so a phone row only names the exceptions. */
+function stateLabel(state: PromptTemplate["state"]): string {
+  return state.replace(/_/g, " ");
+}
+
 export default function TemplatesPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { searchParams, setParam } = useUrlSearchState();
   const { data: templates, isLoading, isError } = usePromptTemplates();
   const search = readStringParam(searchParams, "search");
@@ -46,6 +58,25 @@ export default function TemplatesPage() {
     return filtered;
   }, [templates, scopeFilter, showDefaultsOnly]);
 
+  // One search for both widths, so a phone finds the same templates as the grid.
+  const searchedTemplates = useMemo(() => {
+    if (!search.trim()) return filteredTemplates;
+    return filteredTemplates.filter((t) =>
+      matchesSearchTerms(
+        searchText([
+          t.eventType,
+          t.scope,
+          t.scopeId,
+          stateLabel(t.state),
+          t.version,
+          t.defaultDrifted ? "drifted" : t.isDefault ? "default" : null,
+        ]),
+        search,
+      ),
+    );
+  }, [filteredTemplates, search]);
+  const activeFilterCount = (scopeFilter !== "all" ? 1 : 0) + (showDefaultsOnly ? 1 : 0);
+
   const columnDefs = useMemo<ColDef<PromptTemplate>[]>(
     () => [
       { field: "eventType", headerName: "Event Type", flex: 1, minWidth: 200 },
@@ -57,7 +88,7 @@ export default function TemplatesPage() {
         width: 180,
         cellRenderer: (params: { value: PromptTemplate["state"] }) => (
           <Badge variant={STATE_VARIANTS[params.value] ?? "outline"} size="tag">
-            {params.value?.replace(/_/g, " ")}
+            {params.value ? stateLabel(params.value) : null}
           </Badge>
         ),
       },
@@ -127,52 +158,127 @@ export default function TemplatesPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Templates" />
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search event types..."
+      {isMobile ? (
+        // One row on a phone: search, then the facets behind Filters (n).
+        <div className="flex items-center gap-2">
+          <SearchBox
             value={search}
-            onChange={(e) => setParam("search", e.target.value, { reset: ["templatesPage"] })}
-            className="pl-9"
+            onChange={(value) => setParam("search", value, { reset: ["templatesPage"] })}
+            placeholder="Search templates…"
+            ariaLabel="Search templates"
+            className="flex-1"
           />
+          <FiltersPopover activeCount={activeFilterCount}>
+            <FilterField label="Scope">
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, { defaultValue: "all", reset: ["templatesPage"] })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="All scopes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Scopes</SelectItem>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="repo">Repo</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <label className="flex cursor-pointer select-none items-center justify-between gap-2 text-sm">
+              Defaults only
+              <Switch
+                size="sm"
+                checked={showDefaultsOnly}
+                onCheckedChange={(checked) =>
+                  setParam("defaults", checked ? "true" : "", { reset: ["templatesPage"] })
+                }
+              />
+            </label>
+          </FiltersPopover>
         </div>
-        <Select
-          value={scopeFilter}
-          onValueChange={(value) =>
-            setParam("scope", value, { defaultValue: "all", reset: ["templatesPage"] })
-          }
-        >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="All scopes" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Scopes</SelectItem>
-            <SelectItem value="global">Global</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-            <SelectItem value="repo">Repo</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant={showDefaultsOnly ? "default" : "outline"}
-          size="sm"
-          onClick={() =>
-            setParam("defaults", showDefaultsOnly ? "" : "true", { reset: ["templatesPage"] })
-          }
-        >
-          Defaults only
-        </Button>
-      </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search event types..."
+              value={search}
+              onChange={(e) => setParam("search", e.target.value, { reset: ["templatesPage"] })}
+              className="pl-9"
+            />
+          </div>
+          <Select
+            value={scopeFilter}
+            onValueChange={(value) =>
+              setParam("scope", value, { defaultValue: "all", reset: ["templatesPage"] })
+            }
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="All scopes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Scopes</SelectItem>
+              <SelectItem value="global">Global</SelectItem>
+              <SelectItem value="agent">Agent</SelectItem>
+              <SelectItem value="repo">Repo</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant={showDefaultsOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() =>
+              setParam("defaults", showDefaultsOnly ? "" : "true", { reset: ["templatesPage"] })
+            }
+          >
+            Defaults only
+          </Button>
+        </div>
+      )}
 
-      <DataGrid
-        rowData={filteredTemplates}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No templates found"
-        paginationQueryKey="templates"
-      />
+      {isMobile ? (
+        <MobileList label="Templates" emptyMessage="No templates found">
+          {searchedTemplates.map((t) => (
+            <MobileListRow
+              key={t.id}
+              to={`/templates/${t.id}`}
+              title={t.eventType}
+              status={
+                t.defaultDrifted ? (
+                  <Badge
+                    variant="outline"
+                    size="tag"
+                    className="border-status-warning/30 text-status-warning-strong"
+                  >
+                    Drifted
+                  </Badge>
+                ) : t.state !== "enabled" ? (
+                  <Badge variant={STATE_VARIANTS[t.state] ?? "outline"} size="tag">
+                    {stateLabel(t.state)}
+                  </Badge>
+                ) : null
+              }
+              meta={[
+                t.scopeId ? `${t.scope}: ${t.scopeId}` : t.scope,
+                `v${t.version}`,
+                t.isDefault && !t.defaultDrifted ? "default" : null,
+                t.updatedAt ? formatSmartTime(t.updatedAt) : null,
+              ]}
+            />
+          ))}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={searchedTemplates}
+          columnDefs={columnDefs}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage="No templates found"
+          paginationQueryKey="templates"
+        />
+      )}
     </div>
   );
 }
