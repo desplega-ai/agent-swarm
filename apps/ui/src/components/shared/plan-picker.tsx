@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { PLAN_SOURCES, type PlanSource } from "@/lib/provider-quota";
 import { cn } from "@/lib/utils";
 
 /** Credential types billed as a flat subscription. Mirrors `SUBSCRIPTION_KEY_TYPES` on the server. */
@@ -20,7 +21,7 @@ export function isSubscriptionKeyType(keyType: string | null): boolean {
   return keyType !== null && SUBSCRIPTION_KEY_TYPES.has(keyType);
 }
 
-export type PlanSource = "manual" | "detected" | "estimated";
+export type { PlanSource } from "@/lib/provider-quota";
 
 /** The fields the picker reads. Usage rows and API key rows both have them. */
 export interface PlanPickerCredential {
@@ -29,15 +30,6 @@ export interface PlanPickerCredential {
   plan: string | null;
   planSource: PlanSource | null;
 }
-
-const PLAN_SOURCES: Record<PlanSource, { label: string; hint: string }> = {
-  detected: { label: "Detected", hint: "Read from the credential." },
-  manual: { label: "Set by you", hint: "Picked by an operator." },
-  estimated: {
-    label: "Estimated",
-    hint: "Estimated from rate-limit usage. Pick a plan to fix it.",
-  },
-};
 
 /** Select value for "remove my choice" (the API takes `plan: null`). */
 const USE_DETECTED = "__detected__";

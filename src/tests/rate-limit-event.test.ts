@@ -665,3 +665,25 @@ describe("isRateLimitMessage — shared matcher (runner gate + stderr parser)", 
     expect(parseModelLimitMessage(failureReason)).toBe("fable");
   });
 });
+
+test("Claude quota telemetry preserves bounded overage details and excludes payment metadata", () => {
+  const tracker = new SessionErrorTracker();
+  tracker.processRateLimitEvent({
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "allowed",
+      rateLimitType: "seven_day",
+      overageStatus: "rejected",
+      overageDisabledReason: "group_zero_credit_limit",
+      isUsingOverage: false,
+      canUserPurchaseCredits: true,
+      hasChargeableSavedPaymentMethod: true,
+    },
+  });
+  const windows = tracker.getRateLimitWindows();
+  expect(windows?.seven_day?.durationMins).toBe(10080);
+  expect(windows?.seven_day?.overageStatus).toBe("rejected");
+  expect(windows?.seven_day?.overageDisabledReason).toBe("group_zero_credit_limit");
+  expect(JSON.stringify(windows)).not.toContain("Payment");
+  expect(JSON.stringify(windows)).not.toContain("Purchase");
+});

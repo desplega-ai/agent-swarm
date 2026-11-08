@@ -24,6 +24,16 @@ export interface RateLimitWindowInfo {
   isUsingOverage?: boolean;
   surpassedThreshold?: number;
   lastSeenAt: string;
+  fieldObservedAt?: Partial<
+    Record<"durationMins" | "resetsAt" | "label" | "normalModelSlug", string>
+  >;
+  durationMins?: number;
+  source?: "claude" | "codex";
+  limitId?: string;
+  label?: string;
+  normalModelSlug?: string;
+  overageStatus?: string;
+  overageDisabledReason?: string;
 }
 
 export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
@@ -86,6 +96,15 @@ export function parseRateLimitWindowTelemetry(
     const existing = byType.get(info.rateLimitType);
     byType.set(info.rateLimitType, existing ? { ...existing, ...topLevel } : topLevel);
 
+    const mergedTop = byType.get(info.rateLimitType)!;
+    for (const field of ["overageStatus", "overageDisabledReason"] as const) {
+      if (typeof info[field] === "string") mergedTop[field] = info[field].slice(0, 256);
+    }
+    for (const [key, window] of byType) {
+      window.source = "claude";
+      if (key === "five_hour") window.durationMins = 300;
+      else if (key.startsWith("seven_day")) window.durationMins = 10080;
+    }
     return Array.from(byType, ([rateLimitType, windowInfo]) => ({
       rateLimitType,
       info: windowInfo,
