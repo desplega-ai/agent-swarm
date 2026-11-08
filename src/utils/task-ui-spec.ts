@@ -52,10 +52,16 @@ export interface TaskUiSpecDocument {
   state?: Record<string, unknown>;
 }
 
-export interface TaskUiSpecAction {
-  kind: "follow_up";
-  prompt: string;
-}
+/** Max UTF-8 bytes of `JSON.stringify(args)` on a `script` action. */
+export const UI_SPEC_SCRIPT_ARGS_MAX_BYTES = 4_096;
+
+/**
+ * `follow_up` starts a Lead task once. `script` re-runs an allowlisted global
+ * script with frozen `args` and replaces the card with its output.
+ */
+export type TaskUiSpecAction =
+  | { kind: "follow_up"; prompt: string }
+  | { kind: "script"; script: string; args?: Record<string, unknown> };
 
 export interface TaskUiSpec {
   spec: TaskUiSpecDocument;

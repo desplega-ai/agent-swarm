@@ -18,15 +18,17 @@ import {
 import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
 import {
+  humanOnlyConfigKeyError,
   internalConfigKeyError,
   isApiOnlyConfigKey,
+  isHumanOnlyConfigKey,
   isInternalConfigKey,
   validateConfigEntry,
 } from "../be/swarm-config-guard";
 import { isScriptRunToken } from "../be/users";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { type SwarmConfig, SwarmConfigSchema } from "../types";
-import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
+import { authUserId, getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { syncRankingAfterConfigChange } from "./ranking";
@@ -183,6 +185,24 @@ export async function ensureConfigAdmin(
       ? "Writing swarm config requires the lead agent"
       : "Deleting swarm config requires the lead agent",
   );
+}
+
+/**
+ * A human-only key (see `isHumanOnlyConfigKey`) needs an admin user: a user
+ * token or a dashboard session. The operator key resolves to the operator,
+ * and every worker holds it, so it is refused like an agent or a guest.
+ * Returns true when the request may proceed; on denial it writes a 403.
+ */
+export async function ensureHumanOnlyConfigWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  key: string,
+): Promise<boolean> {
+  if (!isHumanOnlyConfigKey(key)) return true;
+  const userId = authUserId(getRequestAuth(req));
+  if (userId && (!isRbacEnabled() || (await getUserGrant(userId)).grantsAll)) return true;
+  jsonError(res, humanOnlyConfigKeyError(key), 403);
+  return false;
 }
 
 /**
@@ -531,6 +551,7 @@ export async function handleConfig(
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     const { scope, scopeId, key, value, isSecret, envPath, description, exportToEnv } = parsed.body;
+    if (!(await ensureHumanOnlyConfigWrite(req, res, key))) return true;
 
     const validationError = validateConfigEntry({ scope, scopeId, key, value, exportToEnv });
     if (validationError) {
@@ -576,6 +597,7 @@ export async function handleConfig(
       jsonError(res, internalConfigKeyError(existing.key).message, 400);
       return true;
     }
+    if (!(await ensureHumanOnlyConfigWrite(req, res, existing.key))) return true;
     const deleted = await deleteSwarmConfig(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Config not found", 404);

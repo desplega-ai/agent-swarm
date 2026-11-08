@@ -3,6 +3,10 @@ import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemet
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import {
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  validateScriptActionAllowlist,
+} from "../ui-spec/script-allowlist";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import {
   COMPANY_ACQUISITION_SOURCES,
@@ -113,6 +117,22 @@ export function internalConfigKeyError(key: string): Error {
         ? "/api/ranking"
         : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
+}
+
+/**
+ * Keys only an admin user (a user token or dashboard session) may write or
+ * delete: never an agent, the Lead included, a guest, or the shared operator
+ * key, which every worker holds. The deployment env can still seed them.
+ * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
+ */
+const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+
+export function isHumanOnlyConfigKey(key: string): boolean {
+  return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
+}
+
+export function humanOnlyConfigKeyError(key: string): string {
+  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
 }
 
 export function isReservedConfigKey(key: string): boolean {
@@ -381,6 +401,7 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
   DOCKER_RUNTIME: validateDockerRuntime,
   DOCKER_PIDS_LIMIT: validateDockerPidsLimit,

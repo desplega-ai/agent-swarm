@@ -3,7 +3,7 @@ import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { runTaskUiAction } from "../ui-spec/actions";
+import { runTaskUiAction, type TaskUiActionResult } from "../ui-spec/actions";
 import { UI_SPEC_ACTION_PREFIX } from "../utils/task-ui-spec";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
@@ -13,12 +13,35 @@ import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 
 /** The ephemeral reply to a card Button click that did not start its action. */
-const UI_ACTION_REPLIES = {
-  forbidden: "Only the person who asked for this task can use its buttons.",
-  already_done: "This button already ran.",
-  disabled: "Card buttons are turned off on this swarm.",
-  unknown_action: "This button has no action.",
-} as const;
+/** The ephemeral reply to a card click, or `null` when the click needs none. */
+function uiActionReply(result: TaskUiActionResult, renderV2: boolean): string | null {
+  switch (result.status) {
+    case "started":
+      return null;
+    // v2 edits the outcome card in place; v1 keeps no record of the message.
+    case "refreshed":
+      return renderV2 ? null : "Card refreshed in the dashboard.";
+    case "forbidden":
+      return "Only the person who asked for this task can use its buttons.";
+    case "already_done":
+      return "This button already ran.";
+    case "disabled":
+      return "Card buttons are turned off on this swarm.";
+    case "unknown_action":
+      return "This button has no action.";
+    case "not_allowlisted":
+      return "This button's script is not allowlisted for card buttons.";
+    case "script_changed":
+      return "This button's script changed since it was allowlisted. An admin must re-pin it.";
+    case "running":
+      return "This button is already running. Try again in a moment.";
+    case "rate_limited":
+      return `This button ran recently. Try again in ${result.retryAfterSec}s.`;
+    case "script_failed":
+    case "invalid_output":
+      return `Refresh failed: ${result.error}`;
+  }
+}
 
 type ChatUpdatePayload = ChatUpdateArguments & {
   unfurl_links: false;
@@ -205,12 +228,13 @@ export function registerActionHandlers(app: App): void {
       if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([result.taskId]);
       return;
     }
-    if (!channelId) return;
+    const reply = uiActionReply(result, isSlackRenderV2Enabled());
+    if (!channelId || !reply) return;
     try {
       await client.chat.postEphemeral({
         channel: channelId,
         user: body.user.id,
-        text: UI_ACTION_REPLIES[result.status],
+        text: reply,
       });
     } catch (error) {
       console.error("[Slack] Failed to post card button reply:", error);

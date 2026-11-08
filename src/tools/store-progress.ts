@@ -39,11 +39,12 @@ import {
 } from "@/tasks/terminal-result-guard";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { TaskUiSpecInputSchema } from "@/ui-spec/schema";
+import { scriptActionIssues } from "@/ui-spec/script-actions";
 import { validateTaskUiSpec } from "@/ui-spec/validate";
 import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { taskCitationIssues, taskCitationWarnings } from "@/utils/task-citations";
-import { UI_SPEC_ACTION_ID } from "@/utils/task-ui-spec";
 import { ensure } from "../utils/business-use";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
@@ -203,27 +204,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             'Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.',
           ),
-        uiSpec: z
-          .object({
-            spec: z
-              .object({
-                root: z.string().min(1),
-                elements: z.record(z.string(), z.unknown()),
-                state: z.record(z.string(), z.unknown()).optional(),
-              })
-              .describe("A json-render spec for the chat catalog. Root must be a Card."),
-            actions: z
-              .record(
-                z.string().regex(UI_SPEC_ACTION_ID),
-                z.object({ kind: z.literal("follow_up"), prompt: z.string().min(1).max(4000) }),
-              )
-              .optional()
-              .describe("Actions that Button ids name. Needs UI_SPEC_ACTIONS_ENABLED=true."),
-          })
-          .optional()
-          .describe(
-            "Optional rich card for this result, rendered in the Slack outcome card, the session view and Chat SDK channels. `output` stays the prose answer. A Slack card shows only the spec of its own task. See the ui-spec skill.",
-          ),
+        uiSpec: TaskUiSpecInputSchema.optional().describe(
+          "Optional rich card for this result, rendered in the Slack outcome card, the session view and Chat SDK channels. `output` stays the prose answer. A Slack card shows only the spec of its own task. See the ui-spec skill.",
+        ),
         learning: z
           .union([
             z.string(),
@@ -642,10 +625,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
         } else if (uiSpec && status !== "completed") {
           uiSpecNote = 'uiSpec is stored only with status "completed".';
         } else if (uiSpec) {
-          const validation = validateTaskUiSpec(uiSpec, {
-            taskId,
-            actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),
-          });
+          // Script actions are checked first, so a bad one uses the same single refusal.
+          const scriptIssues = await scriptActionIssues(uiSpec.actions);
+          const validation =
+            scriptIssues.length > 0
+              ? { ok: false as const, issues: scriptIssues }
+              : validateTaskUiSpec(uiSpec, {
+                  taskId,
+                  actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),
+                });
           if (validation.ok) {
             uiSpecToStore = {
               spec: validation.spec,
