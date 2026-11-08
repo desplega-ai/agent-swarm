@@ -38,6 +38,7 @@ export const BUILTIN_ROLES = [
       "task.action.own",
       "task.fs.mutate",
       "favorite.write.own",
+      "checklist.write.own",
       "session.share",
       "session.presence",
       "task.steer.own",
@@ -53,6 +54,7 @@ export const BUILTIN_ROLES = [
     isBuiltin: true,
     grantsAll: false,
     verbs: [
+      "checklist.write.own",
       "favorite.write.own",
       "session.presence",
       "comb.presence",

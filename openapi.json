@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.8.3",
+    "version": "2.9.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2494,7 +2494,8 @@
               "page",
               "workflow",
               "schedule",
-              "agent-fs-path"
+              "agent-fs-path",
+              "key"
             ]
           },
           "itemId": {
@@ -2517,6 +2518,139 @@
           "id",
           "itemType",
           "itemId",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
+      "ChecklistItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "swarm",
+              "user"
+            ]
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "channel",
+              "tool",
+              "use_case",
+              "custom"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "href": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "meta": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {}
+          },
+          "sortOrder": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "done",
+              "removed"
+            ]
+          },
+          "statusChangedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusChangedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusChangedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nudgedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nudgedTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signal": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "userId",
+          "kind",
+          "label",
+          "href",
+          "meta",
+          "sortOrder",
+          "status",
+          "statusChangedAt",
+          "statusChangedBy",
+          "statusChangedByName",
+          "statusReason",
+          "nudgedAt",
+          "nudgedTaskId",
+          "signal",
+          "done",
+          "editable",
           "createdAt",
           "lastUpdatedAt"
         ]
@@ -3396,6 +3530,7 @@
               "task_follow_up_suppressed",
               "task_follow_up_gate_shadow",
               "task_citation_check_refused",
+              "task_ui_spec_check_refused",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -4212,6 +4347,39 @@
           "agentId": {
             "type": "string"
           },
+          "credentialKeyType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credentialKeySuffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
           "totalCostUsd": {
             "type": "number",
             "minimum": 0
@@ -4227,14 +4395,20 @@
             "default": 0
           },
           "cacheReadTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "cacheWriteTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "reasoningOutputTokens": {
             "type": "integer",
@@ -14961,7 +15135,7 @@
       },
       "get": {
         "summary": "List approval requests with optional filters",
-        "description": "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
+        "description": "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -15530,6 +15704,10 @@
                               },
                               "questionCount": {
                                 "type": "integer"
+                              },
+                              "viewerCanRespond": {
+                                "type": "boolean",
+                                "description": "Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed)."
                               }
                             },
                             "required": [
@@ -19719,6 +19897,11 @@
                   "plan": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "planRaw": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
                   }
                 },
                 "required": [
@@ -20104,6 +20287,7 @@
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
+        "description": "Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.",
         "tags": [
           "API Keys"
         ],
@@ -20136,13 +20320,68 @@
                       "type": "object",
                       "properties": {
                         "status": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "utilization": {
                           "type": "number"
                         },
                         "resetsAt": {
                           "type": "number"
+                        },
+                        "fieldObservedAt": {
+                          "type": "object",
+                          "properties": {
+                            "durationMins": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "resetsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "label": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "normalModelSlug": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "durationMins": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 576000
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "claude",
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "normalModelSlug": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageStatus": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageDisabledReason": {
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "isUsingOverage": {
                           "type": "boolean"
@@ -20160,6 +20399,252 @@
                         "lastSeenAt"
                       ]
                     }
+                  },
+                  "account": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "codex",
+                          "claude"
+                        ]
+                      },
+                      "observedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "fieldObservedAt": {
+                        "type": "object",
+                        "properties": {
+                          "ordinaryUsageAllowed": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resetCreditsAvailable": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      },
+                      "ordinaryUsageAllowed": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "resetCreditsAvailable": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "limits": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "properties": {
+                            "observedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "fieldObservedAt": {
+                              "type": "object",
+                              "properties": {
+                                "planRaw": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "credits": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spend": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spendControlReached": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "reachedType": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            },
+                            "windowRemovedAt": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "secondary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "planRaw": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "label": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "normalModelSlug": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "credits": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "hasCredits": {
+                                  "type": "boolean"
+                                },
+                                "unlimited": {
+                                  "type": "boolean"
+                                },
+                                "balance": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "maxLength": 256
+                                }
+                              },
+                              "required": [
+                                "hasCredits",
+                                "unlimited"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spend": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "limit": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "used": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "remainingPercent": {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8640000000000
+                                }
+                              },
+                              "required": [
+                                "limit",
+                                "used",
+                                "remainingPercent",
+                                "resetsAt"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spendControlReached": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "reachedType": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "observedAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "observedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "replace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "observedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "slots": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "primary",
+                              "secondary"
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 2
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "limitId",
+                        "observedAt",
+                        "slots"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 128
                   },
                   "scope": {
                     "type": "string"
@@ -20216,6 +20701,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Telemetry report exceeds 256 KiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -20602,13 +21097,68 @@
                               "type": "object",
                               "properties": {
                                 "status": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "utilization": {
                                   "type": "number"
                                 },
                                 "resetsAt": {
                                   "type": "number"
+                                },
+                                "fieldObservedAt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "durationMins": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "resetsAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "normalModelSlug": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                },
+                                "durationMins": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 576000
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex"
+                                  ]
+                                },
+                                "limitId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageStatus": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageDisabledReason": {
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "isUsingOverage": {
                                   "type": "boolean"
@@ -20627,6 +21177,212 @@
                               ]
                             }
                           },
+                          "providerAccount": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "codex",
+                                  "claude"
+                                ]
+                              },
+                              "observedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "fieldObservedAt": {
+                                "type": "object",
+                                "properties": {
+                                  "ordinaryUsageAllowed": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "resetCreditsAvailable": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              },
+                              "ordinaryUsageAllowed": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "resetCreditsAvailable": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "limits": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "observedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "fieldObservedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "planRaw": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "normalModelSlug": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "credits": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spend": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spendControlReached": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "reachedType": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      }
+                                    },
+                                    "windowRemovedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "primary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "secondary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "planRaw": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "label": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "normalModelSlug": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "credits": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "hasCredits": {
+                                          "type": "boolean"
+                                        },
+                                        "unlimited": {
+                                          "type": "boolean"
+                                        },
+                                        "balance": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ],
+                                          "maxLength": 256
+                                        }
+                                      },
+                                      "required": [
+                                        "hasCredits",
+                                        "unlimited"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spend": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "limit": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "used": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "remainingPercent": {
+                                          "type": "integer",
+                                          "minimum": -2147483648,
+                                          "maximum": 2147483647
+                                        },
+                                        "resetsAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 8640000000000
+                                        }
+                                      },
+                                      "required": [
+                                        "limit",
+                                        "used",
+                                        "remainingPercent",
+                                        "resetsAt"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spendControlReached": {
+                                      "type": [
+                                        "boolean",
+                                        "null"
+                                      ]
+                                    },
+                                    "reachedType": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    }
+                                  },
+                                  "required": [
+                                    "observedAt"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "observedAt"
+                            ],
+                            "additionalProperties": false
+                          },
                           "plan": {
                             "type": [
                               "string",
@@ -20643,6 +21399,12 @@
                               "detected",
                               "estimated",
                               null
+                            ]
+                          },
+                          "detectedPlanRaw": {
+                            "type": [
+                              "string",
+                              "null"
                             ]
                           },
                           "lastSeatMismatchAt": {
@@ -20731,8 +21493,10 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "providerAccount",
                           "plan",
                           "planSource",
+                          "detectedPlanRaw",
                           "lastSeatMismatchAt",
                           "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
@@ -20756,6 +21520,419 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/window-usage": {
+      "get": {
+        "summary": "Get Swarm-observed usage within current provider windows",
+        "description": "Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "keyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10
+            },
+            "required": false,
+            "name": "keySuffix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Independent windows with receipt-time tokens and explicit measurement coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "asOf": {
+                      "type": "string"
+                    },
+                    "accounting": {
+                      "type": "string",
+                      "enum": [
+                        "session_cost_receipt_time"
+                      ]
+                    },
+                    "windows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statusId": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "keySuffix": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "scopeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "windowKey": {
+                            "type": "string"
+                          },
+                          "durationMins": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "startsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "dataThrough": {
+                            "type": "string"
+                          },
+                          "observedAt": {
+                            "type": "string"
+                          },
+                          "observationAgeMs": {
+                            "type": "number"
+                          },
+                          "modelScope": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "account",
+                                  "family",
+                                  "unknown"
+                                ]
+                              },
+                              "model": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "model"
+                            ]
+                          },
+                          "unavailableReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "missing_reset",
+                              "unknown_duration",
+                              "unknown_model_scope",
+                              "window_not_started",
+                              null
+                            ]
+                          },
+                          "usage": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "sessions": {
+                                "type": "integer"
+                              },
+                              "errorSessions": {
+                                "type": "integer"
+                              },
+                              "completedTasks": {
+                                "type": "integer"
+                              },
+                              "tokens": {
+                                "type": "object",
+                                "properties": {
+                                  "uncachedInput": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "output": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheRead": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheWrite": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "reasoning": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "thinking": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "uncachedInput",
+                                  "output",
+                                  "cacheRead",
+                                  "cacheWrite",
+                                  "reasoning",
+                                  "thinking"
+                                ]
+                              },
+                              "modelUnattributedSessions": {
+                                "type": "integer"
+                              },
+                              "swarmUnattributedSessions": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "sessions",
+                              "errorSessions",
+                              "completedTasks",
+                              "tokens",
+                              "modelUnattributedSessions",
+                              "swarmUnattributedSessions"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "statusId",
+                          "keyType",
+                          "keySuffix",
+                          "scope",
+                          "scopeId",
+                          "windowKey",
+                          "durationMins",
+                          "startsAt",
+                          "endsAt",
+                          "dataThrough",
+                          "observedAt",
+                          "observationAgeMs",
+                          "modelScope",
+                          "unavailableReason",
+                          "usage"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "asOf",
+                    "accounting",
+                    "windows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requested usage exceeds the aggregation bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Usage query budget exhausted. Retry after one second",
             "content": {
               "application/json": {
                 "schema": {
@@ -22908,7 +24085,8 @@
                 "page",
                 "workflow",
                 "schedule",
-                "agent-fs-path"
+                "agent-fs-path",
+                "key"
               ]
             },
             "required": false,
@@ -22987,7 +24165,8 @@
                       "page",
                       "workflow",
                       "schedule",
-                      "agent-fs-path"
+                      "agent-fs-path",
+                      "key"
                     ]
                   },
                   "itemId": {
@@ -23024,7 +24203,8 @@
                         "page",
                         "workflow",
                         "schedule",
-                        "agent-fs-path"
+                        "agent-fs-path",
+                        "key"
                       ]
                     },
                     "itemId": {
@@ -23051,8 +24231,669 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid asset key for a key favorite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No authenticated principal context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist": {
+      "get": {
+        "summary": "Read the post-onboarding checklist",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checklist items and swarm edit permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChecklistItem"
+                      }
+                    },
+                    "canEditSwarm": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "canEditSwarm"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist/items": {
+      "post": {
+        "summary": "Add a checklist item",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "channel",
+                      "tool",
+                      "use_case",
+                      "custom"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "href": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^\\/(?!\\/)"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "swarm",
+                      "user"
+                    ]
+                  },
+                  "meta": {
+                    "type": "object",
+                    "properties": {
+                      "adapter": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "scope"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added checklist item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "$ref": "#/components/schemas/ChecklistItem"
+                    }
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A user is required for user items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot edit swarm items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An open channel item for the same adapter already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist/items/{id}": {
+      "patch": {
+        "summary": "Update a checklist item",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "remove",
+                      "restore",
+                      "done",
+                      "reorder"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "sortOrder": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated checklist item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "$ref": "#/components/schemas/ChecklistItem"
+                    }
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot edit this item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checklist item not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/me": {
+      "get": {
+        "summary": "Ensure the current user's agent-fs account and shared membership",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account readiness",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "pending",
+                        "off",
+                        "unsupported"
+                      ],
+                      "description": "Account readiness in agent-fs."
+                    },
+                    "agentFsUserId": {
+                      "type": "string",
+                      "description": "User ID in agent-fs when ready."
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Email of the swarm user, when available."
+                    },
+                    "displayName": {
+                      "type": "string",
+                      "description": "Name of the swarm user when ready."
+                    },
+                    "orgId": {
+                      "type": "string",
+                      "description": "Shared agent-fs org ID when configured."
+                    },
+                    "driveId": {
+                      "type": "string",
+                      "description": "Shared agent-fs drive ID when configured."
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Reason the account is not ready."
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of twenty account checks per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/keys": {
+      "post": {
+        "summary": "Mint a named agent-fs key for the current user",
+        "description": "The key is scoped to the shared org. The API returns it once and never stores it.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Named key returned once and never stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiKey": {
+                      "type": "string",
+                      "description": "Plaintext key returned once. The API never stores this key."
+                    },
+                    "keyId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "agentFsUserId": {
+                      "type": "string"
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "driveId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "apiKey",
+                    "keyId",
+                    "label",
+                    "agentFsUserId",
+                    "orgId",
+                    "driveId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid key label",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent-fs account or membership is pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of five keys per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "agent_fs_too_old",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent_fs_not_configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/continue": {
+      "post": {
+        "summary": "Mint a named agent-fs key for the live agent-fs app and return the redirect URL",
+        "description": "Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "returnTo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redirect URL with the named key in the fragment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectUrl": {
+                      "type": "string",
+                      "description": "`returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment."
+                    }
+                  },
+                  "required": [
+                    "redirectUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent-fs account or membership is pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of ten continues per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "agent_fs_too_old",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent_fs_not_configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -24462,6 +26303,9 @@
                               "incomplete"
                             ]
                           },
+                          "connected": {
+                            "type": "boolean"
+                          },
                           "error": {
                             "type": "string"
                           },
@@ -24519,6 +26363,7 @@
                           "configured",
                           "enabled",
                           "health",
+                          "connected",
                           "webhookUrl"
                         ]
                       }
@@ -35410,7 +37255,7 @@
             }
           },
           "403": {
-            "description": "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+            "description": "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
             "content": {
               "application/json": {
                 "schema": {
@@ -36420,6 +38265,62 @@
                               "verified"
                             ]
                           }
+                        },
+                        "uiSpec": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "spec": {
+                              "type": "object",
+                              "properties": {
+                                "root": {
+                                  "type": "string"
+                                },
+                                "elements": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "state": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                }
+                              },
+                              "required": [
+                                "root",
+                                "elements"
+                              ]
+                            },
+                            "actions": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "follow_up"
+                                    ]
+                                  },
+                                  "prompt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "prompt"
+                                ]
+                              }
+                            },
+                            "fallbackText": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "spec",
+                            "fallbackText"
+                          ]
                         }
                       },
                       "required": [
@@ -36427,7 +38328,8 @@
                         "supportedSteerModes",
                         "logs",
                         "attachments",
-                        "citations"
+                        "citations",
+                        "uiSpec"
                       ]
                     }
                   ]
@@ -37369,6 +39271,95 @@
         }
       }
     },
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+      "post": {
+        "summary": "Run the action a task card Button declares",
+        "description": "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "actionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The action started, or it already ran",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "started",
+                        "already_done"
+                      ]
+                    },
+                    "taskId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the task requester may run the action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task or action not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{id}/supersede": {
       "post": {
         "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
@@ -37685,6 +39676,97 @@
                   "required": [
                     "task"
                   ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/tags": {
+      "patch": {
+        "summary": "Add or remove task tags",
+        "description": "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tags updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -40154,6 +42236,28 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "checklistNudge": {
+                              "type": "object",
+                              "properties": {
+                                "itemId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "href": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "itemId",
+                                "kind",
+                                "label"
                               ]
                             },
                             "threadParticipants": {
@@ -48587,6 +50691,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "hiddenInCatalog": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -51181,6 +53288,42 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "credentialKeyType": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Z][A-Z0-9_]{0,79}$"
+                  },
+                  "credentialKeySuffix": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "harness": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok",
+                      "fx",
+                      null
+                    ]
+                  },
                   "totalCostUsd": {
                     "type": "number"
                   },
@@ -51199,7 +53342,10 @@
                     "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "minimum": 0
                   },
                   "cacheWriteTokens": {
@@ -51353,6 +53499,26 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted session attribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session identity conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -51571,6 +53737,12 @@
                         },
                         "subscriptionCostUsd": {
                           "type": "number"
+                        },
+                        "credentialUnattributedCostUsd": {
+                          "type": "number"
+                        },
+                        "credentialUnattributedSessions": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -51586,7 +53758,9 @@
                         "attributableCostUsd",
                         "excludedCostUsd",
                         "excludedTaskCount",
-                        "subscriptionCostUsd"
+                        "subscriptionCostUsd",
+                        "credentialUnattributedCostUsd",
+                        "credentialUnattributedSessions"
                       ]
                     },
                     "daily": {
@@ -51611,6 +53785,12 @@
                           },
                           "subscriptionCostUsd": {
                             "type": "number"
+                          },
+                          "credentialUnattributedCostUsd": {
+                            "type": "number"
+                          },
+                          "credentialUnattributedSessions": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -51619,7 +53799,9 @@
                           "inputTokens",
                           "outputTokens",
                           "sessions",
-                          "subscriptionCostUsd"
+                          "subscriptionCostUsd",
+                          "credentialUnattributedCostUsd",
+                          "credentialUnattributedSessions"
                         ]
                       }
                     },
@@ -55490,6 +57672,62 @@
                                 ]
                               }
                             },
+                            "uiSpec": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "spec": {
+                                  "type": "object",
+                                  "properties": {
+                                    "root": {
+                                      "type": "string"
+                                    },
+                                    "elements": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    "state": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "root",
+                                    "elements"
+                                  ]
+                                },
+                                "actions": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "follow_up"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt"
+                                    ]
+                                  }
+                                },
+                                "fallbackText": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "spec",
+                                "fallbackText"
+                              ]
+                            },
                             "isLeadTask": {
                               "type": "boolean"
                             },
@@ -55506,6 +57744,7 @@
                           },
                           "required": [
                             "citations",
+                            "uiSpec",
                             "isLeadTask",
                             "supportedSteerModes"
                           ]
@@ -55587,6 +57826,62 @@
                                   ]
                                 }
                               },
+                              "uiSpec": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "spec": {
+                                    "type": "object",
+                                    "properties": {
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "elements": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      },
+                                      "state": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "root",
+                                      "elements"
+                                    ]
+                                  },
+                                  "actions": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "follow_up"
+                                          ]
+                                        },
+                                        "prompt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "prompt"
+                                      ]
+                                    }
+                                  },
+                                  "fallbackText": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "spec",
+                                  "fallbackText"
+                                ]
+                              },
                               "isLeadTask": {
                                 "type": "boolean"
                               },
@@ -55603,6 +57898,7 @@
                             },
                             "required": [
                               "citations",
+                              "uiSpec",
                               "isLeadTask",
                               "supportedSteerModes"
                             ]
@@ -57838,6 +60134,79 @@
         }
       }
     },
+    "/api/integrations/slack/events": {
+      "post": {
+        "summary": "Slack HTTP ingress (SLACK_MODE=http): Events API, slash commands and interactivity at one request URL",
+        "tags": [
+          "Slack"
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "Malformed body after a valid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid signature, or timestamp outside the 5-minute window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Delivery for a workspace this swarm does not own",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slack is disabled or not in HTTP mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Receiver not ready, workspace unverified, or backlog full; Slack retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/slack/inbound/diagnostics": {
       "get": {
         "summary": "Operator-only. Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
@@ -59872,7 +62241,19 @@
                     "servers": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/McpServer"
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/McpServer"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "installCount": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
                       }
                     },
                     "total": {

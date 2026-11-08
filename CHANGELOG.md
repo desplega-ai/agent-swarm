@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-08
+
+### Added
+- GitHub: GitHub Enterprise Server support through `GITHUB_URL` and `GITHUB_API_URL`; dashboard links follow the configured host (#2808).
+- Slack: `SLACK_MODE=http` is served by a native signed receiver (#2857); agents can post json-render cards to Slack and Chat SDK channels (#2844); approval cards are marked resolved in place (#2840).
+- Import: opt-in boot-time file import of workflows, skills, scripts and agent instructions via `SWARM_IMPORT_SOURCES[_FILE]` (#2805).
+- Seed: per-kind opt-out flags `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED` and `SEED_SCHEDULES_ENABLED` (#2800).
+- UI: in-app files, Work/Connect/Build navigation, use-case groups and Home (#2734); answer a session's approval request in place (#2851); mobile and desktop layout fixes from the UI audit (#2863).
+- Apps: catalog batch with approval, agent-fs files, split drawer, dialog and charts (#2810); the SessionThread component and app-page steering source (#2760).
+- Extensions: a `sql-admin-only` template that gates `db-query` by the task creator's role (#2824).
+- Dreaming: skill routes are batched per target skill and skill caps rise to 6/2 (#2856).
+
+### Changed
+- agent-fs pins bumped to 0.18.23 (#2862).
+- Docker: bumped claude-code, opencode, amp, copilot and qwen (#2831), and amp again (#2842).
+- Worker: provider binary checks moved from the shell entrypoint to Bun (#2823).
+- Performance: the boot re-scrub sweep is selective and load-paced with a forward-only mode (#2811); `db-query` reuses worker children instead of spawning one per query (#2813).
+- Docs: prompts steer small chat tables and charts to a json-render card (#2860); extension authoring is internal first (#2848); decision provider guidance for ping and the workflow skill (#2843, #2841); team collaboration secrets claim corrected (#2829); AI operations governance guide leads answer-first (#2830); heartbeat spec synced (#2832); seed skill patches (#2828).
+
+### Fixed
+- Slack: buffered thread replies persist across API restarts (#2861) and fold into the pending Lead task (#2849); block dedupe matches word boundaries by code point (#2859); inbound messages are identified in retry logs (#2855); approval cards show dashboard responder names (#2847); the tree stall threshold is validated (#2817).
+- Worker: provider dependencies are validated at task start (#2858).
+- Savings: savings are available before today's first rollup (#2867).
+- UI: session approvals show before live activity (#2864); Files reading width matches agent-fs (#2854); agent files show with the reply and my message time sits at the bubble edge (#2852).
+- Config fallbacks: invalid values fall back to defaults for heartbeat stall thresholds and resume-generation limit (#2838, #2837), the multi-runtime stale threshold (#2821), the task eligibility scan cap (#2836) and the heartbeat pool scan batch size (#2807).
+- Keyed write retries survive a slow first attempt (#2820); `get-swarm` marks wakeable pool agents as on demand (#2815).
+- Evals: three grader false negatives fixed in docs-suggestion, implement-review and fanout-research (#2865).
+- Tests: Chat SDK Slack adapter e2e through slack-mock HTTP delivery (#2853); savings test clocks pinned (#2814, #2822); the Toaster unmounts before happy-dom unregisters (#2839).
+
 ## [2.8.3] - 2026-11-07
 
 ### Added

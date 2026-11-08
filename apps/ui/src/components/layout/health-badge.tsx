@@ -13,13 +13,7 @@ import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { isOnboardingFinished, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useApiVersion } from "@/api/hooks/use-stats";
 import { useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
-import type {
-  MilestoneId,
-  ProviderName,
-  SetupMilestone,
-  StatusHealth,
-  StatusResponse,
-} from "@/api/types";
+import type { ProviderName, StatusHealth, StatusResponse } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BorderBeam } from "@/components/shared/border-beam";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
@@ -40,6 +34,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { type FailingCheck, failingChecks } from "@/lib/setup-checks";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
 import {
@@ -71,47 +66,17 @@ const TARGET_NOTE: Record<WorkerTarget, string> = {
   kubernetes: "Release, namespace and values file as in the Kubernetes guide.",
 };
 
-interface FailingCheck {
-  /** A setup milestone, or `lead`: no lead can take work (`activity.leads_ready`). */
-  milestone: Omit<SetupMilestone, "id"> & { id: MilestoneId | "lead" };
-  /** `true` turns the badge red: no task can run. */
-  blocks: boolean;
-}
-
-/** The checks behind a red or amber badge, by the rules of `computeHealth` in src/http/status.ts. */
-function failingChecks({ setup, activity }: StatusResponse): FailingCheck[] {
-  const checks = setup.flatMap((milestone): FailingCheck[] => {
-    const { id, state } = milestone;
-    if ((id === "harness" || id === "workers") && state === "unverified") {
-      return [{ milestone, blocks: true }];
-    }
-    if (["harness", "slack", "github", "linear", "jira"].includes(id) && state === "configured") {
-      return [{ milestone, blocks: false }];
-    }
-    return [];
-  });
-  // With no agents at all, the workers check already says it.
-  const noAgents = setup.some((m) => m.id === "workers" && m.state === "unverified");
-  if (activity.leads_ready === 0 && !noAgents) {
-    checks.push({
-      milestone: {
-        id: "lead",
-        label: "No lead online",
-        state: "unverified",
-        hint: "Start the lead. New tasks wait until it is online.",
-        action_url: "/agents",
-      },
-      blocks: false,
-    });
-  }
-  return checks;
-}
-
 export function HealthBadge({
   status,
+  devMode = false,
+  compact = false,
   className,
 }: {
   status: StatusResponse;
+  /** Dev mode (UI version checks bypassed): a muted "dev" after the label. */
+  devMode?: boolean;
+  /** The dot only; the label shows on hover and stays in the accessible name. */
+  compact?: boolean;
   /** The phone bar passes its 44 px touch-target size here. */
   className?: string;
 }) {
@@ -122,7 +87,8 @@ export function HealthBadge({
   const badge = (
     <button
       type="button"
-      aria-label={`Swarm health: ${HEALTH_LABEL[health]}`}
+      aria-label={`Swarm health: ${HEALTH_LABEL[health]}${devMode ? ", dev mode" : ""}`}
+      title={compact ? HEALTH_LABEL[health] : undefined}
       className={cn(
         "hit-area flex items-center gap-2 rounded-md px-2 py-1 text-xs",
         "hover:bg-accent transition-colors data-[state=open]:bg-accent",
@@ -133,7 +99,15 @@ export function HealthBadge({
       <span className={cn("size-2 rounded-full", HEALTH_DOT_CLASS[health])} />
       {/* The connection name and version live in the sidebar swarm
           switcher; the header only carries health. */}
-      <span className="hidden sm:inline">{HEALTH_LABEL[health]}</span>
+      {compact ? null : <span className="hidden sm:inline">{HEALTH_LABEL[health]}</span>}
+      {devMode ? (
+        <span
+          className="rounded-sm border border-border px-1 font-mono text-[10px] uppercase leading-4 tracking-wide"
+          title="Dev mode: UI version checks are bypassed"
+        >
+          dev
+        </span>
+      ) : null}
     </button>
   );
 

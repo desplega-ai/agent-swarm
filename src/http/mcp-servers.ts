@@ -12,6 +12,7 @@ import {
   uninstallMcpServer,
   type updateMcpServer,
 } from "../be/db";
+import { countMcpServerInstalls } from "../be/db-queries/mcp-servers";
 import { updateMcpServerChecked } from "../be/mcp-server-checked-update";
 import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
@@ -64,7 +65,15 @@ const listMcpServersRoute = route({
   responses: {
     200: {
       description: "MCP server list",
-      schema: z.object({ servers: z.array(McpServerSchema), total: z.number() }),
+      schema: z.object({
+        servers: z.array(
+          McpServerSchema.extend({
+            /** Agents with an active install of this server. */
+            installCount: z.number().optional(),
+          }),
+        ),
+        total: z.number(),
+      }),
     },
   },
 });
@@ -465,7 +474,11 @@ export async function handleMcpServers(
       search: parsed.query.search,
     });
 
-    listMcpServersRoute.respond(res, 200, { servers, total: servers.length });
+    const installs = await countMcpServerInstalls();
+    listMcpServersRoute.respond(res, 200, {
+      servers: servers.map((server) => ({ ...server, installCount: installs.get(server.id) ?? 0 })),
+      total: servers.length,
+    });
     return true;
   }
 

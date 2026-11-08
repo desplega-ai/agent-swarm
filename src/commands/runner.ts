@@ -3,6 +3,8 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { isGroupKey } from "../assets/key.ts";
+import { sourceOfKey } from "../assets/source-key.ts";
 import {
   type Attributes,
   initOtel,
@@ -50,6 +52,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { effectiveReasoningEffort } from "../providers/reasoning-effort.ts";
+import { validateProviderDependencies } from "../providers/runtime-dependencies.ts";
 import {
   createSkillInvokeTracker,
   isSkillLoaderCall,
@@ -1247,6 +1250,8 @@ export async function provisionAgentFsAfterRegistration(opts: {
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
  * - SWARM_ORG_NAME — read per telemetry event for org identity.
  * - AGENT_FS_LINK_TARGET — read by the prompt builder for the file-link base.
+ * - APP_URL: read by the prompt builder for the file-link base (the dashboard
+ *   by default when set).
  *
  * CLAUDE_TRANSPORT stays in the per-session environment. Caching a scoped
  * value here would prevent deletion from restoring the configured default.
@@ -1267,6 +1272,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
   "AGENT_FS_LINK_TARGET",
+  "APP_URL",
+  // An explicit false keeps prompt file links on the live app (resolveAgentFsLinkBase).
+  "COMB_ENABLED",
   // Gate the public-ranking `ranking.usage` emit, so clearing the website or
   // turning the setting off stops it on running workers.
   "SWARM_ORG_WEBSITE",
@@ -2062,6 +2070,7 @@ async function reportKeyUsage(
         keyIndex: selection.index,
         taskId,
         ...(selection.plan ? { plan: selection.plan } : {}),
+        ...(selection.planRaw ? { planRaw: selection.planRaw } : {}),
       }),
     });
   } catch {
@@ -2533,6 +2542,8 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     output?: string;
     status?: string;
     contextKey?: string;
+    /** Asset key; the lead's use-case note reads it. */
+    key?: string;
     requestedBy?: Trigger["requestedBy"];
     threadParticipants?: Trigger["threadParticipants"];
     /** The profile claim applied, and its pooled-key allowlist read again at fetch. */
@@ -2574,6 +2585,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         finishedAt?: string;
         output?: string;
         status?: string;
+        key?: string;
         requestedBy?: Trigger["requestedBy"];
         threadParticipants?: Trigger["threadParticipants"];
         resolvedProfile?: string;
@@ -2979,7 +2991,7 @@ async function saveCostData(
   }
 
   try {
-    const body = { ...cost, id: crypto.randomUUID() };
+    const body = { ...cost, id: cost.id ?? crypto.randomUUID() };
     const response = await postWithRetry(
       `${apiUrl}/api/session-costs`,
       headers,
@@ -3476,6 +3488,8 @@ interface Trigger {
     /** Structured communication preferences from `users.metadata.comms`. */
     comms?: { tone?: string; language?: string; verbosity?: string };
   };
+  /** One-shot setup nudge for the lead (server-picked open checklist item). */
+  checklistNudge?: ChecklistNudge;
   /** People in a multi-person Slack thread (server: `buildTaskThreadParticipants`). */
   threadParticipants?: {
     total: number;
@@ -3535,6 +3549,32 @@ function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
 type ThreadParticipants = NonNullable<Trigger["threadParticipants"]>;
+
+/** `href` is absent when the API has no APP_URL: the nudge then carries no link. */
+export type ChecklistNudge = { itemId: string; kind: string; label: string; href?: string };
+
+/** The lead's one-shot setup suggestion, rendered into the task prompt only. */
+export async function buildChecklistNudgePrompt(
+  nudge: ChecklistNudge | undefined,
+): Promise<string> {
+  if (!nudge) return "";
+  const result = await resolveTemplateAsync("task.checklist.nudge", {
+    label: nudge.label,
+    href: nudge.href ?? "",
+    link_clause: nudge.href ? `, with the link ${nudge.href}` : "",
+  });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/**
+ * The lead's use-case note: the task's key when it is a use-case group (the
+ * rule `create-schedule` and `create-page` use to inherit it). Task prompt only.
+ */
+export async function buildUseCasePrompt(role: string, key: string | undefined): Promise<string> {
+  if (role !== "lead" || !key || !isGroupKey(key) || sourceOfKey(key)) return "";
+  const result = await resolveTemplateAsync("task.use_case", { key });
+  return result.skipped ? "" : result.text.trim();
+}
 
 /** Comms and notes lines of a profile block, or undefined when it has nothing to say. */
 function profileSections(
@@ -3676,6 +3716,9 @@ export function missingTaskDirWarning(
 /** Per-task context that rides in the task prompt, never the system prompt. */
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
+  checklistNudge?: ChecklistNudge;
+  /** The task's asset key; the lead gets a use-case note when it is a group key. */
+  taskKey?: string;
   threadParticipants?: ThreadParticipants;
   /** Set when the task's `dir` does not exist and the session falls back. */
   cwdWarning?: string;
@@ -3686,7 +3729,7 @@ export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArg
  * agent (profile, harness, deployment), so it is byte-identical across that
  * agent's sessions and the provider reads it from cache instead of re-writing
  * it. Everything that varies per task (repository block, scripts-only Slack
- * note, requester profile, cwd warning) is appended to the task prompt.
+ * note, use-case key, requester profile, checklist nudge, cwd warning) is appended to the task prompt.
  */
 export async function buildTaskSessionPrompts(input: {
   basePromptArgs: BasePromptArgs;
@@ -3706,7 +3749,9 @@ export async function buildTaskSessionPrompts(input: {
       repoContext: context.repoContext,
       slackContext: context.slackContext,
     }),
+    await buildUseCasePrompt(basePromptArgs.role, context.taskKey),
     ...(await buildRequesterPrompts(context.requestedBy, context.threadParticipants)),
+    await buildChecklistNudgePrompt(context.checklistNudge),
     context.cwdWarning?.trim(),
   ]
     .filter((part): part is string => Boolean(part))
@@ -4606,25 +4651,9 @@ export async function spawnProviderProcess(
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
-    // A resolved config-store pool slot always wins over OPENAI_API_KEY at
-    // runtime — `resolveCodexAuthMode` in codex-adapter.ts revalidates and
-    // writes chatgpt-mode auth.json whenever `codexSlot` is set, and OPENAI_API_KEY
-    // is only forwarded to the spawned CLI when auth.json is NOT in chatgpt
-    // mode. Gating this on `credentialSelections[0]`'s rate-limit status
-    // (the old behavior) reported OPENAI_API_KEY as the credential used on
-    // every task as long as OPENAI_API_KEY itself wasn't rate-limited — even
-    // when a healthy CODEX_OAUTH pool slot was the credential actually
-    // authenticating the session (issue: credentialKeyType mislabeled
-    // OPENAI_API_KEY, and CODEX_OAUTH usage never reported to
-    // /api/keys/report-usage so no api_key_status row was ever created for
-    // the pool slot).
-    const oauthIsPrimary =
-      oauthIsPoolBacked ||
-      credentialSelections.length === 0 ||
-      (credentialSelections[0]?.isRateLimitFallback &&
-        oauthSelection &&
-        !oauthSelection.isRateLimitFallback);
-    if (oauthSelection && realTaskId && oauthIsPrimary) {
+    // Both pool credentials and standalone ChatGPT auth suppress OPENAI_API_KEY
+    // in the adapter. Report the same credential that authenticates the session.
+    if (oauthSelection && realTaskId) {
       reportKeyUsage(
         opts.apiUrl,
         opts.apiKey,
@@ -4653,6 +4682,26 @@ export async function spawnProviderProcess(
       ).catch(() => {});
     }
   }
+
+  // Match harness authentication for both cost attribution and failure reports.
+  // isPoolBacked controls slot revalidation, not whether ChatGPT auth wins.
+  const primarySelection = oauthSelection ?? credentialSelections[0];
+  const credentialInfo = primarySelection
+    ? {
+        keyType: primarySelection.keyType,
+        keySuffix: primarySelection.keySuffix,
+        keyIndex: primarySelection.index,
+        authFence: primarySelection.authFailureFence,
+      }
+    : undefined;
+
+  // Capture attribution before the harness starts. Each resume gets a new execution.
+  const costAttribution = {
+    id: crypto.randomUUID(),
+    credentialKeyType: credentialInfo?.keyType ?? null,
+    credentialKeySuffix: credentialInfo?.keySuffix ?? null,
+    harness: opts.harnessProvider,
+  };
 
   // Prompt-path skills can resolve inside createSession, before the event
   // buffer below exists; the tracker holds them until `attach`.
@@ -4684,6 +4733,11 @@ export async function spawnProviderProcess(
     reasoningEffort: reasoningEffortOverride,
     onPromptSkill: skillInvokes.promptSkill,
   };
+
+  // Both new and resumed tasks reach this boundary with the current harness
+  // and resolved env. The caller fails the task and removes its active session
+  // if a dependency is missing, before any provider session starts.
+  await validateProviderDependencies(opts.harnessProvider, config);
 
   // Create the long-lived `worker.session` span up front so the provider
   // session — and the harness subprocess it spawns — is created within its
@@ -5070,6 +5124,8 @@ export async function spawnProviderProcess(
         case "result":
           lastCostHolder.value = {
             ...event.cost,
+            ...costAttribution,
+            agentId: opts.agentId,
             taskId: realTaskId,
             sessionId: opts.runnerSessionId,
           };
@@ -5287,7 +5343,13 @@ export async function spawnProviderProcess(
         // Retain cost data for the concurrent final API writes.
         result.cost ??= lastCostHolder.value;
         if (result.cost) {
-          result.cost = { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId };
+          result.cost = {
+            ...result.cost,
+            ...costAttribution,
+            agentId: opts.agentId,
+            taskId: realTaskId,
+            sessionId: opts.runnerSessionId,
+          };
           sessionSpan.setAttributes({
             "gen_ai.response.model": result.cost.model,
             "gen_ai.usage.input_tokens": result.cost.inputTokens ?? 0,
@@ -5400,38 +5462,6 @@ export async function spawnProviderProcess(
         throw error;
       }),
     );
-
-  // Build credential info for rate limit tracking.
-  // For codex: a resolved CODEX_OAUTH pool slot (oauthIsPoolBacked) is always
-  // the credential actually used at runtime (see resolveCodexAuthMode in
-  // codex-adapter.ts — config store beats OPENAI_API_KEY whenever both
-  // exist), so it must win here too, independent of OPENAI_API_KEY's
-  // rate-limit status. Otherwise fall back to the OPENAI_API_KEY-rate-limited
-  // cross-keyType failover this block already handled.
-  let primarySelection: CredentialSelection | undefined;
-  const firstCred = credentialSelections[0];
-  if (oauthSelection && oauthIsPoolBacked) {
-    primarySelection = oauthSelection;
-  } else if (firstCred && oauthSelection) {
-    if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
-      primarySelection = oauthSelection;
-      console.log(
-        `[credentials] Cross-keyType failover: ${firstCred.keyType} all rate-limited, using ${oauthSelection.keyType} [...${oauthSelection.keySuffix}]`,
-      );
-    } else {
-      primarySelection = firstCred;
-    }
-  } else {
-    primarySelection = firstCred ?? oauthSelection;
-  }
-  const credentialInfo = primarySelection
-    ? {
-        keyType: primarySelection.keyType,
-        keySuffix: primarySelection.keySuffix,
-        keyIndex: primarySelection.index,
-        authFence: primarySelection.authFailureFence,
-      }
-    : undefined;
 
   const runningTask: RunningTask = {
     taskId: effectiveTaskId,
@@ -7261,6 +7291,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 }
               : undefined,
             requestedBy: task.requestedBy,
+            taskKey: task.key,
             threadParticipants: task.threadParticipants,
             cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
           },
@@ -7844,6 +7875,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             repoContext: currentRepoContext,
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
+            checklistNudge: trigger.checklistNudge,
+            taskKey: (trigger.task as { key?: string } | undefined)?.key,
             threadParticipants: trigger.threadParticipants,
             cwdWarning,
           },

@@ -575,6 +575,7 @@ The production inventory is enforced by `src/tests/routing-affinity-inventory.te
 
 | Producer class | Affinity written | Intended destination |
 | --- | --- | --- |
+| REST human task ingress / Slack human ingress | Fresh empty capability requirement, preserving parent Lead-only requirements | Lead by default, or the human-selected agent |
 | `createTaskExtended` parent inheritance | Parent provenance or requirement; Lead-only requirements ratchet | Ordinary continuation destination, subject to create-time authorization |
 | `createResumeFollowUp` | Fresh source-agent snapshot, falling back to inherited parent affinity | Original agent when recoverable; otherwise eligible pool or Lead recovery |
 | `runRebootSweep` | Fresh source-agent snapshot | Original agent when recoverable; otherwise eligible pool |
@@ -583,7 +584,7 @@ The production inventory is enforced by `src/tests/routing-affinity-inventory.te
 | `createRerouteDecisionTask` | New Lead-only control-plane authorization | Current Lead |
 | `createPoolStarvationDecisionTask` | New Lead-only control-plane authorization | Current Lead |
 
-The two decision producers are not continuations of the original execution requirements. They pass `inheritParentRoutingAffinity: false` and declare `{ leadOnly: true, capabilities: [] }`; otherwise a replacement Lead can be rejected by the exact requirement that made the original task unrecoverable. Every other child inherits normally, and a Lead-only parent's capabilities remain a one-way ratchet.
+The two decision producers are not continuations of the original execution requirements. They pass `inheritParentRoutingAffinity: false` and declare `{ leadOnly: true, capabilities: [] }`; otherwise a replacement Lead can be rejected by the exact requirement that made the original task unrecoverable. Human REST callers (verified user or operator, without agent identity) and Slack human ingress declare an empty capability requirement before sibling-aware creation. A new human message keeps its parent, context and requester without inheriting an ordinary worker's role or capabilities. They do not use the inheritance opt-out: a Lead-only parent's authorization and capabilities remain a one-way ratchet, and malformed parent affinity still rejects creation. Agent continuations keep normal inheritance, including when they supply human-looking source/requester hints. REST assignment and malformed-parent routing rejections return 403 with the reason instead of a generic 500.
 
 The consumer cross-product has three distinct policies. Pool selection always applies the full predicate. Direct assignments and established offers apply the full predicate when created, then re-check only corrupt affinity and the Lead-only authorization boundary when dispatched. Recovery selection applies the full predicate before pinning or rerouting.
 

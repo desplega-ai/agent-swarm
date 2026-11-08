@@ -16,6 +16,7 @@ import type { PermissionVerb } from "../rbac";
 const TEST_DB_PATH = "./test-rbac-roles.sqlite";
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const REQUESTER_VERBS = [
+  "checklist.write.own",
   "comb.presence",
   "favorite.write.own",
   "fs.join.own",
@@ -199,6 +200,7 @@ describe("ensureRbacSeedsSynced", () => {
 
     const viewerVerbs = await roleVerbs("rbac-role-viewer");
     expect(viewerVerbs).toEqual([
+      "checklist.write.own",
       "comb.presence",
       "favorite.write.own",
       "fs.join.own",

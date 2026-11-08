@@ -10,6 +10,8 @@ import {
 } from "../be/db";
 import { handleApiKeys } from "../http/api-keys";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { MAX_RATE_LIMIT_RESET_MS } from "../utils/error-tracker";
+import { activeModelBlock } from "../utils/model-rate-limit-windows";
 
 const TEST_DB = "./test-api-keys-validation.sqlite";
 const keyType = "ANTHROPIC_API_KEY";
@@ -166,5 +168,45 @@ describe("pooled key validation", () => {
       (await call("POST", "/api/keys/report-validation", { keyType, keys: [] })).statusCode,
     ).toBe(400);
     expect(await getKeyStatuses(keyType)).toEqual([]);
+  });
+
+  test.each([
+    { model: "opus", window: "seven_day_opus" },
+    { model: "sonnet", window: "seven_day_sonnet" },
+    { model: "fable", window: "seven_day_overage_included" },
+  ] as const)("reported $model blocks cannot exceed the routing ceiling", async ({
+    model,
+    window,
+  }) => {
+    const nowMs = Date.now();
+    const claudeKeyType = "CLAUDE_CODE_OAUTH_TOKEN";
+    const response = await call("POST", "/api/keys/report-rate-limit-windows", {
+      keyType: claudeKeyType,
+      keySuffix: "longblock",
+      keyIndex: 0,
+      windows: {
+        [window]: {
+          status: "rejected",
+          durationMins: 576000,
+          resetsAt: Math.floor(nowMs / 1000) + 400 * 86400,
+          lastSeenAt: new Date(nowMs).toISOString(),
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    const [stored] = await getKeyStatuses(claudeKeyType);
+    const reset = stored!.rateLimitWindows[window]!.resetsAt!;
+    expect(reset).toBeGreaterThanOrEqual(Math.floor((nowMs + MAX_RATE_LIMIT_RESET_MS) / 1000));
+    expect(reset).toBeLessThanOrEqual(Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000));
+    expect(
+      (await getAvailableKeyIndices(claudeKeyType, 1, "global", null, model)).modelBlockedIndices,
+    ).toEqual([0]);
+    expect(
+      activeModelBlock(
+        stored!.rateLimitWindows,
+        model,
+        Date.now() + MAX_RATE_LIMIT_RESET_MS + 1000,
+      ),
+    ).toBeUndefined();
   });
 });

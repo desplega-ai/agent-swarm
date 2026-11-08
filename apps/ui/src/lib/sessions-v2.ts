@@ -28,9 +28,29 @@ export const NEW_SESSION_TAB = "new";
  */
 export const GROUP_TAB = "view";
 
-/** A tab that holds a session (not the New session tab or the group tab). */
+/**
+ * The pinned Overview tab of a use-case group (step-10). It never goes in
+ * `?tabs=`: it shows before the tabs while the group tab is open and its group
+ * qualifies, and `?tab=overview` focuses it (`?tab=list` focuses the list).
+ */
+export const OVERVIEW_TAB = "overview";
+
+/** The group tab's two faces: the Overview or the session list (`?tab=`). */
+export type GroupPane = "overview" | "list";
+
+/** `?tab=` as a group pane, or null when it names neither. */
+export function parseGroupPane(value: string | null): GroupPane | null {
+  return value === "overview" || value === "list" ? value : null;
+}
+
+/** A tab that holds a session (not the New session tab, the group tab, or the Overview). */
 export function isSessionTab(tab: string): boolean {
-  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB;
+  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
+}
+
+/** A tab the split pane can hold: a session or the New session tab. */
+function isSessionOrNewTab(tab: string): boolean {
+  return tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
 }
 
 /** The flat sidebar sections that `?view=` can open. A group key opens a group. */
@@ -108,9 +128,9 @@ export function urlTabs(
   tabsParam: string | null,
   { focused, view, split }: { focused: string; view: string | null; split: string | null },
 ): { tabs: string[]; split: string | null } {
-  const shownSplit = split && split !== GROUP_TAB && split !== focused ? split : null;
+  const shownSplit = split && isSessionOrNewTab(split) && split !== focused ? split : null;
   const listed = parseTabs(tabsParam).filter(
-    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit,
+    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit && tab !== OVERVIEW_TAB,
   );
   return { tabs: tabsWithFocus(listed, focused), split: shownSplit };
 }

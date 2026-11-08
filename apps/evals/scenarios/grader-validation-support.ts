@@ -20,6 +20,7 @@ import {
   type JudgeWorkerContext,
   type Scenario,
   type SwarmTask,
+  scenarioTaskText,
   scenarioWorkerCount,
 } from "../src/types.ts";
 
@@ -178,12 +179,16 @@ export function makeContext(scenario: Scenario, opts: ContextOptions = {}): Judg
   };
 }
 
-/** One completed scenario task per spec, ids `task-<i>`, empty result: what an agent that did nothing reports. */
+/**
+ * One completed scenario task per spec, ids `task-<i>`, empty result: what an agent that did
+ * nothing reports. Shaped like a live task: the runner sends no title, so the server's title
+ * never equals `spec.title`, and the description is the full text the runner sent.
+ */
 export function nullTasks(scenario: Scenario): SwarmTask[] {
   return scenario.tasks.map((spec, i) => ({
     id: `task-${i}`,
-    title: spec.title,
-    description: spec.description,
+    title: "",
+    description: scenarioTaskText(spec),
     status: "completed",
     result: "",
     output: "",

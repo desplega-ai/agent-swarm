@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Index · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<style>
+.hero { margin: 6px 0 22px; max-width: 72ch; }
+.hero .kicker { font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--color-primary); margin: 0 0 8px; }
+.hero h2 { font-size: 30px; line-height: 1.1; letter-spacing: -.02em; margin: 0 0 10px; font-weight: 600; }
+.hero p { margin: 0 0 8px; color: var(--color-muted-foreground); font-size: 15px; line-height: 1.6; }
+.hero code { font-family: var(--font-mono); font-size: 12px; }
+.surf { margin-top: 30px; }
+.surf > h3 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.surf > p { margin: 0 0 12px; font-size: 13px; color: var(--color-muted-foreground); }
+.vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.vcard { display: flex; flex-direction: column; background: var(--color-card); border: 1px solid var(--color-border); border-radius: 14px; overflow: hidden; transition: border-color 150ms var(--ease-snappy); }
+.vcard:hover { border-color: color-mix(in oklch, var(--color-primary) 45%, var(--color-border)); }
+.vcard .hd { display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px 8px; }
+.vcard .letter { flex: none; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; background: color-mix(in oklch, var(--color-primary) 14%, transparent); color: var(--color-primary); }
+.vcard h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.vcard .open { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--color-primary); white-space: nowrap; }
+.vcard dl { margin: 0; padding: 0 14px 12px 58px; font-size: 13px; }
+.vcard dt { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-muted-foreground); margin-top: 6px; }
+.vcard dd { margin: 0; line-height: 1.45; }
+.vcard .thumb { display: block; height: 180px; overflow: hidden; border-top: 1px solid var(--color-border); background: var(--color-muted); margin-top: auto; }
+.vcard .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.sheet-sec { margin-top: 44px; }
+.sheet-sec > h3 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.sheet-sec > p { margin: 0 0 14px; font-size: 13px; color: var(--color-muted-foreground); }
+.cs { display: grid; grid-template-columns: 150px repeat(2, minmax(0, 2.2fr)) repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.cs .h { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-muted-foreground); }
+.cs .lab { font-size: 13px; font-weight: 600; padding-top: 4px; }
+.cs .lab a { color: var(--color-primary); }
+.cs .lab span { display: block; font-weight: 400; font-size: 12px; color: var(--color-muted-foreground); }
+.cs a.shot { display: block; height: 220px; overflow: hidden; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); }
+.cs a.shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.cs .rule { grid-column: 1 / -1; height: 1px; background: var(--color-border-subtle); }
+@media (max-width: 760px) {
+  .cs { grid-template-columns: 1fr 1fr; }
+  .cs .lab, .cs .rule { grid-column: 1 / -1; }
+  .cs .h { display: none; }
+}
+.round { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.round-sub { margin: 0 0 18px; max-width: 76ch; color: var(--color-muted-foreground); font-size: 14px; line-height: 1.6; }
+.r2 { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--color-border); }
+.r2grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.r2card { display: flex; flex-direction: column; background: var(--color-card); border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; }
+.r2card:hover { border-color: color-mix(in oklch, var(--color-foreground) 25%, var(--color-border)); }
+.r2card .thumb { display: block; height: 170px; overflow: hidden; border-bottom: 1px solid var(--color-border); background: var(--color-muted); }
+.r2card .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+.r2card .bd { padding: 12px 14px 14px; }
+.r2card h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.r2card p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-muted-foreground); }
+.r2card .f { display: block; margin-top: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--color-muted-foreground); }
+.r4grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 1080px; }
+.r4grid .r2card { flex-direction: row; }
+.r4grid .r2card .thumb { flex: none; width: 420px; height: 236px; border-bottom: 0; border-right: 1px solid var(--color-border); }
+.r4grid .r2card .bd { align-self: center; padding: 16px 20px; }
+.r4grid .r2card p { max-width: 84ch; }
+@media (max-width: 1100px) { .r4grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .r4grid .r2card { flex-direction: column; } .r4grid .r2card .thumb { width: 100%; height: 200px; border-right: 0; border-bottom: 1px solid var(--color-border); } }
+.r3grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.r3grid .r2card .thumb { height: 220px; }
+.r3 .cs { grid-template-columns: 150px repeat(2, minmax(0, 2.2fr)) repeat(2, minmax(0, 1fr)); }
+.round .sup { font-size: 14px; font-weight: 500; color: var(--color-muted-foreground); letter-spacing: 0; }
+@media (max-width: 1100px) { .r2grid, .r3grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .r2grid, .r3grid { grid-template-columns: 1fr; } .r2, .round, .round-sub { margin-left: 14px; margin-right: 14px; } }
+</style>
+</head>
+<body>
+<header class="chrome">
+  <span class="badge">Post-onboarding · step-16</span>
+  <h1>UI spike <span>· round 5 on top, then rounds 4, 3, 2 and 1</span></h1>
+  <span class="sp"></span>
+  <a class="back" href="../index.html">All mockups</a>
+  <button class="theme-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="page">
+  <section class="r2 r5" id="round-5">
+    <h2 class="round">Round 5</h2>
+    <p class="round-sub">One page: Connect › AI providers. Taras's round-4 notes applied: one list of the configured providers with their marks, an Add provider menu that opens a side panel with the setup steps, and four tabs (LLMs, System One, Embeddings, Transcription). Only data that the API returns today.</p>
+    <div class="r4grid"><a class="r2card" href="r5-ai-providers.html"><span class="thumb"><img src="shots/r5-ai-providers-thumb.png" alt="AI providers round 5, LLMs tab with Claude subscription expanded, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>AI providers</h4><p>LLMs is one list: mark, name, harnesses, type, key count, status with its reason, and cost today and over 7 days. A row opens its keys in place. Add provider is a searchable menu of 16 providers in three groups. A pick opens a side panel with Test and add. System One shows its five hosts and the two defaults. Embeddings and Transcription show the setup in use and a Change provider panel.</p><span class="f">r5-ai-providers.html</span></div></a></div>
+    <div class="sheet-sec" id="contact-sheet-r5"><h3>Round 5 contact sheet</h3><p>Full-page screenshots from agent-browser at 1440 and 390 wide, light and dark, with native scrollbars kept visible. Click a frame to open it at full size.</p>
+      <div class="cs">
+        <span class="h">Surface</span><span class="h">1440 · light</span><span class="h">1440 · dark</span><span class="h">390 · light</span><span class="h">390 · dark</span>
+        <div class="lab"><a href="r5-ai-providers.html">AI providers</a><span>r5-ai-providers.html</span></div><a class="shot" href="shots/r5-ai-providers-1440-light.png"><img src="shots/r5-ai-providers-1440-light.png" alt="AI providers round 5, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r5-ai-providers-1440-dark.png"><img src="shots/r5-ai-providers-1440-dark.png" alt="AI providers round 5, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r5-ai-providers-390-light.png"><img src="shots/r5-ai-providers-390-light.png" alt="AI providers round 5, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r5-ai-providers-390-dark.png"><img src="shots/r5-ai-providers-390-dark.png" alt="AI providers round 5, 390 wide, dark" loading="lazy"></a>
+      </div>
+    </div>
+  </section>
+  <section class="r2 r4" id="round-4">
+    <h2 class="round">Round 4 <span class="sup">(approved except AI providers, superseded by round 5)</span></h2>
+    <p class="round-sub">Connect only. The other surfaces from round 3 are approved. The breadcrumb names the page, every Connect page starts with one search and action row, and AI providers is rebuilt from what the code supports today.</p>
+    <div class="r4grid"><a class="r2card" href="r4-connect.html"><span class="thumb"><img src="shots/r4-connect-thumb.png" alt="Connect round 4, AI providers overview, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Connect</h4><p>The breadcrumb names the page, and one row holds search and the primary action. AI providers is rebuilt from the code: real setup steps, per-key cost and windows, a key drawer, and a dashed tag where the API stops.</p><span class="f">r4-connect.html</span></div></a></div>
+    <div class="sheet-sec" id="contact-sheet-r4"><h3>Round 4 contact sheet</h3><p>Full-page screenshots from agent-browser at 1440 and 390 wide, light and dark, with native scrollbars kept visible. Click a frame to open it at full size.</p>
+      <div class="cs">
+        <span class="h">Surface</span><span class="h">1440 · light</span><span class="h">1440 · dark</span><span class="h">390 · light</span><span class="h">390 · dark</span>
+        <div class="lab"><a href="r4-connect.html">Connect</a><span>r4-connect.html</span></div><a class="shot" href="shots/r4-connect-1440-light.png"><img src="shots/r4-connect-1440-light.png" alt="Connect round 4, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r4-connect-1440-dark.png"><img src="shots/r4-connect-1440-dark.png" alt="Connect round 4, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r4-connect-390-light.png"><img src="shots/r4-connect-390-light.png" alt="Connect round 4, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r4-connect-390-dark.png"><img src="shots/r4-connect-390-dark.png" alt="Connect round 4, 390 wide, dark" loading="lazy"></a>
+      </div>
+    </div>
+  </section>
+  <section class="r2 r3" id="round-3">
+    <h2 class="round">Round 3 <span class="sup">(superseded for Connect)</span></h2>
+    <p class="round-sub">Taras's round-2 notes applied to three surfaces. The sidebar becomes two inset panels and shows two ways to group. Connect becomes three pages. Home gets the three-item checklist. Every scroll container keeps its scrollbar gutter, so nothing shifts when a scrollbar appears. The group header is not in this round: it goes through a separate brainstorm first, and round 2 stays its reference.</p>
+    <div class="r3grid"><a class="r2card" href="r3-sidebar.html"><span class="thumb"><img src="shots/r3-sidebar-thumb.png" alt="Sidebar round 3, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Sidebar</h4><p>Inset panels with 12px corners on a window canvas, shown next to the round-2 flat sidebar. Two groupings: Schedules and Workflows in Work, or in their own Automate group. Build is Agents, Tasks, Skills, Memory and Scripts. A measured demo shows rows keep their width when Build opens.</p><span class="f">r3-sidebar.html</span></div></a><a class="r2card" href="r3-connect.html"><span class="thumb"><img src="shots/r3-connect-thumb.png" alt="Connect round 3, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Connect</h4><p>Channels, Tools and AI providers are three pages with a title and no subtitle, each active in the sidebar. Tools has its own tabs (Tools, Script connections, OAuth apps, MCP servers) and a quiet Advanced link to Settings › Advanced.</p><span class="f">r3-connect.html</span></div></a><a class="r2card" href="r3-home.html"><span class="thumb"><img src="shots/r3-home-thumb.png" alt="Home round 3, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Home</h4><p>Round-2 Home on the inset shell with sidebar Variant 1. The checklist has the plan's three items and reads 1 of 3. Favorites grows to six rows, so the two columns still end within one row of each other.</p><span class="f">r3-home.html</span></div></a><a class="r2card" href="r3-overview.html"><span class="thumb"><img src="shots/r3-overview-thumb.png" alt="Use-case Overview tab round 3, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Use-case Overview tab</h4><p>Opening a use-case group adds a pinned Overview tab next to the unchanged session list: next run, schedules (search from 8 up, 50 shown), outputs with inline preview, Ask the Lead. Plain thread groups get no Overview tab.</p></div></a></div>
+    <div class="sheet-sec" id="contact-sheet-r3"><h3>Round 3 contact sheet</h3><p>Full-page screenshots from agent-browser at 1440 and 390 wide, light and dark, with native scrollbars kept visible. Click a frame to open it at full size.</p>
+      <div class="cs">
+        <span class="h">Surface</span><span class="h">1440 · light</span><span class="h">1440 · dark</span><span class="h">390 · light</span><span class="h">390 · dark</span>
+        <div class="lab"><a href="r3-sidebar.html">Sidebar</a><span>r3-sidebar.html</span></div><a class="shot" href="shots/r3-sidebar-1440-light.png"><img src="shots/r3-sidebar-1440-light.png" alt="Sidebar round 3, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-sidebar-1440-dark.png"><img src="shots/r3-sidebar-1440-dark.png" alt="Sidebar round 3, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r3-sidebar-390-light.png"><img src="shots/r3-sidebar-390-light.png" alt="Sidebar round 3, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-sidebar-390-dark.png"><img src="shots/r3-sidebar-390-dark.png" alt="Sidebar round 3, 390 wide, dark" loading="lazy"></a><div class="lab"><a href="r3-connect.html">Connect</a><span>r3-connect.html</span></div><a class="shot" href="shots/r3-connect-1440-light.png"><img src="shots/r3-connect-1440-light.png" alt="Connect round 3, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-connect-1440-dark.png"><img src="shots/r3-connect-1440-dark.png" alt="Connect round 3, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r3-connect-390-light.png"><img src="shots/r3-connect-390-light.png" alt="Connect round 3, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-connect-390-dark.png"><img src="shots/r3-connect-390-dark.png" alt="Connect round 3, 390 wide, dark" loading="lazy"></a><div class="lab"><a href="r3-home.html">Home</a><span>r3-home.html</span></div><a class="shot" href="shots/r3-home-1440-light.png"><img src="shots/r3-home-1440-light.png" alt="Home round 3, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-home-1440-dark.png"><img src="shots/r3-home-1440-dark.png" alt="Home round 3, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r3-home-390-light.png"><img src="shots/r3-home-390-light.png" alt="Home round 3, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r3-home-390-dark.png"><img src="shots/r3-home-390-dark.png" alt="Home round 3, 390 wide, dark" loading="lazy"></a>
+      </div>
+    </div>
+  </section>
+  <section class="r2" id="round-2">
+    <h2 class="round">Round 2 <span class="sup">(superseded for sidebar, Connect, Home)</span></h2>
+    <p class="round-sub">A second sweep on the directions picked in round 1, with a higher visual bar: real Sessions chrome around the group strip, one widget anatomy on Home, one card anatomy in the hub, and Connect as three sidebar entries. Each page has light and dark, desktop at 1440 and 390px phone frames.</p>
+    <div class="r2grid"><a class="r2card" href="r2-sidebar.html"><span class="thumb"><img src="shots/r2-sidebar-thumb.png" alt="Sidebar round 2, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Sidebar</h4><p>Connect gets three entries (Channels, Tools, AI providers) that deep-link to the hub tabs. Quiet labels, one row rhythm, color only for the Needs-you count and a provider warning dot.</p><span class="f">r2-sidebar.html</span></div></a><a class="r2card" href="r2-connect-hub.html"><span class="thumb"><img src="shots/r2-connect-hub-thumb.png" alt="Connect hub round 2, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Connect hub</h4><p>Three tabs named like the sidebar entries, no subtitle. One card anatomy for every provider, outline actions so unconnected tools stay calm, keys and health inside the AI provider cards.</p><span class="f">r2-connect-hub.html</span></div></a><a class="r2card" href="r2-group-header.html"><span class="thumb"><img src="shots/r2-group-header-thumb.png" alt="Group header round 2, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Group header</h4><p>One 48px strip under the group title; each segment opens a drawer in the page. The schedules drawer scales to 50 with search and per-row Run now, and the session list keeps today's chrome.</p><span class="f">r2-group-header.html</span></div></a><a class="r2card" href="r2-home.html"><span class="thumb"><img src="shots/r2-home-thumb.png" alt="Home round 2, 1440 wide, light" loading="lazy"></span><div class="bd"><h4>Home</h4><p>Two equal columns of widgets with one header anatomy, rows instead of cards in cards, and the real timeline as a full-width widget. Columns end within a row of each other.</p><span class="f">r2-home.html</span></div></a></div>
+    <div class="sheet-sec" id="contact-sheet-r2"><h3>Round 2 contact sheet</h3><p>Full-page screenshots from agent-browser at 1440 and 390 wide, light and dark. Click a frame to open it at full size.</p>
+      <div class="cs">
+        <span class="h">Surface</span><span class="h">1440 · light</span><span class="h">1440 · dark</span><span class="h">390 · light</span><span class="h">390 · dark</span>
+        <div class="lab"><a href="r2-sidebar.html">Sidebar</a><span>r2-sidebar.html</span></div><a class="shot" href="shots/r2-sidebar-1440-light.png"><img src="shots/r2-sidebar-1440-light.png" alt="Sidebar round 2, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-sidebar-1440-dark.png"><img src="shots/r2-sidebar-1440-dark.png" alt="Sidebar round 2, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r2-sidebar-390-light.png"><img src="shots/r2-sidebar-390-light.png" alt="Sidebar round 2, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-sidebar-390-dark.png"><img src="shots/r2-sidebar-390-dark.png" alt="Sidebar round 2, 390 wide, dark" loading="lazy"></a><div class="lab"><a href="r2-connect-hub.html">Connect hub</a><span>r2-connect-hub.html</span></div><a class="shot" href="shots/r2-connect-hub-1440-light.png"><img src="shots/r2-connect-hub-1440-light.png" alt="Connect hub round 2, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-connect-hub-1440-dark.png"><img src="shots/r2-connect-hub-1440-dark.png" alt="Connect hub round 2, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r2-connect-hub-390-light.png"><img src="shots/r2-connect-hub-390-light.png" alt="Connect hub round 2, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-connect-hub-390-dark.png"><img src="shots/r2-connect-hub-390-dark.png" alt="Connect hub round 2, 390 wide, dark" loading="lazy"></a><div class="lab"><a href="r2-group-header.html">Group header</a><span>r2-group-header.html</span></div><a class="shot" href="shots/r2-group-header-1440-light.png"><img src="shots/r2-group-header-1440-light.png" alt="Group header round 2, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-group-header-1440-dark.png"><img src="shots/r2-group-header-1440-dark.png" alt="Group header round 2, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r2-group-header-390-light.png"><img src="shots/r2-group-header-390-light.png" alt="Group header round 2, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-group-header-390-dark.png"><img src="shots/r2-group-header-390-dark.png" alt="Group header round 2, 390 wide, dark" loading="lazy"></a><div class="lab"><a href="r2-home.html">Home</a><span>r2-home.html</span></div><a class="shot" href="shots/r2-home-1440-light.png"><img src="shots/r2-home-1440-light.png" alt="Home round 2, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-home-1440-dark.png"><img src="shots/r2-home-1440-dark.png" alt="Home round 2, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/r2-home-390-light.png"><img src="shots/r2-home-390-light.png" alt="Home round 2, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/r2-home-390-dark.png"><img src="shots/r2-home-390-dark.png" alt="Home round 2, 390 wide, dark" loading="lazy"></a>
+      </div>
+    </div>
+  </section>
+  <h2 class="round">Round 1 (superseded)</h2>
+    <div class="hero">
+    <p class="kicker">Post-onboarding · pick one per surface</p>
+    <h2>Four surfaces, ten variants</h2>
+    <p>What a user sees after <code>/setup</code>: the regrouped sidebar, the Connect hub at <code>/integrations</code>, the use-case group header on <code>/sessions?view=&lt;key&gt;</code>, and Home as a command center. Every variant uses the same data: the use case <b>competitor-research</b>, the schedule <b>Competitor scan · Mon &amp; Thu 09:00</b>, three reports, one pending approval and one running run.</p>
+    <p>Each page shows desktop states at full width plus 390px phone frames, and has its own light and dark toggle. Plan: <code>thoughts/taras/plans/2026-11-04-post-onboarding/</code> (step-16). Picks go to <code>root.md § Design decisions (step-16)</code>.</p>
+  </div>
+
+  <section class="surf"><h3>Sidebar</h3><p>Groups, the icon-collapsed rail and the phone sheet. Feeds step-5.</p>
+    <div class="vgrid">
+      <a class="vcard" href="sidebar-a.html"><div class="hd"><span class="letter">A</span><h4>WORK / CONNECT / BUILD</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>The brainstorm layout: BUILD collapsed, seven rows on a first visit.</dd><dt>Trade-off</dt><dd>A one-item CONNECT group, and BUILD sits one click deeper.</dd></dl><span class="thumb"><img src="shots/sidebar-a-1440-light.png" alt="Sidebar A, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="sidebar-b.html"><div class="hd"><span class="letter">B</span><h4>WORK / BUILD, Connect in footer</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>Shortest list. Connect is treated like Settings: set up once, visit rarely.</dd><dt>Trade-off</dt><dd>Connect is easy to miss in week one, when the checklist sends people there.</dd></dl><span class="thumb"><img src="shots/sidebar-b-1440-light.png" alt="Sidebar B, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="sidebar-c.html"><div class="hd"><span class="letter">C</span><h4>WORK + icon rows</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>Everything one click away, no collapse state to remember.</dd><dt>Trade-off</dt><dd>Icons need hover labels, weak on touch, 18 icons when collapsed.</dd></dl><span class="thumb"><img src="shots/sidebar-c-1440-light.png" alt="Sidebar C, desktop, light" loading="lazy"></span></a>
+    </div>
+  </section>
+
+  <section class="surf"><h3>Connect hub</h3><p>/integrations: one card per provider, Script connections and MCP servers as sub-sections. Feeds steps 5 to 8.</p>
+    <div class="vgrid">
+      <a class="vcard" href="connect-hub-a.html"><div class="hd"><span class="letter">A</span><h4>Three tabs, Advanced as a link</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>Short tabs that map 1:1 to checklist deep links (?tab=channels).</dd><dt>Trade-off</dt><dd>No overview. Users guess which tab holds Gmail.</dd></dl><span class="thumb"><img src="shots/connect-hub-a-1440-light.png" alt="Connect hub A, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="connect-hub-b.html"><div class="hd"><span class="letter">B</span><h4>One long page, sticky nav</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>The whole setup in one scroll, with counts in a pinned section nav.</dd><dt>Trade-off</dt><dd>A long page. AI providers land far below the fold.</dd></dl><span class="thumb"><img src="shots/connect-hub-b-1440-light.png" alt="Connect hub B, desktop, light" loading="lazy"></span></a>
+    </div>
+  </section>
+
+  <section class="surf"><h3>Group header</h3><p>/sessions?view=shared/competitor-research/: schedule, outputs, chat to the Lead. Feeds step-10.</p>
+    <div class="vgrid">
+      <a class="vcard" href="group-header-a.html"><div class="hd"><span class="letter">A</span><h4>Two panels, chat below</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>The step-10 sketch. When, what and how to talk, with no click.</dd><dt>Trade-off</dt><dd>About 260px of header before the first session row.</dd></dl><span class="thumb"><img src="shots/group-header-a-1440-light.png" alt="Group header A, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="group-header-b.html"><div class="hd"><span class="letter">B</span><h4>Compact strip, expands on click</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>48px. The list stays first, and the same strip works on phone.</dd><dt>Trade-off</dt><dd>Report, template and chat box are one click away.</dd></dl><span class="thumb"><img src="shots/group-header-b-1440-light.png" alt="Group header B, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="group-header-c.html"><div class="hd"><span class="letter">C</span><h4>Right rail, chat at the bottom</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>The list keeps its full height. Uses wide screens well.</dd><dt>Trade-off</dt><dd>Narrows the list, clashes with the split view, phone needs chips and a sheet.</dd></dl><span class="thumb"><img src="shots/group-header-c-1440-light.png" alt="Group header C, desktop, light" loading="lazy"></span></a>
+    </div>
+  </section>
+
+  <section class="surf"><h3>Home</h3><p>Needs you, In progress, checklist, Favorites, timeline, admin banner, all-done state. Feeds steps 13 and 15.</p>
+    <div class="vgrid">
+      <a class="vcard" href="home-a.html"><div class="hd"><span class="letter">A</span><h4>Two columns, timeline below</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>Act-on on the left, set-up on the right, all above the fold.</dd><dt>Trade-off</dt><dd>Uneven columns. The checklist competes with Needs you.</dd></dl><span class="thumb"><img src="shots/home-a-1440-light.png" alt="Home A, desktop, light" loading="lazy"></span></a>
+      <a class="vcard" href="home-b.html"><div class="hd"><span class="letter">B</span><h4>Single column by urgency</h4><span class="open">Open</span></div><dl><dt>Why</dt><dd>One reading order and one layout for desktop and phone.</dd><dt>Trade-off</dt><dd>Wasted sides on wide screens. Favorites and timeline fall below the fold.</dd></dl><span class="thumb"><img src="shots/home-b-1440-light.png" alt="Home B, desktop, light" loading="lazy"></span></a>
+    </div>
+  </section>
+
+  <section class="sheet-sec" id="contact-sheet"><h3>Contact sheet</h3><p>Full-page screenshots from agent-browser at 1440 and 390 wide, light and dark. Click a frame to open it at full size.</p>
+    <div class="cs">
+      <span class="h">Variant</span><span class="h">1440 · light</span><span class="h">1440 · dark</span><span class="h">390 · light</span><span class="h">390 · dark</span>
+      <div class="lab"><a href="sidebar-a.html">Sidebar A</a><span>sidebar-a.html</span></div><a class="shot" href="shots/sidebar-a-1440-light.png"><img src="shots/sidebar-a-1440-light.png" alt="Sidebar A, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-a-1440-dark.png"><img src="shots/sidebar-a-1440-dark.png" alt="Sidebar A, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/sidebar-a-390-light.png"><img src="shots/sidebar-a-390-light.png" alt="Sidebar A, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-a-390-dark.png"><img src="shots/sidebar-a-390-dark.png" alt="Sidebar A, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="sidebar-b.html">Sidebar B</a><span>sidebar-b.html</span></div><a class="shot" href="shots/sidebar-b-1440-light.png"><img src="shots/sidebar-b-1440-light.png" alt="Sidebar B, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-b-1440-dark.png"><img src="shots/sidebar-b-1440-dark.png" alt="Sidebar B, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/sidebar-b-390-light.png"><img src="shots/sidebar-b-390-light.png" alt="Sidebar B, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-b-390-dark.png"><img src="shots/sidebar-b-390-dark.png" alt="Sidebar B, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="sidebar-c.html">Sidebar C</a><span>sidebar-c.html</span></div><a class="shot" href="shots/sidebar-c-1440-light.png"><img src="shots/sidebar-c-1440-light.png" alt="Sidebar C, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-c-1440-dark.png"><img src="shots/sidebar-c-1440-dark.png" alt="Sidebar C, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/sidebar-c-390-light.png"><img src="shots/sidebar-c-390-light.png" alt="Sidebar C, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/sidebar-c-390-dark.png"><img src="shots/sidebar-c-390-dark.png" alt="Sidebar C, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="connect-hub-a.html">Connect hub A</a><span>connect-hub-a.html</span></div><a class="shot" href="shots/connect-hub-a-1440-light.png"><img src="shots/connect-hub-a-1440-light.png" alt="Connect hub A, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/connect-hub-a-1440-dark.png"><img src="shots/connect-hub-a-1440-dark.png" alt="Connect hub A, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/connect-hub-a-390-light.png"><img src="shots/connect-hub-a-390-light.png" alt="Connect hub A, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/connect-hub-a-390-dark.png"><img src="shots/connect-hub-a-390-dark.png" alt="Connect hub A, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="connect-hub-b.html">Connect hub B</a><span>connect-hub-b.html</span></div><a class="shot" href="shots/connect-hub-b-1440-light.png"><img src="shots/connect-hub-b-1440-light.png" alt="Connect hub B, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/connect-hub-b-1440-dark.png"><img src="shots/connect-hub-b-1440-dark.png" alt="Connect hub B, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/connect-hub-b-390-light.png"><img src="shots/connect-hub-b-390-light.png" alt="Connect hub B, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/connect-hub-b-390-dark.png"><img src="shots/connect-hub-b-390-dark.png" alt="Connect hub B, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="group-header-a.html">Group header A</a><span>group-header-a.html</span></div><a class="shot" href="shots/group-header-a-1440-light.png"><img src="shots/group-header-a-1440-light.png" alt="Group header A, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-a-1440-dark.png"><img src="shots/group-header-a-1440-dark.png" alt="Group header A, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/group-header-a-390-light.png"><img src="shots/group-header-a-390-light.png" alt="Group header A, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-a-390-dark.png"><img src="shots/group-header-a-390-dark.png" alt="Group header A, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="group-header-b.html">Group header B</a><span>group-header-b.html</span></div><a class="shot" href="shots/group-header-b-1440-light.png"><img src="shots/group-header-b-1440-light.png" alt="Group header B, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-b-1440-dark.png"><img src="shots/group-header-b-1440-dark.png" alt="Group header B, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/group-header-b-390-light.png"><img src="shots/group-header-b-390-light.png" alt="Group header B, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-b-390-dark.png"><img src="shots/group-header-b-390-dark.png" alt="Group header B, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="group-header-c.html">Group header C</a><span>group-header-c.html</span></div><a class="shot" href="shots/group-header-c-1440-light.png"><img src="shots/group-header-c-1440-light.png" alt="Group header C, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-c-1440-dark.png"><img src="shots/group-header-c-1440-dark.png" alt="Group header C, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/group-header-c-390-light.png"><img src="shots/group-header-c-390-light.png" alt="Group header C, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/group-header-c-390-dark.png"><img src="shots/group-header-c-390-dark.png" alt="Group header C, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="home-a.html">Home A</a><span>home-a.html</span></div><a class="shot" href="shots/home-a-1440-light.png"><img src="shots/home-a-1440-light.png" alt="Home A, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/home-a-1440-dark.png"><img src="shots/home-a-1440-dark.png" alt="Home A, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/home-a-390-light.png"><img src="shots/home-a-390-light.png" alt="Home A, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/home-a-390-dark.png"><img src="shots/home-a-390-dark.png" alt="Home A, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+      <div class="lab"><a href="home-b.html">Home B</a><span>home-b.html</span></div><a class="shot" href="shots/home-b-1440-light.png"><img src="shots/home-b-1440-light.png" alt="Home B, 1440 wide, light" loading="lazy"></a><a class="shot" href="shots/home-b-1440-dark.png"><img src="shots/home-b-1440-dark.png" alt="Home B, 1440 wide, dark" loading="lazy"></a><a class="shot" href="shots/home-b-390-light.png"><img src="shots/home-b-390-light.png" alt="Home B, 390 wide, light" loading="lazy"></a><a class="shot" href="shots/home-b-390-dark.png"><img src="shots/home-b-390-dark.png" alt="Home B, 390 wide, dark" loading="lazy"></a><div class="rule"></div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("theme");
+  var q = new URLSearchParams(location.search).get("theme"), t = "light";
+  try { t = q || localStorage.getItem("swarmMock") || "light"; } catch (e) { t = q || "light"; }
+  function set(v) {
+    t = v; root.classList.toggle("dark", v === "dark"); root.setAttribute("data-theme", v);
+    btn.innerHTML = '<span class="ic i-' + (v === "dark" ? "sun" : "moon") + '" aria-hidden="true"></span>';
+    try { localStorage.setItem("swarmMock", v); } catch (e) { /* file:// without storage */ }
+  }
+  set(t);
+  btn.addEventListener("click", function () { set(t === "dark" ? "light" : "dark"); });
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    list.querySelectorAll("[role=tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        list.querySelectorAll("[role=tab]").forEach(function (o) {
+          var on = o === tab; o.setAttribute("aria-selected", String(on));
+          document.getElementById(o.getAttribute("aria-controls")).hidden = !on;
+        });
+      });
+    });
+  });
+})();
+</script>
+<script>
+(function () {
+  function sync() {
+    var t = document.documentElement.classList.contains("dark") ? "dark" : "light";
+    document.querySelectorAll("a.vcard, a.r2card").forEach(function (a) { a.setAttribute("href", a.getAttribute("href").split("?")[0] + "?theme=" + t); });
+  }
+  sync();
+  document.getElementById("theme").addEventListener("click", sync);
+})();
+</script>
+</body>
+</html>

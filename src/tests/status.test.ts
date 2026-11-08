@@ -550,8 +550,8 @@ describe("setup milestones", () => {
     delete process.env.SLACK_APP_TOKEN;
     process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
     const http = await buildStatusPayload();
-    expect(getMilestone(http, "slack").state).toBe("unverified");
-    expect(getMilestone(http, "slack").hint).toContain("unavailable");
+    expect(getMilestone(http, "slack").state).toBe("configured");
+    expect(getMilestone(http, "slack").hint).toContain("receiver is not ready");
 
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
@@ -604,9 +604,9 @@ describe("setup milestones", () => {
     expect(getMilestone(empty, "gsc").state).toBe("unverified");
     expect(getMilestone(empty, "agentmail").state).toBe("unverified");
     expect(getMilestone(empty, "agentfs").state).toBe("unverified");
-    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/integrations/gsc");
-    expect(getMilestone(empty, "agentmail").action_url).toBe("/settings/integrations/agentmail");
-    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/integrations/agentfs");
+    expect(getMilestone(empty, "gsc").action_url).toBe("/integrations/gsc");
+    expect(getMilestone(empty, "agentmail").action_url).toBe("/integrations/agentmail");
+    expect(getMilestone(empty, "agentfs").action_url).toBe("/integrations/agentfs");
 
     process.env.GSC_SERVICE_ACCOUNT_BASE64 = "encoded-service-account";
     process.env.AGENTMAIL_API_KEY = "am_test";
@@ -749,7 +749,7 @@ describe("automation setup status", () => {
         missing: { params: ["REPO_URL"], integrations: ["github"] },
         fixes: [
           { type: "param", key: "REPO_URL", url: `/schedules/${schedule.id}?param=REPO_URL` },
-          { type: "integration", key: "github", url: "/settings/integrations/github" },
+          { type: "integration", key: "github", url: "/integrations/github" },
         ],
         fixUrl: `/schedules/${schedule.id}?param=REPO_URL`,
       },

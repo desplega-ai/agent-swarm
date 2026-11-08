@@ -12,6 +12,23 @@ const packageJson = JSON.parse(
   version?: string;
 };
 
+/**
+ * The agent-fs version this release pins (`bun run bump:agent-fs` keeps the
+ * file in step with the compose files and the chart). The dashboard compares
+ * the connected agent-fs server to it. Null when the file is not there.
+ */
+function pinnedAgentFsVersion(): string | null {
+  try {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../../src/commands/onboard/agent-fs-version.ts"),
+      "utf8",
+    );
+    return /export const AGENT_FS_VERSION = "([^"]+)"/.exec(source)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Plausible site script id of the hosted dashboard (app.agent-swarm.dev). */
 const DEFAULT_PLAUSIBLE_SCRIPT_ID = "aDF5FACknjhykIUMd6n_a";
 
@@ -90,6 +107,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), plausibleAnalytics(), buildVersionManifest(), devNotes()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
+    __AGENT_FS_VERSION__: JSON.stringify(pinnedAgentFsVersion()),
   },
   resolve: {
     alias: {

@@ -1,4 +1,4 @@
-import { Unplug } from "lucide-react";
+import { KeyRound, Unplug } from "lucide-react";
 import { useState } from "react";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { userInitials } from "@/components/shared/user-chip";
@@ -31,11 +31,15 @@ import { usePresenceControl } from "./presence-context";
 /**
  * The agent-fs account at the right end of the Comb header: initials with a
  * dot (green while the change stream is live). The menu says who is
- * connected and how the view stays fresh, and holds "Show cursors" (other
- * people's pointers and selections) and Disconnect.
+ * connected, with which key, and how the view stays fresh. It holds "Show
+ * cursors" (other people's pointers and selections), "Manage keys in
+ * agent-fs", and "Forget this browser's key" (the next page load mints a new
+ * one).
  */
 export function CombAccountMenu() {
-  const { me, disconnect } = useAgentFs();
+  const { me, credential, liveUrl, disconnect } = useAgentFs();
+  const keyLabel = credential?.label ?? null;
+  const keysUrl = liveUrl ? `${liveUrl.replace(/\/+$/, "")}/credentials` : null;
   const status = useLiveStatus();
   const presence = usePresenceControl();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -75,6 +79,12 @@ export function CombAccountMenu() {
             <span className="text-xs text-muted-foreground">Connected to agent-fs as</span>
             <span className="truncate font-medium">{name}</span>
             {email ? <span className="truncate text-xs text-muted-foreground">{email}</span> : null}
+            {keyLabel ? (
+              <span className="mt-1 flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground">
+                <KeyRound className="mt-0.5 size-3 shrink-0" aria-hidden />
+                <span className="min-w-0 break-words">{keyLabel}</span>
+              </span>
+            ) : null}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <div className="flex flex-col gap-1 px-2 py-1.5 text-sm">
@@ -98,25 +108,34 @@ export function CombAccountMenu() {
               <DropdownMenuSeparator />
             </>
           ) : null}
+          {keysUrl ? (
+            <DropdownMenuItem asChild>
+              <a href={keysUrl} target="_blank" rel="noopener noreferrer">
+                <KeyRound />
+                Manage keys in agent-fs
+              </a>
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOpen(true)}>
             <Unplug />
-            Disconnect
+            Forget this browser's key
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Disconnect agent-fs?</AlertDialogTitle>
+            <AlertDialogTitle>Forget this browser's key?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes your agent-fs key from this browser. Your agent-fs account and files
-              stay.
+              This removes the agent-fs key from this browser. The next visit creates a new one.
+              Your agent-fs account and files stay. To revoke the old key, use Manage keys in
+              agent-fs.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep connected</AlertDialogCancel>
+            <AlertDialogCancel>Keep key</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={disconnect}>
-              Disconnect
+              Forget key
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

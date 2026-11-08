@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import OpenAI from "openai";
-import { getAutomationSetupStates } from "../be/automation-preflight";
+import { getAutomationSetupStates, setupIntegrationFlags } from "../be/automation-preflight";
 import { getAgentHarnessProviders, getReadyAgentCounts, getTaskById } from "../be/db";
 import { getEmbeddingProvider, resetEmbeddingProvider } from "../be/memory";
 import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
@@ -140,14 +140,7 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
       provider: embeddingsOn ? embeddingsProvider(process.env.EMBEDDING_API_BASE_URL) : null,
       localDefault: localDefault(),
     },
-    integrations: {
-      slack: integrations.slack === "configured",
-      github: Boolean(process.env.GITHUB_TOKEN?.trim()) || integrations.github === "verified",
-      gitlab: Boolean(process.env.GITLAB_TOKEN?.trim()),
-      bitbucket: Boolean(process.env.BITBUCKET_TOKEN?.trim()),
-      linear: integrations.linear === "verified",
-      jira: integrations.jira === "verified",
-    },
+    integrations: setupIntegrationFlags(integrations),
     agents: {
       leadsOnline: agentCounts.leads,
       workersOnline: agentCounts.workers,

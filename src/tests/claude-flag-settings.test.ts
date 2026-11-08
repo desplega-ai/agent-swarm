@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ClaudeSettingsConfigError,
   claudeFlagSettings,
+  claudeThinkingDisplayArgs,
   LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN,
   mergeClaudeSettingsArgs,
   userClaudeMdExclude,
@@ -35,6 +36,7 @@ describe("mergeClaudeSettingsArgs", () => {
     expect(merged.settings).toEqual({
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
       enabledPlugins: LEGACY_PLUGIN_OFF,
+      showThinkingSummaries: true,
     });
   });
 
@@ -64,6 +66,7 @@ describe("mergeClaudeSettingsArgs", () => {
         userClaudeMdExclude(),
       ],
       enabledPlugins: LEGACY_PLUGIN_OFF,
+      showThinkingSummaries: true,
     });
   });
 
@@ -121,6 +124,7 @@ describe("mergeClaudeSettingsArgs", () => {
       env: {},
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
       enabledPlugins: LEGACY_PLUGIN_OFF,
+      showThinkingSummaries: true,
     });
   });
 });
@@ -149,5 +153,30 @@ describe("legacy context-mode plugin", () => {
       [CONTEXT_MODE_CLAUDE_PLUGIN]: false,
       "other@market": true,
     });
+  });
+});
+
+describe("thinking summaries", () => {
+  test("requested by default", () => {
+    expect(claudeFlagSettings().showThinkingSummaries).toBe(true);
+    const { settings } = mergeClaudeSettingsArgs([[]], directory);
+    expect(settings.showThinkingSummaries).toBe(true);
+    expect(claudeThinkingDisplayArgs(settings, [])).toEqual(["--thinking-display", "summarized"]);
+  });
+
+  test("a caller --settings false wins and turns the flag to omitted", () => {
+    const { settings } = mergeClaudeSettingsArgs(
+      [["--settings", JSON.stringify({ showThinkingSummaries: false })]],
+      directory,
+    );
+    expect(settings.showThinkingSummaries).toBe(false);
+    expect(claudeThinkingDisplayArgs(settings, [])).toEqual(["--thinking-display", "omitted"]);
+  });
+
+  test.each([
+    [["--thinking-display", "omitted"]],
+    [["--thinking-display=highlights"]],
+  ])("no flag when the caller already passes one (%p)", (callerArgs) => {
+    expect(claudeThinkingDisplayArgs(claudeFlagSettings(), callerArgs)).toEqual([]);
   });
 });

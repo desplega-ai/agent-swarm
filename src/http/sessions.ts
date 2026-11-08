@@ -28,6 +28,7 @@ import { getResourceSessionLabels, getSessionLabels } from "../be/db/session-lab
 import {
   listPrefixRoots,
   listSharedPrefixRoots,
+  moveKeyFavorites,
   moveSessionChains,
   type SessionKeyMove,
 } from "../be/db/session-moves";
@@ -51,6 +52,7 @@ import {
 } from "../be/session-shares";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
+import { getTaskUiSpecsForTasks, TaskUiSpecSchema } from "../be/task-ui-spec";
 import {
   AgentTokenExistsError,
   findUserById,
@@ -80,6 +82,7 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { canMutateTaskNamespace } from "./assets";
+import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { createListTotalCache } from "./list-total-cache";
 import { agentFirstPrincipal, authUserId, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
@@ -209,6 +212,7 @@ const SessionKeyFilterSchema = z.string().transform((value, ctx) => {
  */
 const TaskWithSteeringSchema = AgentTaskSchema.extend({
   citations: z.array(TaskCitationSchema),
+  uiSpec: TaskUiSpecSchema.nullable(),
   isLeadTask: z.boolean(),
   supportedSteerModes: z.array(SteerModeSchema),
 });
@@ -1242,6 +1246,21 @@ export async function handleSessions(
           if (roots.length < SESSION_MOVE_LIMIT) break;
         }
         const moved = await moveSessionChains({ moves, changedBy });
+        // Stars on the group follow a rename only when no session of any owner is
+        // left under the old key: nothing skipped, nothing remaining. Every user's
+        // stars move only when this request moved sessions, which proves the caller
+        // could move every root. A rename that moves nothing (an emptied group, or a
+        // retry) moves only the caller's own stars. A delete leaves the stars in place.
+        if (
+          key !== null &&
+          skipped.length === 0 &&
+          remaining === 0 &&
+          (await listPrefixRoots({ from, limit: 1 })).length === 0
+        ) {
+          const scope =
+            moved.length > 0 ? undefined : (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+          if (moved.length > 0 || scope) await moveKeyFavorites({ from, to: key, scope });
+        }
         moveSessionPrefix.respond(res, 200, { moved, skipped, remaining });
       },
     );
@@ -1281,11 +1300,12 @@ export async function handleSessions(
       sessionRoot.id,
       actor,
     );
-    // Load steering, citations and pending approvals for the already loaded chain.
+    // Load steering, citations, UI specs and pending approvals for the already loaded chain.
     const tasks = [root, ...chain];
-    const [steering, citations, approvals, read, groupKey] = await Promise.all([
+    const [steering, citations, uiSpecs, approvals, read, groupKey] = await Promise.all([
       getTaskSteeringFieldsForTasks(tasks),
       getTaskCitationsForTasks(tasks.map((task) => task.id)),
+      getTaskUiSpecsForTasks(tasks.map((task) => task.id)),
       getPendingApprovalsForTasks(tasks.map((task) => task.id)),
       // The viewer's read state, so a client marks a session read on open
       // without the list row (the same rule as `GET /api/sessions`).
@@ -1298,6 +1318,7 @@ export async function handleSessions(
       ...task,
       ...steering.get(task.id)!,
       citations: citations.get(task.id)!,
+      uiSpec: uiSpecs.get(task.id) ?? null,
     });
     getSession.respond(res, 200, {
       root: decorate(root),

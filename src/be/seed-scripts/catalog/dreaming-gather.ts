@@ -12,8 +12,8 @@ const CAPS = {
   memoryStore: 5,
   memoryEdit: 5,
   memoryDelete: 10,
-  skillCreate: 1,
-  skillUpdate: 3,
+  skillCreate: 2,
+  skillUpdate: 6,
   scriptSpecs: 2,
   scriptBuilds: 2,
 };

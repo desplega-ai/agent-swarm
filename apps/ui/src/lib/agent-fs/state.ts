@@ -7,11 +7,11 @@ import type { MeResponse } from "./types";
 
 /**
  * - `disabled`: Comb is off, agent-fs is not configured, or the API predates Comb.
- * - `loading`: `/status` or the identity check is in flight.
- * - `needs-connect`: no credential in this browser.
- * - `invalid-key`: agent-fs rejected the saved key (401).
- * - `unreachable`: the identity check failed for another reason (network, 5xx).
- * - `ready`: `me` is loaded and `client` works.
+ * - `loading`: `/status` or the key check is in flight.
+ * - `needs-connect`: no credential in this browser (the browser mints one).
+ * - `invalid-key`: agent-fs rejected the saved key (401). The browser mints a new one.
+ * - `unreachable`: the key check failed for another reason (network, 5xx).
+ * - `ready`: the key check passed and `client` works.
  */
 export type AgentFsState =
   | "disabled"
@@ -53,9 +53,9 @@ export interface AgentFsStateInput {
   endpoint: string | null;
   /** This browser has a saved credential for `endpoint`. */
   hasCredential: boolean;
-  /** Last `me` result, possibly cached from before an error. */
+  /** Last key check result, possibly cached from before an error. */
   me: MeResponse | undefined;
-  /** Last `me` error. */
+  /** Last key check error. */
   meError: unknown;
 }
 
@@ -67,7 +67,7 @@ export function deriveAgentFsState(input: AgentFsStateInput): {
   const meError = input.meError
     ? input.meError instanceof AgentFsError
       ? input.meError
-      : new AgentFsError(0, "UNKNOWN", "agent-fs identity check failed")
+      : new AgentFsError(0, "UNKNOWN", "agent-fs key check failed")
     : null;
   let state: AgentFsState;
   if (input.statusLoading) state = "loading";

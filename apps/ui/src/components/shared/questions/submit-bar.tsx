@@ -123,6 +123,7 @@ export function SubmitBar({
   onSubmit,
   onDiscard,
   label: customLabel,
+  embedded = false,
 }: {
   request: Pick<ApprovalRequest, "status" | "workflowRunId">;
   progress: AnswerProgress;
@@ -133,6 +134,8 @@ export function SubmitBar({
   onDiscard: () => void;
   /** Replaces "Submit" / "Submit · reject" on the button and in its tooltip. */
   label?: string;
+  /** The footer of a host card: in flow, not fixed or sticky. */
+  embedded?: boolean;
 }) {
   const blocked = progress.blockedReason;
   const pct = progress.total ? (progress.answered / progress.total) * 100 : 0;
@@ -142,13 +145,23 @@ export function SubmitBar({
       initial={{ y: "100%", opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.28, ease: SNAPPY, delay: 0.05 }}
-      className="fixed inset-x-0 bottom-0 z-30 md:sticky md:inset-x-auto md:z-20 md:-mx-1 md:mt-2 md:bg-background md:px-1"
+      className={
+        embedded
+          ? undefined
+          : "fixed inset-x-0 bottom-0 z-30 md:sticky md:inset-x-auto md:z-20 md:-mx-1 md:mt-2 md:bg-background md:px-1"
+      }
     >
       {/* Opaque and flush with the bottom of the scroll pane: a gap or a
           translucent fill lets question text scroll visibly underneath. */}
-      <div className="border-t border-border bg-background shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.25)] md:rounded-t-xl md:border md:border-b-0">
+      <div
+        className={cn(
+          "border-t border-border bg-background",
+          !embedded &&
+            "shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.25)] md:rounded-t-xl md:border md:border-b-0",
+        )}
+      >
         <div
-          className="h-0.5 overflow-hidden bg-muted md:rounded-t-xl"
+          className={cn("h-0.5 overflow-hidden bg-muted", !embedded && "md:rounded-t-xl")}
           role="progressbar"
           aria-label="Answered questions"
           aria-valuemin={0}

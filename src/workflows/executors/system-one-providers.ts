@@ -314,6 +314,9 @@ export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER: SystemOneExtractProviderId = "
 /** Global config key naming the decision provider a node or call without `provider` uses. */
 export const SYSTEM_ONE_DEFAULT_PROVIDER_CONFIG_KEY = "SYSTEM_ONE_DEFAULT_PROVIDER";
 
+/** Global config key naming the extraction provider a node without `provider` uses. */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY = "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER";
+
 export function isSystemOneProviderId(value: unknown): value is SystemOneProviderId {
   return (
     typeof value === "string" && (SYSTEM_ONE_PROVIDER_IDS as readonly string[]).includes(value)
@@ -349,6 +352,23 @@ export function isSystemOneExtractProviderId(value: unknown): value is SystemOne
   );
 }
 
+/** Resolve the extraction host from global config, then the environment, then the fallback. */
+export async function resolveSystemOneExtractDefaultProvider(
+  ctx: SystemOneProviderContext,
+): Promise<SystemOneExtractProviderId> {
+  let stored: string | undefined;
+  try {
+    stored = await readGlobalConfig(ctx.db, SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY);
+  } catch {
+    // An unreadable row uses the same fallback as an unset row.
+  }
+  for (const raw of [stored, ctx.env[SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY]]) {
+    const id = raw?.trim().toLowerCase();
+    if (isSystemOneExtractProviderId(id)) return id;
+  }
+  return SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+}
+
 /**
  * Provider a raw node config selects, `defaultId` when it names none. Undefined
  * when the field is present but not a known id.
@@ -364,8 +384,9 @@ export function systemOneProviderOf(
 /** Extraction provider a raw node config selects. Undefined when present but not a known id. */
 export function systemOneExtractProviderOf(
   config: Record<string, unknown>,
+  defaultId: SystemOneExtractProviderId = SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER,
 ): SystemOneExtractProviderId | undefined {
-  if (config.provider === undefined) return SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+  if (config.provider === undefined) return defaultId;
   return isSystemOneExtractProviderId(config.provider) ? config.provider : undefined;
 }
 

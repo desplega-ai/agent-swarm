@@ -42,6 +42,10 @@ import type {
   ChannelsResponse,
   ChatSdkStatusResponse,
   ChatSdkTelegramWebhookResponse,
+  ChecklistAddRequest,
+  ChecklistItem,
+  ChecklistResponse,
+  ChecklistUpdateRequest,
   ClaudeRuntimeConfig,
   CombReviewBatchInput,
   CombReviewBatchResult,
@@ -67,6 +71,7 @@ import type {
   FavoritesResponse,
   FeedbackInput,
   FleetBenchmarkResponse,
+  FsMeResponse,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -91,6 +96,7 @@ import type {
   MetricSaveInput,
   MetricSaveResponse,
   MetricsListResponse,
+  MintedFsKey,
   MintTokenResponse,
   ModelProfile,
   ModelProfileCheckResult,
@@ -176,6 +182,7 @@ import type {
   SwarmConfigsResponse,
   SwarmRepo,
   SwarmReposResponse,
+  TaskAttachment,
   TaskContextResponse,
   TaskLineageResponse,
   TasksResponse,
@@ -376,6 +383,20 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
     // fall through to the generic throw below
   }
   throw new Error(`${genericLabel}: ${res.status}`);
+}
+
+/**
+ * A failed `/api/fs/*` call (`GET /api/fs/me`, `POST /api/fs/keys`,
+ * `POST /api/fs/continue`). `status` picks the message: a 501 (agent-fs too
+ * old for named keys), a 409 (account pending), a 400, and the rest.
+ */
+export class FsApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "FsApiError";
+    this.status = status;
+  }
 }
 
 /**
@@ -763,6 +784,14 @@ class ApiClient {
     return res.json();
   }
 
+  /** The file attachments of one task (`GET /api/fs/tasks/{id}/files`). */
+  async fetchTaskFiles(taskId: string): Promise<{ attachments: TaskAttachment[] }> {
+    const url = `${this.getBaseUrl()}/api/fs/tasks/${encodeURIComponent(taskId)}/files`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch task files: ${res.status}`);
+    return res.json();
+  }
+
   async fetchTask(id: string): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -865,6 +894,23 @@ class ApiClient {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to pause task" }));
       throw new Error(error.error || `Failed to pause task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Runs the action a task card Button declares. Throws with the server's error text. */
+  async runTaskUiAction(
+    id: string,
+    actionId: string,
+  ): Promise<{ status: "started" | "already_done"; taskId?: string }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/ui-actions/${encodeURIComponent(actionId)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to run the card action" }));
+      throw new Error(error.error || `Failed to run the card action: ${res.status}`);
     }
     return res.json();
   }
@@ -1238,6 +1284,57 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** The current user's agent-fs account (`GET /api/fs/me`). */
+  async fsMe(): Promise<FsMeResponse> {
+    const url = `${this.getBaseUrl()}/api/fs/me`;
+    const res = await fetch(url, { headers: this.getHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(
+        err.error || `Failed to load the files account: ${res.status}`,
+        res.status,
+      );
+    }
+    return res.json();
+  }
+
+  /**
+   * Mint a named agent-fs key for this browser (`POST /api/fs/keys`). The API
+   * returns the key once and never stores it.
+   */
+  async mintFsKey(label: string): Promise<MintedFsKey> {
+    const url = `${this.getBaseUrl()}/api/fs/keys`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ label }),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(err.error || `Failed to create a files key: ${res.status}`, res.status);
+    }
+    return res.json();
+  }
+
+  /**
+   * "Continue with your swarm": mint a named agent-fs key for the current user
+   * and get `returnTo` back with the key in its fragment. The API allows only
+   * the live agent-fs app as `returnTo`.
+   */
+  async fsContinue(data: { returnTo: string }): Promise<{ redirectUrl: string }> {
+    const res = await fetch(`${this.getBaseUrl()}/api/fs/continue`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new FsApiError(err.error || `Failed to continue: ${res.status}`, res.status);
     }
     return res.json();
   }
@@ -3035,6 +3132,17 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchKeyWindowUsage(filter: {
+    keyType: string;
+    keySuffix: string;
+  }): Promise<import("./types").KeyWindowUsageResponse> {
+    const params = new URLSearchParams(filter);
+    const url = `${this.getBaseUrl()}/api/keys/window-usage?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch window usage: ${res.status}`);
+    return res.json();
+  }
+
   async fetchApiKeyCosts(keyType?: string): Promise<import("./types").KeyCostResponse> {
     const params = new URLSearchParams();
     if (keyType) params.set("keyType", keyType);
@@ -3824,6 +3932,22 @@ class ApiClient {
     return data.task;
   }
 
+  /** Add and remove task tags. A tag in both lists is removed. */
+  async updateTaskTags(
+    id: string,
+    change: { add?: string[]; remove?: string[] },
+  ): Promise<AgentTask> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/tags`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(change),
+    });
+    if (!res.ok) throw new Error(`Failed to update task tags: ${res.status}`);
+    const data = (await res.json()) as { task: AgentTask };
+    return data.task;
+  }
+
   // ─── Task Templates (Phase 6 ≥1.76.0) ─────────────────────────────────────
 
   async listTaskTemplates(opts?: {
@@ -4301,6 +4425,38 @@ class ApiClient {
     });
     if (!res.ok) throw new Error(`registerAssetMapping: ${res.status}`);
     return res.json();
+  }
+
+  /** The post-onboarding checklist for the picked user (swarm items plus their own). */
+  async getChecklist(): Promise<ChecklistResponse> {
+    const res = await fetch(`${this.getBaseUrl()}/api/checklist`, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`getChecklist: ${res.status}`);
+    return res.json();
+  }
+
+  private async checklistWrite(
+    method: "POST" | "PATCH",
+    path: string,
+    body: unknown,
+  ): Promise<ChecklistItem> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      method,
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Checklist update failed: ${res.status}`);
+    }
+    return ((await res.json()) as { item: ChecklistItem }).item;
+  }
+
+  addChecklistItem(body: ChecklistAddRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("POST", "/api/checklist/items", body);
+  }
+
+  updateChecklistItem(id: string, body: ChecklistUpdateRequest): Promise<ChecklistItem> {
+    return this.checklistWrite("PATCH", `/api/checklist/items/${encodeURIComponent(id)}`, body);
   }
 
   async listFavorites(opts?: {

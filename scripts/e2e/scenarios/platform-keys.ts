@@ -232,6 +232,201 @@ export const platformKeys: Scenario = {
       "the expired limit is reset to available",
     );
 
+    // Codex telemetry uses provider durations and does not gate admission.
+    const quotaAt = new Date().toISOString();
+    const monthlyReset = Math.floor(Date.now() / 1000) + 30 * 86400;
+    const quotaKey = "codex:quota:primary";
+    const quotaBody = { keyType, keySuffix: suffixB, keyIndex: 1 };
+    await report(ctx, "report-rate-limit-windows", {
+      ...quotaBody,
+      windows: {
+        [quotaKey]: {
+          source: "codex",
+          limitId: "quota",
+          status: "rejected",
+          utilization: 1,
+          durationMins: 43200,
+          resetsAt: monthlyReset,
+          lastSeenAt: quotaAt,
+        },
+      },
+      account: {
+        source: "codex",
+        observedAt: quotaAt,
+        ordinaryUsageAllowed: false,
+        limits: {
+          quota: {
+            observedAt: quotaAt,
+            planRaw: "promax",
+            credits: { hasCredits: false, unlimited: false, balance: "0" },
+            spend: { limit: "80", used: "20", remainingPercent: 75, resetsAt: monthlyReset },
+          },
+        },
+      },
+      replace: [
+        { source: "codex", limitId: "quota", observedAt: quotaAt, slots: ["primary", "secondary"] },
+      ],
+    });
+    const quotaStatus = await statusOf(ctx, keyType, suffixB);
+    expect(
+      asRecord(asRecord(quotaStatus.rateLimitWindows)[quotaKey]).resetsAt === monthlyReset,
+      "monthly reset is not a routing cooldown",
+    );
+    expect(
+      asRecord(asRecord(asRecord(quotaStatus.providerAccount).limits).quota).planRaw === "promax",
+      "account metadata persists by limit",
+    );
+    expect(
+      (
+        await available(ctx, `keyType=${keyType}&totalKeys=2&model=opus`)
+      ).availableIndices.join() === "0,1",
+      "Codex rejection telemetry does not change admission",
+    );
+    const removedAt = new Date(Date.parse(quotaAt) + 1000).toISOString();
+    await report(ctx, "report-rate-limit-windows", {
+      ...quotaBody,
+      windows: {},
+      replace: [
+        {
+          source: "codex",
+          limitId: "quota",
+          observedAt: removedAt,
+          slots: ["primary", "secondary"],
+        },
+      ],
+    });
+    await report(ctx, "report-rate-limit-windows", {
+      ...quotaBody,
+      windows: {
+        [quotaKey]: { source: "codex", limitId: "quota", status: "allowed", lastSeenAt: quotaAt },
+      },
+    });
+    expect(
+      !Object.hasOwn(asRecord((await statusOf(ctx, keyType, suffixB)).rateLimitWindows), quotaKey),
+      "delayed snapshots cannot restore a removed window",
+    );
+    await report(ctx, "report-rate-limit-windows", {
+      ...quotaBody,
+      windows: {},
+      account: { source: "codex", observedAt: removedAt, ordinaryUsageAllowed: true },
+    });
+    expect(
+      asRecord((await statusOf(ctx, keyType, suffixB)).providerAccount).ordinaryUsageAllowed ===
+        true,
+      "account-only reports persist",
+    );
+    expectStatus(
+      await ctx.api("POST", "/api/keys/report-rate-limit-windows", {
+        body: {
+          ...quotaBody,
+          windows: {},
+          account: { source: "codex", observedAt: removedAt, accountId: "excluded" },
+        },
+      }),
+      [400],
+      "account identifiers are not part of telemetry",
+    );
+
+    // Future clocks cannot lock out later windows, facts, or explicit removals.
+    const skewed = "3000-01-01T00:00:00.000Z";
+    const skewBody = { keyType, keySuffix: `s${ctx.nonce.slice(0, 8)}`, keyIndex: 2 };
+    const beforeSkew = Date.now();
+    await report(ctx, "report-rate-limit-windows", {
+      ...skewBody,
+      windows: {
+        [quotaKey]: {
+          source: "codex",
+          limitId: "quota",
+          status: "allowed",
+          utilization: 0.7,
+          lastSeenAt: skewed,
+          resetsAt: monthlyReset,
+          fieldObservedAt: { resetsAt: skewed },
+        },
+        overage: { status: "allowed", lastSeenAt: quotaAt, resetsAt: monthlyReset },
+      },
+      account: {
+        source: "codex",
+        observedAt: skewed,
+        ordinaryUsageAllowed: false,
+        fieldObservedAt: { ordinaryUsageAllowed: skewed },
+        limits: {
+          quota: {
+            observedAt: skewed,
+            planRaw: "pro",
+            fieldObservedAt: { planRaw: skewed },
+            windowRemovedAt: { secondary: skewed },
+          },
+        },
+      },
+      replace: [{ source: "codex", limitId: "quota", observedAt: skewed, slots: ["secondary"] }],
+    });
+    const skewStatus = await statusOf(ctx, keyType, skewBody.keySuffix);
+    const boundedWindow = asRecord(asRecord(skewStatus.rateLimitWindows)[quotaKey]);
+    const boundedAccount = asRecord(skewStatus.providerAccount);
+    const boundedLimit = asRecord(asRecord(boundedAccount.limits).quota);
+    expect(
+      Date.parse(String(boundedWindow.lastSeenAt)) >= beforeSkew &&
+        Date.parse(String(boundedWindow.lastSeenAt)) <= Date.now(),
+      "future window observation is bounded to receipt time",
+    );
+    expect(
+      Date.parse(String(asRecord(boundedAccount.fieldObservedAt).ordinaryUsageAllowed)) <=
+        Date.now() &&
+        Date.parse(String(asRecord(boundedLimit.fieldObservedAt).planRaw)) <= Date.now(),
+      "future account facts are bounded",
+    );
+    expect(
+      Date.parse(String(asRecord(boundedLimit.windowRemovedAt).secondary)) <= Date.now(),
+      "future removals are bounded",
+    );
+    expect(
+      boundedWindow.resetsAt === monthlyReset &&
+        asRecord(asRecord(skewStatus.rateLimitWindows).overage).resetsAt === monthlyReset,
+      "unknown-duration Codex and Claude monthly resets persist",
+    );
+    const recoveredAt = new Date().toISOString();
+    await report(ctx, "report-rate-limit-windows", {
+      ...skewBody,
+      windows: {
+        [quotaKey]: {
+          source: "codex",
+          limitId: "quota",
+          status: "allowed",
+          utilization: 0.2,
+          lastSeenAt: recoveredAt,
+        },
+        "codex:quota:secondary": {
+          source: "codex",
+          limitId: "quota",
+          status: "allowed",
+          lastSeenAt: recoveredAt,
+        },
+      },
+      account: {
+        source: "codex",
+        observedAt: recoveredAt,
+        ordinaryUsageAllowed: true,
+        limits: { quota: { observedAt: recoveredAt, planRaw: "plus" } },
+      },
+    });
+    const recoveredStatus = await statusOf(ctx, keyType, skewBody.keySuffix);
+    expect(
+      asRecord(asRecord(recoveredStatus.rateLimitWindows)[quotaKey]).utilization === 0.2 &&
+        Object.hasOwn(asRecord(recoveredStatus.rateLimitWindows), "codex:quota:secondary"),
+      "normal window reports recover after clock skew",
+    );
+    expect(
+      asRecord(recoveredStatus.providerAccount).ordinaryUsageAllowed === true &&
+        asRecord(asRecord(asRecord(recoveredStatus.providerAccount).limits).quota).planRaw ===
+          "plus",
+      "normal account facts recover after clock skew",
+    );
+    expect(
+      asRecord(asRecord(recoveredStatus.rateLimitWindows)[quotaKey]).resetsAt === monthlyReset,
+      "sparse recovery retains the known reset",
+    );
+
     // ── auth failures bench a key until a fenced proof of health ─────────────
     const first = await report(ctx, "report-auth-failure", {
       keyType,
@@ -412,6 +607,15 @@ export const platformKeys: Scenario = {
           typeof plan.keyType === "string",
         `plan ${id} has label, keyType and a monthly price`,
       );
+    }
+    for (const [id, label] of [
+      ["claude_max_5x", "Claude Max"],
+      ["claude_max_20x", "Claude Ultra"],
+      ["chatgpt_pro_5x", "ChatGPT Pro 100"],
+      ["chatgpt_pro", "ChatGPT Pro 200"],
+      ["chatgpt_pro_500", "ChatGPT Pro 500"],
+    ]) {
+      expect(catalog.find((plan) => plan.id === id)?.label === label, `current plan label ${id}`);
     }
     // Plans only apply to their credential type, so use a real OAuth key type with a unique suffix.
     const claudeType = "CLAUDE_CODE_OAUTH_TOKEN";

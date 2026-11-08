@@ -392,3 +392,69 @@ export async function announceLiveView(ctx: ScenarioContext, path: string): Prom
   console.log(`E2E_SLACK_UI ${ctx.slack.baseUrl.replace(/\/$/, "")}${path}`);
   await slackPace();
 }
+
+/**
+ * The transport-neutral mention round trip on the built-in Slack: mention, eyes reaction,
+ * threaded bot reply, one pending `source: slack` task with its thread key and channel
+ * label, then claim and finish for the outcome message and the check reaction. It drives
+ * `ctx.slack`, so a caller on another transport passes `{ ...ctx, slack: otherMock }`
+ * after its own connection checks.
+ */
+export async function runSlackMentionFlow(
+  ctx: ScenarioContext,
+  leadName: string,
+  options: { pinLead?: boolean } = {},
+): Promise<void> {
+  const leadId = await registerLead(ctx, leadName);
+  // `swarm#<id>` pins the task to this lead: a scenario that runs late in the suite meets
+  // older leads, some busy, and routing may hand the task to one of them.
+  const message = await ask(
+    ctx,
+    `${options.pinLead ? `swarm#${leadId} ` : ""}say hello from the E2E worker`,
+  );
+  ctx.markThread("mention", "C0GENERAL0", message.ts);
+  await waitForEyes(ctx, message.ts);
+
+  const reply = await waitForBotReply(ctx, message.ts);
+  expect(
+    reply.thread_ts === message.ts,
+    `Bot replied in general on thread ${String(reply.thread_ts)}, expected ${message.ts}`,
+  );
+
+  const task = await findSlackTask(ctx, message.ts);
+  const taskId = String(task.id);
+  expect(task.status === "pending", `Slack task ${taskId} is ${String(task.status)}, not pending`);
+
+  const row = ctx.db.get<{ source: string; key: string }>(
+    'SELECT source, "key" FROM agent_tasks WHERE id = ?',
+    [taskId],
+  );
+  expect(
+    row?.source === "slack",
+    `agent_tasks row for ${taskId} has source ${row?.source ?? "<missing row>"}`,
+  );
+  expect(
+    row?.key === `shared/slack/${"C0GENERAL0".toLowerCase()}/thread:${message.ts}/`,
+    `agent_tasks row for ${taskId} has key ${row?.key ?? "<missing row>"}`,
+  );
+
+  expect(
+    await pollUntil(async () => {
+      const response = await ctx.api("GET", "/api/session-tree");
+      const tree = response.json as { labels?: Record<string, string> };
+      return response.status === 200 && tree.labels?.["shared/slack/c0general0/"] === "#general";
+    }, 10_000),
+    "Session tree did not return the mock channel label",
+  );
+
+  await claim(ctx, leadId, taskId);
+  const output = "Hello from the E2E worker.";
+  await finish(ctx, leadId, taskId, { status: "completed", output });
+
+  const outcome = await waitForOutcome(ctx, message.ts, output);
+  expect(
+    outcome.bot_id === ctx.slack.bot.botId,
+    `Outcome message came from ${String(outcome.bot_id)}, expected the bot`,
+  );
+  await waitForReaction(ctx, message.ts, "white_check_mark");
+}

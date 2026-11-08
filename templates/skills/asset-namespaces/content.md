@@ -13,11 +13,12 @@ Use an asset `key` as directory-like grouping metadata across tasks, workflows, 
 
 ## Set and inherit keys
 
-Pass `key` when creating a task, workflow, schedule, or page. Omitting it creates a deterministic shared resource key such as `shared/task:<id>/`, `shared/workflow:<id>/`, `shared/schedule:<id>/`, `shared/page:<id>/`, or `shared/fs:agent-fs:<id>/`.
+Pass `key` when creating a task, workflow, schedule, or page. Without inheritance, omitting it creates a deterministic shared resource key such as `shared/task:<id>/`, `shared/workflow:<id>/`, `shared/schedule:<id>/`, `shared/page:<id>/`, or `shared/fs:agent-fs:<id>/`.
 
 - Tasks sent from another task inherit the source task's key unless explicitly overridden.
 - Tasks launched by a workflow inherit the workflow key unless the agent-task node supplies a key.
 - Tasks launched by a schedule inherit the schedule key.
+- The `create-schedule` and `create_page` tools default to the calling task's group key, excluding namespace roots and resource leaves.
 - Agent-fs task attachments receive logical file mappings and inherit their task key.
 
 Use only a canonical user-registry ID in `personal/<user-id>/`. Do not substitute an agent ID, email address, Slack ID, or unverified caller-provided value. The API authorizes the destination against trusted request/task context and rejects mismatches.

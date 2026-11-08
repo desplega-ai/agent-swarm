@@ -1,6 +1,7 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -23,6 +24,7 @@ import type {
 } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
+import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -277,6 +279,10 @@ function BundleFiles({
   if (!current) return <p className="text-sm text-muted-foreground">No files in this bundle.</p>;
 
   const source = files[current] ?? "";
+  // Size the viewer to its content (18px lines + padding),
+  // capped at 70dvh, instead of a fixed 360px box nested inside the sheet's scroller.
+  const contentHeight = source.split("\n").length * 18 + 16;
+  const viewerHeight = `min(70dvh, ${contentHeight}px)`;
   return (
     <div className="flex flex-col gap-3">
       {paths.length > 1 && (
@@ -300,10 +306,10 @@ function BundleFiles({
           source={source}
           typeDefs={current === hooksPath ? typeDefs : undefined}
           readOnly
-          height="360px"
+          height={viewerHeight}
         />
       ) : (
-        <pre className="max-h-[360px] overflow-auto rounded-md border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
+        <pre className="max-h-[70dvh] overflow-auto rounded-md border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
           {source}
         </pre>
       )}
@@ -412,8 +418,11 @@ export function ExtensionDetail({
   extensionId,
   active,
   onDeleted,
+  actionsSlot,
 }: {
   extensionId: string;
+  /** Sheet-header node the Delete/Enable buttons portal into; inline when absent. */
+  actionsSlot?: HTMLElement | null;
   /** False while the sheet closes: render cached data, fetch nothing. */
   active: boolean;
   onDeleted: () => void;
@@ -539,48 +548,54 @@ export function ExtensionDetail({
     activate.isPending ||
     remove.isPending;
 
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-end gap-2">
+  // Delete/Enable move into the sheet header (no row of their own)
+  const actions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="destructive-outline"
+        disabled={busy}
+        aria-label="Delete extension"
+        onClick={() => setConfirmDelete(true)}
+      >
+        <Trash2 className="h-4 w-4" />
+        <span className="hidden sm:inline">Delete</span>
+      </Button>
+      {extension.enabled ? (
         <Button
           type="button"
           size="sm"
-          variant="destructive-outline"
+          variant="outline"
           disabled={busy}
-          onClick={() => setConfirmDelete(true)}
+          onClick={() =>
+            disable.mutate(undefined, {
+              onError: (err) => setSaveError(err.message),
+            })
+          }
         >
-          <Trash2 className="h-4 w-4" />
-          Delete
+          Disable
         </Button>
-        {extension.enabled ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              disable.mutate(undefined, {
-                onError: (err) => setSaveError(err.message),
-              })
-            }
-          >
-            Disable
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              enable.mutate(undefined, {
-                onError: (err) => setSaveError(err.message),
-              })
-            }
-          >
-            Enable
-          </Button>
-        )}
-      </div>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy}
+          onClick={() =>
+            enable.mutate(undefined, {
+              onError: (err) => setSaveError(err.message),
+            })
+          }
+        >
+          Enable
+        </Button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      {actionsSlot ? createPortal(actions, actionsSlot) : actions}
 
       {saveError && (
         <Alert variant="destructive">
@@ -596,11 +611,12 @@ export function ExtensionDetail({
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
+      {/* Tighter Bundle card on a phone (less chrome above the source) */}
+      <Card className="max-sm:gap-4 max-sm:py-4">
+        <CardHeader className="max-sm:px-4">
           <CardTitle>Bundle</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="flex flex-col gap-4 max-sm:px-4">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <InfoRow label="Manifest version">
               <span className="font-mono text-xs">{manifest.version}</span>
@@ -613,7 +629,17 @@ export function ExtensionDetail({
             </InfoRow>
             <InfoRow label="Author">{manifest.author || "—"}</InfoRow>
           </div>
-          <InfoRow label="Description">{manifest.description || "—"}</InfoRow>
+          {/* Description clamped to 2 lines with "Show more" */}
+          <InfoRow label="Description">
+            {manifest.description ? (
+              <CollapsibleDescription
+                text={manifest.description}
+                collapsedClassName="line-clamp-2"
+              />
+            ) : (
+              "—"
+            )}
+          </InfoRow>
           {manifest.homepage && (
             <InfoRow label="Homepage">
               <a
@@ -818,6 +844,8 @@ export function ExtensionDetailSheet({
   // The header's disabled observer keeps a failing fetch retrying after the
   // body stops, so closing (or switching extensions) cancels that id's requests.
   const cancelRequests = useCancelExtensionRequests();
+  // Header slot for the body's Delete/Enable buttons
+  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open || !shownId) return;
     return () => cancelRequests(shownId);
@@ -826,7 +854,7 @@ export function ExtensionDetailSheet({
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl" {...focus.contentProps}>
-        <SheetHeader className="border-b border-border px-6 py-4 pr-12">
+        <SheetHeader className="border-b border-border px-4 py-3 pr-12 sm:px-6 sm:py-4 sm:pr-12">
           <SheetTitle className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono">{extension?.name ?? "Extension"}</span>
             {extension && (
@@ -835,18 +863,23 @@ export function ExtensionDetailSheet({
               </Badge>
             )}
           </SheetTitle>
-          <SheetDescription>
-            {extension
-              ? `Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`
-              : "Installed extension"}
-          </SheetDescription>
+          {/* Actions share the description row, so the name keeps the full title line */}
+          <div className="flex min-w-0 items-center gap-2">
+            <SheetDescription className="min-w-0 flex-1">
+              {extension
+                ? `Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`
+                : "Installed extension"}
+            </SheetDescription>
+            <div ref={setActionsSlot} className="shrink-0" />
+          </div>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {shownId && (
             <ExtensionDetail
               key={shownId}
               extensionId={shownId}
               active={open}
+              actionsSlot={actionsSlot}
               onDeleted={() => {
                 deleted.current = true;
                 focus.forgetOpener();

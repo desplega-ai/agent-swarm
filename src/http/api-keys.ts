@@ -14,16 +14,42 @@ import {
   setApiKeyName,
   setApiKeyPlan,
 } from "../be/db";
+import {
+  aggregateKeyWindowUsage,
+  currentKeyWindows,
+  KeyWindowUsageLimitError,
+  keyWindowUsageSchema,
+} from "../be/key-window-usage";
 import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
-import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
+import {
+  activeModelBlocks,
+  isModelScopedWindow,
+  MODEL_SCOPED_WINDOWS,
+} from "../utils/model-rate-limit-windows";
+import {
+  MAX_PROVIDER_QUOTA_ENTRIES,
+  ProviderQuotaCapacityError,
+  type ProviderQuotaReport,
+  providerAccountTelemetrySchema,
+  rateLimitReplacementSchema,
+  windowFieldObservedAtSchema,
+} from "../utils/provider-account-telemetry";
 import {
   isSubscriptionPlanId,
   SUBSCRIPTION_PLANS,
   SUBSCRIPTION_PLANS_CHECKED_AT,
 } from "../utils/subscription-plans";
+import { createIpRateLimiter } from "./ip-rate-limit";
 import { bodyTask, route } from "./route-def";
-import { clearUsageCache } from "./usage-cache";
+import { cachedUsageReport, clearUsageCache } from "./usage-cache";
 import { jsonError } from "./utils";
+
+// One process-wide budget for cache misses. Filters, callers, and reports cannot reset it.
+const windowUsageQueryRateLimit = createIpRateLimiter({ capacity: 8, refillPerMs: 1 / 1000 });
+
+export function _resetKeyWindowUsageRateLimitForTests(): void {
+  windowUsageQueryRateLimit.reset();
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -49,6 +75,7 @@ const reportUsage = route({
     scopeId: z.string().optional(),
     /** Plan id the worker detected on the credential (`SUBSCRIPTION_PLANS`). Unknown ids are ignored. */
     plan: z.string().max(40).optional(),
+    planRaw: z.string().min(1).max(80).optional(),
   }),
   responses: {
     200: { description: "Usage recorded", schema: successMessageSchema },
@@ -148,42 +175,122 @@ const reportAuthFailure = route({
 });
 
 export const rateLimitWindowSchema = z.object({
-  status: z.string(),
+  status: z.string().max(256),
   utilization: z.number().optional(),
   // .finite() rejects NaN/Infinity at the report boundary; sanitizeReportedWindowResets
   // below still has to guard a finite-but-out-of-range or implausibly far-future value.
   resetsAt: z.number().finite().optional(),
+  fieldObservedAt: windowFieldObservedAtSchema.optional(),
+  durationMins: z.number().int().positive().max(576000).optional(),
+  source: z.enum(["claude", "codex"]).optional(),
+  limitId: z.string().min(1).max(128).optional(),
+  label: z.string().max(256).optional(),
+  normalModelSlug: z.string().max(256).optional(),
+  overageStatus: z.string().max(256).optional(),
+  overageDisabledReason: z.string().max(256).optional(),
   isUsingOverage: z.boolean().optional(),
   surpassedThreshold: z.number().optional(),
   lastSeenAt: z.string().datetime(),
 });
 
 /**
- * Clamps a reported window's `resetsAt` (seconds) to `[now, now+7d]`, the
- * same 7-day ceiling used for the key-wide cooldown (`MAX_RATE_LIMIT_RESET_MS`).
- * Guards two failure modes at the report boundary, in either direction: a
- * finite-but-out-of-Date-range value (e.g. 1e20 or -1e20) that would
- * otherwise throw when rendered via `new Date(resetsAt * 1000).toISOString()`
- * downstream in `computeModelLimits`, and a representable but implausible
- * value (far-future, or negative/past — a freshly reported window can't
- * reset in the past) that would otherwise read as bogus. NaN/Infinity are
- * already rejected upstream by the route's `.finite()` schema. Applied
- * before storage, so `computeModelLimits` never sees an out-of-range value
- * from data reported through this endpoint.
+ * A finite reset can still exceed Date's range and crash status rendering.
+ * Model blocks retain the fixed routing ceiling regardless of reported duration.
+ * Display-only windows can be monthly and allow one day of provider clock skew.
+ * Never extend an expired reset into a new quota period.
+ * Sparse updates do not establish a new period.
  */
+export const MAX_DISPLAY_RESET_MS = 400 * 86400000;
 export function sanitizeReportedWindowResets(
   windows: RateLimitWindowTelemetry,
 ): RateLimitWindowTelemetry {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const maxResetsAtSec = Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000);
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+
   const sanitized: RateLimitWindowTelemetry = {};
   for (const [key, window] of Object.entries(windows)) {
+    const duration =
+      window.durationMins ??
+      (key === "five_hour" ? 300 : key.startsWith("seven_day") ? 10080 : undefined);
+    const horizonMs = isModelScopedWindow(key)
+      ? MAX_RATE_LIMIT_RESET_MS
+      : duration === undefined
+        ? MAX_DISPLAY_RESET_MS
+        : Math.min(
+            MAX_DISPLAY_RESET_MS,
+            Math.max(MAX_RATE_LIMIT_RESET_MS, duration * 60000 + 86400000),
+          );
+    const maxResetsAtSec = Math.floor((nowMs + horizonMs) / 1000);
     sanitized[key] =
       window.resetsAt === undefined
         ? window
-        : { ...window, resetsAt: Math.min(Math.max(window.resetsAt, nowSec), maxResetsAtSec) };
+        : {
+            ...window,
+            resetsAt: Math.min(
+              window.resetsAt < nowSec - MAX_DISPLAY_RESET_MS / 1000 ? nowSec : window.resetsAt,
+              maxResetsAtSec,
+            ),
+          };
   }
   return sanitized;
+}
+
+/** Future clocks can otherwise prevent every subsequent report from taking effect. */
+export function sanitizeReportedQuotaObservations(
+  report: ProviderQuotaReport,
+  nowMs = Date.now(),
+): ProviderQuotaReport {
+  const bound = (at: string) =>
+    Date.parse(at) > nowMs + 60000 ? new Date(nowMs).toISOString() : at;
+  const times = <K extends string>(
+    values: Partial<Record<K, string>> | undefined,
+  ): Partial<Record<K, string>> | undefined =>
+    values &&
+    (Object.fromEntries(Object.entries(values).map(([key, at]) => [key, bound(at as string)])) as
+      | Partial<Record<K, string>>
+      | undefined);
+  return {
+    windows: Object.fromEntries(
+      Object.entries(report.windows).map(([key, window]) => [
+        key,
+        {
+          ...window,
+          lastSeenAt: bound(window.lastSeenAt),
+          ...(window.fieldObservedAt ? { fieldObservedAt: times(window.fieldObservedAt) } : {}),
+        },
+      ]),
+    ),
+    account: report.account && {
+      ...report.account,
+      observedAt: bound(report.account.observedAt),
+      ...(report.account.fieldObservedAt
+        ? { fieldObservedAt: times(report.account.fieldObservedAt) }
+        : {}),
+      ...(report.account.limits
+        ? {
+            limits: Object.fromEntries(
+              Object.entries(report.account.limits).map(([id, limit]) => [
+                id,
+                {
+                  ...limit,
+                  observedAt: bound(limit.observedAt),
+                  ...(limit.fieldObservedAt
+                    ? { fieldObservedAt: times(limit.fieldObservedAt) }
+                    : {}),
+                  ...(limit.windowRemovedAt
+                    ? { windowRemovedAt: times(limit.windowRemovedAt) }
+                    : {}),
+                },
+              ]),
+            ),
+          }
+        : {}),
+    },
+    replace: report.replace?.map((replacement) => ({
+      ...replacement,
+      observedAt: bound(replacement.observedAt),
+    })),
+  };
 }
 
 const reportRateLimitWindows = route({
@@ -191,15 +298,27 @@ const reportRateLimitWindows = route({
   path: "/api/keys/report-rate-limit-windows",
   pattern: ["api", "keys", "report-rate-limit-windows"],
   summary: "Record provider-emitted rate-limit window telemetry for an API key",
+  description:
+    "Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.",
   tags: ["API Keys"],
-  body: z.object({
-    keyType: z.string(),
-    keySuffix: z.string().min(1).max(10),
-    keyIndex: z.number().int().min(0),
-    windows: z.record(z.string(), rateLimitWindowSchema),
-    scope: z.string().optional(),
-    scopeId: z.string().optional(),
-  }),
+  maxBodyBytes: 256 * 1024,
+  body: z
+    .object({
+      keyType: z.string(),
+      keySuffix: z.string().min(1).max(10),
+      keyIndex: z.number().int().min(0),
+      windows: z.record(z.string().max(256), rateLimitWindowSchema),
+      account: providerAccountTelemetrySchema.optional(),
+      replace: z.array(rateLimitReplacementSchema).max(128).optional(),
+      scope: z.string().optional(),
+      scopeId: z.string().optional(),
+    })
+    .refine(
+      (report) =>
+        Object.keys(report.windows).length <= MAX_PROVIDER_QUOTA_ENTRIES &&
+        Object.keys(report.account?.limits ?? {}).length <= MAX_PROVIDER_QUOTA_ENTRIES,
+      "Reports support at most 64 windows and 64 account limits.",
+    ),
   responses: {
     200: {
       description: "Rate-limit window telemetry recorded",
@@ -207,8 +326,12 @@ const reportRateLimitWindows = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    413: { description: "Telemetry report exceeds 256 KiB" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated: "worker credential telemetry, same posture as POST /api/keys/report-rate-limit",
+  },
 });
 
 const reportSeatMismatch = route({
@@ -312,9 +435,11 @@ const ApiKeyStatusSchema = z.object({
   provider: z.string(),
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: z.record(z.string(), rateLimitWindowSchema),
+  providerAccount: providerAccountTelemetrySchema.nullable(),
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: z.string().nullable(),
   planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
+  detectedPlanRaw: z.string().nullable(),
   /** When the CLI last rejected a model with `credits_required` on this key. */
   lastSeatMismatchAt: z.string().nullable(),
   /** Model family of that rejection (`fable`, `opus`, ...). */
@@ -394,6 +519,38 @@ const listStatuses = route({
       schema: z.object({ success: z.literal(true), keys: z.array(ApiKeyStatusSchema) }),
     },
     401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
+const getWindowUsage = route({
+  method: "get",
+  path: "/api/keys/window-usage",
+  pattern: ["api", "keys", "window-usage"],
+  summary: "Get Swarm-observed usage within current provider windows",
+  description:
+    "Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.",
+  tags: ["API Keys"],
+  query: z.object({
+    keyType: z.string().max(128).optional(),
+    keySuffix: z.string().min(1).max(10).optional(),
+    scope: z.string().max(64).optional(),
+    scopeId: z.string().max(128).optional(),
+  }),
+  responses: {
+    200: {
+      description: "Independent windows with receipt-time tokens and explicit measurement coverage",
+      schema: z.object({
+        success: z.literal(true),
+        asOf: z.string(),
+        accounting: z.literal("session_cost_receipt_time"),
+        windows: z.array(keyWindowUsageSchema),
+      }),
+    },
+    400: { description: "Invalid filters" },
+    401: { description: "Unauthorized" },
+    422: { description: "Requested usage exceeds the aggregation bounds" },
+    429: { description: "Usage query budget exhausted. Retry after one second" },
   },
   auth: { apiKey: true },
 });
@@ -562,7 +719,7 @@ export async function handleApiKeys(
     const parsed = await reportUsage.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId, plan } = parsed.body;
+    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId, plan, planRaw } = parsed.body;
     try {
       const { planChanged } = await recordKeyUsage(
         keyType,
@@ -572,6 +729,7 @@ export async function handleApiKeys(
         scope,
         scopeId ?? null,
         plan && isSubscriptionPlanId(plan) ? plan : null,
+        planRaw,
       );
       if (planChanged) clearUsageCache();
       reportUsage.respond(res, 200, { success: true, message: "Key usage recorded" });
@@ -648,17 +806,27 @@ export async function handleApiKeys(
     const parsed = await reportRateLimitWindows.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
+    const { keyType, keySuffix, keyIndex, scope, scopeId } = parsed.body;
+    const { windows, account, replace } = sanitizeReportedQuotaObservations(parsed.body);
     try {
-      const { planChanged } = await recordKeyRateLimitWindows(
+      // Spend strings retain provider units. Validate their reset independently of routing.
+      for (const limit of Object.values(account?.limits ?? {})) {
+        if (limit.spend)
+          limit.spend.resetsAt = Math.min(
+            limit.spend.resetsAt,
+            Math.floor(Date.now() / 1000) + 400 * 86400,
+          );
+      }
+      await recordKeyRateLimitWindows(
         keyType,
         keySuffix,
         keyIndex,
         sanitizeReportedWindowResets(windows),
         scope,
         scopeId ?? null,
+        account ?? undefined,
+        replace,
       );
-      if (planChanged) clearUsageCache();
       reportRateLimitWindows.respond(res, 200, {
         success: true,
         message: `Rate-limit windows recorded for ...${keySuffix}`,
@@ -667,7 +835,7 @@ export async function handleApiKeys(
       jsonError(
         res,
         err instanceof Error ? err.message : "Failed to record rate-limit windows",
-        500,
+        err instanceof ProviderQuotaCapacityError ? 400 : 500,
       );
     }
     return true;
@@ -730,6 +898,66 @@ export async function handleApiKeys(
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
+    }
+    return true;
+  }
+
+  // GET /api/keys/window-usage
+  if (getWindowUsage.match(req.method, pathSegments)) {
+    const parsed = await getWindowUsage.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { keyType, keySuffix, scope, scopeId } = parsed.query;
+    try {
+      const statuses = await getKeyStatuses(keyType, scope, scope ? (scopeId ?? null) : undefined);
+      const sampledAt = Date.now();
+      const windows = currentKeyWindows(
+        statuses.filter((key) => keySuffix === undefined || key.keySuffix === keySuffix),
+        sampledAt,
+      );
+      // Visibility matches /keys/status for every authenticated caller.
+      const bounds = windows.map((w) => [
+        w.statusId,
+        w.windowKey,
+        w.startsAt,
+        w.endsAt,
+        w.modelScope,
+        w.unavailableReason,
+      ]);
+      const cached = await cachedUsageReport(
+        `key-windows:${JSON.stringify([parsed.query, bounds])}`,
+        () => {
+          if (!windowUsageQueryRateLimit.take("window-usage")) {
+            throw new KeyWindowUsageLimitError(
+              "Window usage is busy. Retry after one second.",
+              429,
+            );
+          }
+          return aggregateKeyWindowUsage(windows, new Date(sampledAt).toISOString());
+        },
+      );
+      const nowMs = Date.now();
+      const byWindow = new Map(
+        cached.map((item) => [JSON.stringify([item.statusId, item.windowKey]), item]),
+      );
+      getWindowUsage.respond(res, 200, {
+        success: true,
+        asOf: new Date(nowMs).toISOString(),
+        accounting: "session_cost_receipt_time",
+        windows: windows
+          .filter((w) => w.endsAt === null || Date.parse(w.endsAt) > nowMs)
+          .map((window) => {
+            const aggregate = byWindow.get(JSON.stringify([window.statusId, window.windowKey]));
+            return {
+              ...window,
+              observationAgeMs: Math.max(0, nowMs - Date.parse(window.observedAt)),
+              ...(aggregate ? { dataThrough: aggregate.dataThrough, usage: aggregate.usage } : {}),
+            };
+          }),
+      });
+    } catch (err) {
+      const status = err instanceof KeyWindowUsageLimitError ? err.status : 500;
+      if (status === 429) res.setHeader("Retry-After", "1");
+      jsonError(res, err instanceof Error ? err.message : "Failed to get window usage", status);
     }
     return true;
   }

@@ -1,6 +1,7 @@
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine } from "@nivo/line";
 import { useMemo } from "react";
+import { useElementWidth } from "@/hooks/use-element-width";
 
 // Categorical palette sourced from semantic design tokens (theme-aware via the
 // CSS custom properties; nivo applies these strings as SVG `fill`). Keeps the
@@ -13,6 +14,23 @@ const CHART_COLORS = [
   "var(--color-status-warning)",
   "var(--color-action-script)",
 ];
+
+/** Left + right plot margins shared by both charts, in px. */
+const PLOT_X_MARGIN = 56 + 24;
+
+/**
+ * The x labels to draw: every k-th one, so neighbours keep their distance in
+ * a plot `widthPx` wide. Upright labels need their own width apart; labels
+ * rotated -28deg need ~28px, or their baselines stack into one smear.
+ */
+function thinXTicks(labels: string[], widthPx: number, rotated: boolean): string[] | undefined {
+  if (widthPx <= 0 || labels.length === 0) return undefined;
+  const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
+  const minGapPx = rotated ? 28 : longest * 6.5 + 12;
+  const slotPx = (widthPx - PLOT_X_MARGIN) / labels.length;
+  const every = Math.max(1, Math.ceil(minGapPx / Math.max(slotPx, 1)));
+  return every === 1 ? undefined : labels.filter((_, index) => index % every === 0);
+}
 
 export interface CategoricalChartProps {
   data: Record<string, unknown>[];
@@ -59,8 +77,16 @@ export function SharedBarChart({
     [data, indexBy, keys],
   );
 
+  const [plotRef, plotWidth] = useElementWidth<HTMLDivElement>();
+  const rotated = data.length > 8;
+  const xTicks = thinXTicks(
+    chartData.map((row) => String(row[indexBy])),
+    plotWidth,
+    rotated,
+  );
+
   return (
-    <div style={{ height }} className="w-full min-w-0">
+    <div ref={plotRef} style={{ height }} className="w-full min-w-0">
       <ResponsiveBar
         data={chartData}
         keys={keys}
@@ -78,7 +104,8 @@ export function SharedBarChart({
         axisBottom={{
           tickSize: 0,
           tickPadding: 10,
-          tickRotation: data.length > 8 ? -28 : 0,
+          tickRotation: rotated ? -28 : 0,
+          tickValues: xTicks,
         }}
         axisLeft={{
           tickSize: 0,
@@ -156,8 +183,16 @@ export function SharedLineChart({
     [data, keys, xKey],
   );
 
+  const [plotRef, plotWidth] = useElementWidth<HTMLDivElement>();
+  const rotated = data.length > 8;
+  const xTicks = thinXTicks(
+    data.map((row) => String(row[xKey] ?? "")),
+    plotWidth,
+    rotated,
+  );
+
   return (
-    <div style={{ height }} className="w-full min-w-0">
+    <div ref={plotRef} style={{ height }} className="w-full min-w-0">
       <ResponsiveLine
         data={series}
         margin={{ top: 12, right: 24, bottom: 52, left: 56 }}
@@ -174,7 +209,8 @@ export function SharedLineChart({
         axisBottom={{
           tickSize: 0,
           tickPadding: 10,
-          tickRotation: data.length > 8 ? -28 : 0,
+          tickRotation: rotated ? -28 : 0,
+          tickValues: xTicks,
         }}
         axisLeft={{
           tickSize: 0,

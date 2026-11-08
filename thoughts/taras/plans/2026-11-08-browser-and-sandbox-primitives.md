@@ -402,6 +402,18 @@ Prove that denied creation, denied resume, and rejected private mode cause zero 
 
 **Implementation Note:** Stop for manual confirmation, then commit `[phase 2] enforce resource lifecycle and budgets`.
 
+### Draft PR integration checkpoint
+
+Taras authorized merging main, resolving integration failures, reverifying, committing, and opening a draft PR for Phases 1–2. Phase 3 and live-provider work remain paused. Local Docker builds are explicitly deferred to CI.
+
+- Merged main at `adc02e749`. Preserved both the resource permissions/validators and main's checklist permissions/Docker validators. Regenerated OpenAPI and script SDK types. Migrations 310/311 remain above main's tail of 307; nine open PRs had no ordinal collision.
+- Main's dynamic OpenAPI footprint assertion replaces the stale 477-operation expectation. The merged specification contains 489 operations.
+- Main now initially expands only the first configuration group. Updated two Playwright specs to search for `STEERING_ENABLED` instead of relying on Steering being first. All 16 tests in those specs pass without changing product behavior.
+- Final `bun run check:local`: 22,079 root tests passed, 41 skipped, zero failures across four shards. One intervening run hit a five-second WebSocket setup timeout in the unchanged runner-push-delivery fixture; its isolated rerun passed 18/18, and the subsequent full local check passed. No retry settings or assertions were weakened.
+- `bun run e2e --strict`: 119/119 scenarios; 489/489 routes, 173/173 tools, and 15/15 workflow node types covered. Final `bun run e2e:ui`: 271 passed, 78 skipped, zero failures. E2E types and changed-spec formatting pass.
+- The merged-tree static, type, boundary, promise, classification, coverage, migration, and generated-freshness gates pass. Evals passed 1,168 tests. Postgres-backed tests remain unverified locally because `SQL_CONNECTION_TEST_URL` is unset.
+- Pre-merge UI screenshots and recording are superseded: main changed the configuration layout. Refresh evidence from the merge commit before opening the PR. Scan the merge commit for secrets before pushing.
+
 ## Phase 3: E2B provider adapter
 
 ### Overview

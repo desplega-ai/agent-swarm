@@ -2,7 +2,11 @@ import {
   Blocks,
   Boxes,
   Bug,
-  Cable,
+  ChevronLeft,
+  ChevronRight,
+  Contact,
+  FileText,
+  FlaskConical,
   Key,
   KeyRound,
   ListChecks,
@@ -10,11 +14,11 @@ import {
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
+  Server,
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
@@ -35,6 +39,10 @@ interface SettingsNavItem {
   beta?: { tooltip: string };
   /** Shown to everyone: browser-local or per-person. The rest is admin-only. */
   everyone?: boolean;
+  /** Listed under the rail's "Advanced" label, after the other entries. */
+  advanced?: boolean;
+  /** Another path prefix that marks this entry active (a detail page outside `path`). */
+  alsoActiveOn?: string;
 }
 
 // The first-run stepper lives outside the settings shell; the rail links to
@@ -43,13 +51,14 @@ const SETUP_PATH = "/setup";
 // Shown only while `useRuntimePoolsGate()` is open.
 const RUNTIME_POOLS_NAV_PATH = "/settings/runtime-pools";
 
+// Keep in step with the Settings flyout in `components/layout/app-sidebar.tsx`.
+// People, Templates and a repo's detail page keep their own URLs, but the
+// router renders them inside this shell too (`app/routes.tsx`).
 const SETTINGS_NAV: SettingsNavItem[] = [
-  { title: "Connections", path: "/settings/connections", icon: Cable, everyone: true },
+  { title: "Servers", path: "/settings/connections", icon: Server, everyone: true },
   { title: "Setup", path: SETUP_PATH, icon: ListChecks },
+  { title: "People", path: "/people", icon: Contact },
   { title: "Appearance", path: "/settings/appearance", icon: Palette, everyone: true },
-  { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
-  { title: "Provider keys", path: "/settings/api-keys", icon: Key },
-  { title: "Integrations", path: "/settings/integrations", icon: Plug },
   { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
   { title: "Extensions", path: "/settings/extensions", icon: Blocks },
   {
@@ -58,8 +67,22 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     icon: Boxes,
     beta: { tooltip: "Run agents on Docker or E2B runtimes" },
   },
-  { title: "Repos", path: "/settings/repos", icon: SettingsIcon },
+  { title: "Repos", path: "/settings/repos", icon: SettingsIcon, alsoActiveOn: "/repos/" },
   { title: "Debug", path: "/settings/debug", icon: Bug },
+  { title: "Secrets", path: "/settings/secrets", icon: KeyRound, advanced: true },
+  { title: "Templates", path: "/templates", icon: FileText, advanced: true },
+  {
+    title: "Playground",
+    path: "/settings/connection-playground",
+    icon: FlaskConical,
+    advanced: true,
+  },
+  {
+    title: "Fetch credentials",
+    path: "/settings/fetch-credentials",
+    icon: Key,
+    advanced: true,
+  },
 ];
 
 const RAIL_COLLAPSED_KEY = "agent-swarm:settings-rail-collapsed";
@@ -119,19 +142,21 @@ export function SettingsLayout() {
   );
 
   // Match the active rail item by path prefix so deep links (e.g.
-  // /settings/integrations/slack) keep "Integrations" highlighted.
-  const activeItem =
-    navItems.find((item) => location.pathname.startsWith(item.path)) ?? navItems[0];
+  // /settings/extensions/<id>) keep their entry highlighted.
+  const matchedItem = navItems.find(
+    (item) =>
+      location.pathname.startsWith(item.path) ||
+      (item.alsoActiveOn !== undefined && location.pathname.startsWith(item.alsoActiveOn)),
+  );
+  const activeItem = matchedItem ?? navItems[0];
 
   return (
     <div className="flex flex-col flex-1 min-h-0 lg:flex-row lg:gap-6">
       {/* Mobile: a tab strip above the content (no select repeating the page name). */}
-      <SectionTabs
-        label="Settings"
-        tabs={navItems}
-        activePath={activeItem.path}
-        className="lg:hidden shrink-0 mb-4"
-      />
+      {/* Settings tab strip hid 7 of 10 sections, add edge fade + chevrons */}
+      <OverflowCue className="lg:hidden shrink-0 mb-4">
+        <SectionTabs label="Settings" tabs={navItems} activePath={activeItem.path} />
+      </OverflowCue>
 
       {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
           § Motion collapse pattern). */}
@@ -156,23 +181,29 @@ export function SettingsLayout() {
               <TooltipContent side="right">Collapse rail</TooltipContent>
             </Tooltip>
           </div>
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                )
-              }
-            >
-              <item.icon className="size-4 shrink-0" />
-              <span>{item.title}</span>
-              {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
-            </NavLink>
+          {navItems.map((item, index) => (
+            <Fragment key={item.path}>
+              {item.advanced && !navItems[index - 1]?.advanced ? (
+                <span className="mt-3 px-3 pb-1 text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                  Advanced
+                </span>
+              ) : null}
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive || item === matchedItem
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )
+                }
+              >
+                <item.icon className="size-4 shrink-0" />
+                <span className="min-w-0 truncate">{item.title}</span>
+                {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
+              </NavLink>
+            </Fragment>
           ))}
         </nav>
       </AnimatedReveal>
@@ -204,6 +235,67 @@ export function SettingsLayout() {
         ) : null}
         <Outlet />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Wraps the shared `SectionTabs` strip (whose scrollbar is hidden) with an
+ * edge fade and a chevron on each side that still has hidden tabs, so a phone
+ * shows that more sections exist past the screen edge. Page-local: it finds
+ * the strip's scroller in the DOM instead of changing the shared component.
+ * The scroller gets an inline scroll padding as wide as a chevron, so the
+ * active tab that `SectionTabs` scrolls into view never sits under one.
+ */
+function OverflowCue({ children, className }: { children: ReactNode; className?: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>("nav > div");
+    if (!scroller) return;
+    const update = () => {
+      const max = scroller.scrollWidth - scroller.clientWidth;
+      setEdges({ left: scroller.scrollLeft > 4, right: scroller.scrollLeft < max - 4 });
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, []);
+
+  const scrollBy = (direction: 1 | -1) => {
+    const scroller = rootRef.current?.querySelector<HTMLElement>("nav > div");
+    scroller?.scrollBy({ left: direction * scroller.clientWidth * 0.7, behavior: "smooth" });
+  };
+
+  return (
+    <div ref={rootRef} className={cn("relative [&_nav>div]:scroll-px-10", className)}>
+      {children}
+      {edges.left ? (
+        <button
+          type="button"
+          onClick={() => scrollBy(-1)}
+          aria-label="Show earlier settings sections"
+          className="absolute top-0 bottom-[3px] left-0 flex w-10 items-center justify-start bg-gradient-to-r from-background from-40% to-transparent pl-0.5 text-foreground"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+      ) : null}
+      {edges.right ? (
+        <button
+          type="button"
+          onClick={() => scrollBy(1)}
+          aria-label="Show more settings sections"
+          className="absolute top-0 bottom-[3px] right-0 flex w-10 items-center justify-end bg-gradient-to-l from-background from-40% to-transparent pr-0.5 text-foreground"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      ) : null}
     </div>
   );
 }

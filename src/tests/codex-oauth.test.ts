@@ -502,7 +502,9 @@ describe("authJsonToCredentialSelection", () => {
 
 describe("codexPlanFromClaim", () => {
   it("maps paid ChatGPT plans and drops plans without a list price", () => {
-    expect(codexPlanFromClaim("pro")).toBe("chatgpt_pro");
+    expect(codexPlanFromClaim("pro")).toBeNull();
+    expect(codexPlanFromClaim("prolite")).toBeNull();
+    expect(codexPlanFromClaim("promax")).toBeNull();
     expect(codexPlanFromClaim("Plus")).toBe("chatgpt_plus");
     expect(codexPlanFromClaim("team")).toBe("chatgpt_business");
     expect(codexPlanFromClaim("business")).toBe("chatgpt_business");

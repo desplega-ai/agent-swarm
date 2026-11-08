@@ -357,6 +357,34 @@ describe("the approvers policy is enforced", () => {
     expect(approvalRequest.approvals).toHaveLength(1);
   });
 
+  test("the slim list says whether the caller may answer each pending request", async () => {
+    const open = await pendingRequest();
+    const forAlice = await pendingRequest({ users: [alice.email], policy: "any" });
+    const forManagers = await pendingRequest({ roles: ["release-manager"], policy: "any" });
+    const canRespond = async (headers: Record<string, string>) => {
+      const res = await fetch(`${baseUrl}/api/approval-requests?fields=slim&status=pending`, {
+        headers,
+      });
+      const { approvalRequests } = (await res.json()) as {
+        approvalRequests: { id: string; viewerCanRespond?: boolean }[];
+      };
+      const byId = new Map(approvalRequests.map((row) => [row.id, row.viewerCanRespond]));
+      return [open.id, forAlice.id, forManagers.id].map((id) => byId.get(id));
+    };
+    expect(await canRespond(asUser(alice.token))).toEqual([true, true, true]);
+    expect(await canRespond(asUser(bob.token))).toEqual([true, false, false]);
+    expect(await canRespond(asUser(carol.token))).toEqual([true, false, true]);
+    expect(await canRespond(operator())).toEqual([true, true, true]);
+    // An agent never answers, so no request counts as one it may answer.
+    expect(await canRespond({ ...operator(), "X-Agent-ID": workerId })).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    // Bob's 403 on the respond route matches the false above.
+    expect((await respond(forAlice.id, asUser(bob.token))).status).toBe(403);
+  });
+
   test("one rejection from an eligible responder rejects a multi-approver request", async () => {
     const request = await pendingRequest({ users: [alice.id, bob.id], policy: "all" });
     expect((await respond(request.id, asUser(alice.token))).body.approvalRequest.status).toBe(

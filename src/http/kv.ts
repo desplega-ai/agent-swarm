@@ -14,6 +14,7 @@ import {
 import { mcpOverflowAuthError } from "../kv-overflow";
 import {
   privateNamespaceError,
+  requiresLeadToWrite,
   reservedNamespaceError,
   reservedRoomKeyError,
 } from "../kv-reserved-namespaces";
@@ -362,6 +363,7 @@ async function buildAuthCtx(req: IncomingMessage): Promise<AuthCtx> {
  *     The proxy injects the page id and we re-derive the expected namespace
  *     from that header; anything else is 403.
  *   - `task:agent:<X>` where X ≠ caller → 403 unless caller is lead.
+ *   - a lead-only family (`usecase:*`) → 403 unless the caller is a lead agent.
  *   - everything else → allow (any authenticated caller).
  */
 function authorizeWrite(
@@ -385,6 +387,17 @@ function authorizeWrite(
     // by the handler before we get here, so by construction the namespace
     // matches the page id. Belt-and-braces: if it doesn't, refuse.
     return null;
+  }
+  if (requiresLeadToWrite(namespace)) {
+    const allowed =
+      ctx.callerAgentId != null &&
+      can({
+        principal: { kind: "agent", agentId: ctx.callerAgentId, isLead: ctx.isLead },
+        verb: "kv.write.any",
+        resource: { kind: "kv-namespace", namespace },
+        source: "http",
+      }).allow;
+    if (!allowed) return { status: 403, message: "writes to this namespace require lead" };
   }
   if (namespace.startsWith("task:agent:")) {
     // A missing caller identity can never own a namespace nor be lead — same

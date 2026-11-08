@@ -4,10 +4,14 @@ An extension is a trusted TypeScript hook bundle that runs inside the swarm API 
 
 Do not use an extension for work that one task, one script, or one schedule can do.
 
-## Two ways to install
+## Build and use it on this swarm first
 
-- **Catalog** (always on): a predefined extension in the repo (`templates/extensions/<name>/`), installed by name. Any authenticated agent can do it. To ship a catalog extension, open a PR that adds a template directory (see Bundle shape below); it becomes installable once that build is deployed.
-- **Inline** (opt-in): a `manifest` plus a `files` map in the install request, with no PR and no deploy. It is off unless an operator sets `EXTENSION_ALLOW_INLINE_INSTALL=true` (dashboard Settings > Configuration > Security & access, or the API environment). With the flag off the install fails with `inline_install_disabled`. With it on, only a lead, operator, or dashboard user may send an inline bundle; a worker gets 403 and stays catalog-only. An inline bundle runs as code in the API process once enabled, so write it as carefully as a catalog one.
+For a new or custom extension, write an inline bundle (manifest plus every referenced file), install it on the swarm you are on, enable it, and use it. No PR or deploy is needed. Extensions are custom swarm behavior first; promoting one for other deployments comes later.
+
+- **Inline (default authoring path):** send `manifest` plus a `files` map. This requires `EXTENSION_ALLOW_INLINE_INSTALL=true` and a lead, operator, or dashboard user. An inline bundle runs as code in the API process once enabled, so write it as carefully as a catalog one.
+- **Worker handoff:** workers cannot send inline bundles (403). Stage the full bundle, including the manifest and every file, where a lead can read it, such as `/workspace/shared/extensions/<name>/` or agent-fs. Hand the location and install/enable steps to a lead or operator; do not open a catalog PR to work around worker permissions.
+- **Flag off:** ask an operator to turn on `EXTENSION_ALLOW_INLINE_INSTALL` (Settings > Configuration > Security & access, or the API environment). Inline requests otherwise fail with `inline_install_disabled`. A catalog template PR is a fallback only if the operator will not enable inline installs and a human asks to promote the extension.
+- **Catalog (promotion):** an existing predefined extension can be installed by name by any authenticated agent. A PR adding `templates/extensions/<name>/` promotes a proven extension to every deployment once that build ships. Open one only when a human asks for promotion.
 
 Both paths run the same validation and both land disabled.
 
@@ -62,6 +66,29 @@ curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
 
 ## Bundle shape
 
+Only `runtime: "api"` is supported. Inline and catalog bundles use the same manifest and referenced files.
+
+### Inline bundle
+
+An inline install sends the same manifest as a JSON object, plus every file it references in `files`, keyed by bundle path:
+
+```json
+{
+  "manifest": {
+    "name": "require-ticket-ref",
+    "description": "Blocks REST and MCP tasks that do not name a ticket",
+    "version": "1.0.0",
+    "runtime": "api",
+    "assets": { "hooks": "hooks.ts" }
+  },
+  "files": { "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\n..." }
+}
+```
+
+`files` must hold `assets.hooks`, each script `file`, each workflow `file`, and for each skill `dir` its `SKILL.md` plus any `files/**`. A file the manifest does not reference is rejected. Naming rules (`<name>-` prefixes, schedule scripts declared in `assets.scripts`) are the same as for a template. To change an inline extension, send the full bundle again under the same name; it adds a new version.
+
+### Catalog template reference (promotion only)
+
 A predefined extension is a directory `templates/extensions/<name>/` with exactly one manifest, `manifest.yaml`, `manifest.yml` or `manifest.json`, plus the files it references and a `README.md`. Only `runtime: "api"` is supported. Type the manifest with the generated JSON Schema, `templates/extensions/manifest.schema.json`:
 
 ```yaml
@@ -91,24 +118,7 @@ A workflow file holds `name`, optional `description`, `definition`, and optional
 
 A JSON manifest carries `"$schema": "../manifest.schema.json"` instead. After changing a template, run `bun run build:extension-catalog` and commit `src/extensions/catalog.generated.json`.
 
-### Inline bundle
-
-An inline install sends the same manifest as a JSON object, plus every file it references in `files`, keyed by bundle path:
-
-```json
-{
-  "manifest": {
-    "name": "require-ticket-ref",
-    "description": "Blocks REST and MCP tasks that do not name a ticket",
-    "version": "1.0.0",
-    "runtime": "api",
-    "assets": { "hooks": "hooks.ts" }
-  },
-  "files": { "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\n..." }
-}
-```
-
-`files` must hold `assets.hooks`, each script `file`, each workflow `file`, and for each skill `dir` its `SKILL.md` plus any `files/**`. A file the manifest does not reference is rejected. Naming rules (`<name>-` prefixes, schedule scripts declared in `assets.scripts`) are the same as for a template. To change an inline extension, send the full bundle again under the same name; it adds a new version.
+### Hook rules (all bundles)
 
 Rules for `hooks.ts`:
 
@@ -162,7 +172,7 @@ export default extension;
 ## Verify
 
 1. Call `extension-list` and confirm the name, version, and `enabled: false`. The install response lists the assets it created.
-2. Report the enable step. After a lead or operator enables it, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
+2. Enable it as a lead or operator, or hand off the enable step to one. After it is enabled, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
 3. Trigger the event once and confirm the effect (for example, a blocked REST task returns HTTP 422 with your reason).
 
 ## Common mistakes
@@ -173,6 +183,6 @@ export default extension;
 - Modifying fields the event does not allow. Read the `*Modify` type for that event.
 - Expecting the extension to run after install. Its hooks, schedules, workflows, and skills are off until a lead or operator enables it.
 - Expecting agents to see an extension skill after enable. Install it on each agent with `skill-install`.
-- Sending an inline `manifest`/`files` bundle as a worker, or without `EXTENSION_ALLOW_INLINE_INSTALL` on. Workers use a catalog `template`; with the flag off ask an operator to turn it on, or ship a catalog template.
+- Sending an inline `manifest`/`files` bundle as a worker, or without `EXTENSION_ALLOW_INLINE_INSTALL` on. Workers stage the full inline bundle for a lead or operator. With the flag off, ask an operator to turn it on; a catalog PR requires a human promotion request and is a fallback only if the operator will not enable inline installs.
 - Sending both `template` and `manifest`/`files`. Pick one.
 - Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

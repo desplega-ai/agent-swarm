@@ -10,9 +10,11 @@
  */
 
 import { MessageSquarePlus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { SessionPanel } from "@/components/session-panel";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { ResizeHandle } from "@/components/shared/resize-handle";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -28,6 +30,48 @@ import { useContextPanel } from "./context-panel-state";
 
 const DOCK_QUERY = "(min-width: 1280px)";
 const WIDE_QUERY = "(min-width: 1440px)";
+
+/** The docked panel's width: from its original 380 px up to half the window, kept per browser. */
+const PANEL_MIN = 380;
+const PANEL_STEP = 16;
+const PANEL_WIDTH_KEY = "agent-swarm:context-panel-width";
+
+function panelMax(): number {
+  return typeof window === "undefined"
+    ? PANEL_MIN
+    : Math.max(PANEL_MIN, Math.floor(window.innerWidth / 2));
+}
+
+function readPanelWidth(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(PANEL_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : PANEL_MIN;
+  } catch {
+    return PANEL_MIN;
+  }
+}
+
+function usePanelWidth() {
+  const [width, setWidthState] = useState(readPanelWidth);
+  const [max, setMax] = useState(panelMax);
+  useEffect(() => {
+    const onResize = () => setMax(panelMax());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const setWidth = useCallback((next: number, save: boolean) => {
+    const clamped = Math.min(panelMax(), Math.max(PANEL_MIN, Math.round(next)));
+    setWidthState(clamped);
+    if (!save) return;
+    try {
+      window.localStorage.setItem(PANEL_WIDTH_KEY, String(clamped));
+    } catch {
+      /* best-effort */
+    }
+  }, []);
+  // A narrower window clamps the stored width without forgetting it.
+  return { width: Math.min(width, max), max, setWidth };
+}
 
 /** The page column (header, route content, footer): what "Add screenshot" captures. */
 const pageColumn = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]');
@@ -92,10 +136,9 @@ export function ContextSessionPanel() {
   const { config } = useConfig();
   const docked = open && !!pageCtx && canDock;
   useCollapseNavWhile(docked && !isWide);
+  const panelWidth = usePanelWidth();
 
-  if (!open || !pageCtx) return null;
-
-  const panel = (
+  const panel = pageCtx ? (
     <SessionPanel
       pageKey={pageCtx.pageKey}
       contextLabel={pageContextLabel(pageCtx)}
@@ -107,18 +150,36 @@ export function ContextSessionPanel() {
         focusedSession?.pageKey === pageCtx.pageKey ? focusedSession.rootTaskId : undefined
       }
     />
-  );
+  ) : null;
 
   if (canDock) {
+    // Width reveal on open and close (the settings-rail pattern). The inner
+    // aside carries the width, so a resize never animates.
     return (
-      <aside
-        aria-label="Session about this page"
-        className="flex h-svh w-[380px] shrink-0 flex-col border-l border-border 2xl:w-[420px]"
-      >
-        {panel}
-      </aside>
+      <AnimatedReveal open={docked} axis="x" className="shrink-0">
+        <aside
+          aria-label="Session about this page"
+          // A floating panel on the canvas, like the sidebar and the page: 8px
+          // apart, rounded, bordered.
+          className="relative my-2 mr-2 flex h-[calc(100svh-1rem)] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xs"
+          style={{ width: panelWidth.width }}
+        >
+          <ResizeHandle
+            edge="left"
+            width={panelWidth.width}
+            min={PANEL_MIN}
+            max={panelWidth.max}
+            defaultWidth={PANEL_MIN}
+            step={PANEL_STEP}
+            onResize={panelWidth.setWidth}
+            label="Resize the session panel"
+          />
+          {panel}
+        </aside>
+      </AnimatedReveal>
     );
   }
+  if (!open || !panel) return null;
   return (
     <Sheet open onOpenChange={setOpen}>
       <SheetContent

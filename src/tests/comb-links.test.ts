@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { buildCitationUrl } from "../be/task-citations";
 import type { TaskAttachment } from "../types";
 import {
+  agentFsFileLinkQuery,
   buildAgentFsLiveUrl,
-  buildCombFileUrl,
   readAgentFsLinkTarget,
   resolveAgentFsLinkBase,
 } from "../utils/constants";
@@ -18,6 +18,8 @@ const ENV_KEYS = [
   "AGENT_FS_LINK_TARGET",
   "AGENT_FS_DEFAULT_ORG_ID",
   "AGENT_FS_DEFAULT_DRIVE_ID",
+  "AGENT_FS_PROXY",
+  "AGENT_FS_PUBLIC_URL",
 ] as const;
 const saved = new Map<string, string | undefined>();
 
@@ -28,6 +30,9 @@ beforeEach(() => {
   }
   process.env.AGENT_FS_API_URL = "http://agent-fs:7433";
   process.env.AGENT_FS_LIVE_URL = "https://live.example.test/";
+  // Comb is on by default with AGENT_FS_API_URL set. Tests that need it off
+  // set COMB_ENABLED=false.
+  process.env.COMB_ENABLED = "false";
 });
 
 afterEach(() => {
@@ -59,8 +64,12 @@ describe("taskAttachmentDisplayUrl for agent-fs attachments", () => {
   test("flag off: the live URL, even with APP_URL set", () => {
     process.env.APP_URL = "http://localhost:5274";
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
-    process.env.COMB_ENABLED = "false";
-    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+  });
+
+  test("flag unset: on by default, so the dashboard URL with APP_URL", () => {
+    delete process.env.COMB_ENABLED;
+    process.env.APP_URL = "http://localhost:5274/";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
   });
 
   test("flag on with APP_URL: the dashboard URL", () => {
@@ -117,9 +126,9 @@ describe("taskAttachmentDisplayUrl for agent-fs attachments", () => {
     ).toBe(
       "http://localhost:5274/file/~/org-1/drive-1/shared%20reports/final%20report%20100%25.md",
     );
-    expect(
-      buildCombFileUrl({ path: "reports/café #1?.md", orgId: "org-1", driveId: "drive-1" }),
-    ).toBe("http://localhost:5274/file/~/org-1/drive-1/reports/caf%C3%A9%20%231%3F.md");
+    expect(taskAttachmentDisplayUrl(agentFsAttachment({ path: "reports/café #1?.md" }))).toBe(
+      "http://localhost:5274/file/~/org-1/drive-1/reports/caf%C3%A9%20%231%3F.md",
+    );
   });
 
   test("other attachment kinds are unchanged", () => {
@@ -142,7 +151,6 @@ describe("taskAttachmentDisplayUrl for agent-fs attachments", () => {
     process.env.APP_URL = "http://localhost:5274";
     for (const path of ["../../settings", "%2e%2e/%2e%2e/settings", "a/./b.md", "a/.%2E/b.md"]) {
       const file = { path, orgId: "org-1", driveId: "drive-1" };
-      expect(buildCombFileUrl(file)).toBeNull();
       expect(buildAgentFsLiveUrl(file)).toBeNull();
       expect(taskAttachmentDisplayUrl(agentFsAttachment({ path }))).toBe(`agent-fs:${path}`);
     }
@@ -150,6 +158,30 @@ describe("taskAttachmentDisplayUrl for agent-fs attachments", () => {
     expect(buildAgentFsLiveUrl({ path: "a/.b/c..md", orgId: "org-1", driveId: "drive-1" })).toBe(
       "https://live.example.test/file/~/org-1/drive-1/a/.b/c..md",
     );
+  });
+});
+
+describe("live links carry ?apiUrl= for a key-less browser", () => {
+  const PUBLIC = "https://fs.example.test";
+  const QUERY = `?apiUrl=${encodeURIComponent(PUBLIC)}`;
+
+  test("set AGENT_FS_PUBLIC_URL: live links get the query, dashboard links do not", () => {
+    process.env.AGENT_FS_PUBLIC_URL = `${PUBLIC}/`;
+    expect(agentFsFileLinkQuery("https://live.example.test")).toBe(QUERY);
+    expect(agentFsFileLinkQuery("http://localhost:5274")).toBe("");
+    expect(
+      buildAgentFsLiveUrl({ path: "comb-qa/notes.md", orgId: "org-1", driveId: "drive-1" }),
+    ).toBe(`${LIVE}${QUERY}`);
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(`${LIVE}${QUERY}`);
+    process.env.COMB_ENABLED = "true";
+    process.env.APP_URL = "http://localhost:5274";
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+    expect(taskAttachmentDisplayUrl(agentFsAttachment(), { comb: false })).toBe(`${LIVE}${QUERY}`);
+  });
+
+  test("no AGENT_FS_PUBLIC_URL: live links stay as they are", () => {
+    expect(agentFsFileLinkQuery("https://live.example.test")).toBe("");
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
   });
 });
 
@@ -168,14 +200,42 @@ describe("agent-fs citations", () => {
 });
 
 describe("AGENT_FS_LINK_TARGET", () => {
-  test("unset: no target, and attachments keep the automatic choice", () => {
-    expect(readAgentFsLinkTarget()).toBeNull();
-    expect(resolveAgentFsLinkBase("attachment")).toBeNull();
-    expect(resolveAgentFsLinkBase("prompt")).toBeNull();
+  test("unset without APP_URL: live on both surfaces", () => {
+    expect(readAgentFsLinkTarget()).toBe("live");
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
-    process.env.COMB_ENABLED = "true";
-    process.env.APP_URL = "http://localhost:5274";
+  });
+
+  test("unset with APP_URL: the dashboard by default", () => {
+    delete process.env.COMB_ENABLED;
+    process.env.APP_URL = "http://localhost:5274/";
+    expect(readAgentFsLinkTarget()).toBe("dashboard");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
+    expect(resolveAgentFsLinkBase("attachment")).toBe("http://localhost:5274");
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
+    // Attachments still need Comb on.
+    delete process.env.AGENT_FS_API_URL;
+    expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+  });
+
+  test("unset with APP_URL and COMB_ENABLED=false: live on both surfaces", () => {
+    process.env.APP_URL = "http://localhost:5274/";
+    expect(readAgentFsLinkTarget()).toBe("live");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    // On a worker (no AGENT_FS_API_URL) the explicit flag still decides.
+    delete process.env.AGENT_FS_API_URL;
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+    delete process.env.COMB_ENABLED;
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
+  });
+
+  test("the deprecated DASHBOARD_URL also turns the dashboard default on", () => {
+    delete process.env.COMB_ENABLED;
+    process.env.DASHBOARD_URL = "http://localhost:5274";
+    expect(readAgentFsLinkTarget()).toBe("dashboard");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });
 
   test("live on a Comb + APP_URL install: the live URL", () => {
@@ -195,10 +255,20 @@ describe("AGENT_FS_LINK_TARGET", () => {
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });
 
-  test("dashboard with Comb off: attachments use the live URL, the prompt still uses APP_URL", () => {
+  test("dashboard with Comb explicitly off: the live URL on both surfaces", () => {
     process.env.APP_URL = "http://localhost:5274";
     process.env.AGENT_FS_LINK_TARGET = "dashboard";
     expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(LIVE);
+    expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
+    expect(resolveAgentFsLinkBase("prompt")).toBe("https://live.example.test");
+  });
+
+  test("dashboard with Comb off for lack of agent-fs: the prompt still uses APP_URL", () => {
+    // A worker never has AGENT_FS_API_URL, so only an explicit false counts.
+    delete process.env.COMB_ENABLED;
+    delete process.env.AGENT_FS_API_URL;
+    process.env.APP_URL = "http://localhost:5274";
+    process.env.AGENT_FS_LINK_TARGET = "dashboard";
     expect(resolveAgentFsLinkBase("attachment")).toBe("https://live.example.test");
     expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
   });
@@ -215,8 +285,8 @@ describe("AGENT_FS_LINK_TARGET", () => {
     process.env.APP_URL = "http://localhost:5274";
     for (const value of ["Dashboard2", "comb", "", "   "]) {
       process.env.AGENT_FS_LINK_TARGET = value;
-      expect(readAgentFsLinkTarget()).toBeNull();
-      expect(resolveAgentFsLinkBase("prompt")).toBeNull();
+      expect(readAgentFsLinkTarget()).toBe("dashboard");
+      expect(resolveAgentFsLinkBase("prompt")).toBe("http://localhost:5274");
       expect(taskAttachmentDisplayUrl(agentFsAttachment())).toBe(COMB);
     }
   });

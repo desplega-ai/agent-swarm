@@ -219,6 +219,12 @@ async function sessionCosts(
     "Combined cost includes the separate resource dimension",
   );
   expect(
+    totals.credentialUnattributedSessions === 2 &&
+      totals.credentialUnattributedCostUsd === totals.totalCostUsd &&
+      totals.subscriptionCostUsd === 0,
+    "Legacy costs must retain unknown credential coverage",
+  );
+  expect(
     totals.totalSessions === 2 &&
       totals.totalInputTokens === 1000 + 1000 &&
       Number(totals.totalCostUsd) > 0.25,
@@ -466,9 +472,84 @@ export const coreSessionData: Scenario = {
     await claimTask(ctx, workerId, taskId);
     await sessionLogs(ctx, taskId, owner, stranger);
     await sessionCosts(ctx, workerId, taskId, owner);
+    await credentialAttribution(ctx, workerId, taskId);
     // Orphan recovery is per agent: a dedicated worker keeps the logs task out of it.
     const activeWorkerId = await registerWorker(ctx, "active-sessions", { maxTasks: 2 });
     await activeSessions(ctx, activeWorkerId, otherId);
     await cancelQuietly(ctx, taskId);
   },
 };
+
+/** Execution attribution survives retries, late reports, and reposts. */
+async function credentialAttribution(ctx: ScenarioContext, agentId: string, taskId: string) {
+  const report = (suffix: string) =>
+    ctx.api("POST", "/api/keys/report-usage", {
+      body: {
+        keyType: "CODEX_OAUTH",
+        keySuffix: suffix,
+        keyIndex: 0,
+        taskId,
+      },
+    });
+  await report("phase2-A");
+  const first = {
+    id: crypto.randomUUID(),
+    sessionId: `phase2-A-${ctx.nonce}`,
+    agentId,
+    taskId,
+    totalCostUsd: 0,
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 40,
+    credentialKeyType: "CODEX_OAUTH",
+    credentialKeySuffix: "phase2-A",
+    harness: "codex",
+    provider: "codex",
+  };
+  await report("phase2-B");
+  const retry = {
+    ...first,
+    id: crypto.randomUUID(),
+    sessionId: `phase2-B-${ctx.nonce}`,
+    credentialKeySuffix: "phase2-B",
+    harness: "pi",
+    provider: "pi",
+    isError: true,
+  };
+  const b = await ctx.api("POST", "/api/session-costs", { body: retry });
+  expectStatus(b, [201], "retry cost");
+  const a = await ctx.api("POST", "/api/session-costs", { body: first });
+  expectStatus(a, [201], "delayed first cost");
+  const saved = asRecord(asRecord(a.json).cost);
+  expect(
+    saved.credentialKeySuffix === "phase2-A" && saved.harness === "codex",
+    "late cost lost its execution attribution",
+  );
+  expect(
+    saved.inputTokens === 100 && saved.cacheReadTokens === 40 && saved.cacheWriteTokens === null,
+    "cache measurements changed",
+  );
+  const repeated = await ctx.api("POST", "/api/session-costs", {
+    body: { ...first, credentialKeySuffix: "phase2-B", inputTokens: 999 },
+  });
+  expectStatus(repeated, [201], "idempotent cost repost");
+  expect(
+    JSON.stringify(asRecord(repeated.json).cost) === JSON.stringify(saved),
+    "repost changed session cost",
+  );
+  expectStatus(
+    await ctx.api("POST", "/api/session-costs", {
+      body: { ...first, sessionId: `reassigned-${ctx.nonce}` },
+    }),
+    [409],
+    "cost identity conflict",
+  );
+  const rows = ctx.db.query<{ credentialKeySuffix: string; harness: string; n: number }>(
+    "SELECT credentialKeySuffix, harness, COUNT(*) AS n FROM session_costs WHERE sessionId IN (?, ?) GROUP BY credentialKeySuffix, harness",
+    [first.sessionId, retry.sessionId],
+  );
+  expect(
+    rows.length === 2 && rows.every((row) => row.n === 1),
+    "retry attribution duplicated sessions",
+  );
+}

@@ -550,7 +550,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Text` | `content` | `tone: "default" or "muted"`. |
 | `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip (icon plus short label), like agent output in a session; `[text](url)` keeps its text. |
 | `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
-| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
+| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`; a value bound to a query that is still loading seeds when it arrives, unless the viewer already picked); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
 | `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
@@ -584,6 +584,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
+| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
 
 Table details:
 
@@ -709,7 +710,7 @@ SessionThread details — a chat on an app page, one session per viewer and `ses
 - Each `app.action` step of `onDispatch` is sent with the session (`{ key, scope }`) and with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
 - "New session" (shown once a session exists) starts over: the next message creates a new root, and the thread shows only sessions created after the current one. Nothing is deleted; older sessions stay in the dashboard's Sessions list.
 - While the session loads, the composer is disabled with a loading notice. A session whose chain cannot be found blocks sending. After a send, the composer stays busy until the new task shows up, for at most 30 seconds.
-- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
+- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent, and keeps at least 420 px on a phone, where a `Split` or `Grid` stacks its panes. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
 
 ```json
 { "type": "SessionThread", "props": {
@@ -717,6 +718,22 @@ SessionThread details — a chat on an app page, one session per viewer and `ses
   "sessionKey": { "$state": "/route/params/screenId" },
   "onDispatch": [{ "action": "app.action", "params": {
     "name": "editScreen", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }]
+} }
+```
+
+PageFrame details — a live swarm Page inside the app, for a preview pane next to a `SessionThread`:
+
+- It renders the body `/pages/<pageId>` shows: an HTML page in a sandboxed iframe (scripts, forms and popups; never top navigation), a JSON page inline. The viewer can click and scroll it.
+- It checks the page every 3 s and reloads by itself when the page's `updatedAt` moves: a new version, a restore, a theme switch. A reload resets scroll and any state inside the page.
+- `pageId` is a page id (32 hex characters), usually bound: `{ "$state": "/queries/project/data/0/pageId" }`. A literal slug is rejected; an empty id shows "No page selected".
+- The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for its password.
+- `device: "mobile"` centers a 390 px wide frame, so the page's own media queries see a phone. A JSON page follows the dashboard viewport instead. Switch devices with two `PageFrame`s in `Tabs`, or bind `device` to a `Select`.
+
+```json
+{ "type": "PageFrame", "props": {
+  "pageId": { "$state": "/queries/project/data/0/pageId" },
+  "device": { "$state": "/ui/device/value" },
+  "fill": true
 } }
 ```
 

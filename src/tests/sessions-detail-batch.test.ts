@@ -17,6 +17,7 @@ import {
 import { getSessionGroupKey } from "../be/db/session-tree";
 import { getTaskSteeringFields, getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitations, getTaskCitationsForTasks } from "../be/task-citations";
+import { getTaskUiSpec, upsertTaskUiSpec } from "../be/task-ui-spec";
 import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { AgentTask } from "../types";
@@ -50,6 +51,7 @@ async function unbatchedSession(id: string) {
     ...task,
     ...(await getTaskSteeringFields(task)),
     citations: await getTaskCitations(task.id),
+    uiSpec: await getTaskUiSpec(task.id),
   });
   return {
     root: await decorate(root),
@@ -139,6 +141,11 @@ beforeAll(async () => {
   await addCitation(childA.id, 2);
   await addCitation(childA.id, 1);
   await addCitation(grandchild.id, 1, true);
+  // One task with a UI spec, so the batched spec load is exercised too.
+  await upsertTaskUiSpec(childA.id, {
+    spec: { root: "c", elements: { c: { type: "Card", props: { title: "A" }, children: [] } } },
+    fallbackText: "A",
+  });
 });
 
 afterAll(async () => {

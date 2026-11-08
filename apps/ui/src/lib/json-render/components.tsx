@@ -225,6 +225,7 @@ import {
   tipText,
 } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
+import { PageFrameComponent } from "./page-frame";
 import { SchemaFormComponent } from "./schema-form";
 import { SessionThreadComponent } from "./session-thread";
 import { SmartLink } from "./smart-link";
@@ -1082,10 +1083,22 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   getRef.current = get;
   const setRef = useRef(set);
   setRef.current = set;
+  // Set while the slot holds the empty seed written before a bound `defaultValue` loaded.
+  const awaitingDefaultRef = useRef(false);
   useEffect(() => {
-    if (getRef.current(path) !== undefined) return;
+    const current = getRef.current(path);
     const seed = props.defaultValue;
-    setRef.current(path, multiple ? (seed ? [seed] : []) : (seed ?? null));
+    if (current === undefined) {
+      setRef.current(path, multiple ? (seed ? [seed] : []) : (seed ?? null));
+      awaitingDefaultRef.current = !seed;
+      return;
+    }
+    // A `defaultValue` bound to a query arrives after that empty seed: apply it
+    // once, unless the viewer picked something in the meantime.
+    if (!seed || !awaitingDefaultRef.current) return;
+    awaitingDefaultRef.current = false;
+    const empty = multiple ? Array.isArray(current) && current.length === 0 : current === null;
+    if (empty) setRef.current(path, multiple ? [seed] : seed);
   }, [path, multiple, props.defaultValue]);
 
   // A standalone Select (no `label`) has no accessible name — fall back to the
@@ -4359,4 +4372,5 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
+  PageFrame: ({ props }) => <PageFrameComponent props={props} />,
 };

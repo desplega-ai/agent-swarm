@@ -37,6 +37,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskTags,
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
@@ -57,10 +58,11 @@ import {
   SteeringRequestError,
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
+import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
-import { TaskCreationBlockedError } from "../tasks/errors";
+import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -96,6 +98,7 @@ import {
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
+import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -220,6 +223,7 @@ const GetTaskResponseSchema = AgentTaskSchema.extend({
   logs: z.array(AgentLogSchema),
   attachments: z.array(TaskAttachmentSchema),
   citations: z.array(TaskCitationSchema),
+  uiSpec: TaskUiSpecSchema.nullable(),
 });
 
 const FinishTaskSuccessSchema = z.object({
@@ -401,7 +405,7 @@ const createTask = route({
     },
     403: {
       description:
-        "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -784,6 +788,31 @@ const resumeTaskRoute = route({
   },
 });
 
+const runTaskUiActionRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/ui-actions/{actionId}",
+  pattern: ["api", "tasks", null, "ui-actions", null],
+  session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
+  summary: "Run the action a task card Button declares",
+  description:
+    "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string(), actionId: z.string() }),
+  responses: {
+    200: {
+      description: "The action started, or it already ran",
+      schema: z.object({
+        status: z.enum(["started", "already_done"]),
+        taskId: z.string().optional(),
+      }),
+    },
+    403: { description: "Only the task requester may run the action" },
+    404: { description: "Task or action not found" },
+    409: { description: "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)" },
+  },
+});
+
 const supersedeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/supersede",
@@ -849,6 +878,46 @@ const updateTaskTitleRoute = route({
   }),
   responses: {
     200: { description: "Title updated", schema: z.object({ task: AgentTaskSchema }) },
+    404: { description: "Task not found" },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "task.action.own" },
+});
+
+/**
+ * Only dashboard presentation tags (`ui:` namespace). Every other tag drives
+ * behaviour (classification such as `heartbeat`, routing, follow-ups) and is
+ * set by the server, never through this route.
+ */
+const TaskTagListSchema = z
+  .array(
+    z
+      .string()
+      .regex(/^ui:[a-z0-9][a-z0-9-]{0,60}$/, "Only ui: presentation tags can be changed here"),
+  )
+  .max(20);
+
+const updateTaskTagsRoute = route({
+  method: "patch",
+  path: "/api/tasks/{id}/tags",
+  pattern: ["api", "tasks", null, "tags"],
+  session: { taskParam: "id" },
+  summary: "Add or remove task tags",
+  description:
+    "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z
+    .object({
+      add: TaskTagListSchema.optional(),
+      remove: TaskTagListSchema.optional(),
+    })
+    .refine((body) => (body.add?.length ?? 0) + (body.remove?.length ?? 0) > 0, {
+      message: "Give at least one tag to add or remove",
+    }),
+  responses: {
+    200: { description: "Tags updated", schema: z.object({ task: AgentTaskSchema }) },
+    403: { description: "Task belongs to another user" },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -1199,6 +1268,12 @@ export async function handleTasks(
           parentTaskId: parsed.body.parentTaskId || undefined,
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",
+          // Un mensaje humano abre trabajo nuevo; el padre conserva contexto, no requisitos del worker.
+          // Solo en respuestas a un hilo: sin padre no hay requisitos que heredar.
+          routingAffinity:
+            parsed.body.parentTaskId && (principal.kind === "user" || principal.kind === "operator")
+              ? { capabilities: [] }
+              : undefined,
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
@@ -1232,6 +1307,21 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      if (error instanceof TaskRoutingAuthorizationError) {
+        console.warn(
+          "[HTTP] Task assignment rejected:",
+          scrubSecrets(
+            JSON.stringify({
+              parentTaskId: parsed.body.parentTaskId,
+              source: parsed.body.source ?? "api",
+              contextKey: parsed.body.contextKey ?? parentTask?.contextKey,
+              reason: error.message,
+            }),
+          ),
+        );
+        jsonError(res, error.message, 403);
+        return true;
+      }
       if (error instanceof TaskCreationBlockedError) {
         createTask.respond(res, 422, { error: error.reason, extension: error.extension });
         return true;
@@ -1690,6 +1780,7 @@ export async function handleTasks(
       logs,
       attachments,
       citations: await getTaskCitations(task.id),
+      uiSpec: await getTaskUiSpec(task.id),
     });
     return true;
   }
@@ -2077,6 +2168,76 @@ export async function handleTasks(
     }
     updateTaskTitleRoute.respond(res, 200, { task });
     return true;
+  }
+
+  if (updateTaskTagsRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskTagsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const existing = await getTaskById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (await deniesNonOwnerTaskWrite(req, existing)) {
+      jsonError(res, NOT_YOUR_TASK_DENIED, 403);
+      return true;
+    }
+    const task = await updateTaskTags(parsed.params.id, parsed.body);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    updateTaskTagsRoute.respond(res, 200, { task });
+    return true;
+  }
+
+  if (runTaskUiActionRoute.match(req.method, pathSegments)) {
+    const parsed = await runTaskUiActionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await getTaskById(parsed.params.id);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!(await canActOnOwnTask(req, myAgentId, task))) {
+      jsonError(res, "Not authorized to act on this task", 403);
+      return true;
+    }
+    // Only a user clicks a card button: a user token, or a dashboard tab on the
+    // operator key that names its user. An agent, or an operator call with no
+    // picked user, resolves to no user, so the requester check refuses it.
+    // TRUST_BODY_REQUESTED_BY_USER_ID=false stops trusting a caller-named user
+    // on the shared key, so then only a user token can click.
+    const actor = await resolveSessionActor(req, myAgentId);
+    const tokenUserId = authUserId(getRequestAuth(req));
+    const trustsPickedUser = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
+    const actorUserId =
+      actor.kind === "user" && (tokenUserId || trustsPickedUser)
+        ? (actor.userId ?? undefined)
+        : undefined;
+    const result = await runTaskUiAction({
+      taskId: task.id,
+      actionId: parsed.params.actionId,
+      surface: "web",
+      actorUserId,
+    });
+    switch (result.status) {
+      case "forbidden":
+        jsonError(res, "Only the task requester may run this action", 403);
+        return true;
+      case "unknown_action":
+        jsonError(res, "This task declares no such action", 404);
+        return true;
+      case "disabled":
+        jsonError(res, "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)", 409);
+        return true;
+      case "already_done":
+        runTaskUiActionRoute.respond(res, 200, { status: "already_done" });
+        return true;
+      case "started":
+        runTaskUiActionRoute.respond(res, 200, result);
+        return true;
+    }
   }
 
   if (resumeTaskRoute.match(req.method, pathSegments)) {

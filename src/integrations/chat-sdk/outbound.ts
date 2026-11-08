@@ -1,4 +1,4 @@
-import type { Attachment, FileUpload } from "chat";
+import type { Attachment, CardElement, FileUpload } from "chat";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
 import { formatFileSize } from "./attachments";
@@ -78,12 +78,12 @@ export class ChatFileTooLargeError extends Error {
 
 type SentChunk = { id: string; threadId?: string };
 
+type OutboundMessage =
+  | { markdown: string; files?: FileUpload[]; attachments?: Attachment[] }
+  | CardElement;
+
 interface PostTarget {
-  post(message: {
-    markdown: string;
-    files?: FileUpload[];
-    attachments?: Attachment[];
-  }): Promise<SentChunk>;
+  post(message: OutboundMessage): Promise<SentChunk>;
 }
 
 /** A fence opener or closer: up to 3 spaces, then 3+ backticks or tildes. */
@@ -122,18 +122,27 @@ export function escapeTelegramHashLines(markdown: string): string {
     .join("\n");
 }
 
-/** `replyFirst` sends the first chunk as a native reply; later chunks are plain posts. */
+/**
+ * `replyFirst` sends the first message as a native reply; later ones are plain
+ * posts. A `card` goes out after the text chunks, as one more message.
+ */
 async function postChunks(
   adapter: string,
   target: PostTarget,
   parts: readonly string[],
-  replyFirst?: (message: { markdown: string }) => Promise<SentChunk>,
+  replyFirst?: (message: OutboundMessage) => Promise<SentChunk>,
+  card?: CardElement,
 ): Promise<{ messageIds: string[]; threadId?: string }> {
   const messageIds: string[] = [];
   let threadId: string | undefined;
   const limit = chatMessageLimit(adapter);
-  for (const chunk of parts.flatMap((part) => splitChatMessage(part, limit))) {
-    const message = { markdown: adapter === "telegram" ? escapeTelegramHashLines(chunk) : chunk };
+  const messages: OutboundMessage[] = parts
+    .flatMap((part) => splitChatMessage(part, limit))
+    .map((chunk) => ({
+      markdown: adapter === "telegram" ? escapeTelegramHashLines(chunk) : chunk,
+    }));
+  if (card) messages.push(card);
+  for (const message of messages) {
     const sent =
       replyFirst && messageIds.length === 0
         ? await replyFirst(message)
@@ -318,6 +327,15 @@ export function formatUnsentFilesNote(unsent: UnsentChatFile[]): string {
   return [`Could not send ${count}:`, ...lines].join("\n");
 }
 
+/** A copy of the card with every string scrubbed, so a card cannot leak what text cannot. */
+function scrubCard(card: CardElement): CardElement {
+  return JSON.parse(
+    JSON.stringify(card, (_key, value) =>
+      typeof value === "string" ? scrubSecrets(value) : value,
+    ),
+  );
+}
+
 /**
  * Post markdown to a Chat SDK thread or channel. Scrubs the text, splits it by
  * the adapter limit, and emits one `chat.message.sent` for the whole message
@@ -335,7 +353,10 @@ export function formatUnsentFilesNote(unsent: UnsentChatFile[]): string {
  * An array `text` is posted as one message per element, each still split at
  * the limit; the caller uses it when its own markup must not be cut in two.
  *
- * `replyToMessageId` anchors the first chunk to that message on a thread
+ * `card` (a validated Chat SDK card) is posted after the text as its own
+ * message; `text` may then be empty. Its strings are scrubbed like the text.
+ *
+ * `replyToMessageId` anchors the first message to that message on a thread
  * target. Telegram sends it with `allow_sending_without_reply`, so a deleted
  * target still gets the message, unthreaded.
  */
@@ -344,6 +365,7 @@ export async function postChatMessage(args: {
   threadId?: string;
   channelId?: string;
   text: string | readonly string[];
+  card?: CardElement;
   taskId?: string;
   files?: OutboundChatFile[];
   replyToMessageId?: string;
@@ -354,7 +376,10 @@ export async function postChatMessage(args: {
   const chat = getChatInstance(args.adapter);
   if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
   const parts = (typeof args.text === "string" ? [args.text] : args.text).map(scrubSecrets);
-  const text = parts.join("\n\n");
+  const card = args.card && scrubCard(args.card);
+  // shortcut: a card-only message reports its title as the event text; add a
+  // plain-text rendering of the card if an event consumer needs the body.
+  const text = parts.join("\n\n") || (card?.title ?? "");
 
   let result: ChatPostResult;
   let target: PostTarget;
@@ -369,6 +394,7 @@ export async function postChatMessage(args: {
       thread,
       parts,
       replyTo && thread.adapter.reply ? (message) => thread.reply(replyTo, message) : undefined,
+      card,
     );
     result = {
       adapter: args.adapter,
@@ -380,7 +406,7 @@ export async function postChatMessage(args: {
   } else if (args.channelId) {
     const channel = chat.channel(args.channelId);
     target = channel;
-    const sent = await postChunks(args.adapter, channel, parts);
+    const sent = await postChunks(args.adapter, channel, parts, undefined, card);
     result = {
       adapter: args.adapter,
       threadId: sent.threadId ?? channel.id,

@@ -115,7 +115,7 @@ function summarizeCosts(costs: SessionCost[] | undefined): CostStats | null {
     harnessCost: hasHarnessCosts ? sum((c) => c.harnessCostUsd ?? 0) : null,
     inputTokens: sum((c) => c.inputTokens),
     outputTokens: sum((c) => c.outputTokens),
-    cacheReadTokens: sum((c) => c.cacheReadTokens),
+    cacheReadTokens: sum((c) => c.cacheReadTokens ?? 0),
     cacheWriteTokens: sum((c) => c.cacheWriteTokens ?? 0),
     durationMs: sum((c) => c.durationMs),
     turns: sum((c) => c.numTurns ?? 0),
@@ -753,7 +753,7 @@ export function TaskDetailsRail({
           {task.credentialKeySuffix ? (
             <RailRow label="API key" mono>
               <Link
-                to="/settings/api-keys"
+                to="/integrations/ai"
                 className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
               >
                 {API_KEY_LABELS[task.credentialKeyType ?? ""] ?? task.credentialKeyType ?? "Key"} …

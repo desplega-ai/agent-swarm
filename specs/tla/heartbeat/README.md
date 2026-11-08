@@ -19,6 +19,10 @@ export TLC_HOME=/path/with/jre-and-jar
 ./long-run.sh                                          # larger constants + -simulate
 ```
 
-TLC defaults to 4 workers. Use `TLC_WORKERS=auto ./tlc.sh ...` to use all cores for a local run.
+TLC defaults to 4 workers, a 6 GiB JVM heap (`TLC_HEAP=6g`), and 4 GiB of direct memory (`TLC_DIRECT_MEMORY=4g`). These caps protect the shared host: three concurrent runs budget 30 GiB for heap and direct memory, leaving room for JVM/native overhead within roughly 40 GB. They are not a hard limit on total process RSS.
+
+`TLC_WORKERS=auto` also uses 4 workers. Set an explicit number (for example `TLC_WORKERS=2`) to override it. Override `TLC_HEAP` and `TLC_DIRECT_MEMORY` only when the host has enough capacity; larger models may exhaust the default memory budget.
+
+Run `bash ./test-tlc.sh` to check the launcher's caps and argument forwarding without starting Java.
 
 A green run proves the model, not the code. When a file named in `ACTIONS.md` changes, re-check that its row is still true.

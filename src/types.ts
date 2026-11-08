@@ -1346,7 +1346,39 @@ export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 // User Favorites (principal-scoped stars for app navigation)
 // ============================================================================
 
-export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule", "agent-fs-path"]);
+export const ChecklistItemSchema = z
+  .object({
+    id: z.string(),
+    scope: z.enum(["swarm", "user"]),
+    userId: z.string().nullable(),
+    kind: z.enum(["channel", "tool", "use_case", "custom"]),
+    label: z.string(),
+    href: z.string().nullable(),
+    meta: z.record(z.string(), z.unknown()).nullable(),
+    sortOrder: z.number(),
+    status: z.enum(["open", "done", "removed"]),
+    statusChangedAt: z.string().nullable(),
+    statusChangedBy: z.string().nullable(),
+    statusChangedByName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    nudgedAt: z.string().nullable(),
+    nudgedTaskId: z.string().nullable(),
+    signal: z.boolean().nullable(),
+    done: z.boolean(),
+    editable: z.boolean(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("ChecklistItem");
+export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
+
+export const FavoriteItemTypeSchema = z.enum([
+  "page",
+  "workflow",
+  "schedule",
+  "agent-fs-path",
+  "key",
+]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
 export const UserFavoriteSchema = z
@@ -1884,6 +1916,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_follow_up_gate_shadow",
   // store-progress refused a completion once because its citations were inaccurate
   "task_citation_check_refused",
+  // store-progress refused a completion once because its uiSpec was invalid
+  "task_ui_spec_check_refused",
   "channel_message",
   // Service registry events
   "service_registered",
@@ -1975,11 +2009,14 @@ export const SessionCostSchema = z
     sessionId: z.string(),
     taskId: z.uuid().optional(),
     agentId: z.string(),
+    credentialKeyType: z.string().nullable().optional(),
+    credentialKeySuffix: z.string().nullable().optional(),
+    harness: ProviderNameSchema.nullable().optional(),
     totalCostUsd: z.number().min(0),
     inputTokens: z.number().int().min(0).default(0),
     outputTokens: z.number().int().min(0).default(0),
-    cacheReadTokens: z.number().int().min(0).default(0),
-    cacheWriteTokens: z.number().int().min(0).default(0),
+    cacheReadTokens: z.number().int().min(0).nullable().default(null),
+    cacheWriteTokens: z.number().int().min(0).nullable().default(null),
     // Migration 063: reasoning_output_tokens from codex turn.completed events.
     reasoningOutputTokens: z.number().int().min(0).default(0),
     // Migration 063: thinking_input_tokens from claude extended-thinking flows.

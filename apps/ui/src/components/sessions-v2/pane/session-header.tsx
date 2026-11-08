@@ -51,7 +51,7 @@ export function SessionHeaderSkeleton() {
   );
 }
 
-/** Row 1 left: the group path. A click shows the group in the sidebar. */
+/** Row 1 left: the group path. A click opens the group in its tab and shows it in the sidebar. */
 function GroupCrumb({
   groupKey,
   me,
@@ -59,7 +59,7 @@ function GroupCrumb({
 }: {
   groupKey: string | undefined;
   me: string | null;
-  /** Show the group in the sidebar tree (null: No group). */
+  /** Open the group in its tab and show it in the sidebar tree (null: No group). */
   onReveal: (groupKey: string | null) => void;
 }) {
   const { data: users } = useUsers();
@@ -81,7 +81,7 @@ function GroupCrumb({
           </span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Show this group in the sidebar</TooltipContent>
+      <TooltipContent>Open this group in a tab</TooltipContent>
     </Tooltip>
   );
 }

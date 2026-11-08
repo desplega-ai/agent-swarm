@@ -3955,7 +3955,7 @@ export interface paths {
         };
         /**
          * List approval requests with optional filters
-         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.
          */
         get: {
             parameters: {
@@ -4109,6 +4109,8 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                                 questionCount: number;
+                                /** @description Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed). */
+                                viewerCanRespond?: boolean;
                             }[];
                         };
                     };
@@ -6395,6 +6397,7 @@ export interface paths {
                         scope?: string;
                         scopeId?: string;
                         plan?: string;
+                        planRaw?: string;
                     };
                 };
             };
@@ -6661,7 +6664,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record provider-emitted rate-limit window telemetry for an API key */
+        /**
+         * Record provider-emitted rate-limit window telemetry for an API key
+         * @description Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -6680,12 +6686,96 @@ export interface paths {
                                 status: string;
                                 utilization?: number;
                                 resetsAt?: number;
+                                fieldObservedAt?: {
+                                    /** Format: date-time */
+                                    durationMins?: string;
+                                    /** Format: date-time */
+                                    resetsAt?: string;
+                                    /** Format: date-time */
+                                    label?: string;
+                                    /** Format: date-time */
+                                    normalModelSlug?: string;
+                                };
+                                durationMins?: number;
+                                /** @enum {string} */
+                                source?: "claude" | "codex";
+                                limitId?: string;
+                                label?: string;
+                                normalModelSlug?: string;
+                                overageStatus?: string;
+                                overageDisabledReason?: string;
                                 isUsingOverage?: boolean;
                                 surpassedThreshold?: number;
                                 /** Format: date-time */
                                 lastSeenAt: string;
                             };
                         };
+                        account?: {
+                            /** @enum {string} */
+                            source: "codex" | "claude";
+                            /** Format: date-time */
+                            observedAt: string;
+                            fieldObservedAt?: {
+                                /** Format: date-time */
+                                ordinaryUsageAllowed?: string;
+                                /** Format: date-time */
+                                resetCreditsAvailable?: string;
+                            };
+                            ordinaryUsageAllowed?: boolean | null;
+                            resetCreditsAvailable?: number | null;
+                            limits?: {
+                                [key: string]: {
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        planRaw?: string;
+                                        /** Format: date-time */
+                                        label?: string;
+                                        /** Format: date-time */
+                                        normalModelSlug?: string;
+                                        /** Format: date-time */
+                                        credits?: string;
+                                        /** Format: date-time */
+                                        spend?: string;
+                                        /** Format: date-time */
+                                        spendControlReached?: string;
+                                        /** Format: date-time */
+                                        reachedType?: string;
+                                    };
+                                    windowRemovedAt?: {
+                                        /** Format: date-time */
+                                        primary?: string;
+                                        /** Format: date-time */
+                                        secondary?: string;
+                                    };
+                                    planRaw?: string | null;
+                                    label?: string | null;
+                                    normalModelSlug?: string | null;
+                                    credits?: {
+                                        hasCredits: boolean;
+                                        unlimited: boolean;
+                                        balance?: string | null;
+                                    } | null;
+                                    spend?: {
+                                        limit: string;
+                                        used: string;
+                                        remainingPercent: number;
+                                        resetsAt: number;
+                                    } | null;
+                                    spendControlReached?: boolean | null;
+                                    reachedType?: string | null;
+                                };
+                            };
+                        };
+                        replace?: {
+                            /** @enum {string} */
+                            source: "codex";
+                            limitId: string;
+                            /** Format: date-time */
+                            observedAt: string;
+                            slots: ("primary" | "secondary")[];
+                        }[];
                         scope?: string;
                         scopeId?: string;
                     };
@@ -6716,6 +6806,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Telemetry report exceeds 256 KiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6922,15 +7021,92 @@ export interface paths {
                                         status: string;
                                         utilization?: number;
                                         resetsAt?: number;
+                                        fieldObservedAt?: {
+                                            /** Format: date-time */
+                                            durationMins?: string;
+                                            /** Format: date-time */
+                                            resetsAt?: string;
+                                            /** Format: date-time */
+                                            label?: string;
+                                            /** Format: date-time */
+                                            normalModelSlug?: string;
+                                        };
+                                        durationMins?: number;
+                                        /** @enum {string} */
+                                        source?: "claude" | "codex";
+                                        limitId?: string;
+                                        label?: string;
+                                        normalModelSlug?: string;
+                                        overageStatus?: string;
+                                        overageDisabledReason?: string;
                                         isUsingOverage?: boolean;
                                         surpassedThreshold?: number;
                                         /** Format: date-time */
                                         lastSeenAt: string;
                                     };
                                 };
+                                providerAccount: {
+                                    /** @enum {string} */
+                                    source: "codex" | "claude";
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        ordinaryUsageAllowed?: string;
+                                        /** Format: date-time */
+                                        resetCreditsAvailable?: string;
+                                    };
+                                    ordinaryUsageAllowed?: boolean | null;
+                                    resetCreditsAvailable?: number | null;
+                                    limits?: {
+                                        [key: string]: {
+                                            /** Format: date-time */
+                                            observedAt: string;
+                                            fieldObservedAt?: {
+                                                /** Format: date-time */
+                                                planRaw?: string;
+                                                /** Format: date-time */
+                                                label?: string;
+                                                /** Format: date-time */
+                                                normalModelSlug?: string;
+                                                /** Format: date-time */
+                                                credits?: string;
+                                                /** Format: date-time */
+                                                spend?: string;
+                                                /** Format: date-time */
+                                                spendControlReached?: string;
+                                                /** Format: date-time */
+                                                reachedType?: string;
+                                            };
+                                            windowRemovedAt?: {
+                                                /** Format: date-time */
+                                                primary?: string;
+                                                /** Format: date-time */
+                                                secondary?: string;
+                                            };
+                                            planRaw?: string | null;
+                                            label?: string | null;
+                                            normalModelSlug?: string | null;
+                                            credits?: {
+                                                hasCredits: boolean;
+                                                unlimited: boolean;
+                                                balance?: string | null;
+                                            } | null;
+                                            spend?: {
+                                                limit: string;
+                                                used: string;
+                                                remainingPercent: number;
+                                                resetsAt: number;
+                                            } | null;
+                                            spendControlReached?: boolean | null;
+                                            reachedType?: string | null;
+                                        };
+                                    };
+                                } | null;
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                detectedPlanRaw: string | null;
                                 lastSeatMismatchAt: string | null;
                                 lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
@@ -6952,6 +7128,152 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keys/window-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Swarm-observed usage within current provider windows
+         * @description Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    keyType?: string;
+                    keySuffix?: string;
+                    scope?: string;
+                    scopeId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Independent windows with receipt-time tokens and explicit measurement coverage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            asOf: string;
+                            /** @enum {string} */
+                            accounting: "session_cost_receipt_time";
+                            windows: {
+                                statusId: string;
+                                keyType: string;
+                                keySuffix: string;
+                                scope: string;
+                                scopeId: string | null;
+                                windowKey: string;
+                                durationMins: number | null;
+                                startsAt: string | null;
+                                endsAt: string | null;
+                                dataThrough: string;
+                                observedAt: string;
+                                observationAgeMs: number;
+                                modelScope: {
+                                    /** @enum {string} */
+                                    kind: "account" | "family" | "unknown";
+                                    model: string | null;
+                                };
+                                /** @enum {string|null} */
+                                unavailableReason: "missing_reset" | "unknown_duration" | "unknown_model_scope" | "window_not_started" | null;
+                                usage: {
+                                    sessions: number;
+                                    errorSessions: number;
+                                    completedTasks: number;
+                                    tokens: {
+                                        uncachedInput: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        output: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheRead: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheWrite: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        reasoning: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        thinking: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                    };
+                                    modelUnattributedSessions: number;
+                                    swarmUnattributedSessions: number;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid filters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Requested usage exceeds the aggregation bounds */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Usage query budget exhausted. Retry after one second */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7746,7 +8068,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                     itemIds?: string;
                 };
                 header?: never;
@@ -7790,7 +8112,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -7806,10 +8128,19 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
+                    };
+                };
+                /** @description Invalid asset key for a key favorite */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description No authenticated principal context */
@@ -7824,6 +8155,538 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the post-onboarding checklist */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Checklist items and swarm edit permission */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["ChecklistItem"][];
+                            canEditSwarm: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a checklist item */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        kind: "channel" | "tool" | "use_case" | "custom";
+                        label: string;
+                        href?: string;
+                        /** @enum {string} */
+                        scope: "swarm" | "user";
+                        meta?: {
+                            adapter?: string;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Added checklist item */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description A user is required for user items */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit swarm items */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An open channel item for the same adapter already exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a checklist item */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "remove" | "restore" | "done" | "reorder";
+                        reason?: string;
+                        sortOrder?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated checklist item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description Invalid update */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit this item */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Checklist item not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/fs/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ensure the current user's agent-fs account and shared membership */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account readiness */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /**
+                             * @description Account readiness in agent-fs.
+                             * @enum {string}
+                             */
+                            status: "ready" | "pending" | "off" | "unsupported";
+                            /** @description User ID in agent-fs when ready. */
+                            agentFsUserId?: string;
+                            /** @description Email of the swarm user, when available. */
+                            email?: string;
+                            /** @description Name of the swarm user when ready. */
+                            displayName?: string;
+                            /** @description Shared agent-fs org ID when configured. */
+                            orgId?: string;
+                            /** @description Shared agent-fs drive ID when configured. */
+                            driveId?: string;
+                            /** @description Reason the account is not ready. */
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of twenty account checks per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fs/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a named agent-fs key for the current user
+         * @description The key is scoped to the shared org. The API returns it once and never stores it.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        label: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Named key returned once and never stored */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description Plaintext key returned once. The API never stores this key. */
+                            apiKey: string;
+                            keyId: string;
+                            label: string;
+                            agentFsUserId: string;
+                            orgId: string;
+                            driveId: string;
+                        };
+                    };
+                };
+                /** @description Invalid key label */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs account or membership is pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of five keys per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_too_old */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_not_configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fs/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a named agent-fs key for the live agent-fs app and return the redirect URL
+         * @description Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        returnTo: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Redirect URL with the named key in the fragment */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description `returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment. */
+                            redirectUrl: string;
+                        };
+                    };
+                };
+                /** @description invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs account or membership is pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of ten continues per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_too_old */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_not_configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -8876,6 +9739,7 @@ export interface paths {
                                 enabled: boolean;
                                 /** @enum {string} */
                                 health: "ok" | "error" | "disabled" | "incomplete";
+                                connected: boolean;
                                 error?: string;
                                 webhookUrl: string;
                                 mode?: string;
@@ -14104,7 +14968,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -14825,6 +15689,25 @@ export interface paths {
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
                             }[];
+                            uiSpec: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    };
+                                };
+                                fallbackText: string;
+                            } | null;
                         };
                     };
                 };
@@ -15358,6 +16241,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the action a task card Button declares
+         * @description Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    actionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The action started, or it already ran */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "started" | "already_done";
+                            taskId?: string;
+                        };
+                    };
+                };
+                /** @description Only the task requester may run the action */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task or action not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{id}/supersede": {
         parameters: {
             query?: never;
@@ -15555,6 +16511,74 @@ export interface paths {
                         "application/json": {
                             task: components["schemas"]["AgentTask"];
                         };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/tasks/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Add or remove task tags
+         * @description Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        add?: string[];
+                        remove?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Tags updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task belongs to another user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Task not found */
@@ -17021,6 +18045,12 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                checklistNudge?: {
+                                    itemId: string;
+                                    kind: string;
+                                    label: string;
+                                    href?: string;
                                 };
                                 threadParticipants?: {
                                     total: number;
@@ -19865,12 +20895,16 @@ export interface paths {
                         id?: string;
                         sessionId: string;
                         agentId: string;
+                        credentialKeyType?: string | null;
+                        credentialKeySuffix?: string | null;
+                        /** @enum {string|null} */
+                        harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
-                        cacheReadTokens?: number;
+                        cacheReadTokens?: number | null;
                         cacheWriteTokens?: number | null;
                         cacheWrite5mTokens?: number | null;
                         cacheWrite1hTokens?: number | null;
@@ -19911,6 +20945,24 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Untrusted session attribution */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Session identity conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -19976,6 +21028,8 @@ export interface paths {
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             };
                             daily: {
                                 date: string;
@@ -19984,6 +21038,8 @@ export interface paths {
                                 outputTokens: number;
                                 sessions: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -21477,6 +22533,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
@@ -21493,6 +22568,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -22763,6 +23857,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/slack/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Slack HTTP ingress (SLACK_MODE=http): Events API, slash commands and interactivity at one request URL */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Malformed body after a valid signature */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Missing or invalid signature, or timestamp outside the 5-minute window */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Delivery for a workspace this swarm does not own */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Slack is disabled or not in HTTP mode */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 1 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Receiver not ready, workspace unverified, or backlog full; Slack retries */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/slack/inbound/diagnostics": {
         parameters: {
             query?: never;
@@ -23161,7 +24343,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            servers: components["schemas"]["McpServer"][];
+                            servers: (components["schemas"]["McpServer"] & {
+                                installCount?: number;
+                            })[];
                             total: number;
                         };
                     };
@@ -29885,12 +31069,39 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
             createdBy?: string;
             updatedBy?: string;
+        };
+        ChecklistItem: {
+            id: string;
+            /** @enum {string} */
+            scope: "swarm" | "user";
+            userId: string | null;
+            /** @enum {string} */
+            kind: "channel" | "tool" | "use_case" | "custom";
+            label: string;
+            href: string | null;
+            meta: {
+                [key: string]: unknown;
+            } | null;
+            sortOrder: number;
+            /** @enum {string} */
+            status: "open" | "done" | "removed";
+            statusChangedAt: string | null;
+            statusChangedBy: string | null;
+            statusChangedByName: string | null;
+            statusReason: string | null;
+            nudgedAt: string | null;
+            nudgedTaskId: string | null;
+            signal: boolean | null;
+            done: boolean;
+            editable: boolean;
+            createdAt: string;
+            lastUpdatedAt: string;
         };
         TaskAttachment: {
             /** Format: uuid */
@@ -30107,7 +31318,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -30321,15 +31532,19 @@ export interface components {
             /** Format: uuid */
             taskId?: string;
             agentId: string;
+            credentialKeyType?: string | null;
+            credentialKeySuffix?: string | null;
+            /** @enum {string|null} */
+            harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             totalCostUsd: number;
             /** @default 0 */
             inputTokens: number;
             /** @default 0 */
             outputTokens: number;
-            /** @default 0 */
-            cacheReadTokens: number;
-            /** @default 0 */
-            cacheWriteTokens: number;
+            /** @default null */
+            cacheReadTokens: number | null;
+            /** @default null */
+            cacheWriteTokens: number | null;
             /** @default 0 */
             reasoningOutputTokens: number;
             /** @default 0 */
@@ -32889,6 +34104,7 @@ export interface operations {
                                 [key: string]: string;
                             };
                             setupHints: string[];
+                            hiddenInCatalog?: boolean;
                         }[];
                     };
                 };

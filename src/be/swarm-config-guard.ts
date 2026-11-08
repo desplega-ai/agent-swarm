@@ -194,6 +194,14 @@ export const SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS = [
   "cloudflare",
 ] as const;
 
+/**
+ * Extraction hosts `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_EXTRACT_PROVIDER_IDS`
+ * in `src/workflows/executors/system-one-providers.ts`, listed here because that
+ * module's credential readers would pull the LLM stack into every `db.ts` import.
+ * A test keeps the two lists equal.
+ */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS = ["cloudflare"] as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -340,6 +348,27 @@ export function validateTaskAutoTitleModel(value: unknown): string | null {
     : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
 }
 
+/**
+ * Docker runtime isolation keys. Empty clears the key. The Docker adapter
+ * applies the same rules (`src/runtime-providers/docker.ts`), so a value
+ * this guard accepts never fails `checkConfig`.
+ */
+export function validateDockerRuntime(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_RUNTIME (must be a string)";
+  const name = value.trim();
+  return !name || /^[A-Za-z0-9._-]+$/.test(name)
+    ? null
+    : "Invalid DOCKER_RUNTIME (use an OCI runtime name: letters, digits, '.', '-', '_')";
+}
+
+export function validateDockerPidsLimit(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_PIDS_LIMIT (must be a string)";
+  const limit = value.trim();
+  return !limit || (/^[1-9]\d*$/.test(limit) && Number.isSafeInteger(Number(limit)))
+    ? null
+    : "Invalid DOCKER_PIDS_LIMIT (must be a positive integer, or empty)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -359,7 +388,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       (value: unknown) => validateResourceConfig(key, value),
     ]),
   ),
-  ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
+  ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
+  DOCKER_RUNTIME: validateDockerRuntime,
+  DOCKER_PIDS_LIMIT: validateDockerPidsLimit,
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   RUNTIME_CONTROLLER_TOKEN_TTL_DAYS: validateControllerTokenTtlDays,
@@ -460,6 +491,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ),
   // Where people-facing file links point. Blank keeps the automatic choice.
   ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
+  // Dashboard origin(s), comma-separated; the first is the link base.
+  APP_URL: (value) => {
+    const invalid =
+      "Invalid APP_URL (must be comma-separated http(s) URLs with no query string or fragment, e.g. https://app.example.com)";
+    if (typeof value !== "string") return invalid;
+    const entries = value.split(",").map((entry) => entry.trim());
+    if (value.trim() && entries.some((entry) => !entry)) return invalid;
+    return entries.some((entry) => validateHttpBaseUrl(entry, invalid)) ? invalid : null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -485,6 +525,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
   },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
+  ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
+    ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
+  ]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {

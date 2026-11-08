@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
 import { closeDb, initDb } from "../be/db";
 import { getEnabledCapabilities } from "../server";
@@ -78,23 +78,11 @@ describe("Slack transport configuration", () => {
     ).toMatchObject({ mode: null });
   });
 
-  test("HTTP selection remains unavailable and never creates a socket app", async () => {
+  test("HTTP selection advertises Slack tools and invalid modes do not", () => {
     process.env.SLACK_MODE = "http";
+    expect(getEnabledCapabilities()).toContain("slack");
+    process.env.SLACK_MODE = "webhook";
     expect(getEnabledCapabilities()).not.toContain("slack");
-    process.env.SLACK_BOT_TOKEN = "xoxb-test";
-    process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
-    delete process.env.SLACK_APP_TOKEN;
-
-    const error = spyOn(console, "error").mockImplementation(() => {});
-    try {
-      expect(await startSlackApp()).toBe(false);
-      expect(getSlackApp()).toBeNull();
-      expect(error).toHaveBeenCalledWith(
-        "[Slack] HTTP mode is configured but unavailable until the HTTP receiver is installed",
-      );
-    } finally {
-      error.mockRestore();
-    }
   });
 });
 
@@ -102,7 +90,6 @@ test.each([
   "disabled",
   "invalid mode",
   "missing credentials",
-  "HTTP unavailable",
   "socket blocked",
 ])("failed init is retryable without stop: %s", async (reason) => {
   const slack = await startSlackMock(false);
@@ -113,7 +100,6 @@ test.each([
     if (reason === "disabled") process.env.SLACK_DISABLE = "true";
     if (reason === "invalid mode") process.env.SLACK_MODE = "invalid";
     if (reason === "missing credentials") delete process.env.SLACK_APP_TOKEN;
-    if (reason === "HTTP unavailable") process.env.SLACK_MODE = "http";
     if (reason === "socket blocked") process.env.NODE_ENV = "development";
 
     expect(await startSlackApp()).toBe(false);

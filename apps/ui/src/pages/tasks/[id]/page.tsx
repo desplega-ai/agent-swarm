@@ -53,6 +53,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
 import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
 import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
@@ -753,6 +754,7 @@ export default function TaskDetailPage() {
           taskIds={knownTaskIds}
         />
       </ShowMore>
+      {task.uiSpec ? <TaskUiSpecView task={task} /> : null}
       {actions.answer ? (
         <div className="mt-1 -ml-1.5 flex">
           <Tooltip>
@@ -1144,20 +1146,21 @@ export default function TaskDetailPage() {
   // line with status, model and tags. The agent is in Details.
   const narrowHero = (
     <div className="flex flex-col gap-1 pb-3">
-      <div className="-mx-2 flex items-center justify-between gap-2">
+      {/* Back arrow, title and the "..." menu share one row: the tabs sit a row higher. */}
+      <div className="-mx-2 flex items-start justify-between gap-1">
         <Button
           variant="ghost"
           asChild
-          className="h-11 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+          size="icon"
+          className="size-11 shrink-0 text-muted-foreground hover:text-foreground"
         >
-          <Link to="/tasks">
+          <Link to="/tasks" aria-label="Back to tasks">
             <ArrowLeft />
-            Tasks
           </Link>
         </Button>
+        <div className="min-w-0 flex-1 pt-1.5">{renderHeading(false)}</div>
         <TaskActionsMenu model={actions} triggerRef={narrowMenuRef} />
       </div>
-      {renderHeading(false)}
       {/* One row: the source line left, the chips right. A phone too narrow
           for both wraps the chips under it. */}
       <div

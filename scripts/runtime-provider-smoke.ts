@@ -62,6 +62,9 @@ const target: Record<string, string | undefined> =
         DOCKER_HOST: process.env.DOCKER_HOST ?? "unix:///var/run/docker.sock",
         DOCKER_NETWORK: process.env.DOCKER_NETWORK,
         DOCKER_EXTRA_HOSTS: process.env.DOCKER_EXTRA_HOSTS,
+        DOCKER_RUNTIME: process.env.DOCKER_RUNTIME,
+        DOCKER_HARDENED: process.env.DOCKER_HARDENED,
+        DOCKER_PIDS_LIMIT: process.env.DOCKER_PIDS_LIMIT,
       }
     : kind === "boxd"
       ? {

@@ -8,6 +8,7 @@ import {
   Archive,
   Hash,
   Inbox,
+  LayoutGrid,
   type LucideIcon,
   SquareDashed,
   SquarePen,
@@ -24,6 +25,7 @@ import {
   isSessionTab,
   itemFromDetail,
   NEW_SESSION_TAB,
+  OVERVIEW_TAB,
   type SessionSection,
   userName,
 } from "@/lib/sessions-v2";
@@ -67,10 +69,10 @@ const ACTIVITY_WORDS: Record<Exclude<Activity, null>, string> = {
   failed: "Failed",
 };
 
-/** The accessible name of a tab: its read state, its activity, then its title. */
-export function tabLabel(info: TabInfo): string {
+/** The accessible name of a tab: its read state, its activity, its title, then "Pinned" when pinned. */
+export function tabLabel(info: TabInfo, pinned = false): string {
   const words = [info.unread && "Unread", info.activity && ACTIVITY_WORDS[info.activity]];
-  return [...words.filter(Boolean), info.title].join(". ");
+  return [...words.filter(Boolean), info.title, pinned && "Pinned"].filter(Boolean).join(". ");
 }
 
 /**
@@ -92,6 +94,16 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
       title: "New session",
       tip: "New session",
       icon: SquarePen,
+      unread: false,
+      activity: null,
+    };
+  }
+  if (tab === OVERVIEW_TAB) {
+    const crumb = groupCrumb(view ?? undefined, me, nameOf, labels);
+    return {
+      title: "Overview",
+      tip: `Overview of ${crumb}`,
+      icon: LayoutGrid,
       unread: false,
       activity: null,
     };

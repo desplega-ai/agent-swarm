@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
+import {
+  SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
+  validateConfigValue,
+} from "../be/swarm-config-guard";
 import type { WorkflowNode } from "../types";
 import { validateDefinition } from "../workflows/definition";
 import { interpolateNodeConfig } from "../workflows/engine";
@@ -15,6 +19,8 @@ import {
   SystemOneExtractionOutputSchema,
 } from "../workflows/executors/system-one-extraction";
 import {
+  resolveSystemOneExtractDefaultProvider,
+  SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY,
   SYSTEM_ONE_EXTRACT_PROVIDER_IDS,
   SYSTEM_ONE_PROVIDER_IDS,
 } from "../workflows/executors/system-one-providers";
@@ -57,7 +63,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await getDbClient().run(
-    "DELETE FROM swarm_config WHERE key IN ('CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_API_KEY')",
+    "DELETE FROM swarm_config WHERE key IN ('CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_API_KEY', 'SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER')",
   );
 });
 
@@ -830,5 +836,147 @@ describe("system-one-extraction in a workflow definition", () => {
 
     const missing = interpolateNodeConfig(node({ config: config({ state: "{{nope}}" }) }), {});
     expect(missing.strictUnresolved).toEqual(["nope"]);
+  });
+});
+
+describe("system-one-extraction default provider", () => {
+  const key = SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_CONFIG_KEY;
+
+  test.each([
+    { row: undefined, env: undefined },
+    { row: undefined, env: "cloudflare" },
+    { row: "cloudflare", env: "bogus" },
+    { row: "openai", env: "cloudflare" },
+    { row: "laya", env: "openai" },
+    { row: undefined, env: "laya" },
+    { row: " CloudFlare ", env: "openai" },
+  ])("resolves row $row and environment $env", async ({ row, env }) => {
+    if (row !== undefined) {
+      await upsertSwarmConfig({ scope: "global", key, value: "cloudflare" });
+      // Simulate an invalid legacy row that the current config guard refuses.
+      await getDbClient().run("UPDATE swarm_config SET value = ? WHERE key = ?", [row, key]);
+    }
+    const lookups: unknown[] = [];
+    const db = {
+      ...deps.db,
+      getSwarmConfigs: async (filter: Parameters<typeof deps.db.getSwarmConfigs>[0]) => {
+        lookups.push(filter);
+        return deps.db.getSwarmConfigs(filter);
+      },
+    };
+    expect(await resolveSystemOneExtractDefaultProvider({ db, env: { [key]: env } })).toBe(
+      "cloudflare",
+    );
+    expect(lookups).toEqual([{ scope: "global", key }]);
+  });
+
+  test("an unreadable row uses the environment", async () => {
+    const db = {
+      ...deps.db,
+      getSwarmConfigs: async () => {
+        throw new Error("unreadable");
+      },
+    };
+    expect(await resolveSystemOneExtractDefaultProvider({ db, env: { [key]: "cloudflare" } })).toBe(
+      "cloudflare",
+    );
+  });
+
+  test("the config guard accepts exactly the extraction hosts", () => {
+    expect([...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS]).toEqual(
+      SYSTEM_ONE_EXTRACT_PROVIDER_IDS,
+    );
+    expect(validateConfigValue(key, "cloudflare")).toBeNull();
+    expect(validateConfigValue(key, "openai")).toContain(
+      "Invalid SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER value",
+    );
+  });
+
+  test("a node without a provider resolves the setting at each extraction", async () => {
+    expect(SystemOneExtractionConfigSchema.parse(config()).provider).toBeUndefined();
+    let reads = 0;
+    const { transport, calls } = makeTransport([jsonResponse(envelope())]);
+    const executor = new SystemOneExtractionExecutor(
+      {
+        ...deps,
+        db: {
+          ...deps.db,
+          getSwarmConfigs: async (filter) => {
+            reads++;
+            return deps.db.getSwarmConfigs(filter);
+          },
+        },
+      },
+      {
+        fetch: transport,
+        env: { [key]: "openai" },
+        getApiKey: async () => CF_TOKEN,
+        getServerUrl: async () => CF_ACCOUNT,
+      },
+    );
+    await upsertSwarmConfig({ scope: "global", key, value: "cloudflare" });
+    expect((await run(executor, config())).status).toBe("success");
+    expect(calls[0]?.url).toBe(`${CF_BASE}/clairic`);
+    await getDbClient().run("UPDATE swarm_config SET value = 'laya' WHERE key = ?", [key]);
+    expect((await run(executor, config())).status).toBe("success");
+    expect(calls[1]?.url).toBe(`${CF_BASE}/clairic`);
+    expect(reads).toBe(2);
+  });
+
+  test("an explicit provider does not read the default", async () => {
+    let reads = 0;
+    const executor = new SystemOneExtractionExecutor(
+      {
+        ...deps,
+        db: {
+          ...deps.db,
+          getSwarmConfigs: async () => {
+            reads++;
+            throw new Error("default must not be read");
+          },
+        },
+      },
+      {
+        fetch: makeTransport([jsonResponse(envelope())]).transport,
+        getApiKey: async (id) => {
+          expect(id).toBe("cloudflare");
+          return CF_TOKEN;
+        },
+        getServerUrl: async () => CF_ACCOUNT,
+        env: { [key]: "openai" },
+      },
+    );
+    expect((await run(executor, config({ provider: "cloudflare" }))).status).toBe("success");
+    expect(reads).toBe(0);
+  });
+
+  test("readiness resolves the default once for all nodes", async () => {
+    let reads = 0;
+    const executor = new SystemOneExtractionExecutor(
+      {
+        ...deps,
+        db: {
+          ...deps.db,
+          getSwarmConfigs: async (filter) => {
+            reads++;
+            expect(filter).toEqual({ scope: "global", key });
+            return [];
+          },
+        },
+      },
+      {
+        env: { [key]: "cloudflare" },
+        getApiKey: async () => null,
+        getServerUrl: async () => CF_ACCOUNT,
+      },
+    );
+    const problems = await executor.checkReadiness([
+      { id: "a", config: config() },
+      { id: "b", config: config() },
+    ]);
+    expect(reads).toBe(1);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.nodeIds).toEqual(["a", "b"]);
+    expect(problems[0]?.message).toContain("CLOUDFLARE_API_TOKEN");
   });
 });
