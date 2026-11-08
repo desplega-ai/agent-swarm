@@ -54,7 +54,9 @@ bin="$cache_dir/gitleaks"
 mkdir -p "$cache_dir"
 
 if [ ! -f "$tarball" ]; then
-  url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${asset}"
+  # Tests point this at a local server. The SHA-256 check below still pins the bytes.
+  base_url="${GITLEAKS_DOWNLOAD_BASE_URL:-https://github.com/gitleaks/gitleaks/releases/download}"
+  url="$base_url/v${GITLEAKS_VERSION}/${asset}"
   tmp=$(mktemp "$cache_dir/.download.XXXXXX")
   # GitHub's release host returns 504s for over a minute at times. curl backs
   # off 1, 2, 4... seconds between tries, so 6 retries ride out about 60s.
