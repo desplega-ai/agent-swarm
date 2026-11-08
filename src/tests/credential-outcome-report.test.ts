@@ -169,3 +169,23 @@ describe("reportCredentialOutcomeThenFinish — seat mismatch after a key-wide r
     expect(keyReports[0]?.body).toMatchObject({ keyIndex: 3, rateLimitedUntil: rateLimitResetAt });
   });
 });
+
+test.each(["account", "removal"])("reports %s without window measurements", async (kind) => {
+  const observedAt = new Date().toISOString();
+  const result: ProviderResult = {
+    exitCode: 0,
+    isError: false,
+    ...(kind === "account"
+      ? { providerAccount: { source: "codex", observedAt, ordinaryUsageAllowed: false } as const }
+      : {
+          rateLimitReplacements: [
+            { source: "codex", limitId: "codex", observedAt, slots: ["primary", "secondary"] },
+          ] as ProviderResult["rateLimitReplacements"],
+        }),
+  };
+  await completeTask(`quota-${kind}`, result, "gpt-test");
+  const report = requests.find((r) => r.path === "/api/keys/report-rate-limit-windows");
+  expect(report?.body?.windows).toEqual({});
+  expect(report?.body?.[kind === "account" ? "account" : "replace"]).toBeDefined();
+  expect(requests.some((r) => r.path === "/api/keys/report-rate-limit")).toBe(false);
+});

@@ -3132,6 +3132,17 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchKeyWindowUsage(filter: {
+    keyType: string;
+    keySuffix: string;
+  }): Promise<import("./types").KeyWindowUsageResponse> {
+    const params = new URLSearchParams(filter);
+    const url = `${this.getBaseUrl()}/api/keys/window-usage?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch window usage: ${res.status}`);
+    return res.json();
+  }
+
   async fetchApiKeyCosts(keyType?: string): Promise<import("./types").KeyCostResponse> {
     const params = new URLSearchParams();
     if (keyType) params.set("keyType", keyType);

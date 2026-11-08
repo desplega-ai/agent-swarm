@@ -297,7 +297,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/internal/script-runs/{runId}/steps": BACKLOG_REASON,
   "POST /api/keys/clear-rate-limit": BACKLOG_REASON,
   "POST /api/keys/report-rate-limit": BACKLOG_REASON,
-  "POST /api/keys/report-rate-limit-windows": BACKLOG_REASON,
   "POST /api/keys/report-usage": BACKLOG_REASON,
   "POST /api/mcp-bridge": BACKLOG_REASON,
   "POST /api/mcp-oauth/{mcpServerId}/manual-client": BACKLOG_REASON,

@@ -2009,11 +2009,14 @@ export const SessionCostSchema = z
     sessionId: z.string(),
     taskId: z.uuid().optional(),
     agentId: z.string(),
+    credentialKeyType: z.string().nullable().optional(),
+    credentialKeySuffix: z.string().nullable().optional(),
+    harness: ProviderNameSchema.nullable().optional(),
     totalCostUsd: z.number().min(0),
     inputTokens: z.number().int().min(0).default(0),
     outputTokens: z.number().int().min(0).default(0),
-    cacheReadTokens: z.number().int().min(0).default(0),
-    cacheWriteTokens: z.number().int().min(0).default(0),
+    cacheReadTokens: z.number().int().min(0).nullable().default(null),
+    cacheWriteTokens: z.number().int().min(0).nullable().default(null),
     // Migration 063: reasoning_output_tokens from codex turn.completed events.
     reasoningOutputTokens: z.number().int().min(0).default(0),
     // Migration 063: thinking_input_tokens from claude extended-thinking flows.

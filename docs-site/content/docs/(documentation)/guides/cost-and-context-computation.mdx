@@ -292,3 +292,84 @@ reports no cost, or reports it in a currency other than USD, `totalCostUsd` stay
 log keeps the reported value. A requested model ID is insufficient evidence for
 a rate mapping when the target can reject that model and fall back to another; a
 target-reported cost does not depend on the model ID, so it needs no rate.
+
+## Session credential attribution
+
+Workers capture credential type, credential suffix, and harness at execution start.
+Each resume uses a new runner session and captures its own credential.
+The cost API accepts attribution only from operator keys and matching worker tokens, including runtime tokens.
+Task tokens, script tokens, and user tokens cannot assert attribution.
+The API rejects conflicting session identities and preserves the first stored report on repost.
+Legacy reports remain accepted with null attribution.
+Historical rows remain null because the task's latest credential cannot prove which credential executed an earlier session.
+Summary totals and daily rows expose `credentialUnattributedCostUsd` and `credentialUnattributedSessions` separately from subscription cost.
+The Usage page labels these costs as unattributed because their billing type is unknown.
+
+Session counters retain their harness semantics.
+Codex input includes cache reads. Claude and Pi input exclude cache reads, including Pi sessions that use a Codex credential.
+Do not add cache reads to Codex input when calculating combined usage.
+Missing cache measurements remain null, while measured zeroes remain zero.
+Historical cache zeroes retain their original values because their measurement provenance is unknown.
+The existing summary counters remain separate. They do not normalize mixed harness input.
+
+## Observed usage within provider windows
+
+`GET /api/keys/window-usage` returns independent provider windows and Swarm-observed usage.
+It accepts optional `keyType`, `keySuffix`, `scope`, and `scopeId` filters.
+It uses the same authenticated read posture as `/api/keys/status`.
+Scope filters select telemetry records. Session attribution spans every execution of that credential, across agents and scopes.
+
+Each window includes credential identity, `windowKey`, `startsAt`, `endsAt`, `dataThrough`, `observedAt`, and `observationAgeMs`.
+Bounds use `[reset - duration, reset)`. `dataThrough` is an exclusive upper bound that never exceeds query time.
+Cached totals retain their original `dataThrough`. Fresh metadata supplies the observation age on each response.
+Expired windows disappear, including during the cache lifetime. Removed slots cannot return through cached totals.
+Unknown durations, resets, or model scopes return `usage: null` and an explicit `unavailableReason`.
+Legacy Claude windows use known duration and family rules. Codex primary has no assumed duration.
+Windows without a reset remain unavailable records. They do not assert a current quota period.
+
+Usage calculations accept at most 256 windows and 16 distinct periods or model scopes per credential.
+The maximum lookback is 90 days. Queries stop after 100,001 session rows and reject results above 100,000 rows.
+Requests beyond these bounds return HTTP 422 without partial totals. Credential and scope filters can reduce the requested population.
+Longer provider limits remain visible on the Providers page, even when observed usage is unavailable.
+Cache misses share a process-wide budget: eight immediate calculations, then one additional calculation per second.
+HTTP 429 includes `Retry-After: 1`. Cached reads remain available when the calculation budget is exhausted.
+Telemetry reports accept at most 256 KiB, 64 windows, and 64 account limits.
+The database also rejects cumulative growth beyond those counts. It preserves existing facts and removal timestamps.
+
+`accounting: "session_cost_receipt_time"` describes an approximation.
+Tokens belong to the window containing the server insertion time of their session-cost report.
+A delayed report belongs to its receipt window, even when execution started before a reset.
+The API cannot distribute tokens across reset boundaries without event-level billing measurements.
+Error sessions contribute their reported tokens.
+`completedTasks` counts distinct completed tasks by task completion time and immutable session credentials.
+An attributable session can precede the window. Its task can still complete within the window.
+Retries do not multiply a task within one window. A task that used two credentials can appear under both.
+
+`modelScope` distinguishes account, known Claude family, and unknown scope.
+The default Codex limit remains account-wide, including when it carries a `normalModelSlug` display alias.
+Other Codex limits retain unknown model scope until their chargeable models are established.
+Model windows require matching entries from `modelBreakdown`.
+They never substitute whole-session totals for a missing or invalid breakdown.
+`modelUnattributedSessions` counts receipt-window sessions whose stored models cannot establish attribution to a model window.
+Labels never establish model scope.
+
+Each `tokens` counter contains `value`, `measuredSessions`, and `missingSessions`.
+A non-null value sums available measurements only. Missing measurements never become zero.
+No measurements produce `value: null`. An explicit measured zero remains zero.
+`uncachedInput` subtracts cache reads from Codex input. Claude, Claude Managed, Pi, and OpenCode input already exclude cache reads.
+Unknown harness semantics leave normalized input unavailable. Output, cache reads, and cache writes remain separate counters.
+Reasoning and thinking can overlap output. Never add them to output.
+Stored reasoning and thinking zeroes lack presence evidence, so this endpoint treats them as unavailable.
+Positive session measurements remain available for account windows. Model breakdowns cannot allocate session-level reasoning or thinking.
+
+`swarmUnattributedSessions` counts reports with missing credential identity in the same receipt interval across the entire visible swarm.
+It includes all key types, even when the request filters one key type.
+It is coverage context, not missing usage for the selected credential.
+Historical unknown credentials never contribute to a credential's totals.
+
+Do not add overlapping windows together. These counters describe observed activity, not provider allowance, quota consumption, or remaining capacity.
+Pi-only slots have no quota collector. Shared native Codex observations can still supply their windows.
+The endpoint caches aggregation with the existing 30-second freshness and 120-second maximum stale age.
+Filters, window bounds, and model scope partition cache entries.
+Authenticated callers share the same visibility and reuse the same cached totals.
+Quota reports do not invalidate the entire usage cache. Current telemetry reads prevent stale removals and resets from reusing incompatible totals.

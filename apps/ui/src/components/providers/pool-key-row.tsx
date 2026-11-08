@@ -1,4 +1,4 @@
-import { CircleAlert, MoreHorizontal, Timer } from "lucide-react";
+import { CircleAlert, MoreHorizontal, RotateCcw, Timer } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -37,9 +37,27 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { type AiProvider, backAt, type KeyHealth, type ProviderKey } from "@/lib/ai-providers";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
+import {
+  type AiProvider,
+  backAt,
+  type KeyHealth,
+  type ProviderKey,
+  resetLabel,
+} from "@/lib/ai-providers";
 import { formatCost } from "@/lib/cost-format";
+import {
+  currentQuotaWindows,
+  planDisplay,
+  type QuotaWindow,
+  quotaIsHigh,
+  quotaLabel,
+  quotaRemaining,
+  quotaResetIn,
+} from "@/lib/provider-quota";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { KeyQuotaDetails, QuotaBar } from "./key-quota-details";
 
 /**
  * The column grid of the LLMs list, from `md` up: provider (or key), type,
@@ -48,12 +66,6 @@ import { cn, formatRelativeTime } from "@/lib/utils";
  */
 export const PROVIDER_GRID =
   "md:grid md:grid-cols-[minmax(0,1.6fr)_6.5rem_6.5rem_minmax(0,1.4fr)_5rem_5rem_2rem] md:items-center md:gap-x-4";
-
-const PLAN_SOURCE: Record<string, string> = {
-  manual: "Set by you",
-  detected: "Detected",
-  estimated: "Estimated",
-};
 
 const DOT: Record<KeyHealth, string> = {
   ok: "bg-status-success",
@@ -69,54 +81,73 @@ const DOT_LABEL: Record<KeyHealth, string> = {
   failing: "Failing",
 };
 
-/** A provider reset time (unix seconds) as a clock time, with the date when not today. */
-function resetTime(resetsAt: number | undefined): string | null {
-  return resetsAt ? backAt(new Date(resetsAt * 1000).toISOString()) : null;
-}
-
 /** "fable" as "Fable". */
 function modelName(model: string): string {
   return model.charAt(0).toUpperCase() + model.slice(1);
 }
 
-/**
- * One usage window: "5 h", a short bar, the percent, and when the window
- * resets. 75% and up reads as a warning.
- */
-function Meter({
-  label,
-  value,
-  resetsAt,
-}: {
-  label: string;
-  value: number;
-  resetsAt: number | undefined;
-}) {
-  const high = value >= 75;
-  const reset = resetTime(resetsAt);
+/** Meters in the row. The popover lists every window. */
+const ROW_METERS = 2;
+
+function Meter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
+  const label = quotaLabel(window);
+  const warning = window.limited || window.overageStatus === "rejected";
   return (
-    <span className="inline-flex flex-col gap-0.5 text-[11px] text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
+    <span className="flex min-w-0 items-center gap-2 text-xs">
+      <span className="min-w-0 flex-1 truncate text-left text-foreground/70" title={label}>
         {label}
-        <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+      </span>
+      {warning ? (
+        <CircleAlert
+          aria-label="Limit or credits restricted"
+          className="size-3 text-status-warning-strong"
+        />
+      ) : null}
+      {window.percent === null ? (
+        <span className="text-foreground/70">Unknown</span>
+      ) : (
+        <>
+          <QuotaBar percent={window.percent} className="w-10 shrink-0" />
           <span
             className={cn(
-              "block h-full rounded-full",
-              high ? "bg-status-warning" : "bg-foreground/50",
+              "shrink-0 tabular-nums",
+              quotaIsHigh(window.percent) && "text-status-warning-strong",
             )}
-            style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-          />
+          >
+            {quotaRemaining(window.percent)}% left
+          </span>
+        </>
+      )}
+      {window.resetsAtMs !== null ? (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 text-foreground/70"
+          title={`Resets ${resetLabel(window.resetsAtMs)}`}
+        >
+          <RotateCcw aria-hidden className="size-3" />
+          {quotaResetIn(window.resetsAtMs, nowMs)}
         </span>
-        <span className={cn("w-8 font-mono", high && "text-status-warning-strong")}>{value}%</span>
-      </span>
-      {reset ? <span>Resets {reset}</span> : null}
+      ) : null}
     </span>
   );
 }
 
 /** A badge per model whose weekly window the provider closed ("Fable limit, resets 14:00"). */
-function ModelLimitBadges({ status }: { status: ProviderKey["status"] }) {
-  const active = (status?.modelLimits ?? []).filter((limit) => limit.active);
+function ModelLimitBadges({
+  statuses,
+  nowMs,
+}: {
+  statuses: ProviderKey["statuses"];
+  nowMs: number;
+}) {
+  // `active` is the server's view when it answered: the clock hides a passed reset.
+  const active = [
+    ...new Map(
+      statuses
+        .flatMap((status) => status.modelLimits ?? [])
+        .filter((limit) => limit.active && limit.resetsAt * 1000 > nowMs)
+        .map((limit) => [limit.window, limit]),
+    ).values(),
+  ];
   if (active.length === 0) return null;
   return (
     <span className="flex flex-wrap gap-1">
@@ -128,7 +159,7 @@ function ModelLimitBadges({ status }: { status: ProviderKey["status"] }) {
         >
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-warning" />
           <span className="text-status-warning-strong">
-            {modelName(limit.model)} limit, resets {resetTime(limit.resetsAt) ?? "soon"}
+            {modelName(limit.model)} limit, resets {resetLabel(limit.resetsAt * 1000)}
           </span>
         </Badge>
       ))}
@@ -159,7 +190,7 @@ function KeySubLine({ k }: { k: ProviderKey }) {
     return <span className="text-xs text-muted-foreground">Not checked yet</span>;
   }
   return (
-    <span className="text-xs text-muted-foreground">
+    <span className="hidden text-xs text-muted-foreground md:inline">
       {k.lastUsedAt ? `Used ${formatRelativeTime(k.lastUsedAt)}` : "Not used yet"}
     </span>
   );
@@ -190,10 +221,17 @@ export function PoolKeyRow({
   const removePoolKey = useRemovePoolKey(k.keyType);
   const removeAccount = useRemoveCodexAccount();
   const { data: plans } = useSubscriptionPlans();
+  const nowMs = useMinuteClock();
   const isCodex = k.keyType === "CODEX_OAUTH";
   const subscription = isSubscriptionKeyType(k.keyType);
   const status = k.status;
-  const planLabel = plans?.plans.find((p) => p.id === k.plan && p.keyType === k.keyType)?.label;
+  const plan = planDisplay(k, plans?.plans);
+  const windows = currentQuotaWindows(k.statuses, nowMs);
+  const modelRestricted = k.statuses.some((row) =>
+    row.modelLimits?.some((limit) => limit.active && limit.resetsAt * 1000 > nowMs),
+  );
+  const hasDetails =
+    subscription || windows.length > 0 || k.statuses.some((row) => row.providerAccount);
   const suffix = k.suffix ? `…${k.suffix}` : null;
   const removing = removePoolKey.isPending || removeAccount.isPending;
 
@@ -250,107 +288,148 @@ export function PoolKeyRow({
   const hasMenu = Boolean(status) || canRemove;
 
   return (
-    <li className={cn(PROVIDER_GRID, "flex items-start gap-3 px-4 py-2.5 md:py-2")}>
-      <div className="flex min-w-0 flex-1 items-start gap-2.5">
-        <span
-          role="img"
-          aria-label={DOT_LABEL[k.health]}
-          className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", DOT[k.health])}
-        />
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-sm font-medium">{k.label}</span>
-            {suffix && k.label !== `Key ending ${k.suffix}` ? (
-              <span className="shrink-0 font-mono text-xs text-muted-foreground">{suffix}</span>
-            ) : null}
-          </span>
-          <KeySubLine k={k} />
-          <ModelLimitBadges status={status} />
-          {/* Phone: the plan and today's amount, under the key. */}
-          <span className="text-xs text-muted-foreground md:hidden">
-            {subscription && planLabel ? `${planLabel} · ` : ""}today{" "}
-            {formatCost(k.costToday, { placeholder: "$0" })}
-          </span>
-        </div>
-      </div>
-      <div className="hidden min-w-0 flex-col md:col-span-2 md:flex">
-        {subscription ? (
-          <>
-            <span className="truncate text-sm">{planLabel ?? "No plan set"}</span>
-            {planLabel && k.planSource ? (
-              <span className="text-xs text-muted-foreground">{PLAN_SOURCE[k.planSource]}</span>
-            ) : null}
-          </>
-        ) : (
-          <span className="text-sm text-muted-foreground">Pay per token</span>
+    <li>
+      <div
+        className={cn(
+          PROVIDER_GRID,
+          "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4 py-2.5 md:py-2",
         )}
-      </div>
-      <div className="hidden flex-wrap gap-x-3 gap-y-1 md:flex">
-        {k.window5h !== null ? (
-          <Meter
-            label="5 h"
-            value={k.window5h}
-            resetsAt={status?.rateLimitWindows?.five_hour?.resetsAt}
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <span
+            role="img"
+            aria-label={DOT_LABEL[k.health]}
+            className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", DOT[k.health])}
           />
-        ) : null}
-        {k.window7d !== null ? (
-          <Meter
-            label="7 d"
-            value={k.window7d}
-            resetsAt={status?.rateLimitWindows?.seven_day?.resetsAt}
-          />
-        ) : null}
-      </div>
-      <span className="hidden text-right font-mono text-xs md:block">
-        {formatCost(k.costToday, { placeholder: "$0" })}
-      </span>
-      <span className="hidden text-right font-mono text-xs md:block">
-        {formatCost(k.cost7d, { placeholder: "$0" })}
-      </span>
-      <div className="flex justify-end">
-        {hasMenu ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Actions for ${k.label}`}
-                disabled={removing}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-sm font-medium">{k.label}</span>
+              {modelRestricted ? (
+                <CircleAlert
+                  aria-label="Model limit reached"
+                  className="size-3 shrink-0 text-status-warning-strong"
+                />
+              ) : null}
+              {suffix && k.label !== `Key ending ${k.suffix}` ? (
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">{suffix}</span>
+              ) : null}
+            </span>
+            <KeySubLine k={k} />
+            {/* Phone: the plan and today's amount, under the key. */}
+            <span className="text-xs text-muted-foreground md:hidden">
+              {subscription && plan.known
+                ? `${plan.label}${plan.uncertain ? ` (${plan.note?.toLowerCase()})` : ""} · `
+                : ""}
+              today {formatCost(k.costToday, { placeholder: "$0" })}
+            </span>
+          </div>
+        </div>
+        <div className="hidden min-w-0 flex-col md:col-span-2 md:flex">
+          {subscription ? (
+            <>
+              <span
+                className="truncate text-sm"
+                title={plan.raw ? `Provider reports "${plan.raw}"` : undefined}
               >
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              {status ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    setDraftName(k.name ?? "");
-                    setDialog("rename");
-                  }}
+                {plan.label}
+              </span>
+              {plan.note ? (
+                <span className="text-xs text-muted-foreground">{plan.note}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-sm text-muted-foreground">Pay per token</span>
+          )}
+        </div>
+        <div className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-auto">
+          {hasDetails ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Limits and usage for ${k.label}`}
+                  className="h-auto min-h-9 w-full flex-col items-stretch gap-1 px-1.5 py-1.5 font-normal md:min-h-8"
                 >
-                  Rename
-                </DropdownMenuItem>
-              ) : null}
-              {status && subscription ? (
-                <DropdownMenuItem onSelect={() => setDialog("plan")}>Set plan</DropdownMenuItem>
-              ) : null}
-              {status?.status === "rate_limited" ? (
-                <DropdownMenuItem onSelect={() => setDialog("clear")}>
-                  Clear rate limit
-                </DropdownMenuItem>
-              ) : null}
-              {canRemove ? (
-                <>
-                  {status ? <DropdownMenuSeparator /> : null}
-                  <DropdownMenuItem variant="destructive" onSelect={() => setDialog("remove")}>
-                    Remove
+                  {windows.slice(0, ROW_METERS).map((w) => (
+                    <Meter key={w.key} window={w} nowMs={nowMs} />
+                  ))}
+                  {windows.length > ROW_METERS ? (
+                    <span className="text-left text-xs text-muted-foreground">
+                      +{windows.length - ROW_METERS} more
+                    </span>
+                  ) : null}
+                  {windows.length === 0 ? (
+                    <span className="text-left text-xs text-muted-foreground">
+                      No current limit data
+                    </span>
+                  ) : null}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                collisionPadding={16}
+                aria-label={`${k.label} quota details`}
+                className="max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-2rem)] space-y-3 overflow-y-auto"
+              >
+                <ModelLimitBadges statuses={k.statuses} nowMs={nowMs} />
+                <KeyQuotaDetails poolKey={k} windows={windows} nowMs={nowMs} />
+              </PopoverContent>
+            </Popover>
+          ) : null}
+        </div>
+        <span className="hidden text-right font-mono text-xs md:block">
+          {formatCost(k.costToday, { placeholder: "$0" })}
+        </span>
+        <span className="hidden text-right font-mono text-xs md:block">
+          {formatCost(k.cost7d, { placeholder: "$0" })}
+        </span>
+        <div className="col-start-2 row-start-1 flex justify-end md:col-auto md:row-auto">
+          {hasMenu ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Actions for ${k.label}`}
+                  disabled={removing}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                {status ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setDraftName(k.name ?? "");
+                      setDialog("rename");
+                    }}
+                  >
+                    Rename
                   </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+                ) : null}
+                {status && subscription ? (
+                  <DropdownMenuItem onSelect={() => setDialog("plan")}>Set plan</DropdownMenuItem>
+                ) : null}
+                {status?.status === "rate_limited" ? (
+                  <DropdownMenuItem onSelect={() => setDialog("clear")}>
+                    Clear rate limit
+                  </DropdownMenuItem>
+                ) : null}
+                {canRemove ? (
+                  <>
+                    {status ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuItem variant="destructive" onSelect={() => setDialog("remove")}>
+                      Remove
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </div>
       </div>
 
       <Dialog open={dialog === "rename"} onOpenChange={(open) => !open && close()}>

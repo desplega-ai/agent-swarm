@@ -281,3 +281,19 @@ describe("CodexAppServer", () => {
     );
   }
 });
+
+test(
+  "a quota request timeout releases pending work and leaves the client usable",
+  async () => {
+    const server = new CodexAppServer({ codexPath: FIXTURE, env: fixtureEnv() });
+    try {
+      await expect(server.request("hang", {}, { timeoutMs: 25 })).rejects.toThrow(
+        "timed out after 25ms",
+      );
+      expect(await server.request("fast")).toBe("fast");
+    } finally {
+      await server.close();
+    }
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);

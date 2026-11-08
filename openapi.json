@@ -4347,6 +4347,39 @@
           "agentId": {
             "type": "string"
           },
+          "credentialKeyType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credentialKeySuffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
           "totalCostUsd": {
             "type": "number",
             "minimum": 0
@@ -4362,14 +4395,20 @@
             "default": 0
           },
           "cacheReadTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "cacheWriteTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "reasoningOutputTokens": {
             "type": "integer",
@@ -19732,6 +19771,11 @@
                   "plan": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "planRaw": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
                   }
                 },
                 "required": [
@@ -20117,6 +20161,7 @@
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
+        "description": "Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.",
         "tags": [
           "API Keys"
         ],
@@ -20149,13 +20194,68 @@
                       "type": "object",
                       "properties": {
                         "status": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "utilization": {
                           "type": "number"
                         },
                         "resetsAt": {
                           "type": "number"
+                        },
+                        "fieldObservedAt": {
+                          "type": "object",
+                          "properties": {
+                            "durationMins": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "resetsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "label": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "normalModelSlug": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "durationMins": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 576000
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "claude",
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "normalModelSlug": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageStatus": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageDisabledReason": {
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "isUsingOverage": {
                           "type": "boolean"
@@ -20173,6 +20273,252 @@
                         "lastSeenAt"
                       ]
                     }
+                  },
+                  "account": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "codex",
+                          "claude"
+                        ]
+                      },
+                      "observedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "fieldObservedAt": {
+                        "type": "object",
+                        "properties": {
+                          "ordinaryUsageAllowed": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resetCreditsAvailable": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      },
+                      "ordinaryUsageAllowed": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "resetCreditsAvailable": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "limits": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "properties": {
+                            "observedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "fieldObservedAt": {
+                              "type": "object",
+                              "properties": {
+                                "planRaw": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "credits": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spend": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spendControlReached": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "reachedType": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            },
+                            "windowRemovedAt": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "secondary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "planRaw": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "label": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "normalModelSlug": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "credits": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "hasCredits": {
+                                  "type": "boolean"
+                                },
+                                "unlimited": {
+                                  "type": "boolean"
+                                },
+                                "balance": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "maxLength": 256
+                                }
+                              },
+                              "required": [
+                                "hasCredits",
+                                "unlimited"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spend": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "limit": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "used": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "remainingPercent": {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8640000000000
+                                }
+                              },
+                              "required": [
+                                "limit",
+                                "used",
+                                "remainingPercent",
+                                "resetsAt"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spendControlReached": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "reachedType": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "observedAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "observedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "replace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "observedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "slots": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "primary",
+                              "secondary"
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 2
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "limitId",
+                        "observedAt",
+                        "slots"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 128
                   },
                   "scope": {
                     "type": "string"
@@ -20229,6 +20575,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Telemetry report exceeds 256 KiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -20615,13 +20971,68 @@
                               "type": "object",
                               "properties": {
                                 "status": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "utilization": {
                                   "type": "number"
                                 },
                                 "resetsAt": {
                                   "type": "number"
+                                },
+                                "fieldObservedAt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "durationMins": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "resetsAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "normalModelSlug": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                },
+                                "durationMins": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 576000
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex"
+                                  ]
+                                },
+                                "limitId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageStatus": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageDisabledReason": {
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "isUsingOverage": {
                                   "type": "boolean"
@@ -20640,6 +21051,212 @@
                               ]
                             }
                           },
+                          "providerAccount": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "codex",
+                                  "claude"
+                                ]
+                              },
+                              "observedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "fieldObservedAt": {
+                                "type": "object",
+                                "properties": {
+                                  "ordinaryUsageAllowed": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "resetCreditsAvailable": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              },
+                              "ordinaryUsageAllowed": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "resetCreditsAvailable": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "limits": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "observedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "fieldObservedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "planRaw": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "normalModelSlug": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "credits": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spend": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spendControlReached": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "reachedType": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      }
+                                    },
+                                    "windowRemovedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "primary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "secondary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "planRaw": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "label": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "normalModelSlug": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "credits": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "hasCredits": {
+                                          "type": "boolean"
+                                        },
+                                        "unlimited": {
+                                          "type": "boolean"
+                                        },
+                                        "balance": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ],
+                                          "maxLength": 256
+                                        }
+                                      },
+                                      "required": [
+                                        "hasCredits",
+                                        "unlimited"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spend": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "limit": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "used": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "remainingPercent": {
+                                          "type": "integer",
+                                          "minimum": -2147483648,
+                                          "maximum": 2147483647
+                                        },
+                                        "resetsAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 8640000000000
+                                        }
+                                      },
+                                      "required": [
+                                        "limit",
+                                        "used",
+                                        "remainingPercent",
+                                        "resetsAt"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spendControlReached": {
+                                      "type": [
+                                        "boolean",
+                                        "null"
+                                      ]
+                                    },
+                                    "reachedType": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    }
+                                  },
+                                  "required": [
+                                    "observedAt"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "observedAt"
+                            ],
+                            "additionalProperties": false
+                          },
                           "plan": {
                             "type": [
                               "string",
@@ -20656,6 +21273,12 @@
                               "detected",
                               "estimated",
                               null
+                            ]
+                          },
+                          "detectedPlanRaw": {
+                            "type": [
+                              "string",
+                              "null"
                             ]
                           },
                           "lastSeatMismatchAt": {
@@ -20744,8 +21367,10 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "providerAccount",
                           "plan",
                           "planSource",
+                          "detectedPlanRaw",
                           "lastSeatMismatchAt",
                           "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
@@ -20769,6 +21394,419 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/window-usage": {
+      "get": {
+        "summary": "Get Swarm-observed usage within current provider windows",
+        "description": "Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "keyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10
+            },
+            "required": false,
+            "name": "keySuffix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Independent windows with receipt-time tokens and explicit measurement coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "asOf": {
+                      "type": "string"
+                    },
+                    "accounting": {
+                      "type": "string",
+                      "enum": [
+                        "session_cost_receipt_time"
+                      ]
+                    },
+                    "windows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statusId": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "keySuffix": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "scopeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "windowKey": {
+                            "type": "string"
+                          },
+                          "durationMins": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "startsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "dataThrough": {
+                            "type": "string"
+                          },
+                          "observedAt": {
+                            "type": "string"
+                          },
+                          "observationAgeMs": {
+                            "type": "number"
+                          },
+                          "modelScope": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "account",
+                                  "family",
+                                  "unknown"
+                                ]
+                              },
+                              "model": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "model"
+                            ]
+                          },
+                          "unavailableReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "missing_reset",
+                              "unknown_duration",
+                              "unknown_model_scope",
+                              "window_not_started",
+                              null
+                            ]
+                          },
+                          "usage": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "sessions": {
+                                "type": "integer"
+                              },
+                              "errorSessions": {
+                                "type": "integer"
+                              },
+                              "completedTasks": {
+                                "type": "integer"
+                              },
+                              "tokens": {
+                                "type": "object",
+                                "properties": {
+                                  "uncachedInput": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "output": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheRead": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheWrite": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "reasoning": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "thinking": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "uncachedInput",
+                                  "output",
+                                  "cacheRead",
+                                  "cacheWrite",
+                                  "reasoning",
+                                  "thinking"
+                                ]
+                              },
+                              "modelUnattributedSessions": {
+                                "type": "integer"
+                              },
+                              "swarmUnattributedSessions": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "sessions",
+                              "errorSessions",
+                              "completedTasks",
+                              "tokens",
+                              "modelUnattributedSessions",
+                              "swarmUnattributedSessions"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "statusId",
+                          "keyType",
+                          "keySuffix",
+                          "scope",
+                          "scopeId",
+                          "windowKey",
+                          "durationMins",
+                          "startsAt",
+                          "endsAt",
+                          "dataThrough",
+                          "observedAt",
+                          "observationAgeMs",
+                          "modelScope",
+                          "unavailableReason",
+                          "usage"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "asOf",
+                    "accounting",
+                    "windows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requested usage exceeds the aggregation bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Usage query budget exhausted. Retry after one second",
             "content": {
               "application/json": {
                 "schema": {
@@ -52124,6 +53162,42 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "credentialKeyType": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Z][A-Z0-9_]{0,79}$"
+                  },
+                  "credentialKeySuffix": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "harness": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok",
+                      "fx",
+                      null
+                    ]
+                  },
                   "totalCostUsd": {
                     "type": "number"
                   },
@@ -52142,7 +53216,10 @@
                     "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "minimum": 0
                   },
                   "cacheWriteTokens": {
@@ -52296,6 +53373,26 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted session attribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session identity conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -52492,6 +53589,12 @@
                         },
                         "subscriptionCostUsd": {
                           "type": "number"
+                        },
+                        "credentialUnattributedCostUsd": {
+                          "type": "number"
+                        },
+                        "credentialUnattributedSessions": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -52507,7 +53610,9 @@
                         "attributableCostUsd",
                         "excludedCostUsd",
                         "excludedTaskCount",
-                        "subscriptionCostUsd"
+                        "subscriptionCostUsd",
+                        "credentialUnattributedCostUsd",
+                        "credentialUnattributedSessions"
                       ]
                     },
                     "daily": {
@@ -52532,6 +53637,12 @@
                           },
                           "subscriptionCostUsd": {
                             "type": "number"
+                          },
+                          "credentialUnattributedCostUsd": {
+                            "type": "number"
+                          },
+                          "credentialUnattributedSessions": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -52540,7 +53651,9 @@
                           "inputTokens",
                           "outputTokens",
                           "sessions",
-                          "subscriptionCostUsd"
+                          "subscriptionCostUsd",
+                          "credentialUnattributedCostUsd",
+                          "credentialUnattributedSessions"
                         ]
                       }
                     },
