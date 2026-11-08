@@ -25,7 +25,14 @@ import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 import { HomeWidget, HomeWidgetCount, HomeWidgetEmpty } from "./home-widget";
 import { SectionBody, type SectionQuery } from "./section-state";
 
-export function Favorites({ className }: { className?: string }) {
+export function Favorites({
+  className,
+  showAll = false,
+}: {
+  className?: string;
+  /** Start with every favorite listed (Home does this once setup is complete). */
+  showAll?: boolean;
+}) {
   const queries = [
     useFavorites("key"),
     useFavorites("page"),
@@ -43,7 +50,9 @@ export function Favorites({ className }: { className?: string }) {
     errorUpdateCount: Math.max(...queries.map((query) => query.errorUpdateCount)),
     refetch: () => failed.refetch(),
   };
-  return <FavoritesView className={className} favorites={favorites} state={state} />;
+  return (
+    <FavoritesView className={className} favorites={favorites} state={state} showAll={showAll} />
+  );
 }
 
 /** Rows before "Show all". */
@@ -65,14 +74,19 @@ export function FavoritesView({
   favorites,
   state,
   initialLimit = FAVORITES_SHOWN,
+  showAll = false,
 }: {
   className?: string;
   favorites: UserFavorite[];
   state: SectionQuery<unknown>;
   /** Rows shown before "Show all". */
   initialLimit?: number;
+  /** Open by default; the user's own toggle wins. */
+  showAll?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  // `null` until the user toggles: `showAll` can resolve after the first render.
+  const [toggled, setOpen] = useState<boolean | null>(null);
+  const open = toggled ?? showAll;
   const [query, setQuery] = useState("");
   // The names the rows resolved (page titles, workflow and schedule names, group labels).
   const [labels, setLabels] = useState<Record<string, string>>({});
@@ -114,7 +128,7 @@ export function FavoritesView({
             type="button"
             aria-expanded={open}
             onClick={() => {
-              setOpen((value) => !value);
+              setOpen(!open);
               setQuery("");
             }}
             className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"

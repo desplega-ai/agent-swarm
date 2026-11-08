@@ -612,6 +612,7 @@ value:updateSlackMessageRecord
 value:updateSwarmRepo
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
+value:updateTaskTags
 value:updateTaskTitle
 value:updateTaskVcs
 value:updateUser

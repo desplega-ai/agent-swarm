@@ -105,3 +105,15 @@ export function useSchedulesSavings() {
     retry: false,
   });
 }
+
+/** Home's 30-day fleet summary at the page's default tier (the same cache entry as /usage/savings). */
+export function useHomeSavings() {
+  const window30: SavingsWindow = { days: 30, tier: "smart" };
+  const summary = useQuery({
+    queryKey: ["savings", "fleet", window30],
+    queryFn: () => api.getSavingsSummary(window30),
+    staleTime: STALE_MS,
+    retry: false,
+  });
+  return { summary };
+}

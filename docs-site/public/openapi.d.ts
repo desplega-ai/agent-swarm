@@ -16114,6 +16114,74 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/tasks/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Add or remove task tags
+         * @description Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        add?: string[];
+                        remove?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Tags updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task belongs to another user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/pages": {
         parameters: {
             query?: never;
