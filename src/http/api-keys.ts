@@ -14,6 +14,11 @@ import {
   setApiKeyName,
   setApiKeyPlan,
 } from "../be/db";
+import {
+  aggregateKeyWindowUsage,
+  currentKeyWindows,
+  keyWindowUsageSchema,
+} from "../be/key-window-usage";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
 import {
@@ -28,7 +33,7 @@ import {
   SUBSCRIPTION_PLANS_CHECKED_AT,
 } from "../utils/subscription-plans";
 import { bodyTask, route } from "./route-def";
-import { clearUsageCache } from "./usage-cache";
+import { cachedUsageReport, clearUsageCache } from "./usage-cache";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -486,6 +491,34 @@ const listStatuses = route({
   auth: { apiKey: true },
 });
 
+const getWindowUsage = route({
+  method: "get",
+  path: "/api/keys/window-usage",
+  pattern: ["api", "keys", "window-usage"],
+  summary: "Get Swarm-observed usage within current provider windows",
+  tags: ["API Keys"],
+  query: z.object({
+    keyType: z.string().optional(),
+    keySuffix: z.string().min(1).max(10).optional(),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: {
+      description: "Independent windows with receipt-time tokens and explicit measurement coverage",
+      schema: z.object({
+        success: z.literal(true),
+        asOf: z.string(),
+        accounting: z.literal("session_cost_receipt_time"),
+        windows: z.array(keyWindowUsageSchema),
+      }),
+    },
+    400: { description: "Invalid filters" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
 /** Mirrors `KeyCostSummary` in `src/be/db.ts`. */
 const KeyCostSummarySchema = z.object({
   keyType: z.string(),
@@ -829,6 +862,55 @@ export async function handleApiKeys(
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
+    }
+    return true;
+  }
+
+  // GET /api/keys/window-usage
+  if (getWindowUsage.match(req.method, pathSegments)) {
+    const parsed = await getWindowUsage.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { keyType, keySuffix, scope, scopeId } = parsed.query;
+    try {
+      const statuses = await getKeyStatuses(keyType, scope, scope ? (scopeId ?? null) : undefined);
+      const sampledAt = Date.now();
+      const windows = currentKeyWindows(
+        statuses.filter((key) => keySuffix === undefined || key.keySuffix === keySuffix),
+        sampledAt,
+      );
+      // Visibility matches /keys/status for every authenticated caller.
+      const bounds = windows.map((w) => [
+        w.statusId,
+        w.windowKey,
+        w.startsAt,
+        w.endsAt,
+        w.modelScope,
+        w.unavailableReason,
+      ]);
+      const cached = await cachedUsageReport(
+        `key-windows:${JSON.stringify([parsed.query, bounds])}`,
+        () => aggregateKeyWindowUsage(windows, new Date(sampledAt).toISOString()),
+      );
+      const nowMs = Date.now();
+      getWindowUsage.respond(res, 200, {
+        success: true,
+        asOf: new Date(nowMs).toISOString(),
+        accounting: "session_cost_receipt_time",
+        windows: windows
+          .filter((w) => w.endsAt === null || Date.parse(w.endsAt) > nowMs)
+          .map((window) => {
+            const aggregate = cached.find(
+              (item) => item.statusId === window.statusId && item.windowKey === window.windowKey,
+            );
+            return {
+              ...window,
+              observationAgeMs: Math.max(0, nowMs - Date.parse(window.observedAt)),
+              ...(aggregate ? { dataThrough: aggregate.dataThrough, usage: aggregate.usage } : {}),
+            };
+          }),
+      });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to get window usage", 500);
     }
     return true;
   }

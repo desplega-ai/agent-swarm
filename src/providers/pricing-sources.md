@@ -291,3 +291,18 @@ Do not add cache reads to Codex input when calculating combined usage.
 Missing cache measurements remain null, while measured zeroes remain zero.
 Historical cache zeroes retain their original values because their measurement provenance is unknown.
 The existing summary counters remain separate. They do not normalize mixed harness input.
+
+## Provider-window observations
+
+`GET /api/keys/window-usage` uses immutable session credentials and server receipt time for tokens.
+This approximates completion accounting. Delayed reports belong to their receipt window.
+Completed tasks use task completion time and distinct task IDs per credential and window.
+Retries cannot multiply a completed task. A task that used two credentials can appear under both.
+
+Window counters normalize Codex input by subtracting cache reads.
+Claude, Claude Managed, Pi, and OpenCode already report uncached input separately.
+Other harnesses retain unavailable normalized input until their semantics are verified.
+Every counter reports measurement coverage. Missing cache data and unproven reasoning zeroes remain unavailable.
+Model windows use matching model breakdowns. Session-level reasoning cannot be assigned to individual models.
+Overlapping windows must never be added together or interpreted as provider quota consumption.
+See the cost computation guide for the full response contract and historical coverage limitations.

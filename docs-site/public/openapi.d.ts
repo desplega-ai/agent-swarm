@@ -7133,6 +7133,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/window-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Swarm-observed usage within current provider windows */
+        get: {
+            parameters: {
+                query?: {
+                    keyType?: string;
+                    keySuffix?: string;
+                    scope?: string;
+                    scopeId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Independent windows with receipt-time tokens and explicit measurement coverage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            asOf: string;
+                            /** @enum {string} */
+                            accounting: "session_cost_receipt_time";
+                            windows: {
+                                statusId: string;
+                                keyType: string;
+                                keySuffix: string;
+                                scope: string;
+                                scopeId: string | null;
+                                windowKey: string;
+                                durationMins: number | null;
+                                startsAt: string | null;
+                                endsAt: string | null;
+                                dataThrough: string;
+                                observedAt: string;
+                                observationAgeMs: number;
+                                modelScope: {
+                                    /** @enum {string} */
+                                    kind: "account" | "family" | "unknown";
+                                    model: string | null;
+                                };
+                                /** @enum {string|null} */
+                                unavailableReason: "missing_reset" | "unknown_duration" | "unknown_model_scope" | "window_not_started" | null;
+                                usage: {
+                                    sessions: number;
+                                    errorSessions: number;
+                                    completedTasks: number;
+                                    tokens: {
+                                        uncachedInput: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        output: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheRead: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheWrite: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        reasoning: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        thinking: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                    };
+                                    modelUnattributedSessions: number;
+                                    swarmUnattributedSessions: number;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid filters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/costs": {
         parameters: {
             query?: never;
