@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "ui-spec",
+  "displayName": "UI spec cards",
+  "slug": "ui-spec",
+  "title": "UI spec cards",
+  "description": "Attach a rich card to a task result with the `store-progress` input `uiSpec`: a json-render spec for the chat catalog that renders in the Slack outcome card, the session view and Chat SDK channels. Covers the 12 components and their props, when to make a card and when not to, the caps and their Slack reasons, the https rule, buttons, the lead rule for worker specs, and 2 complete examples.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["ui-spec", "json-render", "cards", "slack", "visuals"]
+}

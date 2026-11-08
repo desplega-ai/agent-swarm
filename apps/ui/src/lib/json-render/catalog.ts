@@ -435,6 +435,16 @@ const sessionThreadProps = z.object({
   fill: z.boolean().optional(),
 });
 
+const pageFrameProps = z.object({
+  /** Swarm Page id (32 hex characters), literal or bound. Empty renders a "No page selected" state. */
+  pageId: z.string(),
+  /** `desktop` (default) fills the width; `mobile` is a 390 px wide frame, centered. */
+  device: z.enum(["desktop", "mobile"]).optional(),
+  /** CSS height of the frame, e.g. '640px' (default '640px'). */
+  height: z.string().optional(),
+  fill: z.boolean().optional(),
+});
+
 const markdownProps = z.object({
   content: z.string(),
 });
@@ -1512,6 +1522,11 @@ export const swarmCatalogSpec = {
       props: sessionThreadProps,
       description:
         'A chat on an app page, rendered as the dashboard\'s session conversation (the same turn timeline and composer as the "Session about this page" panel). The session is found by key, not stored in a row: the server keys each task an `app.action` step creates as `task:app:<appId>:<sessionKey>:user:<viewer>`, and the thread shows the viewer\'s newest session with that key. The viewer must have an identity: with none picked the composer is disabled. `scope: "shared"` (one session for everyone) comes in a follow-up PR and is rejected today. A person bubble shows the `message` of an app-action input (cut at 4,000 characters), not the whole agent prompt. Sending routes three ways: no session yet → run `onDispatch`, whose `app.action` creates the session\'s root task; a task in the session not finished → the shared composer steers the newest unfinished task on any agent (steering source `app-page`; Queue, or Interrupt where the harness supports it); every task finished → run `onDispatch` again, chaining off the newest task via `"parentTaskId": { "$chain": "leafTaskId" }`. `$chain.leafTaskId` is `null` when there is no session, and a null `$chain` key drops the param, so one `onDispatch` covers the first message and follow-ups. Each `app.action` step is sent with the session and `followUp: false` (unless it sets `followUp` itself), so the Lead adds no review task. Messages are text only (no attachments or mic). After each send the composer stays busy until the new task shows up (at most 30 s). "New session" starts over: the next message creates a new root, and the older session is no longer shown. The composer draft is mirrored to `/ui/<id>/value` (namespaced per instance inside an element). The thread is 420 px tall; `fill: true` fills a `fill`-aware parent instead, with the timeline scrolling inside it and the composer pinned to the bottom.',
+    },
+    PageFrame: {
+      props: pageFrameProps,
+      description:
+        'A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ "$state": "/queries/<name>/data/0/pageId" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: "mobile"` narrows the frame to 390 px, so the page\'s own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows "No page selected".',
     },
     ElementRef: {
       props: elementRefProps,

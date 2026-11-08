@@ -3530,6 +3530,7 @@
               "task_follow_up_suppressed",
               "task_follow_up_gate_shadow",
               "task_citation_check_refused",
+              "task_ui_spec_check_refused",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -37727,6 +37728,62 @@
                               "verified"
                             ]
                           }
+                        },
+                        "uiSpec": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "spec": {
+                              "type": "object",
+                              "properties": {
+                                "root": {
+                                  "type": "string"
+                                },
+                                "elements": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "state": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                }
+                              },
+                              "required": [
+                                "root",
+                                "elements"
+                              ]
+                            },
+                            "actions": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "follow_up"
+                                    ]
+                                  },
+                                  "prompt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "prompt"
+                                ]
+                              }
+                            },
+                            "fallbackText": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "spec",
+                            "fallbackText"
+                          ]
                         }
                       },
                       "required": [
@@ -37734,7 +37791,8 @@
                         "supportedSteerModes",
                         "logs",
                         "attachments",
-                        "citations"
+                        "citations",
+                        "uiSpec"
                       ]
                     }
                   ]
@@ -38665,6 +38723,95 @@
           },
           "404": {
             "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+      "post": {
+        "summary": "Run the action a task card Button declares",
+        "description": "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "actionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The action started, or it already ran",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "started",
+                        "already_done"
+                      ]
+                    },
+                    "taskId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the task requester may run the action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task or action not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)",
             "content": {
               "application/json": {
                 "schema": {
@@ -56889,6 +57036,62 @@
                                 ]
                               }
                             },
+                            "uiSpec": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "spec": {
+                                  "type": "object",
+                                  "properties": {
+                                    "root": {
+                                      "type": "string"
+                                    },
+                                    "elements": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    "state": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "root",
+                                    "elements"
+                                  ]
+                                },
+                                "actions": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "follow_up"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt"
+                                    ]
+                                  }
+                                },
+                                "fallbackText": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "spec",
+                                "fallbackText"
+                              ]
+                            },
                             "isLeadTask": {
                               "type": "boolean"
                             },
@@ -56905,6 +57108,7 @@
                           },
                           "required": [
                             "citations",
+                            "uiSpec",
                             "isLeadTask",
                             "supportedSteerModes"
                           ]
@@ -56986,6 +57190,62 @@
                                   ]
                                 }
                               },
+                              "uiSpec": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "spec": {
+                                    "type": "object",
+                                    "properties": {
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "elements": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      },
+                                      "state": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "root",
+                                      "elements"
+                                    ]
+                                  },
+                                  "actions": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "follow_up"
+                                          ]
+                                        },
+                                        "prompt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "prompt"
+                                      ]
+                                    }
+                                  },
+                                  "fallbackText": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "spec",
+                                  "fallbackText"
+                                ]
+                              },
                               "isLeadTask": {
                                 "type": "boolean"
                               },
@@ -57002,6 +57262,7 @@
                             },
                             "required": [
                               "citations",
+                              "uiSpec",
                               "isLeadTask",
                               "supportedSteerModes"
                             ]

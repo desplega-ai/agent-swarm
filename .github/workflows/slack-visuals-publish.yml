@@ -14,9 +14,9 @@
 # the producing job (slack-visuals.yml) runs with the PR-branch copy of that workflow file for
 # a `pull_request` trigger, so for a fork PR the artifact's CONTENTS — including
 # visuals/pr-context.json — are attacker-controlled, even though this workflow's own token is
-# not. `workflow_run.head_sha` is the one piece of trusted event metadata we get for free, so
-# every other value is treated as a hint that must be corroborated against it and against the
-# GitHub API before it is allowed to drive a privileged action.
+# not. `workflow_run.head_sha` (with its `head_repository`) is the trusted event metadata we get
+# for free, so every other value is treated as a hint that must be corroborated against it and
+# against the GitHub API before it is allowed to drive a privileged action.
 #
 # Privilege separation (why this is two jobs, not one): CodeQL's artifact-poisoning query flags
 # any `actions/download-artifact` step keyed off `workflow_run.id` that runs in a job holding
@@ -127,25 +127,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.pr.outputs.pr_number }}
           TRUSTED_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          TRUSTED_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           set -euo pipefail
           # Derive the PR identity from the commit itself rather than trusting the artifact's
-          # prNumber outright — a commit's associated-PRs lookup is scoped to this repository, so
-          # every PR it returns already belongs here regardless of what the artifact claimed.
-          # (Using pulls/$PR directly would instead compare against the PR's CURRENT head, which
-          # can have legitimately moved on by the time this job runs — a false rejection, not a
-          # security property.)
-          associated=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TRUSTED_HEAD_SHA/pulls")
-          match_count=$(printf '%s' "$associated" | jq --argjson pr "$PR" '[.[] | select(.number == $pr)] | length')
-          if [ "$match_count" -ne 1 ]; then
-            echo "Commit $TRUSTED_HEAD_SHA is not associated with exactly one PR numbered $PR in this repository (found $match_count)." >&2
-            exit 1
-          fi
-          base_repo=$(printf '%s' "$associated" | jq -r --argjson pr "$PR" '.[] | select(.number == $pr) | .base.repo.full_name')
-          if [ "$base_repo" != "$GITHUB_REPOSITORY" ]; then
-            echo "PR #$PR's base repo ($base_repo) is not this repository ($GITHUB_REPOSITORY)." >&2
-            exit 1
-          fi
+          # prNumber outright: the PR must be one GitHub links to the trusted head sha, with
+          # base repo == this repository. A fork-only commit has no PRs in this repository's
+          # lookup, so the script falls back to the trusted head repository's lookup and still
+          # requires base repo == this repository. (Using pulls/$PR directly would instead
+          # compare against the PR's CURRENT head, which can have legitimately moved on by the
+          # time this job runs — a false rejection, not a security property.)
+          bash scripts/e2e/visuals-verify-pr.sh "$PR" "$TRUSTED_HEAD_SHA" "$TRUSTED_HEAD_REPO"
 
       - name: Stage allowlisted visuals
         if: steps.pr.outputs.found == 'true'

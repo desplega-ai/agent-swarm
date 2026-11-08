@@ -494,10 +494,13 @@ export function PagePreviewBody({
   id,
   frameQuery,
   className,
+  revision,
 }: {
   id: string;
   frameQuery: string;
   className?: string;
+  /** A new value reloads the HTML frame (the app `PageFrame` passes the page's `updatedAt`). */
+  revision?: string;
 }) {
   const viewer = useTheme();
   const { data, error, isLoading } = useQuery({
@@ -518,6 +521,7 @@ export function PagePreviewBody({
       data={data}
       frameQuery={withViewerTheme(frameQuery, viewer)}
       className={className}
+      revision={revision}
     />
   );
 }

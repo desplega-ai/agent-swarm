@@ -15744,6 +15744,25 @@ export interface paths {
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
                             }[];
+                            uiSpec: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    };
+                                };
+                                fallbackText: string;
+                            } | null;
                         };
                     };
                 };
@@ -16262,6 +16281,79 @@ export interface paths {
                 };
                 /** @description Task not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the action a task card Button declares
+         * @description Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    actionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The action started, or it already ran */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "started" | "already_done";
+                            taskId?: string;
+                        };
+                    };
+                };
+                /** @description Only the task requester may run the action */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task or action not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -22464,6 +22556,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
@@ -22480,6 +22591,25 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -31177,7 +31307,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;

@@ -676,6 +676,51 @@ describe("Codex app-server session", () => {
     expect(prompts).toEqual(["hello"]);
   });
 
+  test("asks for detailed reasoning summaries on every turn and logs them intact", async () => {
+    const threadId = "thread-reasoning-summary";
+    const turnStarts: unknown[] = [];
+    const fake = makeFakeAppServer((method, params, emit) => {
+      if (method === "thread/start") return { thread: { id: threadId } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      turnStarts.push(params);
+      const turnId = `turn-${turnStarts.length}`;
+      queueMicrotask(() => {
+        emit("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
+        if (turnStarts.length === 1) {
+          emit("item/completed", {
+            threadId,
+            turnId,
+            item: { type: "reasoning", id: "reasoning-1", summary: ["a", "b"], content: [] },
+          });
+        }
+        emit("turn/completed", {
+          threadId,
+          turn: { id: turnId, status: "completed", error: null },
+        });
+      });
+      return { turn: { id: turnId } };
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((event) => emitted.push(event));
+    await session.deliverSteering?.({ mode: "queue", text: "follow-up" });
+    await session.waitForCompletion();
+
+    expect(turnStarts).toHaveLength(2);
+    for (const params of turnStarts) {
+      expect(params).toMatchObject({ threadId, summary: "detailed" });
+    }
+    const reasoningLogs = emitted.flatMap((event) => {
+      if (event.type !== "raw_log") return [];
+      const line = JSON.parse(event.content) as { item?: { type?: string; summary?: unknown } };
+      return line.item?.type === "reasoning" ? [line.item] : [];
+    });
+    expect(reasoningLogs).toEqual([expect.objectContaining({ summary: ["a", "b"] })]);
+  });
+
   test("keeps terminal interrupted usage and emits reasoning arrays as text", async () => {
     const fake = makeFakeAppServer((method, _params, emit) => {
       if (method === "thread/start") return { thread: { id: "thread-native-interrupted" } };
