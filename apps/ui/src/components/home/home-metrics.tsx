@@ -175,7 +175,7 @@ function Metric({
       to={to}
       className="flex min-w-0 flex-col gap-1 border-border-subtle px-4 py-3 outline-none transition-colors hover:bg-accent focus-visible:bg-accent [&:not(:first-child)]:border-l @max-3xl/home:[&:nth-child(odd)]:border-l-0 @max-3xl/home:[&:nth-child(n+3)]:border-t @3xl/home:@max-5xl/home:[&:nth-child(3n+1)]:border-l-0 @3xl/home:@max-5xl/home:[&:nth-child(n+4)]:border-t"
     >
-      <span className="truncate font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+      <span className="line-clamp-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </span>
       <span className="flex min-w-0 items-end justify-between gap-2">
@@ -184,7 +184,7 @@ function Metric({
         </span>
         {aside}
       </span>
-      <span className="truncate text-xs text-muted-foreground">{detail ?? " "}</span>
+      <span className="line-clamp-2 text-xs text-muted-foreground">{detail ?? " "}</span>
     </Link>
   );
 }

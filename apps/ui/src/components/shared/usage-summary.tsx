@@ -179,7 +179,8 @@ export function UsageSummary(props: UsageSummaryProps) {
             <XAxis
               dataKey="date"
               tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
-              interval={Math.max(0, Math.floor(dailyData.length / 10))}
+              interval="preserveStartEnd"
+              minTickGap={24}
             />
             <YAxis
               tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}

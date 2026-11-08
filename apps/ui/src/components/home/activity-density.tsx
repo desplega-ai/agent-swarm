@@ -14,12 +14,14 @@ import { useTasks } from "@/api/hooks/use-tasks";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useElementWidth } from "@/hooks/use-element-width";
 import { useMinuteClock } from "@/hooks/use-minute-clock";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   buildDensityLanes,
   type DensityBin,
   type DensityLane,
+  densityHourTicks,
   densityPeak,
 } from "@/lib/activity-density";
 import { taskListTitle } from "@/lib/task-title";
@@ -33,6 +35,9 @@ const TASK_LIMIT = 1200;
 const MAX_LANES = 6;
 /** Tasks listed in a bar's popover before "more" takes over. */
 const LIST_ROWS = 12;
+/** Room for one "21:00" axis label (11px mono) and the "now" pill, in px. */
+const AXIS_LABEL_PX = 36;
+const AXIS_NOW_PX = 30;
 
 function hhmm(ms: number): string {
   const at = new Date(ms);
@@ -84,10 +89,16 @@ export function ActivityDensity({
     0,
   );
   const partial = tasks.length >= TASK_LIMIT;
-  const hours = Array.from({ length: 8 }, (_, index) => {
-    const at = Math.ceil(startMs / HOUR_MS) * HOUR_MS + index * HOUR_MS;
-    return { at, left: ((at - startMs) / WINDOW_MS) * 100 };
-  }).filter((tick) => tick.left > 2 && tick.left < 98);
+  const [axisRef, axisWidth] = useElementWidth<HTMLDivElement>();
+  // Thin the hour labels to the width at hand (every 2h or 3h on a phone) and
+  // keep them clear of the "now" pill.
+  const hours = densityHourTicks({
+    startMs,
+    endMs,
+    widthPx: axisWidth,
+    labelPx: AXIS_LABEL_PX,
+    reservePx: AXIS_NOW_PX,
+  });
 
   return (
     <HomeWidget
@@ -123,19 +134,23 @@ export function ActivityDensity({
         <p className="px-4 py-6 text-sm text-muted-foreground">No activity in the last 8 hours.</p>
       ) : (
         <div className="px-2 pb-2 sm:px-4">
-          <div className="grid grid-cols-[6rem_minmax(0,1fr)] sm:grid-cols-[11rem_minmax(0,1fr)]">
-            <span />
-            <div className="relative h-7" aria-hidden>
+          <div className="grid grid-cols-1 md:grid-cols-[11rem_minmax(0,1fr)]">
+            <span className="max-md:hidden" />
+            <div ref={axisRef} className="relative h-7" aria-hidden>
               {hours.map((tick) => (
                 <span
                   key={tick.at}
-                  className="absolute top-2 -translate-x-1/2 font-mono text-[11px] text-muted-foreground"
-                  style={{ left: `${tick.left}%` }}
+                  data-axis-label
+                  className="absolute top-2 -translate-x-1/2 whitespace-nowrap font-mono text-[11px] text-muted-foreground"
+                  style={{ left: tick.x }}
                 >
                   {hhmm(tick.at)}
                 </span>
               ))}
-              <span className="absolute right-0 top-1.5 rounded bg-primary px-1 font-mono text-[10px] font-semibold text-primary-foreground">
+              <span
+                data-axis-now
+                className="absolute right-0 top-1.5 rounded bg-primary px-1 font-mono text-[10px] font-semibold text-primary-foreground"
+              >
                 now
               </span>
             </div>
@@ -162,17 +177,22 @@ function Legend({ className, children }: { className: string; children: string }
 
 function LaneRow({ lane, peak, binMs }: { lane: DensityLane; peak: number; binMs: number }) {
   return (
-    <li className="grid h-11 grid-cols-[6rem_minmax(0,1fr)] items-center sm:grid-cols-[11rem_minmax(0,1fr)]">
-      <div className="min-w-0 pr-3" title={lane.members?.join(", ")}>
-        <p className="truncate text-[13px] font-medium">{lane.name}</p>
-        <p className="truncate font-mono text-[11px] text-muted-foreground">
+    // Phones stack the name and counts over full-width bars; a 6rem gutter
+    // cut both to one word.
+    <li className="grid grid-cols-1 pt-1.5 md:h-11 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:pt-0">
+      <div
+        className="flex min-w-0 items-baseline gap-2 md:block md:pr-3"
+        title={lane.members?.join(", ")}
+      >
+        <p className="min-w-0 truncate text-[13px] font-medium">{lane.name}</p>
+        <p className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground md:truncate">
           {lane.total} tasks
           {lane.failed > 0 ? (
             <span className="text-status-error-strong"> · {lane.failed} failed</span>
           ) : null}
         </p>
       </div>
-      <div className="flex h-full items-end gap-px py-1.5">
+      <div className="flex h-9 items-end gap-px py-1.5 md:h-full">
         {lane.bins.map((bin) => (
           <Bar key={bin.start} lane={lane} bin={bin} peak={peak} binMs={binMs} />
         ))}
