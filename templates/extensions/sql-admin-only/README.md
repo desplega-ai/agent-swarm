@@ -5,9 +5,10 @@ Blocks `db-query` tool calls made on a task whose creator (`requestedByUserId`) 
 | Task creator | `db-query` |
 |---|---|
 | Not set, or the call has no task | Allowed |
+| The header's id has no task row (a session with no task) | Allowed |
 | Set, holds an admin role | Allowed |
 | Set, no admin role | Blocked |
-| Set, but the lookup fails, times out, or the task row is missing | Blocked |
+| Set, but the lookup fails or times out | Blocked |
 
 No config. "Admin" means the creator's `users.role` is `admin` (case-insensitive), the role the swarm shows next to a requester's name. Only Lead (`manage-user`) and REST callers with `user.role.manage` can set it. RBAC roles are not used, because every user is created with the RBAC `admin` role. A creator whose user row is gone counts as non-admin.
 
