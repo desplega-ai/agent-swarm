@@ -12,26 +12,14 @@
  * it as a sheet over the page.
  */
 
-import {
-  createContext,
-  type MouseEvent,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from "react";
+import { type MouseEvent, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useOptionalContextPanel } from "@/components/context-panel/context-panel-state";
 import { isPlainClick, linkPreviewTarget } from "@/lib/link-preview";
 import type { SwarmLinkOrigins } from "@/lib/swarm-links";
 import { LinkPreviewSheet } from "./link-preview-panel";
+import { LinkPreviewScopeContext, useLinkPreviewScope } from "./link-preview-scope";
 
-interface LinkPreviewScopeValue {
-  /** Called by a mounted dock; returns the unregister call. */
-  registerDock: () => () => void;
-}
-
-const LinkPreviewScopeContext = createContext<LinkPreviewScopeValue | null>(null);
+export { useLinkPreviewScope };
 
 /** Turns link previews on for `children`. */
 export function LinkPreviewScope({ children }: { children: ReactNode }) {
@@ -51,11 +39,6 @@ export function LinkPreviewScope({ children }: { children: ReactNode }) {
       ) : null}
     </LinkPreviewScopeContext.Provider>
   );
-}
-
-/** The scope a dock registers with; null outside a `LinkPreviewScope`. */
-export function useLinkPreviewScope(): LinkPreviewScopeValue | null {
-  return useContext(LinkPreviewScopeContext);
 }
 
 /**
