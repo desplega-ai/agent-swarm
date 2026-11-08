@@ -1496,3 +1496,18 @@ The Anthropic Beta SDK has a few non-obvious surface differences from the conven
 - [`CLAUDE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/CLAUDE.md) — project-wide rules, especially "Architecture invariants" (DB boundary) and "Secret scrubbing".
 - [`src/providers/types.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/types.ts) — canonical interface definitions.
 - [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) — the most feature-complete reference (OAuth + skills resolver + hooks + model resolver).
+
+## Subscription identity and session costs
+
+Claude Max and Ultra retain the IDs `claude_max_5x` and `claude_max_20x`.
+Manual ChatGPT Pro 100 and Pro 200 retain `chatgpt_pro_5x` and `chatgpt_pro`.
+Pro 500 uses `chatgpt_pro_500`.
+Raw Codex identities `pro`, `prolite`, and `promax` do not establish a price tier.
+The worker preserves the claim in `detectedPlanRaw`, independently of manual assignments.
+Native account telemetry also preserves raw provider identities.
+Manual assignments remain authoritative.
+New Claude estimates based on old capacity ratios are disabled.
+Existing estimates remain stored as uncertain, and savings reports omit their prices.
+This change preserves model routing and the existing Fable policy.
+Workers capture immutable session credentials and harness identity before execution, including Pi sessions that use Codex OAuth.
+Legacy reports and historical rows remain explicitly unattributed.

@@ -175,7 +175,7 @@ import {
   scrubSecrets,
 } from "../utils/secret-scrubber";
 import {
-  estimateClaudePlan,
+  codexPlanFromClaim,
   planAllowsModelFamily,
   SUBSCRIPTION_KEY_TYPES,
 } from "../utils/subscription-plans";
@@ -4956,8 +4956,11 @@ type SessionCostRow = {
   totalCostUsd: number;
   inputTokens: number;
   outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
+  credentialKeyType: string | null;
+  credentialKeySuffix: string | null;
+  harness: ProviderName | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
   // Migration 063 additions:
   reasoningOutputTokens: number;
   thinkingTokens: number;
@@ -4991,6 +4994,9 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
     sessionId: row.sessionId,
     taskId: row.taskId ?? undefined,
     agentId: row.agentId,
+    credentialKeyType: row.credentialKeyType,
+    credentialKeySuffix: row.credentialKeySuffix,
+    harness: row.harness,
     totalCostUsd: row.totalCostUsd,
     inputTokens: row.inputTokens,
     outputTokens: row.outputTokens,
@@ -5012,6 +5018,9 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
 }
 
 export interface CreateSessionCostInput {
+  credentialKeyType?: string | null;
+  credentialKeySuffix?: string | null;
+  harness?: ProviderName | null;
   id?: string;
   sessionId: string;
   taskId?: string;
@@ -5019,8 +5028,8 @@ export interface CreateSessionCostInput {
   totalCostUsd: number;
   inputTokens?: number;
   outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheWriteTokens?: number;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
   // Migration 063 additions — adapters that have these numbers should pass
   // them; defaulting to 0 preserves the old write shape for callers that don't.
   reasoningOutputTokens?: number;
@@ -5047,61 +5056,100 @@ export interface CreateSessionCostInput {
   modelBreakdown?: SessionCostModelBreakdown[] | null;
 }
 
+export class SessionCostConflictError extends Error {}
+
 export async function createSessionCost(input: CreateSessionCostInput): Promise<SessionCost> {
-  const id = input.id ?? crypto.randomUUID();
-  const costSource: SessionCostSource = input.costSource ?? "harness";
-  const reasoningOutputTokens = input.reasoningOutputTokens ?? 0;
-  const thinkingTokens = input.thinkingTokens ?? 0;
-  await getDbClient().run(
-    `INSERT INTO session_costs (
+  return (await insertSessionCost(input)).cost;
+}
+
+/** Insert once. Existing session identity and attribution never change. */
+export async function insertSessionCost(
+  input: CreateSessionCostInput,
+): Promise<{ cost: SessionCost; created: boolean }> {
+  return getDbClient().transaction(async (client) => {
+    const id = input.id ?? crypto.randomUUID();
+    // Taskless triggers register a synthetic ID that has no task row.
+    const active = await client.get<{ agentId: string; taskId: string | null }>(
+      `SELECT a.agentId, t.id AS taskId FROM active_sessions a
+       LEFT JOIN agent_tasks t ON t.id = a.taskId
+       WHERE a.runnerSessionId = ? OR a.id = ? LIMIT 1`,
+      [input.sessionId, input.sessionId],
+    );
+    if (active && (active.agentId !== input.agentId || active.taskId !== (input.taskId ?? null))) {
+      throw new SessionCostConflictError("Session cost identity conflicts with an active session.");
+    }
+    const existing = await client.get<SessionCostRow>(
+      "SELECT * FROM session_costs WHERE id = ? OR sessionId = ? ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, createdAt, id LIMIT 1",
+      [id, input.sessionId, id],
+    );
+    if (existing) {
+      if (
+        existing.sessionId !== input.sessionId ||
+        existing.agentId !== input.agentId ||
+        existing.taskId !== (input.taskId ?? null)
+      ) {
+        throw new SessionCostConflictError(
+          "Session cost identity conflicts with an existing record.",
+        );
+      }
+      // Reposts return the original counters and attribution, including unknown values.
+      return { cost: rowToSessionCost(existing), created: false };
+    }
+    const costSource: SessionCostSource = input.costSource ?? "harness";
+    const reasoningOutputTokens = input.reasoningOutputTokens ?? 0;
+    const thinkingTokens = input.thinkingTokens ?? 0;
+    await client.run(
+      `INSERT INTO session_costs (
          id, sessionId, taskId, agentId,
          totalCostUsd, inputTokens, outputTokens,
          cacheReadTokens, cacheWriteTokens,
          reasoningOutputTokens, thinkingTokens,
          durationMs, numTurns, model, isError,
          costSource, harnessCostUsd, cacheWrite5mTokens, cacheWrite1hTokens,
-         modelBreakdown, createdAt
+         modelBreakdown, credentialKeyType, credentialKeySuffix, harness, createdAt
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(id) DO NOTHING`,
-    [
-      id,
-      input.sessionId,
-      input.taskId ?? null,
-      input.agentId,
-      input.totalCostUsd,
-      input.inputTokens ?? 0,
-      input.outputTokens ?? 0,
-      input.cacheReadTokens ?? 0,
-      input.cacheWriteTokens ?? 0,
-      reasoningOutputTokens,
-      thinkingTokens,
-      input.durationMs,
-      input.numTurns,
-      // Cost rows group by the underlying model, while task configuration and
-      // session logs retain the pi route used to select credentials.
-      chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
-      input.isError ? 1 : 0,
-      costSource,
-      input.harnessCostUsd ?? null,
-      input.cacheWrite5mTokens ?? null,
-      input.cacheWrite1hTokens ?? null,
-      input.modelBreakdown
-        ? JSON.stringify(
-            input.modelBreakdown.map((entry) => ({
-              ...entry,
-              model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
-            })),
-          )
-        : null,
-    ],
-  );
+      [
+        id,
+        input.sessionId,
+        input.taskId ?? null,
+        input.agentId,
+        input.totalCostUsd,
+        input.inputTokens ?? 0,
+        input.outputTokens ?? 0,
+        input.cacheReadTokens ?? null,
+        input.cacheWriteTokens ?? null,
+        reasoningOutputTokens,
+        thinkingTokens,
+        input.durationMs,
+        input.numTurns,
+        // Cost rows group by the underlying model, while task configuration and
+        // session logs retain the pi route used to select credentials.
+        chatgptSubscriptionModelId(input.model)?.toLowerCase() ?? input.model,
+        input.isError ? 1 : 0,
+        costSource,
+        input.harnessCostUsd ?? null,
+        input.cacheWrite5mTokens ?? null,
+        input.cacheWrite1hTokens ?? null,
+        input.modelBreakdown
+          ? JSON.stringify(
+              input.modelBreakdown.map((entry) => ({
+                ...entry,
+                model: chatgptSubscriptionModelId(entry.model)?.toLowerCase() ?? entry.model,
+              })),
+            )
+          : null,
+        input.credentialKeyType ?? null,
+        input.credentialKeySuffix ?? null,
+        input.harness ?? null,
+      ],
+    );
 
-  const row = await getDbClient().get<SessionCostRow>("SELECT * FROM session_costs WHERE id = ?", [
-    id,
-  ]);
-  if (!row) throw new Error("Session cost record is missing after insertion.");
-  return rowToSessionCost(row);
+    const row = await client.get<SessionCostRow>("SELECT * FROM session_costs WHERE id = ?", [id]);
+    if (!row) throw new Error("Session cost record is missing after insertion.");
+    return { cost: rowToSessionCost(row), created: true };
+  });
 }
 
 export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
@@ -5203,6 +5251,9 @@ export interface SessionCostSummaryTotals {
   excludedTaskCount: number;
   /** API-priced cost of sessions whose task ran on a subscription credential (`SUBSCRIPTION_KEY_TYPES`). */
   subscriptionCostUsd: number;
+  /** Cost without an immutable credential identity. Its billing type is unknown. */
+  credentialUnattributedCostUsd: number;
+  credentialUnattributedSessions: number;
 }
 
 export interface SessionCostDailyRow {
@@ -5213,6 +5264,9 @@ export interface SessionCostDailyRow {
   sessions: number;
   /** Part of `costUsd` that ran on a subscription credential. */
   subscriptionCostUsd: number;
+  /** Cost without an immutable credential identity. Its billing type is unknown. */
+  credentialUnattributedCostUsd: number;
+  credentialUnattributedSessions: number;
 }
 
 /**
@@ -5223,7 +5277,7 @@ export type PlanSource = "manual" | "detected" | "estimated";
 
 /** Spend per credential, for the subscription vs API comparison. */
 export interface SessionCostByCredentialRow {
-  /** `null` when the task recorded no credential (or the session has no task). */
+  /** Null when the executing session reported no credential. */
   keyType: string | null;
   keySuffix: string | null;
   /** Label set on the API Keys page. */
@@ -5320,7 +5374,7 @@ export async function getSessionCostSummary(opts: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const subscriptionSql = `t.credentialKeyType IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
+  const subscriptionSql = `sc.credentialKeyType IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
 
   // Totals
   type TotalsRow = {
@@ -5336,6 +5390,8 @@ export async function getSessionCostSummary(opts: {
     excludedCostUsd: number;
     excludedTaskCount: number;
     subscriptionCostUsd: number;
+    credentialUnattributedCostUsd: number;
+    credentialUnattributedSessions: number;
   };
 
   const totalsRow = await getDbClient().get<TotalsRow>(
@@ -5355,7 +5411,10 @@ export async function getSessionCostSummary(opts: {
           THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
         COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
         COALESCE(SUM(CASE WHEN ${subscriptionSql}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd
+          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
+        COALESCE(SUM(CASE WHEN sc.credentialKeyType IS NULL
+          THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
+        COUNT(CASE WHEN sc.credentialKeyType IS NULL THEN 1 END) as credentialUnattributedSessions
       ${from} ${where}`,
     params,
   );
@@ -5380,6 +5439,8 @@ export async function getSessionCostSummary(opts: {
         excludedCostUsd: 0,
         excludedTaskCount: 0,
         subscriptionCostUsd: 0,
+        credentialUnattributedCostUsd: 0,
+        credentialUnattributedSessions: 0,
       };
 
   // Daily breakdown
@@ -5393,6 +5454,8 @@ export async function getSessionCostSummary(opts: {
       outputTokens: number;
       sessions: number;
       subscriptionCostUsd: number;
+      credentialUnattributedCostUsd: number;
+      credentialUnattributedSessions: number;
     }>(
       `SELECT
           DATE(sc.createdAt) as date,
@@ -5401,7 +5464,10 @@ export async function getSessionCostSummary(opts: {
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(*) as sessions,
           COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
-            as subscriptionCostUsd
+            as subscriptionCostUsd,
+          COALESCE(SUM(CASE WHEN sc.credentialKeyType IS NULL
+            THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
+          COUNT(CASE WHEN sc.credentialKeyType IS NULL THEN 1 END) as credentialUnattributedSessions
         ${from} ${where}
         GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
@@ -5461,8 +5527,8 @@ export async function getSessionCostSummary(opts: {
     >;
     const rows = await getDbClient().query<CredentialRow>(
       `SELECT
-          t.credentialKeyType as keyType,
-          t.credentialKeySuffix as keySuffix,
+          sc.credentialKeyType as keyType,
+          sc.credentialKeySuffix as keySuffix,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
@@ -5470,7 +5536,7 @@ export async function getSessionCostSummary(opts: {
           MIN(sc.createdAt) as firstSessionAt,
           MAX(sc.createdAt) as lastSessionAt
         ${from} ${where}
-        GROUP BY t.credentialKeyType, t.credentialKeySuffix
+        GROUP BY sc.credentialKeyType, sc.credentialKeySuffix
         ORDER BY costUsd DESC`,
       params,
     );
@@ -5523,7 +5589,11 @@ async function getCredentialLabels(): Promise<
     const key = credentialKey(row.keyType, row.keySuffix);
     const seen = labels.get(key);
     if (!seen) {
-      labels.set(key, { name: row.name, plan: row.plan, planSource: row.planSource });
+      labels.set(key, {
+        name: row.name,
+        plan: row.planSource === "estimated" ? null : row.plan,
+        planSource: row.planSource,
+      });
     } else if (!seen.name && row.name) {
       seen.name = row.name;
     }
@@ -11907,6 +11977,7 @@ export interface ApiKeyStatus {
   /** Subscription plan id (`SUBSCRIPTION_PLANS`), when known. */
   plan: string | null;
   planSource: PlanSource | null;
+  detectedPlanRaw: string | null;
   /** When the CLI last rejected a model with `credits_required` on this key. */
   lastSeatMismatchAt: string | null;
   /** Model family of that rejection (`fable`, `opus`, ...). */
@@ -12118,18 +12189,19 @@ export async function recordKeyUsage(
   scopeId: string | null = null,
   /** Plan id the worker detected on the credential (for example from the Codex JWT). */
   plan: string | null = null,
+  planRaw?: string | null,
 ): Promise<{ planChanged: boolean }> {
   const now = new Date().toISOString();
-  const client = getDbClient();
-  const effectiveScopeId = scopeId ?? "";
+  return getDbClient().transaction(async (client) => {
+    const effectiveScopeId = scopeId ?? "";
 
-  // Upsert key status record. Sets `provider` on insert (auto-derived from
-  // keyType — see deriveProviderFromKeyType in src/utils/credentials.ts).
-  // The `name` column is left null on insert and only set via the
-  // setApiKeyName API endpoint when the user manually labels the key.
-  const provider = deriveProviderFromKeyType(keyType);
-  await client.run(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
+    // Upsert key status record. Sets `provider` on insert (auto-derived from
+    // keyType — see deriveProviderFromKeyType in src/utils/credentials.ts).
+    // The `name` column is left null on insert and only set via the
+    // setApiKeyName API endpoint when the user manually labels the key.
+    const provider = deriveProviderFromKeyType(keyType);
+    await client.run(
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
      ON CONFLICT(keyType, keySuffix, scope, scopeId)
      DO UPDATE SET
@@ -12137,29 +12209,53 @@ export async function recordKeyUsage(
        totalUsageCount = totalUsageCount + 1,
        keyIndex = excluded.keyIndex,
        updatedAt = excluded.updatedAt`,
-    [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
-  );
+      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
+    );
 
-  // A detected plan replaces an estimate, never a plan the operator picked.
-  let planChanged = false;
-  if (plan) {
-    const result = await client.run(
-      `UPDATE api_key_status SET plan = ?, planSource = 'detected'
+    const ambiguousPro =
+      keyType === "CODEX_OAUTH" &&
+      (plan === "chatgpt_pro" || plan === "chatgpt_pro_5x" || plan === "chatgpt_pro_500");
+    let planChanged = false;
+    const rawIdentity = planRaw
+      ? scrubSecrets(planRaw).slice(0, 80)
+      : keyType === "CODEX_OAUTH" && plan === "chatgpt_pro"
+        ? "pro"
+        : null;
+    // A legacy plan report must not retain a contradictory raw claim.
+    if (rawIdentity || plan) {
+      await client.run(
+        "UPDATE api_key_status SET detectedPlanRaw = ? WHERE keyType = ? AND keySuffix = ?",
+        [rawIdentity, keyType, keySuffix],
+      );
+    }
+    if (ambiguousPro || (keyType === "CODEX_OAUTH" && planRaw && !codexPlanFromClaim(planRaw))) {
+      plan = null;
+      const cleared = await client.run(
+        "UPDATE api_key_status SET plan = NULL, planSource = 'detected' WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual' AND (plan IS NOT NULL OR planSource IS NOT 'detected')",
+        [keyType, keySuffix],
+      );
+      planChanged = cleared.changes > 0;
+    }
+    // A detected plan replaces an estimate, never a plan the operator picked.
+    if (plan) {
+      const result = await client.run(
+        `UPDATE api_key_status SET plan = ?, planSource = 'detected'
          WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual'
            AND (plan IS NOT ? OR planSource IS NOT 'detected')`,
-      [plan, keyType, keySuffix, plan],
-    );
-    planChanged = result.changes > 0;
-  }
+        [plan, keyType, keySuffix, plan],
+      );
+      planChanged = result.changes > 0;
+    }
 
-  // Record which key was used on the task
-  if (taskId) {
-    await client.run(
-      "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
-      [keySuffix, keyType, taskId],
-    );
-  }
-  return { planChanged };
+    // Record which key was used on the task
+    if (taskId) {
+      await client.run(
+        "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
+        [keySuffix, keyType, taskId],
+      );
+    }
+    return { planChanged };
+  });
 }
 
 /**
@@ -12290,14 +12386,13 @@ export async function recordKeyRateLimitWindows(
   scopeId: string | null = null,
   account?: ProviderAccountTelemetry,
   replace: RateLimitReplacement[] = [],
-): Promise<{ planChanged: boolean }> {
-  if (Object.keys(windows).length === 0 && !account && !replace.length)
-    return { planChanged: false };
+): Promise<void> {
+  if (Object.keys(windows).length === 0 && !account && !replace.length) return;
 
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  const merged = await getDbClient().transaction(async (tx) => {
+  await getDbClient().transaction(async (tx) => {
     const existing = await tx.get<{
       rateLimitWindows: string | null;
       providerAccount: string | null;
@@ -12335,52 +12430,7 @@ export async function recordKeyRateLimitWindows(
         now,
       ],
     );
-    return mergedWindows;
   });
-
-  const planChanged =
-    keyType === "CLAUDE_CODE_OAUTH_TOKEN" && (await refreshEstimatedClaudePlan(keySuffix, merged));
-  return { planChanged };
-}
-
-const WEEK_SECONDS = 7 * 24 * 3600;
-
-/**
- * Estimate the plan of a Claude credential from its 7-day window (see
- * `estimateClaudePlan`), unless a stronger source already set it. Returns
- * true when the stored plan changed.
- */
-async function refreshEstimatedClaudePlan(
-  keySuffix: string,
-  windows: RateLimitWindowTelemetry,
-): Promise<boolean> {
-  const week = windows.seven_day;
-  if (!week?.utilization || !week.resetsAt) return false;
-  const client = getDbClient();
-  const stronger = await client.get<{ found: number }>(
-    `SELECT 1 as found FROM api_key_status
-       WHERE keyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND keySuffix = ? AND planSource IN ('manual', 'detected')
-       LIMIT 1`,
-    [keySuffix],
-  );
-  if (stronger) return false;
-  const windowStart = new Date((week.resetsAt - WEEK_SECONDS) * 1000).toISOString();
-  const spend = await client.get<{ spendUsd: number }>(
-    `SELECT COALESCE(SUM(sc.totalCostUsd), 0) as spendUsd
-       FROM session_costs sc JOIN agent_tasks t ON t.id = sc.taskId
-       WHERE t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND t.credentialKeySuffix = ?
-         AND sc.createdAt >= ?`,
-    [keySuffix, windowStart],
-  );
-  const plan = estimateClaudePlan(week.utilization, spend?.spendUsd ?? 0);
-  if (!plan) return false;
-  const result = await client.run(
-    `UPDATE api_key_status SET plan = ?, planSource = 'estimated'
-       WHERE keyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND keySuffix = ?
-         AND COALESCE(planSource, 'estimated') = 'estimated' AND plan IS NOT ?`,
-    [plan, keySuffix, plan],
-  );
-  return result.changes > 0;
 }
 
 /**
@@ -12499,36 +12549,29 @@ export interface KeyCostSummary {
 }
 
 /**
- * Aggregate cost data per API key by joining session_costs through agent_tasks.
+ * Aggregate cost data using immutable session credentials.
  */
 export async function getKeyCostSummary(keyType?: string): Promise<KeyCostSummary[]> {
-  const conditions = ["t.credentialKeySuffix IS NOT NULL"];
+  const conditions = ["sc.credentialKeySuffix IS NOT NULL"];
   const params: string[] = [];
 
   if (keyType) {
-    conditions.push("t.credentialKeyType = ?");
+    conditions.push("sc.credentialKeyType = ?");
     params.push(keyType);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  // Phase 13: INNER JOIN -> LEFT JOIN. The `WHERE t.credentialKeySuffix IS NOT NULL`
-  // still filters out rows whose taskId doesn't link to a task with credentials,
-  // but switching to LEFT JOIN means a future change that drops the WHERE
-  // (or a debugging query that wants orphan rows visible) doesn't silently
-  // disappear them. Equivalent for the current `WHERE … IS NOT NULL` filter;
-  // makes the query's intent (cost rows owned by a credential) explicit.
   return getDbClient().query<KeyCostSummary>(
     `SELECT
-        t.credentialKeyType as keyType,
-        t.credentialKeySuffix as keySuffix,
+        sc.credentialKeyType as keyType,
+        sc.credentialKeySuffix as keySuffix,
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
         COUNT(DISTINCT sc.taskId) as taskCount
       FROM session_costs sc
-      LEFT JOIN agent_tasks t ON sc.taskId = t.id
       ${where}
-      GROUP BY t.credentialKeyType, t.credentialKeySuffix`,
+      GROUP BY sc.credentialKeyType, sc.credentialKeySuffix`,
     params,
   );
 }

@@ -55,7 +55,7 @@ export function subscriptionSavings(
       const planCost = (plan.monthlyUsd * billedDays) / DAYS_PER_MONTH;
       return { key: credentialKey(row), row, plan, planCost, saved: row.costUsd - planCost };
     });
-  const payg = rows.filter((row) => !row.subscription).sort(byCost);
+  const payg = rows.filter((row) => !row.subscription && row.keyType !== null).sort(byCost);
   const counted = lines.filter((line) => line.plan);
   const apiValue = counted.reduce((sum, line) => sum + line.row.costUsd, 0);
   const plansCost = counted.reduce((sum, line) => sum + (line.planCost ?? 0), 0);

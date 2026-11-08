@@ -55,6 +55,7 @@ const reportUsage = route({
     scopeId: z.string().optional(),
     /** Plan id the worker detected on the credential (`SUBSCRIPTION_PLANS`). Unknown ids are ignored. */
     plan: z.string().max(40).optional(),
+    planRaw: z.string().min(1).max(80).optional(),
   }),
   responses: {
     200: { description: "Usage recorded", schema: successMessageSchema },
@@ -401,6 +402,7 @@ const ApiKeyStatusSchema = z.object({
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: z.string().nullable(),
   planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
+  detectedPlanRaw: z.string().nullable(),
   /** When the CLI last rejected a model with `credits_required` on this key. */
   lastSeatMismatchAt: z.string().nullable(),
   /** Model family of that rejection (`fable`, `opus`, ...). */
@@ -648,7 +650,7 @@ export async function handleApiKeys(
     const parsed = await reportUsage.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId, plan } = parsed.body;
+    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId, plan, planRaw } = parsed.body;
     try {
       const { planChanged } = await recordKeyUsage(
         keyType,
@@ -658,6 +660,7 @@ export async function handleApiKeys(
         scope,
         scopeId ?? null,
         plan && isSubscriptionPlanId(plan) ? plan : null,
+        planRaw,
       );
       if (planChanged) clearUsageCache();
       reportUsage.respond(res, 200, { success: true, message: "Key usage recorded" });
@@ -745,7 +748,7 @@ export async function handleApiKeys(
             Math.floor(Date.now() / 1000) + 400 * 86400,
           );
       }
-      const { planChanged } = await recordKeyRateLimitWindows(
+      await recordKeyRateLimitWindows(
         keyType,
         keySuffix,
         keyIndex,
@@ -755,7 +758,6 @@ export async function handleApiKeys(
         account ?? undefined,
         replace,
       );
-      if (planChanged) clearUsageCache();
       reportRateLimitWindows.respond(res, 200, {
         success: true,
         message: `Rate-limit windows recorded for ...${keySuffix}`,

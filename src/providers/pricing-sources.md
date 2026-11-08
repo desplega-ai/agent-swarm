@@ -274,3 +274,20 @@ To fix: first check whether the runtime refresh is failing. If the model must
 also appear in the UI picker or cold-start fallback, add it to
 `src/be/modelsdev-cache.json`; otherwise add a manual override row via the
 existing admin route `POST /api/pricing`.
+
+## Session attribution and cache counters
+
+Workers capture credential type, credential suffix, and harness at execution start.
+Each resume uses a new runner session and captures its own credential.
+The cost API accepts attribution only from operator keys and matching worker tokens, including runtime tokens.
+Task tokens, script tokens, and user tokens cannot assert attribution.
+The API rejects conflicting session identities and preserves the first stored report on repost.
+Legacy reports remain accepted with null attribution.
+Historical rows remain null because the task's latest credential cannot prove which credential executed an earlier session.
+
+Session counters retain their harness semantics.
+Codex input includes cache reads. Claude and Pi input exclude cache reads, including Pi sessions that use a Codex credential.
+Do not add cache reads to Codex input when calculating combined usage.
+Missing cache measurements remain null, while measured zeroes remain zero.
+Historical cache zeroes retain their original values because their measurement provenance is unknown.
+The existing summary counters remain separate. They do not normalize mixed harness input.

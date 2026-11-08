@@ -4347,6 +4347,39 @@
           "agentId": {
             "type": "string"
           },
+          "credentialKeyType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credentialKeySuffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
           "totalCostUsd": {
             "type": "number",
             "minimum": 0
@@ -4362,14 +4395,20 @@
             "default": 0
           },
           "cacheReadTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "cacheWriteTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "reasoningOutputTokens": {
             "type": "integer",
@@ -19732,6 +19771,11 @@
                   "plan": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "planRaw": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
                   }
                 },
                 "required": [
@@ -21218,6 +21262,12 @@
                               null
                             ]
                           },
+                          "detectedPlanRaw": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "lastSeatMismatchAt": {
                             "type": [
                               "string",
@@ -21307,6 +21357,7 @@
                           "providerAccount",
                           "plan",
                           "planSource",
+                          "detectedPlanRaw",
                           "lastSeatMismatchAt",
                           "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
@@ -52685,6 +52736,42 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "credentialKeyType": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Z][A-Z0-9_]{0,79}$"
+                  },
+                  "credentialKeySuffix": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "harness": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok",
+                      "fx",
+                      null
+                    ]
+                  },
                   "totalCostUsd": {
                     "type": "number"
                   },
@@ -52703,7 +52790,10 @@
                     "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "minimum": 0
                   },
                   "cacheWriteTokens": {
@@ -52857,6 +52947,26 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted session attribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session identity conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -53053,6 +53163,12 @@
                         },
                         "subscriptionCostUsd": {
                           "type": "number"
+                        },
+                        "credentialUnattributedCostUsd": {
+                          "type": "number"
+                        },
+                        "credentialUnattributedSessions": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -53068,7 +53184,9 @@
                         "attributableCostUsd",
                         "excludedCostUsd",
                         "excludedTaskCount",
-                        "subscriptionCostUsd"
+                        "subscriptionCostUsd",
+                        "credentialUnattributedCostUsd",
+                        "credentialUnattributedSessions"
                       ]
                     },
                     "daily": {
@@ -53093,6 +53211,12 @@
                           },
                           "subscriptionCostUsd": {
                             "type": "number"
+                          },
+                          "credentialUnattributedCostUsd": {
+                            "type": "number"
+                          },
+                          "credentialUnattributedSessions": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -53101,7 +53225,9 @@
                           "inputTokens",
                           "outputTokens",
                           "sessions",
-                          "subscriptionCostUsd"
+                          "subscriptionCostUsd",
+                          "credentialUnattributedCostUsd",
+                          "credentialUnattributedSessions"
                         ]
                       }
                     },

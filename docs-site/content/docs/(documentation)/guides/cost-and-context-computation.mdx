@@ -292,3 +292,22 @@ reports no cost, or reports it in a currency other than USD, `totalCostUsd` stay
 log keeps the reported value. A requested model ID is insufficient evidence for
 a rate mapping when the target can reject that model and fall back to another; a
 target-reported cost does not depend on the model ID, so it needs no rate.
+
+## Session credential attribution
+
+Workers capture credential type, credential suffix, and harness at execution start.
+Each resume uses a new runner session and captures its own credential.
+The cost API accepts attribution only from operator keys and matching worker tokens, including runtime tokens.
+Task tokens, script tokens, and user tokens cannot assert attribution.
+The API rejects conflicting session identities and preserves the first stored report on repost.
+Legacy reports remain accepted with null attribution.
+Historical rows remain null because the task's latest credential cannot prove which credential executed an earlier session.
+Summary totals and daily rows expose `credentialUnattributedCostUsd` and `credentialUnattributedSessions` separately from subscription cost.
+The Usage page labels these costs as unattributed because their billing type is unknown.
+
+Session counters retain their harness semantics.
+Codex input includes cache reads. Claude and Pi input exclude cache reads, including Pi sessions that use a Codex credential.
+Do not add cache reads to Codex input when calculating combined usage.
+Missing cache measurements remain null, while measured zeroes remain zero.
+Historical cache zeroes retain their original values because their measurement provenance is unknown.
+The existing summary counters remain separate. They do not normalize mixed harness input.

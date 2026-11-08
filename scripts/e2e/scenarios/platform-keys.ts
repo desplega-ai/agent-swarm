@@ -608,6 +608,15 @@ export const platformKeys: Scenario = {
         `plan ${id} has label, keyType and a monthly price`,
       );
     }
+    for (const [id, label] of [
+      ["claude_max_5x", "Claude Max"],
+      ["claude_max_20x", "Claude Ultra"],
+      ["chatgpt_pro_5x", "ChatGPT Pro 100"],
+      ["chatgpt_pro", "ChatGPT Pro 200"],
+      ["chatgpt_pro_500", "ChatGPT Pro 500"],
+    ]) {
+      expect(catalog.find((plan) => plan.id === id)?.label === label, `current plan label ${id}`);
+    }
     // Plans only apply to their credential type, so use a real OAuth key type with a unique suffix.
     const claudeType = "CLAUDE_CODE_OAUTH_TOKEN";
     const claudeSuffix = `p${ctx.nonce.slice(0, 8)}`;

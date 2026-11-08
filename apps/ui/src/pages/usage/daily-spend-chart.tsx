@@ -19,12 +19,14 @@ import { DAY_MS, formatCount, formatDay, formatUsd } from "./usage-format";
 const SUBSCRIPTION_FILL = "var(--color-primary)";
 const PAYG_FILL = "var(--color-muted-foreground)";
 const PAYG_OPACITY = 0.45;
+const UNATTRIBUTED_FILL = "var(--color-status-info)";
 
 interface DayPoint {
   date: string;
   total: number;
   subscription: number;
   payg: number;
+  unattributed: number;
   sessions: number;
 }
 
@@ -40,11 +42,13 @@ function fillDays(daily: UsageSummaryDailyRow[], from: string, to: string): DayP
     const row = byDate.get(date);
     const total = row?.costUsd ?? 0;
     const subscription = Math.min(total, row?.subscriptionCostUsd ?? 0);
+    const unattributed = Math.min(total - subscription, row?.credentialUnattributedCostUsd ?? 0);
     points.push({
       date,
       total,
       subscription,
-      payg: total - subscription,
+      payg: total - subscription - unattributed,
+      unattributed,
       sessions: row?.sessions ?? 0,
     });
   }
@@ -68,6 +72,7 @@ function DayTooltip({ active, payload, split }: TooltipContentProps & { split: b
         <>
           <TooltipRow label="Subscription" value={formatUsd(point.subscription)} />
           <TooltipRow label="Pay-as-you-go" value={formatUsd(point.payg)} />
+          <TooltipRow label="Unattributed" value={formatUsd(point.unattributed)} />
         </>
       ) : null}
       <TooltipRow label="Sessions" value={formatCount(point.sessions)} />
@@ -107,7 +112,7 @@ export function DailySpendChart({
       <CardHeader className="px-5">
         <CardTitle>Daily spend</CardTitle>
         {split ? (
-          <CardAction className="flex items-center gap-3 text-xs text-muted-foreground">
+          <CardAction className="flex flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <Swatch fill={SUBSCRIPTION_FILL} />
               Subscription
@@ -116,6 +121,12 @@ export function DailySpendChart({
               <Swatch fill={PAYG_FILL} opacity={PAYG_OPACITY} />
               Pay-as-you-go
             </span>
+            {points.some((point) => point.unattributed > 0) && (
+              <span className="flex items-center gap-1.5">
+                <Swatch fill={UNATTRIBUTED_FILL} />
+                Unattributed
+              </span>
+            )}
           </CardAction>
         ) : null}
       </CardHeader>
@@ -152,6 +163,7 @@ export function DailySpendChart({
                   fillOpacity={PAYG_OPACITY}
                   radius={[2, 2, 0, 0]}
                 />
+                <Bar dataKey="unattributed" stackId="spend" fill={UNATTRIBUTED_FILL} />
               </>
             ) : (
               <Bar dataKey="total" fill={SUBSCRIPTION_FILL} radius={[2, 2, 0, 0]} />

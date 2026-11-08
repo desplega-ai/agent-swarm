@@ -1467,10 +1467,13 @@ export interface SessionCost {
   sessionId: string;
   taskId?: string;
   agentId: string;
+  credentialKeyType?: string | null;
+  credentialKeySuffix?: string | null;
+  harness?: string | null;
   totalCostUsd: number;
   inputTokens: number;
   outputTokens: number;
-  cacheReadTokens: number;
+  cacheReadTokens: number | null;
   // Migration 063 nullable — adapters that can't honestly report this
   // (e.g. Codex SDK) leave it null instead of mixing fake-0 with real-0.
   cacheWriteTokens: number | null;
@@ -1517,6 +1520,9 @@ export interface UsageSummaryTotals {
   excludedTaskCount?: number;
   /** API-priced cost of sessions on subscription credentials (Claude OAuth, Codex OAuth). Older API servers omit it. */
   subscriptionCostUsd?: number;
+  /** Cost whose credential and billing type are unknown. */
+  credentialUnattributedCostUsd?: number;
+  credentialUnattributedSessions?: number;
 }
 
 /**
@@ -1546,6 +1552,9 @@ export interface UsageSummaryDailyRow {
   sessions: number;
   /** Part of `costUsd` on subscription credentials. Older API servers omit it. */
   subscriptionCostUsd?: number;
+  /** Cost whose credential and billing type are unknown. */
+  credentialUnattributedCostUsd?: number;
+  credentialUnattributedSessions?: number;
 }
 
 /** Spend per credential in the window (`groupBy=both` only). */
@@ -3203,6 +3212,7 @@ export interface ApiKeyStatus {
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: string | null;
   planSource: "manual" | "detected" | "estimated" | null;
+  detectedPlanRaw?: string | null;
   /** The provider rejected this key in a worker live test (`HTTP 401`), until it passes or leaves the pool. */
   lastValidationError?: string | null;
   lastValidationFailedAt?: string | null;

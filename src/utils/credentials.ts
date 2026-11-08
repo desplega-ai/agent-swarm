@@ -172,6 +172,8 @@ export interface CredentialSelection {
   seatBlockedIndices?: number[];
   /** Subscription plan id detected on the credential (`SUBSCRIPTION_PLANS`), reported with its usage. */
   plan?: string | null;
+  /** Raw provider identity, independent of a priced catalog selection. */
+  planRaw?: string | null;
   /** `authFailureFence` from `GET /api/keys/available`, read before the task (Codex pool only). */
   authFailureFence?: number;
 }

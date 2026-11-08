@@ -6397,6 +6397,7 @@ export interface paths {
                         scope?: string;
                         scopeId?: string;
                         plan?: string;
+                        planRaw?: string;
                     };
                 };
             };
@@ -7093,6 +7094,7 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                detectedPlanRaw: string | null;
                                 lastSeatMismatchAt: string | null;
                                 lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
@@ -20735,12 +20737,16 @@ export interface paths {
                         id?: string;
                         sessionId: string;
                         agentId: string;
+                        credentialKeyType?: string | null;
+                        credentialKeySuffix?: string | null;
+                        /** @enum {string|null} */
+                        harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
-                        cacheReadTokens?: number;
+                        cacheReadTokens?: number | null;
                         cacheWriteTokens?: number | null;
                         cacheWrite5mTokens?: number | null;
                         cacheWrite1hTokens?: number | null;
@@ -20781,6 +20787,24 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Untrusted session attribution */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Session identity conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20840,6 +20864,8 @@ export interface paths {
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             };
                             daily: {
                                 date: string;
@@ -20848,6 +20874,8 @@ export interface paths {
                                 outputTokens: number;
                                 sessions: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -31306,15 +31334,19 @@ export interface components {
             /** Format: uuid */
             taskId?: string;
             agentId: string;
+            credentialKeyType?: string | null;
+            credentialKeySuffix?: string | null;
+            /** @enum {string|null} */
+            harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             totalCostUsd: number;
             /** @default 0 */
             inputTokens: number;
             /** @default 0 */
             outputTokens: number;
-            /** @default 0 */
-            cacheReadTokens: number;
-            /** @default 0 */
-            cacheWriteTokens: number;
+            /** @default null */
+            cacheReadTokens: number | null;
+            /** @default null */
+            cacheWriteTokens: number | null;
             /** @default 0 */
             reasoningOutputTokens: number;
             /** @default 0 */

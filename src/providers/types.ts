@@ -11,6 +11,11 @@ export type CostModelUsage = {
 
 /** Data for session cost tracking. Shared across all provider adapters. */
 export interface CostData {
+  /** Stable report identity and attribution captured by the worker at execution start. */
+  id?: string;
+  credentialKeyType?: string | null;
+  credentialKeySuffix?: string | null;
+  harness?: ProviderName | null;
   sessionId: string;
   taskId?: string;
   agentId: string;
