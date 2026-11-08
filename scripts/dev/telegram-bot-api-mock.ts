@@ -10,7 +10,8 @@
  * `failSends(n)` answers the next n sends with HTTP 500. `failUploads(n)`
  * answers the next n file uploads with HTTP 413. `failSetWebhook(true)`
  * answers `setWebhook` with HTTP 401 and a description that echoes the bot token (tests
- * check that the API redacts it). Point the API at it with
+ * check that the API redacts it). `rejectToken(true)` answers every method with HTTP 401
+ * `Unauthorized`, as Telegram does for a wrong bot token. Point the API at it with
  * `CHAT_SDK_API_URL_OVERRIDES='{"telegram":"http://127.0.0.1:<port>"}'`.
  * `setWebhook` stores `url` (and `secret_token`); `getWebhookInfo` reports the stored url.
  *
@@ -36,6 +37,8 @@ export interface TelegramBotApiMock {
   failSetWebhook: (on: boolean) => void;
   /** Answer the next `count` `setMessageReaction` calls with HTTP 400 `REACTION_INVALID`. */
   failReactions: (count: number) => void;
+  /** While on, every method answers HTTP 401 `Unauthorized`, as for a wrong bot token. */
+  rejectToken: (on: boolean) => void;
   stop: () => void;
 }
 
@@ -159,6 +162,7 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
   let failingUploads = 0;
   let failingSetWebhook = false;
   let failingReactions = 0;
+  let rejectingToken = false;
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -174,6 +178,12 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
       if (!method) return Response.json({ ok: false, description: "Not Found" }, { status: 404 });
       const body = await readBody(req);
       calls.push({ method, body });
+      if (rejectingToken) {
+        return Response.json(
+          { ok: false, error_code: 401, description: "Unauthorized" },
+          { status: 401 },
+        );
+      }
       if (failingSetWebhook && method === "setWebhook") {
         return Response.json(
           { ok: false, error_code: 401, description: `Unauthorized: bot${match[1]} rejected` },
@@ -228,6 +238,9 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
     },
     failSetWebhook: (on) => {
       failingSetWebhook = on;
+    },
+    rejectToken: (on) => {
+      rejectingToken = on;
     },
     stop: () => server.stop(true),
   };

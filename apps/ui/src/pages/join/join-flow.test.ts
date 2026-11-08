@@ -95,7 +95,7 @@ describe("runJoin", () => {
     expect(rec.switched).toEqual(["conn_new"]);
   });
 
-  test("Comb on lands on /file?connect=auto", async () => {
+  test("Comb on lands on /file", async () => {
     const seen: Array<{ swarm: string; token: string }> = [];
     const { deps } = fakeDeps({
       combEnabled: async (swarm, token) => {
@@ -104,9 +104,9 @@ describe("runJoin", () => {
       },
     });
     const outcome = await runJoin(deps, PARAMS);
-    expect(outcome).toMatchObject({ kind: "joined", redirect: "/file?connect=auto" });
+    expect(outcome).toMatchObject({ kind: "joined", redirect: "/file" });
     expect(seen).toEqual([{ swarm: PARAMS.swarm, token: "aswt_teammate" }]);
-    expect(joinRedirect(true)).toBe("/file?connect=auto");
+    expect(joinRedirect(true)).toBe("/file");
     expect(joinRedirect(false)).toBe("/");
   });
 

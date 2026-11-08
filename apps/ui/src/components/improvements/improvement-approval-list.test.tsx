@@ -47,6 +47,11 @@ mock.module("./improvement-dialog", () => ({
   },
 }));
 // Radix portals and focus traps need a real browser; render the popover inline.
+mock.module("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: () => null,
+}));
 mock.module("@/components/ui/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PopoverTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,

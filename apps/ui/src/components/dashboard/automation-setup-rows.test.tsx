@@ -19,10 +19,10 @@ describe("AutomationSetupRows", () => {
             key: "GSC_PROPERTY",
             url: "/workflows/gsc-topic-miner?param=GSC_PROPERTY",
           },
-          { type: "integration", key: "gsc", url: "/settings/integrations/gsc" },
-          { type: "integration", key: "agentfs", url: "/settings/integrations/agentfs" },
+          { type: "integration", key: "gsc", url: "/integrations/gsc" },
+          { type: "integration", key: "agentfs", url: "/integrations/agentfs" },
         ],
-        fixUrl: "/settings/integrations/gsc",
+        fixUrl: "/integrations/gsc",
       },
     ];
 
@@ -35,9 +35,9 @@ describe("AutomationSetupRows", () => {
     expect(html).toContain("Google Search Console Topic Miner");
     expect(html).toContain('href="/workflows/gsc-topic-miner?param=GSC_PROPERTY"');
     expect(html).toContain("Set a Google Search Console property");
-    expect(html).toContain('href="/settings/integrations/gsc"');
+    expect(html).toContain('href="/integrations/gsc"');
     expect(html).toContain("Connect Google Search Console");
-    expect(html).toContain('href="/settings/integrations/agentfs"');
+    expect(html).toContain('href="/integrations/agentfs"');
     expect(html).toContain("Connect AgentFS");
     expect(html).not.toContain("<details");
   });

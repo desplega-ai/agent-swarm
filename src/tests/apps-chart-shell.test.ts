@@ -36,7 +36,7 @@ describe("Chart, Metric sparkline and the sidebar layout", () => {
     expect(await pathsFor(withProps("overview", "deploysChart", { colour: "red" }))).toContain(
       `${chart}.colour`,
     );
-    expect(await pathsFor(withProps("overview", "deploysChart", { kind: "pie" }))).toContain(
+    expect(await pathsFor(withProps("overview", "deploysChart", { kind: "radar" }))).toContain(
       `${chart}.kind`,
     );
     expect(await pathsFor(withProps("overview", "deploysChart", { xType: "log" }))).toContain(

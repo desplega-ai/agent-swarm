@@ -4085,5 +4085,68 @@
     "updated_at": { "exempt": "timestamp" },
     "created_by": { "exempt": "audit principal foreign key" },
     "updated_by": { "exempt": "audit principal foreign key" }
+  },
+  "checklist_items": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum"
+    },
+    "label": "scrubbed",
+    "href": "scrubbed",
+    "meta": "scrubbed",
+    "status": {
+      "exempt": "enum"
+    },
+    "statusChangedAt": {
+      "exempt": "timestamp"
+    },
+    "statusChangedBy": {
+      "exempt": "identifier"
+    },
+    "statusReason": "scrubbed",
+    "nudgedAt": {
+      "exempt": "timestamp"
+    },
+    "nudgedTaskId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "import_items": {
+    "sourceId": { "exempt": "identifier" },
+    "kind": { "exempt": "enum or fixed-format value" },
+    "itemKey": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "entityId": { "exempt": "identifier" },
+    "createdAt": { "exempt": "timestamp" },
+    "updatedAt": { "exempt": "timestamp" }
+  },
+  "import_pending_assignments": {
+    "sourceId": { "exempt": "identifier" },
+    "agentKey": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "agentId": { "exempt": "identifier" },
+    "agentName": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "instructions": { "pending": "unassigned: no batch yet scrubs this writer" },
+    "instructionsHash": { "exempt": "hash or digest" },
+    "skillKeys": { "exempt": "JSON array of import item keys" },
+    "createdAt": { "exempt": "timestamp" }
   }
 }

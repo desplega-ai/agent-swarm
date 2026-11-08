@@ -516,6 +516,15 @@ export interface JudgeContext {
  */
 export const CASCADE_SKIP_RE = /^Blocked dependency [0-9a-f]{8} was /;
 
+/**
+ * Task text the runner sends for a scenario task. The runner sets no `title`, so a
+ * live task's `title` is the server's (null, or an auto-generated one), never
+ * `spec.title`: graders find a scenario task by this text instead.
+ */
+export function scenarioTaskText(spec: Pick<TaskSpec, "title" | "description">): string {
+  return `${spec.title}\n\n${spec.description}`;
+}
+
 /** Minimal shape of a swarm task as the eval system consumes it. */
 export interface SwarmTask {
   id: string;

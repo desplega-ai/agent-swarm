@@ -18,6 +18,7 @@ import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
   extractPiAssistantText,
+  extractPiThinkingBlocks,
   listPiOpencodeGoModelIds,
   PiMonoAdapter,
   resolveModel,
@@ -1262,6 +1263,84 @@ async function runWithEvents(events: AgentSessionEvent[]): Promise<{
   const result = await session.waitForCompletion();
   return { events: emitted, result };
 }
+
+describe("PiMonoSession — thinking blocks in the session-log row", () => {
+  async function run(turn: AgentSessionEvent[]): Promise<ProviderEvent[]> {
+    const logFile = join(
+      tmpLogDir,
+      `thinking-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+    );
+    const session = new PiMonoSession(
+      makeMockAgentSession({ turns: [turn, [successMessageEnd("done")]] }),
+      makeSessionConfig(logFile),
+      false,
+    );
+    const events: ProviderEvent[] = [];
+    session.onEvent((e) => events.push(e));
+    await session.waitForCompletion();
+    return events;
+  }
+
+  const end = (content: unknown[]): AgentSessionEvent =>
+    ({
+      type: "message_end",
+      message: { role: "assistant", content, stopReason: "stop" },
+    }) as unknown as AgentSessionEvent;
+
+  const assistantRows = (events: ProviderEvent[]) =>
+    events.flatMap((e) => {
+      if (e.type !== "raw_log") return [];
+      const line = JSON.parse(e.content) as { type?: string; message?: { content?: unknown[] } };
+      return line.type === "assistant" ? [line.message?.content ?? []] : [];
+    });
+
+  const messages = (events: ProviderEvent[]) =>
+    events.flatMap((e) => (e.type === "message" ? [e.content] : []));
+
+  test("thinking + text gives one row with both blocks, thinking first", async () => {
+    const events = await run([
+      end([
+        { type: "thinking", thinking: "plan the answer" },
+        { type: "text", text: "answer" },
+      ]),
+    ]);
+    expect(assistantRows(events)[0]).toEqual([
+      { type: "thinking", thinking: "plan the answer" },
+      { type: "text", text: "answer" },
+    ]);
+    // The assistant reply never carries thinking.
+    expect(messages(events)[0]).toBe("answer");
+  });
+
+  test("a thinking-only turn before a tool call still writes a row", async () => {
+    const events = await run([
+      end([
+        { type: "thinking", thinking: "call the tool" },
+        { type: "toolCall", id: "t1", name: "get-task-details", arguments: {} },
+      ]),
+    ]);
+    expect(assistantRows(events)[0]).toEqual([{ type: "thinking", thinking: "call the tool" }]);
+    // No text, so no assistant reply event.
+    expect(messages(events)).toEqual([]);
+  });
+
+  test("text-only, empty and redacted thinking keep the text-only row", async () => {
+    const events = await run([
+      end([
+        { type: "thinking", thinking: "  " },
+        { type: "thinking", thinking: "secret", redacted: true },
+        { type: "text", text: "plain" },
+      ]),
+    ]);
+    expect(assistantRows(events)[0]).toEqual([{ type: "text", text: "plain" }]);
+  });
+
+  test("extractPiThinkingBlocks ignores user messages", () => {
+    expect(
+      extractPiThinkingBlocks({ role: "user", content: [{ type: "thinking", thinking: "x" }] }),
+    ).toEqual([]);
+  });
+});
 
 describe("PiMonoSession — empty final turn reprompt", () => {
   const STORE_PROGRESS_OUTPUT = '{"result":"ok"}';

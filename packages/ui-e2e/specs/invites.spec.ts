@@ -57,7 +57,7 @@ test.describe("invites", () => {
       expect(dashboardRequests.every((requested) => !requested.searchParams.has("code"))).toBe(
         true,
       );
-      await expect(ada.getByRole("link", { name: "Tasks", exact: true })).toBeVisible();
+      await expect(ada.getByRole("link", { name: "Home", exact: true })).toBeVisible();
       await expect(ada.getByRole("link", { name: "People", exact: true })).toHaveCount(0);
       // The saved connection holds the teammate's own token.
       const stored = await ada.evaluate(() => localStorage.getItem("agent-swarm-connections"));

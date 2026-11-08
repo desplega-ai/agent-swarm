@@ -49,6 +49,8 @@ export const QuestionCard = forwardRef<
     hint: string | null;
     keyHint?: ReactNode;
     onActivate: () => void;
+    /** Inside a host card (one question per tab): no border, no index badge. */
+    plain?: boolean;
     children?: ReactNode;
   }
 >(function QuestionCard(
@@ -65,6 +67,7 @@ export const QuestionCard = forwardRef<
     hint,
     keyHint,
     onActivate,
+    plain = false,
     children,
   },
   ref,
@@ -73,7 +76,7 @@ export const QuestionCard = forwardRef<
   const open = collapsed !== true;
   const range = question.type === "multi-select" ? selectionRange(question) : null;
   const body = (
-    <div className="flex flex-col gap-3 px-4 pb-4 sm:pl-[3.25rem]">
+    <div className={cn("flex flex-col gap-3 px-4 pb-4", !plain && "sm:pl-[3.25rem]")}>
       {question.description ? (
         <div className={cn("prose-chat max-w-prose text-sm text-muted-foreground", WRAP)}>
           <Streamdown
@@ -100,24 +103,27 @@ export const QuestionCard = forwardRef<
       }}
       onClick={onActivate}
       className={cn(
-        "relative scroll-mt-4 scroll-mb-28 rounded-xl border bg-card shadow-sm outline-none",
-        "transition-[border-color,box-shadow] duration-200 ease-snappy",
-        focused ? "border-primary/60 ring-2 ring-primary/20" : "border-border",
+        "relative scroll-mt-4 scroll-mb-28 outline-none",
+        !plain && "rounded-xl border bg-card shadow-sm",
+        !plain && "transition-[border-color,box-shadow] duration-200 ease-snappy",
+        !plain && (focused ? "border-primary/60 ring-2 ring-primary/20" : "border-border"),
       )}
     >
       {beam ? <BorderBeam /> : null}
       <div className="flex items-start gap-3 px-4 py-3">
-        <span
-          aria-hidden
-          className={cn(
-            "mt-px flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[11px] tabular-nums transition-colors",
-            focused
-              ? "border-primary/60 bg-primary/10 text-foreground"
-              : "border-border text-muted-foreground",
-          )}
-        >
-          {index + 1}
-        </span>
+        {plain ? null : (
+          <span
+            aria-hidden
+            className={cn(
+              "mt-px flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[11px] tabular-nums transition-colors",
+              focused
+                ? "border-primary/60 bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground",
+            )}
+          >
+            {index + 1}
+          </span>
+        )}
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <div id={titleId} className={cn("text-sm font-semibold leading-snug [&_p]:my-0", WRAP)}>
             <Streamdown>{normalizeNewlines(question.label)}</Streamdown>

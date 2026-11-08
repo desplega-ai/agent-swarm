@@ -99,6 +99,7 @@ mock.module("@/app/status-context", () => ({
 }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
+mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/components/shared/image-preview", () => require("./image-preview"));
 mock.module("@/components/shared/animated-reveal", () => ({
   AnimatedReveal: ({ open, children }: { open: boolean; children: ReactNode }) =>
@@ -151,6 +152,10 @@ mock.module("@/components/ui/dialog", () => ({
   DialogTitle: Box,
 }));
 const { OrganizationNameDialog } = await import("./organization-name-dialog");
+const { GrantsContext } = await import("../../lib/use-can");
+type GrantsState = import("../../lib/use-can").GrantsState;
+// The default is an operator tab: every check passes.
+let grants: GrantsState = { operatorTab: true, pending: false, grants: undefined };
 const { promptShownThisLoad } = await import("../../hooks/use-other-dialog-open");
 let cleanup: (() => Promise<void>) | undefined;
 async function mount() {
@@ -160,7 +165,9 @@ async function mount() {
   await act(async () =>
     root.render(
       <QueryClientProvider client={new QueryClient()}>
-        <OrganizationNameDialog />
+        <GrantsContext.Provider value={grants}>
+          <OrganizationNameDialog />
+        </GrantsContext.Provider>
       </QueryClientProvider>,
     ),
   );
@@ -184,6 +191,7 @@ afterEach(async () => {
   perkGate = null;
   inviteFails = false;
   role = "";
+  grants = { operatorTab: true, pending: false, grants: undefined };
   userEmail = "ada@acme.com";
   orgDomain = "acme.com";
   apiUrl = "https://swarm.example";
@@ -234,6 +242,25 @@ test("stays closed on a persisted profile until a fresh read lands", async () =>
 test("members never see the prompt", async () => {
   role = "member";
   expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
+});
+
+test("a role that cannot write config never sees the prompt, also with no legacy role", async () => {
+  grants = {
+    operatorTab: false,
+    pending: false,
+    grants: { grantsAll: false, roles: [], verbs: ["fs.join.own", "favorite.write.own"] },
+  };
+  expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
+  await cleanup?.();
+  grants = { operatorTab: false, pending: true, grants: undefined };
+  expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
+  await cleanup?.();
+  grants = {
+    operatorTab: false,
+    pending: false,
+    grants: { grantsAll: false, roles: [], verbs: ["config.write.any"] },
+  };
+  expect((await mount()).querySelector('[role="dialog"]')).not.toBeNull();
 });
 
 test("pre-fills the name and website from the admin's work domain", async () => {

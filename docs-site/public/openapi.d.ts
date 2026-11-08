@@ -2307,6 +2307,7 @@ export interface paths {
                                 };
                                 /** @enum {string} */
                                 claudeTransport?: "cli" | "sdk";
+                                onDemand?: boolean;
                             })[];
                         };
                     };
@@ -3048,6 +3049,7 @@ export interface paths {
                             };
                             /** @enum {string} */
                             claudeTransport?: "cli" | "sdk";
+                            onDemand?: boolean;
                         };
                     };
                 };
@@ -3953,7 +3955,7 @@ export interface paths {
         };
         /**
          * List approval requests with optional filters
-         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.
          */
         get: {
             parameters: {
@@ -4107,6 +4109,8 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                                 questionCount: number;
+                                /** @description Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed). */
+                                viewerCanRespond?: boolean;
                             }[];
                         };
                     };
@@ -7744,7 +7748,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                     itemIds?: string;
                 };
                 header?: never;
@@ -7788,7 +7792,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -7804,10 +7808,19 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
+                    };
+                };
+                /** @description Invalid asset key for a key favorite */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description No authenticated principal context */
@@ -7822,6 +7835,538 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the post-onboarding checklist */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Checklist items and swarm edit permission */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["ChecklistItem"][];
+                            canEditSwarm: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a checklist item */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        kind: "channel" | "tool" | "use_case" | "custom";
+                        label: string;
+                        href?: string;
+                        /** @enum {string} */
+                        scope: "swarm" | "user";
+                        meta?: {
+                            adapter?: string;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Added checklist item */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description A user is required for user items */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit swarm items */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An open channel item for the same adapter already exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/checklist/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a checklist item */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "remove" | "restore" | "done" | "reorder";
+                        reason?: string;
+                        sortOrder?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated checklist item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: components["schemas"]["ChecklistItem"];
+                        };
+                    };
+                };
+                /** @description Invalid update */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The caller cannot edit this item */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Checklist item not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/fs/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ensure the current user's agent-fs account and shared membership */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account readiness */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /**
+                             * @description Account readiness in agent-fs.
+                             * @enum {string}
+                             */
+                            status: "ready" | "pending" | "off" | "unsupported";
+                            /** @description User ID in agent-fs when ready. */
+                            agentFsUserId?: string;
+                            /** @description Email of the swarm user, when available. */
+                            email?: string;
+                            /** @description Name of the swarm user when ready. */
+                            displayName?: string;
+                            /** @description Shared agent-fs org ID when configured. */
+                            orgId?: string;
+                            /** @description Shared agent-fs drive ID when configured. */
+                            driveId?: string;
+                            /** @description Reason the account is not ready. */
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of twenty account checks per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fs/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a named agent-fs key for the current user
+         * @description The key is scoped to the shared org. The API returns it once and never stores it.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        label: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Named key returned once and never stored */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description Plaintext key returned once. The API never stores this key. */
+                            apiKey: string;
+                            keyId: string;
+                            label: string;
+                            agentFsUserId: string;
+                            orgId: string;
+                            driveId: string;
+                        };
+                    };
+                };
+                /** @description Invalid key label */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs account or membership is pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of five keys per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_too_old */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_not_configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fs/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a named agent-fs key for the live agent-fs app and return the redirect URL
+         * @description Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        returnTo: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Redirect URL with the named key in the fragment */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description `returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment. */
+                            redirectUrl: string;
+                        };
+                    };
+                };
+                /** @description invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User identity required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot join the shared org */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs account or membership is pending */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Limit of ten continues per minute reached */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_too_old */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent_fs_not_configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -8874,6 +9419,7 @@ export interface paths {
                                 enabled: boolean;
                                 /** @enum {string} */
                                 health: "ok" | "error" | "disabled" | "incomplete";
+                                connected: boolean;
                                 error?: string;
                                 webhookUrl: string;
                                 mode?: string;
@@ -12603,7 +13149,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.
          */
         get: {
             parameters: {
@@ -12711,6 +13257,10 @@ export interface paths {
                                 tasks_completed: number;
                                 tasks_failed: number;
                                 workflow_runs_completed: number;
+                            };
+                            github?: {
+                                web_url: string;
+                                enterprise: boolean;
                             };
                         };
                     };
@@ -15564,6 +16114,74 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/tasks/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Add or remove task tags
+         * @description Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        add?: string[];
+                        remove?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Tags updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            task: components["schemas"]["AgentTask"];
+                        };
+                    };
+                };
+                /** @description Task belongs to another user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/pages": {
         parameters: {
             query?: never;
@@ -17015,6 +17633,12 @@ export interface paths {
                                     role?: string;
                                     notes?: string;
                                     comms?: components["schemas"]["UserCommsPrefs"];
+                                };
+                                checklistNudge?: {
+                                    itemId: string;
+                                    kind: string;
+                                    label: string;
+                                    href?: string;
                                 };
                                 threadParticipants?: {
                                     total: number;
@@ -22751,6 +23375,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/slack/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Slack HTTP ingress (SLACK_MODE=http): Events API, slash commands and interactivity at one request URL */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Malformed body after a valid signature */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Missing or invalid signature, or timestamp outside the 5-minute window */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Delivery for a workspace this swarm does not own */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Slack is disabled or not in HTTP mode */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 1 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Receiver not ready, workspace unverified, or backlog full; Slack retries */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/slack/inbound/diagnostics": {
         parameters: {
             query?: never;
@@ -23149,7 +23861,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            servers: components["schemas"]["McpServer"][];
+                            servers: (components["schemas"]["McpServer"] & {
+                                installCount?: number;
+                            })[];
                             total: number;
                         };
                     };
@@ -29839,12 +30553,39 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
             createdBy?: string;
             updatedBy?: string;
+        };
+        ChecklistItem: {
+            id: string;
+            /** @enum {string} */
+            scope: "swarm" | "user";
+            userId: string | null;
+            /** @enum {string} */
+            kind: "channel" | "tool" | "use_case" | "custom";
+            label: string;
+            href: string | null;
+            meta: {
+                [key: string]: unknown;
+            } | null;
+            sortOrder: number;
+            /** @enum {string} */
+            status: "open" | "done" | "removed";
+            statusChangedAt: string | null;
+            statusChangedBy: string | null;
+            statusChangedByName: string | null;
+            statusReason: string | null;
+            nudgedAt: string | null;
+            nudgedTaskId: string | null;
+            signal: boolean | null;
+            done: boolean;
+            editable: boolean;
+            createdAt: string;
+            lastUpdatedAt: string;
         };
         TaskAttachment: {
             /** Format: uuid */
@@ -32819,6 +33560,7 @@ export interface operations {
                                 [key: string]: string;
                             };
                             setupHints: string[];
+                            hiddenInCatalog?: boolean;
                         }[];
                     };
                 };

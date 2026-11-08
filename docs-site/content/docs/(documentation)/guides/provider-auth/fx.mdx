@@ -17,7 +17,7 @@ OPENROUTER_API_KEY=sk-or-...
 
 Any one of `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` is enough to start. You can store the key as a swarm secret instead of the worker environment. A worker with none of the three waits until one appears in the swarm config. **Test connection** reuses the OpenRouter, OpenAI and AI Gateway checks, which list models and run none.
 
-The full worker image (`worker-full`) installs the pinned release binary at `/usr/local/bin/fx`, verified against a SHA-512 pin. The slim image has none: the entrypoint fails when `fx` is absent, and logs `fx --version` when it is present.
+The full worker image (`worker-full`) installs the pinned release binary at `/usr/local/bin/fx`, verified against a SHA-512 pin. The slim image has none: the runner fails an affected task with installation guidance when `fx` is absent.
 
 `ANTHROPIC_API_KEY` does not work with fx: fx speaks only the OpenAI Chat Completions protocol to custom providers. Run Claude models through OpenRouter or AI Gateway instead.
 

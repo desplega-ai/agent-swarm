@@ -101,6 +101,17 @@
   padding-inline: 0;
 }
 
+/* The favorite (star) column: no inline padding, star centred under its header star. */
+.ag-theme-quartz .ag-cell.favorite-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0;
+}
+.ag-theme-quartz .ag-header-cell.favorite-header {
+  padding-inline: 0;
+}
+
 /* ListView refetch bar: a short segment sweeping across the top edge. Rows stay untouched. */
 @keyframes list-view-refresh {
   0% {

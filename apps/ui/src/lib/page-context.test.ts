@@ -28,10 +28,10 @@ describe("getPageContext — entity routes", () => {
     ["/skills/sk1", "skill", "sk1"],
     ["/templates/tp1", "template", "tp1"],
     ["/templates/tp1/history/3", "template", "tp1"],
-    ["/mcp-servers/m1", "mcp-server", "m1"],
+    ["/integrations/tools/mcp-servers/m1", "mcp-server", "m1"],
     ["/repos/rp1", "repo", "rp1"],
     ["/people/u1", "person", "u1"],
-    ["/connections/c1", "connection", "c1"],
+    ["/integrations/tools/connections/c1", "connection", "c1"],
     ["/approval-requests/ar1", "approval-request", "ar1"],
   ];
   for (const [pathname, kind, ref] of cases) {
@@ -52,8 +52,8 @@ describe("getPageContext — route fallback", () => {
   test("list and settings pages key by their dotted path", () => {
     expect(ctx("/workflows").pageKey).toBe("task:ui:route:workflows");
     expect(ctx("/settings/configuration").pageKey).toBe("task:ui:route:settings.configuration");
-    expect(ctx("/connections/oauth-apps/o1").pageKey).toBe(
-      "task:ui:route:connections.oauth-apps.o1",
+    expect(ctx("/integrations/tools/oauth-apps/o1").pageKey).toBe(
+      "task:ui:route:integrations.tools.oauth-apps.o1",
     );
   });
 

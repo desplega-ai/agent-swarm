@@ -5,7 +5,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/utils";
 
 // StatPanel — a Card-sized stat tile with an icon-bg, label, and value. The
-// canonical pre-Phase-9 form lives in api-keys/page.tsx (5 instances) where
+// canonical pre-Phase-9 form lived in the old api-keys page (5 instances) where
 // each summary card opens with:
 //
 //   <Card>

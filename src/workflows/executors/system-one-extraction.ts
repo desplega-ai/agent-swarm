@@ -8,6 +8,7 @@ import {
   type ExecutorResult,
 } from "./base";
 import {
+  resolveSystemOneExtractDefaultProvider,
   resolveSystemOneTarget,
   SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER,
   SYSTEM_ONE_EXTRACT_PROVIDER_IDS,
@@ -222,7 +223,7 @@ function imageBytes(image: ExtractionImage): number {
 
 export const SystemOneExtractionConfigSchema = z
   .strictObject({
-    provider: z.enum(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).default(SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER),
+    provider: z.enum(SYSTEM_ONE_EXTRACT_PROVIDER_IDS).optional(),
     /** Provider-specific model id. Unset means the provider's default. */
     model: z.string().min(1).optional(),
     /** The text to read. A structured value is sent as JSON text. May be empty when images are sent. */
@@ -298,10 +299,11 @@ export const SystemOneExtractionConfigSchema = z
         message: "images must total at most 8 MiB decoded",
       });
     }
-    const host: SystemOneHost = SYSTEM_ONE_HOSTS[config.provider];
+    const providerId = config.provider ?? SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER;
+    const host: SystemOneHost = SYSTEM_ONE_HOSTS[providerId];
     const service = host.extract;
     const modelProblem = systemOneModelProblem(
-      config.provider,
+      providerId,
       config.model ?? service?.defaultModel,
       "extract",
     );
@@ -311,7 +313,7 @@ export const SystemOneExtractionConfigSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["fields"],
-        message: `SystemOne provider "${config.provider}" takes at most ${maxFields} fields per node; this node has ${fieldIds.length}.`,
+        message: `SystemOne provider "${providerId}" takes at most ${maxFields} fields per node; this node has ${fieldIds.length}.`,
       });
     }
     const maxImages = service?.limits?.maxImages;
@@ -319,7 +321,7 @@ export const SystemOneExtractionConfigSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["images"],
-        message: `SystemOne provider "${config.provider}" takes at most ${maxImages} images per node.`,
+        message: `SystemOne provider "${providerId}" takes at most ${maxImages} images per node.`,
       });
     }
   });
@@ -727,6 +729,10 @@ export class SystemOneExtractionExecutor extends BaseExecutor<
     return { db: this.deps.db, env: this.options.env ?? process.env };
   }
 
+  private defaultProvider(): Promise<SystemOneExtractProviderId> {
+    return resolveSystemOneExtractDefaultProvider(this.providerContext());
+  }
+
   private resolveTarget(id: SystemOneExtractProviderId, model?: string) {
     const { getApiKey, getServerUrl } = this.options;
     return resolveSystemOneTarget(id, this.providerContext(), {
@@ -742,9 +748,10 @@ export class SystemOneExtractionExecutor extends BaseExecutor<
     nodes: readonly ExecutorReadinessNode[],
   ): Promise<ExecutorReadinessProblem[]> {
     const nodeIdsByProvider = new Map<SystemOneExtractProviderId, string[]>();
+    const defaultId = await this.defaultProvider();
     for (const node of nodes) {
       // An unknown provider is a config error the schema reports; it names no credential.
-      const id = systemOneExtractProviderOf(node.config);
+      const id = systemOneExtractProviderOf(node.config, defaultId);
       if (id) nodeIdsByProvider.set(id, [...(nodeIdsByProvider.get(id) ?? []), node.id]);
     }
     const problems: ExecutorReadinessProblem[] = [];
@@ -770,7 +777,7 @@ export class SystemOneExtractionExecutor extends BaseExecutor<
   async extract(
     config: SystemOneExtractionConfig,
   ): Promise<{ ok: true; output: SystemOneExtractionOutput } | { ok: false; error: string }> {
-    const providerId = config.provider;
+    const providerId = config.provider ?? (await this.defaultProvider());
     const service = (SYSTEM_ONE_HOSTS[providerId] as SystemOneHost).extract;
     if (!service) {
       return { ok: false, error: `SystemOne provider "${providerId}" does not serve extraction` };

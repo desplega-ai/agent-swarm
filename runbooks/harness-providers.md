@@ -36,8 +36,36 @@ nonzero exit status, so provider initialization never continues after failure.
 
 The step injects its HTTP probe, clock, sleep and logger for unit tests.
 `src/tests/entrypoint-api-readiness.test.ts` also runs the real Bash shim and Bun
-module against local HTTP servers. This is the first per-step migration from
-Bash tracked in #2047; the remaining boot stages still run in the shell.
+module against local HTTP servers. This is a per-step migration from Bash
+tracked in #2047. Other boot stages still run in the shell.
+
+## Worker runtime dependency validation
+
+`spawnProviderProcess` validates the selected harness with
+`src/providers/runtime-dependencies.ts` before creating each provider session.
+It uses that task's resolved environment and effective working directory,
+including after live harness/config changes. New and resumed tasks share this boundary.
+
+Missing dependencies no longer prevent a worker from joining. The first affected
+task fails explicitly with the provider, missing executable/SDK and installation
+or override guidance; the runner removes its active-session record. No provider
+session starts. Install the dependency (or fix the override), then retry the task.
+Successful checks are not cached, so later tasks see repairs and removed files.
+
+CLI checks honor `CLAUDE_BINARY` (including argv prefixes and effective bridge
+selection), `CODEX_PATH_OVERRIDE` / legacy `CODEX_BINARY`, `DSH_BINARY`,
+`AMP_BINARY`, `GROK_BINARY`, and `FX_BINARY`. Codex prefers its runtime override,
+then the legacy override, PATH, and the local npm package. ACP uses the runtime
+target resolver, including unset-only custom-command fallbacks and explicit args.
+OpenCode checks `OPENCODE_SDK_PATH`, global npm roots, then the local SDK package;
+it does not require a CLI. Cursor checks an explicit `CURSOR_RIPGREP_PATH`.
+Pi, Cursor, Devin and Claude Managed otherwise need no external CLI; their SDKs
+are bundled in the worker. Preflight never executes version commands.
+
+Unit tests inject executable/module resolution; runner regression fixtures cover
+boot-selected missing binaries/SDKs and a live pi-to-Grok switch with task failure
+and session cleanup. The validator ships in the worker binary, not as a shell
+helper or a separate leaf-stage COPY.
 
 ## Tool-schema cost on harness bumps
 
@@ -101,8 +129,8 @@ target profile (`grokTargetProfile` in `src/providers/acp-targets.ts`) and
 The full worker image installs the pinned `@xai-official/grok-linux-*` native
 binary (`GROK_VERSION` in `Dockerfile.worker`, SHA-512 verified, unpacked from
 its brotli payload without the npm postinstall). The slim image has none: the
-entrypoint fails when the executable is absent. `GROK_BINARY` selects a trusted
-preinstalled executable.
+runner fails an affected task with installation guidance when the executable
+is absent. `GROK_BINARY` selects a trusted preinstalled executable.
 
 - **Spawn.** `grok agent --no-leader --always-approve [--model M]
   [--reasoning-effort E] stdio`. `--no-leader` keeps one agent process per task.
@@ -163,8 +191,7 @@ not an operator `ACP_TARGET`. Operator guide:
 The full worker image installs the pinned release binary at
 `/usr/local/bin/fx` (`FX_VERSION` in `Dockerfile.worker`, SHA-512 verified per
 arch, never `fx.sh/setup.sh`, which skips verification). The slim image has
-none: the entrypoint fails when `fx` is absent and logs `fx --version` when it
-is present.
+none: the runner fails an affected task with installation guidance when `fx` is absent.
 
 - **Spawn.** `fx acp --model <fxModel> --log-file <tmp>/fx-<taskId>/acp.log`
   with `FX_PROVIDER`, `FX_PERMISSION_MODE=full-access`, `FX_AUTO_UPGRADE=0`,
@@ -514,7 +541,7 @@ OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODE
 
 Gemini runs `gemini --acp`. Gemini CLI 0.65.0 advertises no ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. Before spawn, the adapter writes the system prompt to a fresh `mkdtemp` directory outside the task `cwd` and sets `GEMINI_SYSTEM_MD` to that file; an empty prompt keeps Gemini's built-in one. The preset sets `GEMINI_CLI_TRUST_WORKSPACE=true` and forwards only the Gemini API key, Vertex AI and base-URL keys listed in `src/providers/acp-target-catalog.ts`. The full worker image pins the CLI with `GEMINI_CLI_VERSION` in `Dockerfile.worker`.
 
-Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full-base` via `COPILOT_CLI_VERSION`; the entrypoint FATALs with an install hint when the binary is missing). Copilot advertises no `model` config option, so `MODEL_OVERRIDE` goes to `COPILOT_MODEL` before spawn. The env allowlist is `COPILOT_GITHUB_TOKEN`, the `COPILOT_PROVIDER_*` BYOK keys, `COPILOT_HOME`, `COPILOT_MODEL`, `GH_HOST`, and proxy vars; `GITHUB_TOKEN`/`GH_TOKEN` are deliberately not forwarded. `COPILOT_AUTO_UPDATE=false` is forced. BYOK with a model Copilot does not know needs `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` set to the real window: the first turn is about 150k tokens of tool definitions, and the default budget rejects it. The CLI has no system-prompt flag: the adapter writes the prompt to `.github/instructions/agent-swarm.instructions.md` under a per-task tmp dir and prepends that dir to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verified on 1.0.97: extra dirs load `.github/instructions/*.instructions.md`, not `AGENTS.md`). No file in the task cwd is touched; `cleanupSystemPromptArtifact` removes the dir when the session ends or fails to start.
+Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full-base` via `COPILOT_CLI_VERSION`; the runner fails an affected task with an install hint when the binary is missing). Copilot advertises no `model` config option, so `MODEL_OVERRIDE` goes to `COPILOT_MODEL` before spawn. The env allowlist is `COPILOT_GITHUB_TOKEN`, the `COPILOT_PROVIDER_*` BYOK keys, `COPILOT_HOME`, `COPILOT_MODEL`, `GH_HOST`, and proxy vars; `GITHUB_TOKEN`/`GH_TOKEN` are deliberately not forwarded. `COPILOT_AUTO_UPDATE=false` is forced. BYOK with a model Copilot does not know needs `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` set to the real window: the first turn is about 150k tokens of tool definitions, and the default budget rejects it. The CLI has no system-prompt flag: the adapter writes the prompt to `.github/instructions/agent-swarm.instructions.md` under a per-task tmp dir and prepends that dir to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verified on 1.0.97: extra dirs load `.github/instructions/*.instructions.md`, not `AGENTS.md`). No file in the task cwd is touched; `cleanupSystemPromptArtifact` removes the dir when the session ends or fails to start.
 
 Qwen Code runs `qwen --acp --auth-type <QWEN_AUTH_TYPE, default openai>` (baked pinned via `QWEN_CODE_VERSION`). A fresh worker has no `~/.qwen/settings.json`, and without an auth type the CLI waits for an interactive `/auth`, so the preset always passes one; `qwen-oauth` is rejected because it needs a browser. The default `openai` type reads `OPENAI_API_KEY` and `OPENAI_BASE_URL` (unset means DashScope, not OpenAI). `MODEL_OVERRIDE` goes on argv as `--model`; the ACP `model` option is skipped because it wants a `<id>(<authType>)` value. Like Gemini, the system prompt goes to a `mkdtemp` file outside the task `cwd` and `QWEN_SYSTEM_MD` points at it (this replaces Qwen's built-in prompt); the file is removed when the session ends. Qwen loads the swarm MCP tools lazily, through its tool search.
 
@@ -813,8 +840,8 @@ Internal refactors that don't change observable behavior don't need a doc update
 1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
 2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
 3. Add its name to `ProviderNameSchema`, wire `createProviderAdapter`, and keep `traits.steerModes` synchronized with `PROVIDER_STEER_CAPABILITIES`.
-4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files, and give it its own branch in the `verify_provider_binary` chain (or add it to the final `!= "pi"` guard when it has no binary).
-5. Run `bun run test:root -- src/tests/provider-registration.test.ts`. It iterates `ProviderNameSchema` over every mandatory touch point (credential checkers, the live Test-connection switch, both unknown-provider messages, `PricingProviderSchema`, the pricing seeder, the local-harness lists on server and dashboard, the dashboard's `PROVIDER_NAMES`, and both entrypoint chains) and names the provider and file on a miss. When a touch point should not carry the provider, add it to that touch point's `exempt` map with a one-line reason; an exemption for a provider that is present fails as stale.
+4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files, and add its executable/SDK check (or explicit no-binary branch) to `src/providers/runtime-dependencies.ts`.
+5. Run `bun run test:root -- src/tests/provider-registration.test.ts src/tests/provider-runtime-dependencies.test.ts`. It iterates `ProviderNameSchema` over every mandatory touch point (credential checkers, the live Test-connection switch, both unknown-provider messages, `PricingProviderSchema`, the pricing seeder, the local-harness lists on server and dashboard, the dashboard's `PROVIDER_NAMES`, the credential-bootstrap chain, and runtime dependency policies) and names the provider and file on a miss. When a touch point should not carry the provider, add it to that touch point's `exempt` map with a one-line reason; an exemption for a provider that is present fails as stale.
 6. Update the docs-site guide:
    - Add to "Reference implementations" table.
    - Add to "Files to touch" checklist.

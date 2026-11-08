@@ -47,8 +47,8 @@ describe("preflightAutomation", () => {
           url: "/schedules/schedule-1?param=SLACK_CHANNEL_ID",
         },
         { type: "param", key: "TIMEZONE", url: "/schedules/schedule-1?param=TIMEZONE" },
-        { type: "integration", key: "github", url: "/settings/integrations/github" },
-        { type: "integration", key: "slack", url: "/settings/integrations/slack" },
+        { type: "integration", key: "github", url: "/integrations/github" },
+        { type: "integration", key: "slack", url: "/integrations/slack" },
       ],
       fixUrl: "/schedules/schedule-1?param=REPO_URL",
       failureReason:
@@ -70,7 +70,7 @@ describe("preflightAutomation", () => {
     );
 
     expect(result.state).toBe("needs_setup");
-    expect(result.fixUrl).toBe("/settings/integrations/github");
+    expect(result.fixUrl).toBe("/integrations/github");
     expect(result.failureReason).toBe("needs_setup: params=[] integrations=[github]");
   });
 
@@ -94,25 +94,25 @@ describe("preflightAutomation", () => {
         name: "gsc-topic-miner",
         requires: ["gsc", "agentfs"],
         param: "GSC_PROPERTY",
-        fixUrl: "/settings/integrations/gsc",
+        fixUrl: "/integrations/gsc",
       },
       {
         name: "linear-drain-loop",
         requires: ["linear"],
         param: "LINEAR_PROJECT_ID",
-        fixUrl: "/settings/integrations/linear",
+        fixUrl: "/integrations/linear",
       },
       {
         name: "daily-hn-briefing",
         requires: ["agentmail"],
         param: "REPORT_EMAIL",
-        fixUrl: "/settings/integrations/agentmail",
+        fixUrl: "/integrations/agentmail",
       },
       {
         name: "gtm-weekly-review",
         requires: ["github", "gsc"],
         param: "REPO_URL",
-        fixUrl: "/settings/integrations/github",
+        fixUrl: "/integrations/github",
       },
     ];
 
@@ -155,13 +155,13 @@ describe("preflightAutomation", () => {
 
   test("points every missing integration at an existing actionable settings route", () => {
     const cases: Array<[AutomationIntegrationId, string]> = [
-      ["slack", "/settings/integrations/slack"],
-      ["github", "/settings/integrations/github"],
-      ["linear", "/settings/integrations/linear"],
-      ["jira", "/settings/integrations/jira"],
-      ["agentmail", "/settings/integrations/agentmail"],
-      ["gsc", "/settings/integrations/gsc"],
-      ["agentfs", "/settings/integrations/agentfs"],
+      ["slack", "/integrations/slack"],
+      ["github", "/integrations/github"],
+      ["linear", "/integrations/linear"],
+      ["jira", "/integrations/jira"],
+      ["agentmail", "/integrations/agentmail"],
+      ["gsc", "/integrations/gsc"],
+      ["agentfs", "/integrations/agentfs"],
     ];
     const unverifiedSetup: AutomationSetupStates = {
       slack: "unverified",

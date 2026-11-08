@@ -150,6 +150,7 @@ import {
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { getGitHubHostForSql } from "../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import { validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
 import {
@@ -342,6 +343,9 @@ export {
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
   installSystemDefaultSkillsForAgent: (agentId) => installSystemDefaultSkillsForAgent(agentId),
+  // Lazy: the importer imports this facade.
+  resolvePendingImportAssignments: async (agent) =>
+    (await import("./import/pending")).resolvePendingImportAssignments(agent),
 });
 
 export {
@@ -438,6 +442,7 @@ export {
   supersedeTask,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskTags,
   updateTaskTitle,
 } from "./db/tasks/write";
 
@@ -5590,6 +5595,7 @@ export async function getAttributionByPerson(opts: {
     }
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
+  const githubHost = getGitHubHostForSql();
 
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = await getDbClient().query<RootRow>(
@@ -5630,7 +5636,7 @@ export async function getAttributionByPerson(opts: {
            OR (
              ta.kind = 'url'
              AND (
-               ta.url LIKE '%github.com/%/pull/%'
+               ta.url LIKE '%${githubHost}/%/pull/%'
                OR ta.url LIKE '%/-/merge_requests/%'
              )
            )
@@ -5642,7 +5648,7 @@ export async function getAttributionByPerson(opts: {
         -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
         -- planner scans every task's output and probes the tree instead.
         CROSS JOIN agent_tasks described ON described.id = tree.taskId
-        WHERE described.output LIKE '%github.com/%/pull/%'
+        WHERE described.output LIKE '%${githubHost}/%/pull/%'
            OR described.output LIKE '%/-/merge_requests/%'
       )
       SELECT
@@ -13016,10 +13022,12 @@ export async function setFavorite(opts: {
   favorite: boolean;
   actorId?: string | null;
 }): Promise<UserFavorite | null> {
+  // A `key` item id arrives normalized: `PUT /api/favorites` normalizes it and answers 400.
+  const itemId = opts.itemId;
   if (!opts.favorite) {
     await getDbClient().run(
       "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",
-      [opts.favoriteScope, opts.itemType, opts.itemId],
+      [opts.favoriteScope, opts.itemType, itemId],
     );
     return null;
   }
@@ -13035,7 +13043,7 @@ export async function setFavorite(opts: {
          lastUpdatedAt = excluded.lastUpdatedAt,
          updated_by = excluded.updated_by
        RETURNING *`,
-    [opts.favoriteScope, opts.userId ?? null, opts.itemType, opts.itemId, now, now, actor, actor],
+    [opts.favoriteScope, opts.userId ?? null, opts.itemType, itemId, now, now, actor, actor],
   );
   if (!row) throw new Error("Failed to set favorite");
   return rowToUserFavorite(row);

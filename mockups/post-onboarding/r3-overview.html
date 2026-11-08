@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Use-case Overview tab · Round 3 · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./r2-kit.css">
+<link rel="stylesheet" href="./r3-overview.css">
+</head>
+<body>
+<header class="x-top">
+  <div class="x-id"><b>Post-onboarding</b><span>Round 3</span></div>
+  <nav class="x-nav" aria-label="Round 3 pages">
+    <a href="r3-sidebar.html">Sidebar</a>
+    <a href="r3-connect.html">Connect</a>
+    <a href="r3-home.html">Home</a>
+    <a href="r3-overview.html" aria-current="page">Overview tab</a>
+  </nav>
+  <span class="sp"></span>
+  <a class="w-a" href="index.html">Index</a>
+  <button class="x-theme" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+
+<main class="x-page">
+  <div class="x-intro">
+    <h1>Use-case group: the Overview tab</h1>
+    <p>A use case is a Sessions group with a schedule or with files under its key. When you open it, the tab strip gets two tabs: a pinned Overview first, then the session list. The list tab does not change. The Overview answers three questions at a glance: when does it run next, what did it make, and what do I tell the Lead.</p>
+    <ul>
+      <li><b>Left column, steer and browse:</b> the schedules (per-row switch, Run now on hover, read-only template) and the files under the group key, newest first.</li>
+      <li><b>Right column, read and reply:</b> the selected file in a preview, then Ask the Lead with its last two replies. The composer can attach the file you are reading.</li>
+      <li><b>Scale:</b> the schedule list caps at 400px and scrolls inside itself. From 8 schedules up it gets a search field. The header row stays on top.</li>
+      <li><b>No Overview</b> for a group with no schedule and no files. It appears when the group gets its first schedule or its first file.</li>
+    </ul>
+  </div>
+
+  <p class="x-narrow">The desktop states need a window wider than 760px. The phone frames follow.</p>
+
+  <section class="x-state x-desk">
+    <h2><span class="k">1</span>Overview tab, 3 schedules, report preview open</h2>
+    <p class="x-cap">The default view of a use case. Click a file to preview it, a Template link to read the task, the caret next to Run now to run another schedule, or the tabs to switch.</p>
+    <div class="app inset" style="--h: 920px"><nav class="side" data-active="sessions" data-rail aria-label="Main navigation, state 1"></nav><div class="main" data-frame="overview" data-count="3"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2><span class="k">2</span>Overview tab, 50 schedules, search for "pricing"</h2>
+    <p class="x-cap">A big swarm. The search matches names, agents and cadences, and the list keeps its sticky header and its scrollbar gutter. One template is open, and the row under the pointer shows Run now in place of its next run. Type in the field to filter.</p>
+    <div class="app inset" style="--h: 1060px"><nav class="side" data-active="sessions" data-rail aria-label="Main navigation, state 2"></nav><div class="main" data-frame="overview" data-count="50"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2><span class="k">3</span>List tab active, next to the pinned Overview</h2>
+    <p class="x-cap">The session list as it is today: title row, filter bar, grid and pager. The pinned Overview tab sits first, with a pin in place of the close button. It closes when its list tab closes.</p>
+    <div class="app inset" style="--h: 700px"><nav class="side" data-active="sessions" data-rail aria-label="Main navigation, state 3"></nav><div class="main" data-frame="list" data-count="3"></div></div>
+  </section>
+
+  <section class="x-state x-desk">
+    <h2><span class="k">4</span>A plain thread group: no Overview tab</h2>
+    <p class="x-cap"><span class="mono">ui-e2e</span> has no schedule and no files under its key, so it opens one tab, as today. Nothing in the list chrome hints at an empty Overview.</p>
+    <div class="app inset" style="--h: 620px"><nav class="side" data-active="sessions" data-rail aria-label="Main navigation, state 4"></nav><div class="main" data-frame="plain" data-count="0"></div></div>
+  </section>
+
+  <section class="x-state">
+    <h2>Phone</h2>
+    <p class="x-cap">A phone has no tab strip. The group screen shows the two tabs as underline tabs under its top bar. The Overview is one column: next run, outputs with the newest report open, schedules, then the Lead. The composer stays at the bottom.</p>
+    <div class="x-row">
+      <div class="x-col"><h3>1. Overview, top</h3><div class="phone" data-pframe="overview"></div></div>
+      <div class="x-col"><h3>1. Overview, scrolled</h3><div class="phone" data-pframe="overview" data-scroll="sched"></div></div>
+      <div class="x-col"><h3>3. List tab</h3><div class="phone" data-pframe="list"></div></div>
+    </div>
+  </section>
+</main>
+
+<script src="./r2-kit.js"></script>
+<script src="./r3-overview.js"></script>
+</body>
+</html>

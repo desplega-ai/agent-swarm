@@ -107,7 +107,7 @@ Deploys the [agent-fs](https://github.com/desplega-ai/agent-fs) HTTP service alo
 agentFs:
   enabled: true
   image:
-    tag: 0.18.22
+    tag: 0.18.23
   bucket: my-agent-fs-bucket
   # Optional. When blank, the API boot seeder registers a service user with
   # agent-fs and stores the generated bootstrap key in encrypted swarm_config.
@@ -120,7 +120,7 @@ agentFs:
     provider: local                         # Or openai/gemini + apiKey
 ```
 
-Files (Comb) in the dashboard is on by default, but only when a browser can reach agent-fs, and the in-cluster `AGENT_FS_API_URL` never qualifies. The chart sets `AGENT_FS_PUBLIC_URL` from `agentFs.publicUrl`, else from `agentFs.ingress.host` when that ingress is enabled. Or set `agentFs.proxy: true` to serve agent-fs through the API at `/agentfs` (this also exposes agent-fs's public `/share/*` and `/site/*` pages on the API origin). With none of the three, Files stays off.
+The chart defaults `agentFs.proxy` to `true` and serves agent-fs through the API at `/agentfs`. This also exposes public `/share/*` and `/site/*` pages on the API origin. Files (Comb) requires a browser-reachable API URL, derived from `ingress.host` or set through `PUBLIC_MCP_BASE_URL`. Set `agentFs.proxy: false` to disable the proxy. With the proxy disabled, Files requires a public agent-fs URL. The chart derives that URL from `agentFs.publicUrl` or `agentFs.ingress.host` when the agent-fs ingress is enabled.
 
 Local-disk variant (no bucket; objects live on the agent-fs PVC, so keep that PVC backed up):
 

@@ -43,9 +43,10 @@ export function useCredentialBindings() {
   });
 }
 
-export function useOAuthApps() {
+export function useOAuthApps(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["oauth-apps"],
+    enabled: options.enabled ?? true,
     queryFn: () => api.fetchOAuthApps(),
     select: (data) => data.oauthApps as OAuthAppSummary[],
   });

@@ -1,29 +1,6 @@
-import {
-  Activity,
-  Bot,
-  Brain,
-  Bug,
-  ChartLine,
-  Cloud,
-  ExternalLink,
-  GitBranch,
-  Github,
-  GitMerge,
-  Info,
-  KeyRound,
-  ListChecks,
-  type LucideIcon,
-  Mail,
-  MessageCircle,
-  MessageSquare,
-  Mic,
-  Plug,
-  Route,
-  Sparkles,
-  SquareCheckBig,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { ExternalLink, Info, MoreHorizontal, Plug } from "lucide-react";
+import { type ComponentType, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useChatSdkStatus } from "@/api/hooks/use-chat-sdk";
 import {
@@ -39,15 +16,15 @@ import {
 import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
+import { ChannelStatusChip } from "@/components/integrations/channel-status-chip";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
+import { IntegrationLogo } from "@/components/integrations/integration-card";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
 import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
-import { ProviderIcon } from "@/components/shared/provider-icon";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,15 +36,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { DetailPageBody } from "@/components/ui/detail-page-layout";
 import {
-  DetailPageBody,
-  DetailPageRail,
-  QuickStat,
-  QuickStats,
-  Relationship,
-  Relationships,
-} from "@/components/ui/detail-page-layout";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
+import { adapterChannelState, CHANNEL_DEFS } from "@/lib/channel-cards";
+import { CHAT_SDK_ADAPTER_DEFS } from "@/lib/chat-sdk-fields";
 import {
   buildInitialState,
   computeDirtyEntries,
@@ -77,6 +55,8 @@ import {
   SECRET_MASK_SENTINEL,
 } from "@/lib/integration-form-state";
 import {
+  connectPageHref,
+  connectPageTitle,
   getIntegrationFields,
   getPresenceKeys,
   INTEGRATIONS,
@@ -85,33 +65,21 @@ import {
   type IntegrationField,
 } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
+import { cn } from "@/lib/utils";
+import { BitbucketPane, GitHubPane, GitLabPane } from "@/pages/setup/steps/integrations/git-panes";
+import { SlackPane } from "@/pages/setup/steps/integrations/slack-pane";
+import type { PaneProps } from "@/pages/setup/steps/integrations/use-config-form";
 
-// Mirror of the ICON_MAP in integration-card. Keeps the detail page rendering
-// the same icon as the card without a round-trip import.
-const ICON_MAP: Record<string, LucideIcon> = {
-  "message-square": MessageSquare,
-  "message-circle": MessageCircle,
-  github: Github,
-  "git-merge": GitMerge,
-  "git-branch": GitBranch,
-  "square-check-big": SquareCheckBig,
-  "list-checks": ListChecks,
-  activity: Activity,
-  bug: Bug,
-  mail: Mail,
-  brain: Brain,
-  sparkles: Sparkles,
-  bot: Bot,
-  route: Route,
-  "key-round": KeyRound,
-  "chart-line": ChartLine,
-  cloud: Cloud,
-  mic: Mic,
+/**
+ * The numbered setup guide `/setup` shows for these integrations (create the
+ * app, then paste the tokens). It saves as you type, like `/setup`.
+ */
+const SETUP_GUIDES: Record<string, ComponentType<PaneProps>> = {
+  slack: SlackPane,
+  github: GitHubPane,
+  gitlab: GitLabPane,
+  bitbucket: BitbucketPane,
 };
-
-function resolveIcon(iconKey: string): LucideIcon {
-  return ICON_MAP[iconKey] ?? Plug;
-}
 
 export default function IntegrationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -147,7 +115,7 @@ export default function IntegrationDetailPage() {
           description={`No integration matches "${id ?? ""}".`}
           action={
             <Button asChild size="sm" variant="outline">
-              <Link to="/settings/integrations">← Back to integrations</Link>
+              <Link to="/integrations/tools">← Back to Connect</Link>
             </Button>
           }
         />
@@ -191,19 +159,19 @@ function IntegrationDetailInner({
   envPresence,
   envPresenceRevision,
 }: InnerProps) {
-  const Icon = resolveIcon(def.iconKey);
-  // A provider glyph (`ProviderIcon`) wins, then a logo file, then the lucide icon.
-  const logo = def.providerIconKey ? (
-    <ProviderIcon provider={def.providerIconKey} className="h-6 w-6 text-foreground opacity-100" />
-  ) : def.logoSrc ? (
-    <BrandLogo src={def.logoSrc} className="size-6 text-foreground" />
-  ) : (
-    <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
-  );
+  const logo = <IntegrationLogo def={def} className="size-6" />;
   const chatSdkStatus = useChatSdkStatus({ enabled: def.id === "chat-sdk", poll: false });
   const status = deriveIntegrationStatus(def, configs, envPresence, {
     chatSdkEnabled: chatSdkStatus.data?.enabled,
   });
+  // `?adapter=` (from Connect › Channels): one Chat SDK adapter, with its own header.
+  const [searchParams] = useSearchParams();
+  const adapterParam = searchParams.get("adapter");
+  const adapter =
+    def.id === "chat-sdk"
+      ? CHAT_SDK_ADAPTER_DEFS.find((candidate) => candidate.name === adapterParam)?.name
+      : undefined;
+  const channel = adapter ? CHANNEL_DEFS.find((c) => c.adapter === adapter) : undefined;
   const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);
@@ -352,42 +320,136 @@ function IntegrationDetailInner({
     ? []
     : allFields.filter((f) => f.required === true || (f.advanced !== true && !f.required));
   const advancedFields = allAdvanced ? allFields : allFields.filter((f) => f.advanced === true);
-  const strictRequiredFields = allFields.filter((f) => f.required === true);
   const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
   const isGithub = def.id === "github";
+  const SetupGuide = SETUP_GUIDES[def.id];
+
+  const formBody = (
+    <>
+      {isReplaced ? null : allFields.length === 0 ? (
+        <EmptyState
+          icon={Plug}
+          title="No configurable fields"
+          description="This integration has no key/value fields. See the docs for the required setup steps."
+        />
+      ) : hasConfigGroups ? (
+        <ConfigGroupSections
+          groups={def.configGroups ?? []}
+          state={state}
+          configs={configs}
+          envPresence={envPresence}
+          onUpdate={updateField}
+          onClearField={handleClearField}
+        />
+      ) : (
+        <div className="space-y-6">
+          {isGithub && (
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                PAT mode is the default. For GitHub App mode (recommended in production), open{" "}
+                <em>Advanced</em>.
+              </span>
+            </p>
+          )}
+
+          {requiredFields.length > 0 && (
+            <FieldGroup
+              title="Required"
+              fields={requiredFields}
+              state={state}
+              configs={configs}
+              envPresence={envPresence}
+              onUpdate={updateField}
+              onClearField={handleClearField}
+            />
+          )}
+
+          {advancedFields.length > 0 && (
+            <details className="border border-border rounded-md">
+              <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
+                Advanced ({advancedFields.length})
+              </summary>
+              <div className="px-4 pb-4 pt-2">
+                <FieldGroup
+                  title=""
+                  fields={advancedFields}
+                  state={state}
+                  configs={configs}
+                  envPresence={envPresence}
+                  onUpdate={updateField}
+                  onClearField={handleClearField}
+                  bare
+                />
+              </div>
+            </details>
+          )}
+
+          {def.recommendedSkills && def.recommendedSkills.length > 0 && (
+            <RecommendedSkillsSection recommendedSkills={def.recommendedSkills} />
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-6">
+    // The page owns its scroll: on lg the main column does not scroll.
+    <div className="flex flex-col flex-1 min-h-0 gap-6 overflow-y-auto">
       {/* Header */}
       <div className="flex flex-col gap-2">
         <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
-          <Link to="/settings/integrations">← All integrations</Link>
+          <Link to={connectPageHref(def)}>← All {connectPageTitle(def.category)}</Link>
         </Button>
         <PageHeader
           title={
             /* Integration name lives in the breadcrumb. Logo + blurb here. */
             <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
-                {logo}
+                {channel?.logoSrc ? (
+                  <BrandLogo src={channel.logoSrc} className="size-6 text-foreground" />
+                ) : (
+                  logo
+                )}
               </div>
-              <p className="min-w-0 text-sm text-muted-foreground">{def.description}</p>
+              {/* Two lines below lg so the first field stays near the top of a phone screen. */}
+              <p className="min-w-0 text-sm text-muted-foreground max-lg:line-clamp-2">
+                {channel ? `${channel.name}: ${channel.description}` : def.description}
+              </p>
             </div>
           }
-          action={<IntegrationStatusBadge status={status} />}
+          action={
+            <div className="flex items-center gap-2">
+              {adapter ? (
+                <ChannelStatusChip chip={adapterChannelState(chatSdkStatus.data, adapter).chip} />
+              ) : (
+                <IntegrationStatusBadge status={status} />
+              )}
+              {def.docsUrl ? (
+                <Button asChild size="sm" variant="outline">
+                  <a href={def.docsUrl} target="_blank" rel="noopener noreferrer">
+                    Docs
+                    <ExternalLink aria-hidden />
+                  </a>
+                </Button>
+              ) : null}
+            </div>
+          }
         />
       </div>
 
       <DetailPageBody
         main={
-          <div className="space-y-6">
+          <div className="flex flex-col gap-6">
             {/* Action bar, hidden when a special flow replaces the generic form. */}
+            {/* Below lg the bar moves under the form and sticks to the bottom; Disable and Reset go into a "…" menu. */}
             {!isReplaced && (
-              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20 max-lg:order-last max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:flex-nowrap max-lg:bg-background/95 max-lg:backdrop-blur max-lg:shadow-sm max-lg:p-2">
                 <Button
                   onClick={handleSave}
                   disabled={!hasDirty || upsertBatch.isPending}
-                  className="bg-primary hover:bg-primary/90"
+                  className="bg-primary hover:bg-primary/90 max-lg:flex-1"
                   size="sm"
                 >
                   {upsertBatch.isPending
@@ -404,12 +466,13 @@ function IntegrationDetailInner({
                     size="sm"
                     onClick={handleToggleDisable}
                     disabled={upsertBatch.isPending}
+                    className="max-lg:hidden"
                   >
                     {isDisabled ? "Enable" : "Disable"} {def.name}
                   </Button>
                 )}
 
-                <div className="flex-1" />
+                <div className="flex-1 max-lg:hidden" />
 
                 <Button
                   type="button"
@@ -417,11 +480,55 @@ function IntegrationDetailInner({
                   size="sm"
                   onClick={() => setConfirmResetOpen(true)}
                   disabled={deleteBatch.isPending}
+                  className="max-lg:hidden"
                 >
                   Reset integration
                 </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 lg:hidden"
+                      aria-label={`More ${def.name} actions`}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="top">
+                    {def.disableKey && (
+                      <DropdownMenuItem
+                        onSelect={handleToggleDisable}
+                        disabled={upsertBatch.isPending}
+                      >
+                        {isDisabled ? "Enable" : "Disable"} {def.name}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => setConfirmResetOpen(true)}
+                      disabled={deleteBatch.isPending}
+                    >
+                      Reset integration
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
+
+            {/* The step-by-step guide, ABOVE the generic form. */}
+            {SetupGuide ? (
+              <section className="space-y-3 rounded-md border border-border bg-card p-4">
+                <h2 className="text-sm font-semibold">Setup steps</h2>
+                <SetupGuide
+                  configs={configs}
+                  presence={envPresence}
+                  connected={status === "configured"}
+                />
+              </section>
+            ) : null}
 
             {/* Special flow (OAuth card, CLI explainer, embeddings form), ABOVE the generic form. */}
             {specialFlow && (
@@ -430,103 +537,22 @@ function IntegrationDetailInner({
                 configs={configs}
                 envPresence={envPresence}
                 envPresenceRevision={envPresenceRevision}
+                adapter={adapter}
               />
             )}
 
-            {/* Body */}
-            {isReplaced ? null : allFields.length === 0 ? (
-              <EmptyState
-                icon={Plug}
-                title="No configurable fields"
-                description="This integration has no key/value fields. See the docs for the required setup steps."
-              />
-            ) : hasConfigGroups ? (
-              <ConfigGroupSections
-                groups={def.configGroups ?? []}
-                state={state}
-                configs={configs}
-                envPresence={envPresence}
-                onUpdate={updateField}
-                onClearField={handleClearField}
-              />
+            {/* Body: behind "All settings" when the guide above covers the setup. */}
+            {SetupGuide ? (
+              <details className="rounded-md border border-border">
+                <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium">
+                  All settings
+                </summary>
+                <div className="px-4 pb-4 pt-2">{formBody}</div>
+              </details>
             ) : (
-              <div className="space-y-6">
-                {isGithub && (
-                  <Alert>
-                    <Info className="h-4 w-4" />
-                    <AlertDescription>
-                      <p className="leading-relaxed">
-                        <strong>PAT mode is the default and simpler path.</strong> For GitHub App
-                        integration (recommended for production), expand <em>Advanced</em> below and
-                        fill{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_ID
-                        </code>{" "}
-                        +{" "}
-                        <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                          GITHUB_APP_PRIVATE_KEY
-                        </code>
-                        .
-                      </p>
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {requiredFields.length > 0 && (
-                  <FieldGroup
-                    title="Required"
-                    fields={requiredFields}
-                    state={state}
-                    configs={configs}
-                    envPresence={envPresence}
-                    onUpdate={updateField}
-                    onClearField={handleClearField}
-                  />
-                )}
-
-                {advancedFields.length > 0 && (
-                  <details className="border border-border rounded-md">
-                    <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
-                      Advanced ({advancedFields.length})
-                    </summary>
-                    <div className="px-4 pb-4 pt-2">
-                      <FieldGroup
-                        title=""
-                        fields={advancedFields}
-                        state={state}
-                        configs={configs}
-                        envPresence={envPresence}
-                        onUpdate={updateField}
-                        onClearField={handleClearField}
-                        bare
-                      />
-                    </div>
-                  </details>
-                )}
-
-                {def.recommendedSkills && def.recommendedSkills.length > 0 && (
-                  <RecommendedSkillsSection recommendedSkills={def.recommendedSkills} />
-                )}
-              </div>
+              formBody
             )}
           </div>
-        }
-        rail={
-          <DetailPageRail>
-            <QuickStats>
-              <QuickStat label="Status" value={status} />
-              <QuickStat label="Total fields" value={allFields.length} />
-              <QuickStat label="Required" value={strictRequiredFields.length} />
-              <QuickStat label="Advanced" value={advancedFields.length} />
-              {def.disableKey && <QuickStat label="Disabled" value={isDisabled ? "Yes" : "No"} />}
-            </QuickStats>
-
-            <Relationships>
-              <Relationship label="Docs" href={def.docsUrl}>
-                <ExternalLink className="h-3 w-3" />
-              </Relationship>
-            </Relationships>
-          </DetailPageRail>
         }
       />
 
@@ -675,28 +701,31 @@ function FieldGroup({
 }: FieldGroupProps) {
   const poolLists = usePoolKeysSupport() !== "legacy";
   const content = (
-    <div className="space-y-5">
+    <div className="grid gap-x-6 gap-y-5 lg:grid-cols-2">
       {fields.map((f) => {
         const existing = findConfigForKey(configs, f.key);
         const current = state[f.key] ?? { value: "" };
+        // Multi-line values and key pools need the full width.
+        const wide = f.type === "textarea" || f.credentialPool === true;
         return (
-          <FieldRenderer
-            key={f.key}
-            field={f}
-            existingConfig={existing}
-            inEnv={!!envPresence[f.key]}
-            value={current.value}
-            markedForReplace={!!current.markedForReplace}
-            onChange={(v) => onUpdate(f.key, { value: v })}
-            onMarkForReplace={() => onUpdate(f.key, { value: "", markedForReplace: true })}
-            onUnmarkForReplace={() =>
-              onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
-            }
-            // A pool field removes its keys one at a time in its own list.
-            onClearExisting={
-              existing && !(f.credentialPool && poolLists) ? () => onClearField(f.key) : undefined
-            }
-          />
+          <div key={f.key} className={cn("min-w-0", wide && "lg:col-span-2")}>
+            <FieldRenderer
+              field={f}
+              existingConfig={existing}
+              inEnv={!!envPresence[f.key]}
+              value={current.value}
+              markedForReplace={!!current.markedForReplace}
+              onChange={(v) => onUpdate(f.key, { value: v })}
+              onMarkForReplace={() => onUpdate(f.key, { value: "", markedForReplace: true })}
+              onUnmarkForReplace={() =>
+                onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
+              }
+              // A pool field removes its keys one at a time in its own list.
+              onClearExisting={
+                existing && !(f.credentialPool && poolLists) ? () => onClearField(f.key) : undefined
+              }
+            />
+          </div>
         );
       })}
     </div>

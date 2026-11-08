@@ -523,7 +523,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.22. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.23. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -656,13 +656,37 @@ Files shared with the bot, and files fetched by task-scoped `slack-read` or `sla
 
 ### Configuration
 
-Keep `SLACK_MODE=socket` for working Slack ingress. The `http` value validates
-`SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, but the HTTP receiver is not yet
-available: no listener or Socket Mode fallback is started. Invalid mode values
-also leave Slack unavailable.
+Set `SLACK_MODE=http` to receive Slack over signed HTTP instead of Socket Mode. The
+API serves one request URL, `POST /api/integrations/slack/events`, for events, slash
+commands and interactivity. It needs `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, never
+reads `SLACK_APP_TOKEN`, and opens no socket. Each request is verified (HMAC v0 over the
+raw body, timestamp within 5 minutes) before any work; a delivery for another workspace
+is refused with 403, and events are stored before the 200, so a Slack retry never
+creates a second task. HTTP mode is also the way to run several swarms against one
+Slack app without Socket Mode cross-delivery. Invalid mode values leave Slack
+unavailable and never fall back to a socket.
+
+In the Slack app manifest, set `settings.socket_mode_enabled: false` and point the
+request URLs at your public API (`<API>` is the swarm's public base URL):
+
+```json
+{
+  "features": {
+    "slash_commands": [
+      { "command": "/agent-swarm-status", "url": "<API>/api/integrations/slack/events", "description": "Check status of available agents", "should_escape": false },
+      { "command": "/agent-swarm-help", "url": "<API>/api/integrations/slack/events", "description": "Show help for using the Agent Swarm bot", "should_escape": false }
+    ]
+  },
+  "settings": {
+    "event_subscriptions": { "request_url": "<API>/api/integrations/slack/events" },
+    "interactivity": { "is_enabled": true, "request_url": "<API>/api/integrations/slack/events" },
+    "socket_mode_enabled": false
+  }
+}
+```
 
 ```bash
-# Socket Mode (default and currently available)
+# Socket Mode (default)
 SLACK_MODE=socket
 SLACK_BOT_TOKEN=xoxb-...      # Bot User OAuth Token
 SLACK_APP_TOKEN=xapp-...      # App-Level Token (Socket Mode)
@@ -753,7 +777,7 @@ Enable GitHub webhooks for automated task creation from PR reviews and issue ass
 
 ### Setup
 
-1. Create a GitHub App at https://github.com/settings/apps/new
+1. Create a GitHub App at https://github.com/settings/apps/new (GitHub Enterprise Server: `https://<host>/settings/apps/new`, and set `GITHUB_URL=https://<host>` on the API and every worker; see the GitHub integration docs)
 2. Set webhook URL to your server: `https://your-server.com/github/webhook`
 3. Generate a webhook secret
 4. (Optional) Generate a private key for bot reactions

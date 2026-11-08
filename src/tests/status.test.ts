@@ -106,6 +106,8 @@ const ENV_KEYS_TO_RESET = [
   "GITHUB_WEBHOOK_SECRET",
   "GITHUB_APP_ID",
   "GITHUB_APP_PRIVATE_KEY",
+  "GITHUB_URL",
+  "GITHUB_API_URL",
   "AGENT_FS_API_URL",
   "API_AGENT_FS_API_KEY",
   "AGENT_FS_API_KEY",
@@ -258,6 +260,30 @@ describe("buildStatusPayload — telemetry", () => {
     expect((await buildStatusPayload()).telemetry?.enabled).toBe(false);
     process.env.ANONYMIZED_TELEMETRY = "true";
     expect((await buildStatusPayload()).telemetry?.enabled).toBe(true);
+  });
+});
+
+// ─── GitHub web base ─────────────────────────────────────────────────────────
+
+describe("buildStatusPayload — github", () => {
+  test("defaults to github.com", async () => {
+    expect((await buildStatusPayload()).github).toEqual({
+      web_url: "https://github.com",
+      enterprise: false,
+    });
+  });
+
+  test("reports the GITHUB_URL web base for GitHub Enterprise Server", async () => {
+    process.env.GITHUB_URL = "https://ghe.test/";
+    expect((await buildStatusPayload()).github).toEqual({
+      web_url: "https://ghe.test",
+      enterprise: true,
+    });
+  });
+
+  test("leaves the field out on an invalid GITHUB_URL instead of failing /status", async () => {
+    process.env.GITHUB_URL = "https://ghe.test/sub/path";
+    expect((await buildStatusPayload()).github).toBeUndefined();
   });
 });
 
@@ -524,8 +550,8 @@ describe("setup milestones", () => {
     delete process.env.SLACK_APP_TOKEN;
     process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
     const http = await buildStatusPayload();
-    expect(getMilestone(http, "slack").state).toBe("unverified");
-    expect(getMilestone(http, "slack").hint).toContain("unavailable");
+    expect(getMilestone(http, "slack").state).toBe("configured");
+    expect(getMilestone(http, "slack").hint).toContain("receiver is not ready");
 
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
@@ -578,9 +604,9 @@ describe("setup milestones", () => {
     expect(getMilestone(empty, "gsc").state).toBe("unverified");
     expect(getMilestone(empty, "agentmail").state).toBe("unverified");
     expect(getMilestone(empty, "agentfs").state).toBe("unverified");
-    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/integrations/gsc");
-    expect(getMilestone(empty, "agentmail").action_url).toBe("/settings/integrations/agentmail");
-    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/integrations/agentfs");
+    expect(getMilestone(empty, "gsc").action_url).toBe("/integrations/gsc");
+    expect(getMilestone(empty, "agentmail").action_url).toBe("/integrations/agentmail");
+    expect(getMilestone(empty, "agentfs").action_url).toBe("/integrations/agentfs");
 
     process.env.GSC_SERVICE_ACCOUNT_BASE64 = "encoded-service-account";
     process.env.AGENTMAIL_API_KEY = "am_test";
@@ -723,7 +749,7 @@ describe("automation setup status", () => {
         missing: { params: ["REPO_URL"], integrations: ["github"] },
         fixes: [
           { type: "param", key: "REPO_URL", url: `/schedules/${schedule.id}?param=REPO_URL` },
-          { type: "integration", key: "github", url: "/settings/integrations/github" },
+          { type: "integration", key: "github", url: "/integrations/github" },
         ],
         fixUrl: `/schedules/${schedule.id}?param=REPO_URL`,
       },

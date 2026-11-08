@@ -226,6 +226,18 @@ const FRAME_CLASS = cn(
   "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
 );
 
+/**
+ * The frame in the normal (non-full) route: it takes whatever height the header
+ * leaves, so the page body is the only thing that scrolls (`calc(100vh - 6rem)`
+ * guessed the header and overshot `<main>` by a few pixels on a phone, which
+ * gave a second, outer scroll).
+ */
+const FRAME_FILL_CLASS = cn(
+  "w-full min-h-[24rem] flex-1 rounded-md border border-border bg-background",
+  // Below md the frame bleeds through `<main>`'s gutter on every side but the top.
+  "max-md:-mx-4 max-md:-mb-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0 max-md:border-b-0",
+);
+
 function PageIframe({
   src,
   title,
@@ -445,8 +457,15 @@ function PageBody({
 }: Omit<FrameProps, "title"> & { data: PageMetadata }) {
   if (data.contentType === "application/json") {
     return (
-      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
-        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div
+        className={cn(
+          "rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]",
+          // A phone gives the page its full width, like the HTML frame.
+          "max-md:-mx-4 max-md:rounded-none max-md:border-x-0 max-md:p-4",
+        )}
+      >
+        {/* The tag names the renderer: desktop keeps it, a phone has no room to spare. */}
+        <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground max-md:hidden">
           <Braces className="size-3" />
           <span>JSON-rendered page</span>
         </div>
@@ -475,10 +494,13 @@ export function PagePreviewBody({
   id,
   frameQuery,
   className,
+  revision,
 }: {
   id: string;
   frameQuery: string;
   className?: string;
+  /** A new value reloads the HTML frame (the app `PageFrame` passes the page's `updatedAt`). */
+  revision?: string;
 }) {
   const viewer = useTheme();
   const { data, error, isLoading } = useQuery({
@@ -499,6 +521,7 @@ export function PagePreviewBody({
       data={data}
       frameQuery={withViewerTheme(frameQuery, viewer)}
       className={className}
+      revision={revision}
     />
   );
 }
@@ -698,6 +721,7 @@ export default function ArtifactPage() {
       data={data}
       frameQuery={themedFrameQuery}
       iframeRef={iframeRef}
+      className={fullMode ? undefined : FRAME_FILL_CLASS}
       revision={`${frameInstance}-${frameRevision}`}
     />
   );
@@ -728,7 +752,7 @@ export default function ArtifactPage() {
   }
 
   return (
-    <div ref={pageVersion.scopeRef} className="flex flex-1 flex-col min-h-0 gap-4">
+    <div ref={pageVersion.scopeRef} className="flex flex-1 flex-col min-h-0 gap-4 max-md:gap-2">
       <PageHeader
         // One row at every width: the summary truncates, the icon actions
         // keep their size.

@@ -25,6 +25,7 @@
 
 import {
   ActionProvider,
+  createStateStore,
   defineRegistry,
   Renderer,
   StateProvider,
@@ -41,6 +42,11 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import {
+  installChainHaltGuard,
+  withChainOnError,
+  withChainOnErrorHandlers,
+} from "@/lib/json-render/chain-halt";
 
 // Re-exported for backwards compatibility with existing importers of the
 // action schemas / catalog (they now live in `@/lib/json-render`).
@@ -57,6 +63,13 @@ export interface JsonPageRendererProps {
 interface ActionState {
   lastResponse: unknown;
   actionError: string | null;
+}
+
+/** A json-render spec names its `root` element and carries an `elements` map. */
+function isSpecLike(spec: unknown): boolean {
+  if (typeof spec !== "object" || spec === null) return false;
+  const candidate = spec as { root?: unknown; elements?: unknown };
+  return typeof candidate.root === "string" && typeof candidate.elements === "object";
 }
 
 export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
@@ -83,10 +96,12 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
   type CompiledErr = { kind: "err"; parseError: string };
   // `ui.toast`'s Undo runs its chain through the current handler map.
   const handlersRef = useRef<ActionHandlerMap | null>(null);
+  // Controlled so a step's `onError: { set }` can write to it (`withChainOnErrorHandlers`).
+  const [store] = useState(() => createStateStore({}));
   const compiled = useMemo<CompiledOk | CompiledErr>(() => {
     let spec: unknown;
     try {
-      spec = JSON.parse(body);
+      spec = withChainOnError(JSON.parse(body));
     } catch (e) {
       return {
         kind: "err",
@@ -124,14 +139,18 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     // handlers factory: pass setState/state getters that the registered
     // action fns ignore — our action fns close over `updateState` directly
     // (the catalog actions don't write into the StateProvider's state model).
-    const handlerMap = handlers(
-      () => () => {
-        /* no-op SetState — we manage UI state via updateState above */
-      },
-      () => ({}),
+    const handlerMap = withChainOnErrorHandlers(
+      handlers(
+        () => () => {
+          /* no-op SetState — we manage UI state via updateState above */
+        },
+        () => ({}),
+      ),
+      { set: (path, value) => store.set(path, value) },
     );
     return { kind: "ok", spec, registry, handlers: handlerMap };
-  }, [body, fetchImpl]);
+  }, [body, fetchImpl, store]);
+  useEffect(() => installChainHaltGuard(), []);
   useEffect(() => {
     handlersRef.current = compiled.kind === "ok" ? compiled.handlers : null;
   }, [compiled]);
@@ -156,6 +175,19 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
   // the success variant by TS's flow analysis.
   const { spec, registry, handlers } = compiled;
 
+  // Valid JSON that is not a json-render spec (no `root` + `elements`) renders
+  // as nothing at all: an empty card. Show the JSON itself instead.
+  if (!isSpecLike(spec)) {
+    return (
+      <pre
+        data-testid="json-page-renderer-raw"
+        className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/80 [overflow-wrap:anywhere]"
+      >
+        {JSON.stringify(spec, null, 2)}
+      </pre>
+    );
+  }
+
   let renderedSpec: React.ReactNode;
   try {
     renderedSpec = <Renderer spec={spec as never} registry={registry} />;
@@ -174,7 +206,7 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
           {state.actionError}
         </AlertCallout>
       )}
-      <StateProvider>
+      <StateProvider store={store}>
         <VisibilityProvider>
           <ActionProvider handlers={handlers}>{renderedSpec}</ActionProvider>
         </VisibilityProvider>

@@ -419,6 +419,53 @@ export function useRetryTask() {
   });
 }
 
+/** The tag that hides a failed task from Home's Needs you. */
+export const DISMISSED_TAG = "ui:dismissed";
+
+/**
+ * Add and remove task tags. The cached task lists change at once (a dismissed
+ * failure leaves Needs you on the click) and roll back when the write fails.
+ */
+export function useUpdateTaskTags() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AgentTask,
+    Error,
+    { id: string; add?: string[]; remove?: string[] },
+    TaskMutationContext
+  >({
+    mutationFn: ({ id, add, remove }) => api.updateTaskTags(id, { add, remove }),
+    onMutate: async ({ id, add = [], remove = [] }) => {
+      await queryClient.cancelQueries({ queryKey: ["tasks"] });
+      const context = snapshotTaskQueries(queryClient, id);
+      const removed = new Set(remove);
+      const retag = (tags: string[] | undefined) =>
+        Array.from(new Set([...(tags ?? []), ...add])).filter((tag) => !removed.has(tag));
+      for (const [key] of queryClient.getQueriesData<TasksCache>({ queryKey: ["tasks"] })) {
+        queryClient.setQueryData<TasksCache>(key, (prev) =>
+          prev
+            ? {
+                ...prev,
+                tasks: prev.tasks.map((row) =>
+                  row.id === id ? { ...row, tags: retag(row.tags) } : row,
+                ),
+              }
+            : prev,
+        );
+      }
+      return context;
+    },
+    onError: (err, _vars, context) => {
+      rollbackTaskQueries(queryClient, context);
+      toast.error(err.message || "Failed to update the task tags");
+    },
+    onSettled: (_data, _err, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task", id] });
+    },
+  });
+}
+
 export function useCancelTask() {
   const queryClient = useQueryClient();
   return useMutation<

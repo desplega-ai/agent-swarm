@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.8.3",
+    "version": "2.9.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2494,7 +2494,8 @@
               "page",
               "workflow",
               "schedule",
-              "agent-fs-path"
+              "agent-fs-path",
+              "key"
             ]
           },
           "itemId": {
@@ -2517,6 +2518,139 @@
           "id",
           "itemType",
           "itemId",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
+      "ChecklistItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "swarm",
+              "user"
+            ]
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "channel",
+              "tool",
+              "use_case",
+              "custom"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "href": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "meta": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {}
+          },
+          "sortOrder": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "done",
+              "removed"
+            ]
+          },
+          "statusChangedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusChangedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusChangedByName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "statusReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nudgedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nudgedTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signal": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "userId",
+          "kind",
+          "label",
+          "href",
+          "meta",
+          "sortOrder",
+          "status",
+          "statusChangedAt",
+          "statusChangedBy",
+          "statusChangedByName",
+          "statusReason",
+          "nudgedAt",
+          "nudgedTaskId",
+          "signal",
+          "done",
+          "editable",
           "createdAt",
           "lastUpdatedAt"
         ]
@@ -11327,6 +11461,9 @@
                                   "cli",
                                   "sdk"
                                 ]
+                              },
+                              "onDemand": {
+                                "type": "boolean"
                               }
                             },
                             "required": [
@@ -12616,6 +12753,9 @@
                             "cli",
                             "sdk"
                           ]
+                        },
+                        "onDemand": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -14829,7 +14969,7 @@
       },
       "get": {
         "summary": "List approval requests with optional filters",
-        "description": "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
+        "description": "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -15398,6 +15538,10 @@
                               },
                               "questionCount": {
                                 "type": "integer"
+                              },
+                              "viewerCanRespond": {
+                                "type": "boolean",
+                                "description": "Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed)."
                               }
                             },
                             "required": [
@@ -22776,7 +22920,8 @@
                 "page",
                 "workflow",
                 "schedule",
-                "agent-fs-path"
+                "agent-fs-path",
+                "key"
               ]
             },
             "required": false,
@@ -22855,7 +23000,8 @@
                       "page",
                       "workflow",
                       "schedule",
-                      "agent-fs-path"
+                      "agent-fs-path",
+                      "key"
                     ]
                   },
                   "itemId": {
@@ -22892,7 +23038,8 @@
                         "page",
                         "workflow",
                         "schedule",
-                        "agent-fs-path"
+                        "agent-fs-path",
+                        "key"
                       ]
                     },
                     "itemId": {
@@ -22919,8 +23066,669 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid asset key for a key favorite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No authenticated principal context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist": {
+      "get": {
+        "summary": "Read the post-onboarding checklist",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checklist items and swarm edit permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChecklistItem"
+                      }
+                    },
+                    "canEditSwarm": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "canEditSwarm"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist/items": {
+      "post": {
+        "summary": "Add a checklist item",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "channel",
+                      "tool",
+                      "use_case",
+                      "custom"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "href": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^\\/(?!\\/)"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "swarm",
+                      "user"
+                    ]
+                  },
+                  "meta": {
+                    "type": "object",
+                    "properties": {
+                      "adapter": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "scope"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added checklist item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "$ref": "#/components/schemas/ChecklistItem"
+                    }
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A user is required for user items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot edit swarm items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An open channel item for the same adapter already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checklist/items/{id}": {
+      "patch": {
+        "summary": "Update a checklist item",
+        "tags": [
+          "Checklist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "remove",
+                      "restore",
+                      "done",
+                      "reorder"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "sortOrder": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated checklist item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "$ref": "#/components/schemas/ChecklistItem"
+                    }
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot edit this item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checklist item not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/me": {
+      "get": {
+        "summary": "Ensure the current user's agent-fs account and shared membership",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account readiness",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "pending",
+                        "off",
+                        "unsupported"
+                      ],
+                      "description": "Account readiness in agent-fs."
+                    },
+                    "agentFsUserId": {
+                      "type": "string",
+                      "description": "User ID in agent-fs when ready."
+                    },
+                    "email": {
+                      "type": "string",
+                      "description": "Email of the swarm user, when available."
+                    },
+                    "displayName": {
+                      "type": "string",
+                      "description": "Name of the swarm user when ready."
+                    },
+                    "orgId": {
+                      "type": "string",
+                      "description": "Shared agent-fs org ID when configured."
+                    },
+                    "driveId": {
+                      "type": "string",
+                      "description": "Shared agent-fs drive ID when configured."
+                    },
+                    "reason": {
+                      "type": "string",
+                      "description": "Reason the account is not ready."
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of twenty account checks per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/keys": {
+      "post": {
+        "summary": "Mint a named agent-fs key for the current user",
+        "description": "The key is scoped to the shared org. The API returns it once and never stores it.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Named key returned once and never stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiKey": {
+                      "type": "string",
+                      "description": "Plaintext key returned once. The API never stores this key."
+                    },
+                    "keyId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "agentFsUserId": {
+                      "type": "string"
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "driveId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "apiKey",
+                    "keyId",
+                    "label",
+                    "agentFsUserId",
+                    "orgId",
+                    "driveId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid key label",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent-fs account or membership is pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of five keys per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "agent_fs_too_old",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent_fs_not_configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fs/continue": {
+      "post": {
+        "summary": "Mint a named agent-fs key for the live agent-fs app and return the redirect URL",
+        "description": "Powers 'Continue with your swarm' on the live agent-fs app. The key travels only in the URL fragment of `redirectUrl`. The API never stores it.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "returnTo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redirect URL with the named key in the fragment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectUrl": {
+                      "type": "string",
+                      "description": "`returnTo` with `#key=<af_...>&apiUrl=<browser-facing agent-fs API URL>` as its only fragment."
+                    }
+                  },
+                  "required": [
+                    "redirectUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_return_to: the origin is not the live agent-fs app (AGENT_FS_LIVE_URL). org_mismatch: the `returnTo` path names an agent-fs org other than this swarm's shared org.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot join the shared org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent-fs account or membership is pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Limit of ten continues per minute reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "agent_fs_too_old",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent_fs_not_configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -24330,6 +25138,9 @@
                               "incomplete"
                             ]
                           },
+                          "connected": {
+                            "type": "boolean"
+                          },
                           "error": {
                             "type": "string"
                           },
@@ -24387,6 +25198,7 @@
                           "configured",
                           "enabled",
                           "health",
+                          "connected",
                           "webhookUrl"
                         ]
                       }
@@ -31396,7 +32208,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
         "tags": [
           "Status"
         ],
@@ -31867,6 +32679,21 @@
                         "tasks_completed",
                         "tasks_failed",
                         "workflow_runs_completed"
+                      ]
+                    },
+                    "github": {
+                      "type": "object",
+                      "properties": {
+                        "web_url": {
+                          "type": "string"
+                        },
+                        "enterprise": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "web_url",
+                        "enterprise"
                       ]
                     }
                   },
@@ -37555,6 +38382,97 @@
         }
       }
     },
+    "/api/tasks/{id}/tags": {
+      "patch": {
+        "summary": "Add or remove task tags",
+        "description": "Adds the `add` tags and removes the `remove` tags. A tag in both lists is removed. Only `ui:` presentation tags are accepted (400 otherwise); tags that drive behaviour are server-owned. The dashboard uses `ui:dismissed` to hide a failed task from Home's Needs you. Does not change `lastUpdatedAt`.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^ui:[a-z0-9][a-z0-9-]{0,60}$"
+                    },
+                    "maxItems": 20
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tags updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/pages": {
       "post": {
         "summary": "Create a new page",
@@ -40007,6 +40925,28 @@
                               },
                               "required": [
                                 "name"
+                              ]
+                            },
+                            "checklistNudge": {
+                              "type": "object",
+                              "properties": {
+                                "itemId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "href": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "itemId",
+                                "kind",
+                                "label"
                               ]
                             },
                             "threadParticipants": {
@@ -48440,6 +49380,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "hiddenInCatalog": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -57667,6 +58610,79 @@
         }
       }
     },
+    "/api/integrations/slack/events": {
+      "post": {
+        "summary": "Slack HTTP ingress (SLACK_MODE=http): Events API, slash commands and interactivity at one request URL",
+        "tags": [
+          "Slack"
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "Malformed body after a valid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid signature, or timestamp outside the 5-minute window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Delivery for a workspace this swarm does not own",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slack is disabled or not in HTTP mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 1 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Receiver not ready, workspace unverified, or backlog full; Slack retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/slack/inbound/diagnostics": {
       "get": {
         "summary": "Operator-only. Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
@@ -59701,7 +60717,19 @@
                     "servers": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/McpServer"
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/McpServer"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "installCount": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
                       }
                     },
                     "total": {

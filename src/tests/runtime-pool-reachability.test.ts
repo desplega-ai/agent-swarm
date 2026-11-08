@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createServer, type Server } from "node:http";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   claimOfferedTask,
   closeDb,
@@ -16,13 +19,20 @@ import {
   createRuntimePool,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
-import { isAgentReachable, isRuntimePoolWakeable } from "../be/runtime-pools/reachability";
+import {
+  isAgentOnDemand,
+  isAgentReachable,
+  isRuntimePoolWakeable,
+} from "../be/runtime-pools/reachability";
 import { codeLevelTriage, gatherSystemStatus, getBootTriageFindings } from "../heartbeat/heartbeat";
+import { handleAgentsRest } from "../http/agents";
 import { routeMessage } from "../slack/router";
 import { resolveLeadOnlyRecoveryAssignment } from "../tasks/worker-follow-up";
+import { registerGetSwarmTool } from "../tools/get-swarm";
 import { sendTaskHandler } from "../tools/send-task";
 import { userCtx } from "../tools/task-tool-ctx";
 import type { RuntimePool } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const dbPath = "./test-runtime-pool-reachability.sqlite";
 const savedFlag = process.env.RUNTIME_POOLS_ENABLED;
@@ -324,5 +334,129 @@ describe("pool agent reachability", () => {
     expect((await gatherSystemStatus({ isBootTriage: true })).includes("Orphaned Tasks")).toBe(
       !enabled,
     );
+  });
+  test.each([
+    true,
+    false,
+  ])("get-swarm marks wakeable pool agents as on demand with pool enabled=%s", async (enabled) => {
+    const lead = await createAgent({ name: "online-lead", isLead: true, status: "idle" });
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    const gone = await createAgent({ name: "gone", isLead: false, status: "offline" });
+    if (!enabled) await updateRuntimePool(pool.id, { enabled: false });
+    const mcp = new McpServer({ name: "get-swarm-on-demand", version: "1.0.0" });
+    registerGetSwarmTool(mcp);
+    const tool = (
+      mcp as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<CallToolResult> }
+        >;
+      }
+    )._registeredTools["get-swarm"];
+    const result = await tool!.handler(
+      {},
+      { sessionId: "test-session", requestInfo: { headers: { "x-agent-id": lead.id } } },
+    );
+    const agents = (result.structuredContent as { agents: { id: string; onDemand?: boolean }[] })
+      .agents;
+    const onDemand = (id: string) => agents.find((a) => a.id === id)?.onDemand;
+    expect(onDemand(worker.id)).toBe(enabled ? true : undefined);
+    expect(onDemand(gone.id)).toBeUndefined();
+    expect(onDemand(lead.id)).toBeUndefined();
+    const text = result.content.map((c) => ("text" in c ? c.text : "")).join("\n");
+    expect(text.includes("sleeping-worker (offline, on demand: send-task starts it)")).toBe(
+      enabled,
+    );
+    expect(text).toContain("gone (offline)");
+  });
+  test.each([
+    ["the pool is enabled with capacity", null, true],
+    ["MULTI_RUNTIME_ENABLED is off", "multi-runtime-off", false],
+    ["the pool is at maxRuntimes", "pool-full", false],
+    ["maxTasks is below slotsPerRuntime", "slots-too-big", false],
+  ] as const)("on demand when %s: %p", async (_label, state, expected) => {
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker", maxTasks: 2 });
+    if (state === "multi-runtime-off") process.env.MULTI_RUNTIME_ENABLED = "false";
+    if (state === "pool-full") {
+      await updateRuntimePool(pool.id, { maxRuntimes: 1 });
+      const other = await createPoolAgent(pool.id, { name: "busy-worker" });
+      await getDbClient().run(
+        "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+        [crypto.randomUUID(), other.id, pool.id],
+      );
+    }
+    if (state === "slots-too-big") await updateRuntimePool(pool.id, { slotsPerRuntime: 4 });
+    expect(await isAgentOnDemand(worker)).toBe(expected);
+    // The heartbeat/routing predicate keeps its broader answer.
+    expect(await isAgentReachable(worker)).toBe(true);
+  });
+  test("a pool under maxRuntimes is on demand", async () => {
+    await updateRuntimePool(pool.id, { maxRuntimes: 2 });
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+      [crypto.randomUUID(), worker.id, pool.id],
+    );
+    expect(await isAgentOnDemand(worker)).toBe(true);
+  });
+  async function addRuntime(agentId: string, status: "provisioning" | "active", draining = 0) {
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots, draining) VALUES (?, ?, ?, ?, 1, ?)",
+      [crypto.randomUUID(), agentId, pool.id, status, draining],
+    );
+  }
+  test.each([
+    ["an uncapped pool", null],
+    ["a pool its runtime fills", 1],
+  ] as const)("a booting runtime keeps the agent on demand in %s", async (_label, maxRuntimes) => {
+    await updateRuntimePool(pool.id, { maxRuntimes, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "booting-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "provisioning");
+    expect(await isAgentOnDemand(worker)).toBe(true);
+  });
+  test.each([
+    ["an uncapped pool", null],
+    ["a capped pool", 5],
+  ] as const)("an agent at its own runtime limit is not on demand in %s", async (_label, maxRuntimes) => {
+    await updateRuntimePool(pool.id, { maxRuntimes, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "capped-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "active");
+    expect(await isAgentOnDemand(worker)).toBe(false);
+  });
+  test("a draining provisioning runtime does not count as booting", async () => {
+    await updateRuntimePool(pool.id, { maxRuntimes: null, slotsPerRuntime: 1 });
+    const worker = await createPoolAgent(pool.id, { name: "draining-worker", maxTasks: 1 });
+    await addRuntime(worker.id, "provisioning", 1);
+    expect(await isAgentOnDemand(worker)).toBe(false);
+  });
+  test("GET /api/agents and /api/agents/{id} flag on-demand pool agents", async () => {
+    const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });
+    const gone = await createAgent({ name: "gone", isLead: false, status: "offline" });
+    const server: Server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const segments = url.pathname.split("/").filter(Boolean);
+      void handleAgentsRest(req, res, segments, url.searchParams, undefined).then((handled) => {
+        if (!handled) res.writeHead(404).end("{}");
+      });
+    });
+    const base = `http://localhost:${await listenOnFreePort(server)}`;
+    try {
+      const list = (await (await fetch(`${base}/api/agents`)).json()) as {
+        agents: { id: string; onDemand?: boolean }[];
+      };
+      expect(list.agents.find((a) => a.id === worker.id)?.onDemand).toBe(true);
+      expect(list.agents.find((a) => a.id === gone.id)?.onDemand).toBeUndefined();
+      const one = (await (await fetch(`${base}/api/agents/${worker.id}`)).json()) as {
+        onDemand?: boolean;
+      };
+      expect(one.onDemand).toBe(true);
+      process.env.MULTI_RUNTIME_ENABLED = "false";
+      const off = (await (await fetch(`${base}/api/agents/${worker.id}`)).json()) as {
+        onDemand?: boolean;
+      };
+      expect(off.onDemand).toBeUndefined();
+    } finally {
+      server.close();
+    }
   });
 });

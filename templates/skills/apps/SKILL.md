@@ -531,9 +531,9 @@ The sidebar lists pages in definition order and marks the current one. Below 768
 
 Param `kind` is `string` by default, or `number` / `boolean`; `required` defaults to false. The names `mode`, `apiUrl`, `apiKey`, `email`, and `name` are reserved. `/apps/<id>` renders `defaultPage`; `/apps/<id>/p/<page>?issueId=42` is the shareable deep link for another page. Browser navigation is client-side, so app state and polled data stay warm across page changes.
 
-Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, Section, and Drawer). `watch` maps state paths to an action step or chain.
+Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, and Dialog). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 35)
+## Component catalog (all 45)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -546,20 +546,21 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; `motion: "rise"` (default), `"fade"`, or `"none"` (see Motion below); `fill` (grow to fill a `fill`-aware parent; see Layout below); has the `default` child slot. |
 | `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
 | `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`, `fill` (same contract as Stack); has the positional `default` child slot. |
-| `Divider` | none | `label`; no children. |
+| `Divider` | none | `label`, `orientation: "horizontal"` (default) or `"vertical"` (a rule between the items of a row `Stack`, as tall as the row); no children. |
 | `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label?, icon?, count? }` (`count` is a number shown as a small pill); `defaultTab`; `variant: "line"` (default) or `"segmented"` (a compact segmented control, same state and warm panels); has the positional `default` child slot. |
+| `Accordion` | `id`, `items` | Grouped collapsible sections. `items` entries are `{ key, title, description?, icon? }`; children are positional like Tabs (`children[i]` is the body of `items[i]`, same count, validated). `type: "single"` (default: opening one closes the others, and the open one can close) or `"multiple"`. Open keys are client state at `{ "$state": "/ui/<id>/open" }`, always an array; `defaultOpen` lists the keys open on first render. Bodies mount only while open. `Section collapsible` stays the one-item form. |
 | `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
 | `Card` | none | `title`, `description`; has the `default` child slot. |
 | `Heading` | `text` | `level: "h1", "h2", or "h3"`. |
 | `Text` | `content` | `tone: "default" or "muted"`. |
 | `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip (icon plus short label), like agent output in a session; `[text](url)` keeps its text. |
 | `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
-| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
+| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`; a value bound to a query that is still loading seeds when it arrives, unless the viewer already picked); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
 | `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
-| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. |
-| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", or "bar"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. Wrap it in a `Card` for a title. |
+| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. `format: "number"`, `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (a ratio: 0.42 is 42%) formats a numeric `value`, like Chart; a string value shows as is. |
+| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", "bar", "pie" or "donut"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. `pie` and `donut` take exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip adds the share to the formatted value, and the legend defaults on (`xType` and `stacked` do not apply). Wrap it in a `Card` for a title. |
 | `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon), `actionLabel` (a button inside the callout that emits `press`; wire it with `on.press`). |
 | `Badge` | `text` | `text` is string or number; `tone`; `icon` replaces the dot; `variant: "tag"` (default uppercase chip), `"status"` (sentence-case pill), `"count"` (numeric pill), or `"beta"` (the BETA tag); `status` (a lifecycle value renders the dashboard status chip); `hint` (tooltip; the beta tag's explanation). |
 | `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
@@ -573,19 +574,26 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
 | `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
-| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below); has the `default` child slot. |
+| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below), `presentation: "sheet"` (default) or `"split"` (an inline right pane beside the page; see below); has the `default` child slot. |
+| `Dialog` | `param` | A centered modal with the Drawer route contract: open exactly while the page param named by `param` is set; Escape, the X or a click outside clears it. `title`, `description`, `size: "sm", "md" (default), or "lg"`, `actions` (footer buttons, Drawer rules). Use it for a short form opened from `headerActions`; after the write, an `app.navigate` without the param closes it. Has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
 | `CardGrid` | `titleKey` | `data`, `loading`, `error`, `emptyMessage`, `imageKey`, `fields`, `columns`, `onClick`; one card per row for record browsers; see below. |
 | `Kanban` | `columnField`, `columns`, `titleField` | `data`, `loading`, `cardFields`, `idField` (default `id`), `onMove`, `onCardClick`; see below. |
 | `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
 | `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 | `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
+| `Files` | `path` | `mode: "list"` (default) or `"browser"`, `selectedPath`, `emptyMessage`, `maxHeight` (default `480px`), `fill`, `onSelect`, `upload`; an agent-fs folder listing read as the viewer; see below. |
+| `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
+| `DateRange` | `id` | `presets` (any of `7d`, `30d`, `90d`, `mtd`, `custom`; default all five), `defaultPreset` (default the first), `label`; writes `/ui/<id>/from` and `/ui/<id>/to`; see below. |
+| `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
+| `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
+| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", hint?: string, popover?: { title?, fields, trigger? }, href?: "<row field>", linkLabel?: "<template>", max?: number, format?: "<template>", onChange?: chain, filter?: "values" or "text" or false, muted?: string[] }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `checkbox`, `link`, or `json`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", hint?: string, popover?: { title?, fields, trigger? }, href?: "<row field>", linkLabel?: "<template>", max?: number, format?: "<template>", currency?: "<ISO 4217>", onChange?: chain, filter?: "values" or "text" or false, muted?: string[] }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, `checkbox`, `link`, `json`, `currency`, or `percent`; `string` and `enum` render as text, and `json` renders a truncated single-line `JSON.stringify` preview. `currency` shows a number as money in the column's `currency` (an uppercase ISO 4217 code, default `USD`): `1234.5` is `$1,234.50`. `percent` reads a ratio: `0.42` is `42%`. Both right-align and show a non-numeric value as is. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
   - `status`: lifecycle values (`pending`, `in_progress`, `running`, `completed`, `failed`, `cancelled`, `paused`, `reviewing`, ...) render the dashboard status chip with its icon; other values use `tones` like `badge`.
   - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: a smart link (see Smart links, tooltips and popovers below); any other http(s) URL opens in a new tab and other values render as text.
   - `switch` / `checkbox`: a toggle or a checkbox bound to a boolean column. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the control is read-only. Each toggle is a model write, so to pick rows for a bulk action use `selectable` (below), not a boolean column.
@@ -632,11 +640,68 @@ Tree details:
 - Each row shows `key — type`. Clicking a row writes its key to `/ui/<id>/value`, and the row bound to that path renders selected; read the selection with `{ "$state": "/ui/<id>/value" }`. The Tree never writes `null`: when the selected key leaves the doc (a refetch, an edit) the stored key stays and no row renders selected. Selection and collapse are keyed by node key, so a key reachable through two parents selects and collapses in both places.
 - Rows scroll inside `maxHeight` (default `480px`). Set `fill: true` inside a `fill` Stack or Split pane to grow to that height instead and scroll within it (ignores `maxHeight`).
 
+Files and File details:
+
+- Both read agent-fs as the viewer, with the viewer's own agent-fs key (the one Comb saves in their browser), from the swarm's default drive (`agent_fs.comb` in `/status`). There is no `drive` prop yet. The swarm key never reaches agent-fs, and the viewer sees only what their drive membership allows; an app cannot widen it.
+- A viewer who has not connected agent-fs sees a "Connect agent-fs" card that opens Comb's connect flow. In a `?mode=chromeless` iframe the card links to the app in the dashboard instead, because the iframe has no saved key.
+- `path` is absolute. A literal path must not contain `..`; bind it with `$state` to follow a route param. A folder that does not exist yet lists as empty (`emptyMessage`).
+- `Files` sorts folders first. `mode: "browser"` opens subfolders in place, with crumbs that never go above `path`, and reopens on the folder holding `selectedPath`. A file click (in list mode, any row) runs `onSelect` with `$row` = `{ path, name, type, size, modifiedAt }`; `type` is `file` or `directory`, and a folder's `path` ends with `/`. Usually: `[{ "action": "app.navigate", "params": { "page": "docs", "params": { "file": { "$row": "path" } } } }]`, plus `"selectedPath": { "$state": "/route/params/file" }`.
+- `File` renders Markdown with raw HTML shown as text, images as `<img>` (SVG too, so its scripts never run), PDFs in the browser's viewer, video and audio in a player, CSV as a table, and text files (HTML as source) as lines. Other types show Download and "Open in agent-fs". An empty `path` shows "No file selected".
+- List and view: a `Split` with `Files` in the left pane and `File` with `"path": { "$state": "/route/params/file" }` in the right; declare `file` in the page's `params`.
+- `upload: true` adds an Upload button and a drop zone over the list. Files upload with the viewer's key into the folder on screen (the opened subfolder in browser mode), create-only: a taken name asks Keep both or Skip. The list refreshes when a file lands. agent-fs's own upload limit applies.
+- Scripts: an `app.action` script runs as its owner agent, so `ctx.fs` `/afs` reads that agent's default drive, not the viewer's. It sees the same files only when the agent's default drive is the swarm's comb drive.
+
+DateRange and Timeline details:
+
+- `DateRange` writes inclusive `YYYY-MM-DD` dates (the viewer's local calendar) to `/ui/<id>/from` and `/ui/<id>/to`, and the active preset to `/ui/<id>/preset`. On first load it writes `defaultPreset` unless the state already holds a range. Bind query params with `{ "$state": "/ui/<id>/from" }` so the query refetches when the range changes. `7d` is today and the six days before it; `mtd` starts on the 1st. `custom` opens two date inputs in a popover; Apply needs both dates, from not after to. `id` must match `[A-Za-z0-9_-]+`, and `defaultPreset` must be one of `presets`.
+- `Timeline` reads `timeField` as an ISO date or epoch ms (rows that do not parse are left out), sorts newest first and groups under day headings: Today, Yesterday, then the date. Each event shows `titleField`, the time, `descriptionField` (two lines at most) and a `statusField` pill (`tones` maps value to tone; lifecycle values get the status chip). `icon` replaces the marker dot. `onSelect` runs with `$row` (the row) and `$rowIndex` (its index in `data`); without it events are not clickable.
+
 SchemaForm details:
 
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
 - Nested document editing: bind `baseDoc` to a doc-shaped value (`{ root, elements }`) and `nodeKey` to an element key, such as a Tree's `{ "$state": "/ui/<tree>/value" }`. The form then edits `baseDoc.elements[nodeKey].props`, and `/ui/<id>/value` holds the whole doc with the edit merged in, so one `app.mutate` with `values: { <jsonColumn>: { "$state": "/ui/<id>/value" } }` persists it. Props the schema does not list are kept. Edits the query has not returned yet stay applied, so two quick edits on different nodes both survive. A `nodeKey` that is not a key of `elements` falls back to plain mode, and a `baseDoc` over 5,000 elements is not editable. Typing writes `/ui/<id>/value` on every keystroke, before the commit on blur, so another component's `app.mutate` that reads that path can persist half-typed text; persist from the SchemaForm's own `onChange`.
+
+Approval details (human-in-the-loop):
+
+- `requestId` names one approval request, usually the id an `app.action` script returned: `{ "$state": "/actions/<name>/result/requestId" }`. An empty value renders nothing, so the element can sit on the page before the request exists.
+- While the request is pending, the card shows its questions with the dashboard's answer flow and polls every 5s; polling stops once it resolves. The viewer answers with their own credential, so the server records them and enforces the approvers list and RBAC.
+- A viewer whose role cannot answer, or whose answer the server refuses (not an approver), sees a read-only card with an "Open in dashboard" link. If the request was answered or expired meanwhile, the card refetches and shows that state instead of an error. With an `all` or `{ min: N }` policy, an answer that does not resolve it shows "Your answer is recorded".
+- `showResolved: false` shows only the outcome line after resolution, not the answers. `compact: true` drops the card chrome.
+- `onResolved` is an action chain run once, when the page sees the request leave `pending`. Its params may read `{ "$chain": "status" }` (`approved`, `rejected`, `timeout`, `cancelled`), `{ "$chain": "responses" }` (answers keyed by question id; `{ "$chain": "responses/<questionId>" }` reads one), and `{ "$chain": "resolvedBy" }`. A request that was already resolved when the page loaded does not run it, so a reload never repeats the follow-up. Use `onResolved`, not `on.resolved`: the validator rejects the latter.
+
+In-session wait: the follow-up runs in the viewer's browser, so if they close the tab before the answer, nothing continues. The script behind the action creates the request detached and returns its id:
+
+```ts
+export default async function run(args, ctx) {
+  const res: any = await ctx.swarm.request_humanInput({
+    title: `Deploy ${args.service}?`,
+    questions: [{ id: "go", type: "approval", label: "Ship it to production?" }],
+    detached: true,
+  });
+  return { requestId: res?.data?.requestId ?? res?.requestId };
+}
+```
+
+```json
+{
+  "askBtn": { "type": "Button", "props": { "label": "Request deploy", "busyWith": "requestDeploy" },
+    "on": { "press": { "action": "app.action", "params": { "name": "requestDeploy", "input": { "service": "api" } } } } },
+  "approve": {
+    "type": "Approval",
+    "props": {
+      "requestId": { "$state": "/actions/requestDeploy/result/requestId" },
+      "onResolved": [
+        { "action": "app.action", "params": { "name": "applyDecision",
+          "input": { "status": { "$chain": "status" }, "responses": { "$chain": "responses" } } } },
+        { "action": "ui.toast", "params": { "message": "Decision applied", "tone": "success" } }
+      ]
+    }
+  }
+}
+```
+
+Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE workflowRunId = ? AND status = 'pending' ORDER BY createdAt DESC LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
 
 SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
 
@@ -650,7 +715,7 @@ SessionThread details — a chat on an app page, one session per viewer and `ses
 - Each `app.action` step of `onDispatch` is sent with the session (`{ key, scope }`) and with `followUp: false` unless the step sets `followUp` itself, so the Lead adds no review task to the chain and each message stays one task. A Lead review that is in the chain anyway (a steer the server promoted to a task) is never steered or chained under.
 - "New session" (shown once a session exists) starts over: the next message creates a new root, and the thread shows only sessions created after the current one. Nothing is deleted; older sessions stay in the dashboard's Sessions list.
 - While the session loads, the composer is disabled with a loading notice. A session whose chain cannot be found blocks sending. After a send, the composer stays busy until the new task shows up, for at most 30 seconds.
-- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
+- Without `fill` the thread is 420 px tall; `fill: true` fills a `fill`-aware parent, and keeps at least 420 px on a phone, where a `Split` or `Grid` stacks its panes. Inside an element instance, `id` is namespaced per instance, so two instances keep separate drafts.
 
 ```json
 { "type": "SessionThread", "props": {
@@ -661,9 +726,27 @@ SessionThread details — a chat on an app page, one session per viewer and `ses
 } }
 ```
 
+PageFrame details — a live swarm Page inside the app, for a preview pane next to a `SessionThread`:
+
+- It renders the body `/pages/<pageId>` shows: an HTML page in a sandboxed iframe (scripts, forms and popups; never top navigation), a JSON page inline. The viewer can click and scroll it.
+- It checks the page every 3 s and reloads by itself when the page's `updatedAt` moves: a new version, a restore, a theme switch. A reload resets scroll and any state inside the page.
+- `pageId` is a page id (32 hex characters), usually bound: `{ "$state": "/queries/project/data/0/pageId" }`. A literal slug is rejected; an empty id shows "No page selected".
+- The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for its password.
+- `device: "mobile"` centers a 390 px wide frame, so the page's own media queries see a phone. A JSON page follows the dashboard viewport instead. Switch devices with two `PageFrame`s in `Tabs`, or bind `device` to a `Select`.
+
+```json
+{ "type": "PageFrame", "props": {
+  "pageId": { "$state": "/queries/project/data/0/pageId" },
+  "device": { "$state": "/ui/device/value" },
+  "fill": true
+} }
+```
+
 Form details:
 
-- `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, or `enum`, and enum fields need `options`.
+- `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, `enum`, or `file`, and enum fields need `options`.
+- `kind: "file"` adds `dir`, `accept` (e.g. `[".pdf", "image/*"]`), `multiple` and `source`: `"upload"` (default) chooses local files, `"pick"` opens a browser of `dir` (or `/`) to attach a file that already exists in agent-fs, `"both"` offers both. `dir` is an absolute agent-fs folder, required unless `source` is `"pick"`. Files use the viewer's own agent-fs key on the swarm's default drive, like `Files`.
+- On submit, chosen files upload first, create-only, to `<dir>/<timestamp>-<id>-<n>-<sanitized name>`: a random id per submit and a counter across all fields, so two fields or two submits never write the same path; then the chain runs. `$form.<name>` is the stored path, or an array of paths with `multiple: true`. An upload failure (the error shows agent-fs's text, e.g. its size limit) stops the chain and keeps the form's values. Without an agent-fs connection the field shows a "Connect agent-fs" card, and a required file field disables submit.
 - Values live at `/forms/<formId>/<fieldName>`. `onSubmit` is an action chain.
 - The submit button shows a pending spinner while the chain runs, and `app.mutate` failures in the chain render inline under the fields (not the page banner) — no extra wiring needed.
 
@@ -671,10 +754,28 @@ Drawer details:
 
 - `param` must name a param declared on the containing page. The drawer is open exactly when `/route/params/<param>` has a non-empty value, so its open state survives refresh and is shareable. Its children mount only while open; closing it clears that param with history replacement.
 - `actions[]`: `{ label, variant?, icon?, confirm?, actions }`, rendered as buttons in a sticky footer under the scrolling body. Confirmation follows Table `rowActions`: destructive variants confirm by default, and a chain with an `app.mutate` delete always confirms. Chains have no `$row`; address the open record with `{ "$state": "/route/params/<param>" }`, for example `{ "action": "app.mutate", "params": { "model": "order", "op": "delete", "rowId": { "$state": "/route/params/panel" } } }`. Prev/next record navigation is not available.
+- `presentation: "split"` renders the Drawer as an inline right pane beside the page instead of a sheet over it. The page canvas shrinks while it is open; the pane has a draggable left edge (arrow keys, Shift for big steps, Home/End for the min/max, double-click or Enter to reset) and the viewer's width is kept per app in the browser. `size` sets its starting width (360/480/640/800px). Opening, closing, refresh and shared links work exactly as for the sheet. Below 768px it falls back to the sheet. At most one split Drawer per page; `side` does not apply.
+
+List + detail recipe (a row click opens the record beside the table):
+
+```json
+"params": { "issue": { "kind": "string" } },
+"elements": {
+  "root": { "type": "Stack", "props": {}, "children": ["table", "issue"] },
+  "table": { "type": "Table", "props": {
+    "data": { "$state": "/queries/issues/data" },
+    "columns": [{ "key": "title" }, { "key": "status", "kind": "status" }],
+    "selectedId": { "$state": "/route/params/issue" },
+    "onRowClick": [{ "action": "app.navigate", "params": { "page": "main", "params": { "issue": { "$row": "id" } } } }] } },
+  "issue": { "type": "Drawer", "props": { "param": "issue", "presentation": "split", "size": "md", "title": "Issue" },
+    "children": ["issueDetail"] },
+  "issueDetail": { "type": "DetailList", "props": { "data": { "$state": "/queries/issue/data/0" }, "fields": [{ "key": "title" }] } }
+}
+```
 
 DetailList details:
 
-- `fields[]`: `{ key, label?, kind?, tones? }`. Kinds reuse Table formatting (`text`, `string`, `number`, `boolean`, `date`, `badge`, `enum`) and the Table cell renderers (`status`: lifecycle chip or `tones` pill; `user`: avatar plus name; `relative`: smart time, exact on hover; `copy`: value plus copy button; `link`: a smart link from the value, or from the row field named by `href`, with `linkLabel` as an optional label template), and add `code` for a monospace block and `json` for a collapsible JSON tree (objects, or a string holding JSON). Bind `data` to one record, commonly `/queries/<detailQuery>/data/0`.
+- `fields[]`: `{ key, label?, kind?, tones? }`. Kinds reuse Table formatting (`text`, `string`, `number`, `boolean`, `date`, `badge`, `enum`) and the Table cell renderers (`status`: lifecycle chip or `tones` pill; `user`: avatar plus name; `relative`: smart time, exact on hover; `copy`: value plus copy button; `link`: a smart link from the value, or from the row field named by `href`, with `linkLabel` as an optional label template), and add `code` for a monospace block and `json` for a collapsible JSON tree (objects, or a string holding JSON). `currency` and `percent` (with `currency?: "<ISO 4217>"`) format numbers like the Table kinds. Bind `data` to one record, commonly `/queries/<detailQuery>/data/0`.
 
 Motion details:
 
@@ -760,7 +861,7 @@ Valid `$state` roots are:
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
-Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or a component chain prop such as `SessionThread.onDispatch`) these scoped sentinels are valid, recursively inside objects and arrays:
+Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `Table.bulkActions[].actions`, `Form.onSubmit`, or a component chain prop such as `Approval.onResolved` or `SessionThread.onDispatch`) these scoped sentinels are valid, recursively inside objects and arrays:
 
 | Sentinel | Resolves to |
 |---|---|
@@ -770,7 +871,7 @@ Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, `
 | `{ "$form": "title" }` | One current Form value. |
 | `{ "$form": "" }` | All current Form values. |
 | `{ "$state": "/queries/allIdeas/data" }` | Current value at a valid app state path, including action state such as `/actions/refreshIssues/status`. |
-| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by a component that runs a task chain (`SessionThread`); it carries `leafTaskId` and `newTaskId`. The component publishes every key, `null` when it has no value yet; a `null` key resolves to nothing and its param is dropped (a `parentTaskId` bound to a `null` `leafTaskId` creates a root task). Where no chain scope is published (Table, Form), or the key is not one the scope carries (a typo), the sentinel is left in place and the action fails instead of silently dropping the parent. An empty string is not "no parent": a `$state` slot meaning "no parent yet" must hold `null`. |
+| `{ "$chain": "leafTaskId" }` | One chain-scope value, published by the component that runs the chain: a task chain (`SessionThread`) carries `leafTaskId` and `newTaskId`; `Approval.onResolved` carries `status`, `responses` and `resolvedBy`. The component publishes every key, `null` when it has no value yet; a `null` key resolves to nothing and its param is dropped (a `parentTaskId` bound to a `null` `leafTaskId` creates a root task). Where no chain scope is published (Table, Form), or the key is not one the scope carries (a typo), the sentinel is left in place and the action fails instead of silently dropping the parent. An empty string is not "no parent": a `$state` slot meaning "no parent yet" must hold `null`. |
 | `{ "$chain": "" }` | The whole chain scope. |
 
 Each sentinel object must contain exactly the single key shown.
@@ -784,6 +885,8 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - `ui.toast`: `{ message, description?, tone?, undo? }`, where `tone` is `"success"`, `"error"`, `"info"` (default), or `"warning"`. `undo: { label?, actions }` adds an Undo button (default label `Undo`) that runs `actions` as a chain; its steps are validated like any chain. Put it after the step it confirms, e.g. a row delete followed by `{ "action": "ui.toast", "params": { "message": "Order deleted", "undo": { "actions": [{ "action": "app.mutate", "params": { "model": "order", "op": "create", "values": { "title": { "$row": "title" } } } }] } } }`. Undo params resolve `$state` when Undo is pressed; `$row` / `$form` resolve when the toast is shown.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.
 - `swarm.call`: `{ method, endpoint: "/api/...", body? }`, where `method` is `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, or `"PATCH"`; raw authenticated API call.
+
+A failed step halts its chain: when `app.action`, `app.mutate`, `swarm.sdk` or `swarm.call` fails (a thrown error, a script action that returns `ok: false`, a non-2xx `swarm.call`), the steps after it do not run and the error shows as an error toast. A step's `onError` (`{ set }` or `{ action }`) runs first, and the chain still halts. So a `ui.toast` after a write is a real success message. A `Form`'s failed `app.mutate` shows inline under the fields instead of a toast. A task-backed `app.action` succeeds once the task is created; the task's own failure shows in the page banner and does not halt the chain. A Table bulk action reads each step's own outcome, as before.
 
 ## Patch semantics
 

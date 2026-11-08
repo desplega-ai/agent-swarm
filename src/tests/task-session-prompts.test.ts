@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildChecklistNudgePrompt,
   buildRequesterProfilePrompt,
   buildTaskSessionPrompts,
+  buildUseCasePrompt,
   type TaskSessionContext,
 } from "../commands/runner";
 import { type BasePromptArgs, getTaskContextPrompt } from "../prompts/base-prompt";
@@ -48,6 +50,12 @@ const sessionA: TaskSessionContext = {
     notes: "Lead with the answer.",
     comms: { verbosity: "terse" },
   },
+  checklistNudge: {
+    itemId: "swarm:channel",
+    kind: "channel",
+    label: "Connect a chat channel",
+    href: "https://swarm.example.com/integrations/channels",
+  },
   cwdWarning: 'Note: The task requested working directory "/nope" but it does not exist.',
 };
 
@@ -78,7 +86,16 @@ describe("buildTaskSessionPrompts", () => {
       expect(a.systemPrompt).toBe(b.systemPrompt);
       expect(a.systemPrompt).toBe(c.systemPrompt);
       expect(a.systemPrompt).toEndWith("\n\nOperator note: be careful.");
-      for (const perTask of ["## Repository", "## Requester Profile", "Taras", "Eze", "/nope"]) {
+      for (const perTask of [
+        "## Repository",
+        "## Requester Profile",
+        "## Setup suggestion",
+        "has not finished setting up",
+        "Connect a chat channel",
+        "Taras",
+        "Eze",
+        "/nope",
+      ]) {
         expect(a.systemPrompt).not.toContain(perTask);
       }
     });
@@ -113,6 +130,7 @@ describe("buildTaskSessionPrompts", () => {
 
     const repoBlock = await getTaskContextPrompt({ ...args, repoContext: sessionA.repoContext });
     const profile = await buildRequesterProfilePrompt(sessionA.requestedBy);
+    const nudge = await buildChecklistNudgePrompt(sessionA.checklistNudge);
     expect(repoBlock).toContain("## Repository");
     expect(repoBlock).toContain("Alpha repo rules.");
     expect(profile).toContain("This task was requested by Taras (CTO).");
@@ -122,11 +140,87 @@ describe("buildTaskSessionPrompts", () => {
     expect(prompt).toContain(profile);
     expect(prompt).toEndWith(sessionA.cwdWarning ?? "");
     expect(prompt.indexOf(repoBlock)).toBeLessThan(prompt.indexOf(profile));
+    expect(prompt.indexOf(profile)).toBeLessThan(prompt.indexOf(nudge));
     expect(prompt).not.toMatch(/\n{3,}/);
   });
 
   test("a task with no per-task context keeps its prompt unchanged", async () => {
     const { prompt } = await build(agentArgs("claude"), sessionC, "/work-on-task ccc");
     expect(prompt).toBe("/work-on-task ccc");
+  });
+
+  test("a lead task with a checklist nudge carries it once, in the task prompt only", async () => {
+    const lead = agentArgs("claude", { role: "lead" });
+    const withNudge = await build(lead, sessionA, "/work-on-task aaa");
+    const withoutNudge = await build(
+      lead,
+      { ...sessionA, checklistNudge: undefined },
+      "/work-on-task aaa",
+    );
+    const nudge = await buildChecklistNudgePrompt(sessionA.checklistNudge);
+
+    expect(nudge).toContain("## Setup suggestion");
+    expect(nudge).toContain("Open item: Connect a chat channel.");
+    expect(nudge).toContain(
+      "at the end of your reply, with the link https://swarm.example.com/integrations/channels.",
+    );
+    expect(withNudge.systemPrompt).toBe(withoutNudge.systemPrompt);
+    expect(withNudge.systemPrompt).not.toContain("has not finished setting up");
+    expect(withNudge.prompt.split("has not finished setting up").length - 1).toBe(1);
+    expect(withoutNudge.prompt).not.toContain("has not finished setting up");
+    // The static pointer for missing tools lives in the lead contract instead.
+    expect(withNudge.systemPrompt).toContain("/integrations/tools");
+  });
+
+  test("a nudge with no link reads as a plain offer", async () => {
+    const nudge = await buildChecklistNudgePrompt({
+      itemId: "swarm:channel",
+      kind: "channel",
+      label: "Connect a chat channel",
+    });
+    expect(nudge).toContain("offer it once, at the end of your reply. If it does not fit");
+    expect(nudge).not.toContain("with the link");
+    expect(nudge).not.toContain("{{");
+  });
+
+  test("no nudge renders nothing", async () => {
+    expect(await buildChecklistNudgePrompt(undefined)).toBe("");
+  });
+
+  test("a lead task in a use-case group carries the key once, in the task prompt only", async () => {
+    const lead = agentArgs("claude", { role: "lead" });
+    const inGroup = await build(
+      lead,
+      { ...sessionA, taskKey: "shared/competitor-watch/" },
+      "/work-on-task aaa",
+    );
+    const inInbox = await build(
+      lead,
+      { ...sessionA, taskKey: "shared/task:aaa/" },
+      "/work-on-task aaa",
+    );
+
+    expect(inGroup.systemPrompt).toBe(inInbox.systemPrompt);
+    expect(inGroup.systemPrompt).not.toContain("shared/competitor-watch/");
+    expect(inGroup.systemPrompt).not.toContain("## Use case\n");
+    expect(inGroup.prompt.split("## Use case\n").length - 1).toBe(1);
+    expect(inGroup.prompt).toContain(
+      "This task is in the use case with key `shared/competitor-watch/`.",
+    );
+    expect(inInbox.prompt).not.toContain("## Use case\n");
+    // The use-case paragraph and its link base stay in the system prompt, once.
+    expect(inGroup.systemPrompt.split("A use case is work that repeats").length - 1).toBe(1);
+    expect(inGroup.prompt).not.toContain("A use case is work that repeats");
+  });
+
+  test("the use-case note needs a lead and a user group key", async () => {
+    expect(await buildUseCasePrompt("lead", "shared/acme/")).toContain("`shared/acme/`");
+    expect(await buildUseCasePrompt("lead", "personal/u1/acme/")).toContain("`personal/u1/acme/`");
+    expect(await buildUseCasePrompt("worker", "shared/acme/")).toBe("");
+    expect(await buildUseCasePrompt("lead", undefined)).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/task:abc/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/schedule:abc/")).toBe("");
+    expect(await buildUseCasePrompt("lead", "shared/slack/C123/thread:1.2/")).toBe("");
   });
 });

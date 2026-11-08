@@ -16,11 +16,19 @@ import {
 } from "react";
 import { useMatch } from "react-router-dom";
 import { useStatusContext } from "@/app/status-context";
+import {
+  autoConnectRunKey,
+  settledOutcome,
+  subscribeSettled,
+} from "@/components/comb/auto-connect-attempts";
+import type { AutoConnectOutcome } from "@/components/comb/connect-flow";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { type AgentFsLive, type LiveState, useAgentFsLive } from "@/hooks/use-agent-fs-live";
 import { useConfig } from "@/hooks/use-config";
 import { AgentFsClient, type AgentFsError } from "@/lib/agent-fs/client";
 import {
   type AgentFsCredential,
+  type CredentialOwner,
   clearCredential,
   credentialSnapshot,
   subscribeCredential,
@@ -45,14 +53,18 @@ export interface AgentFsContextValue extends AgentFsLive {
   credential: Omit<AgentFsCredential, "apiKey"> | null;
   /** Set whenever a credential exists, before the key is verified. */
   client: AgentFsClient | null;
-  /** Set in `ready`. */
+  /** Set in `ready`: the saved identity, after the key check passed. */
   me: MeResponse | null;
   /** `/health` features of the agent-fs server. Empty when unknown. */
   features: Set<string>;
   /** `/health` upload limit in bytes. Null when the server does not say. */
   maxUploadBytes: number | null;
+  /** `/health` version of the agent-fs server. Null while unknown. */
+  serverVersion: string | null;
   /** Why the state is `invalid-key` or `unreachable`. */
   error: AgentFsError | null;
+  /** This page load's settled automatic connect outcome. Null while none has settled. */
+  autoConnect: AutoConnectOutcome | null;
   /** Save a verified credential and switch to it. */
   connect: (credential: AgentFsCredential) => void;
   /** Forget the credential and every cached agent-fs query. */
@@ -80,12 +92,35 @@ function useAgentFsHealth(endpoint: string | null) {
   });
 }
 
-/** The connected identity: the check that the saved key still works. */
-function useAgentFsMe(meKey: readonly unknown[], client: AgentFsClient | null) {
+/**
+ * The check that the saved key still works: `ls /` on the swarm drive. Not
+ * agent-fs `/auth/me`: a key the dashboard minted is scoped to the shared org,
+ * so the identity comes from the saved credential (`GET /api/fs/me` at mint
+ * time). With no swarm drive configured there is nothing to check against.
+ */
+function useAgentFsKeyCheck(
+  checkKey: readonly unknown[],
+  client: AgentFsClient | null,
+  credential: Omit<AgentFsCredential, "apiKey"> | null,
+  drive: { orgId: string | null; driveId: string | null },
+) {
+  const { orgId, driveId } = drive;
   return useQuery({
-    queryKey: meKey,
-    queryFn: ({ signal }) => (client as AgentFsClient).getMe({ signal }),
-    enabled: client !== null,
+    queryKey: checkKey,
+    queryFn: async ({ signal }): Promise<MeResponse> => {
+      if (orgId && driveId) {
+        await (client as AgentFsClient).callOp(orgId, "ls", { path: "/" }, driveId, { signal });
+      }
+      const saved = credential as Omit<AgentFsCredential, "apiKey">;
+      return {
+        userId: saved.userId,
+        email: saved.email,
+        displayName: saved.displayName,
+        defaultOrgId: orgId,
+        defaultDriveId: driveId,
+      };
+    },
+    enabled: client !== null && credential !== null,
     ...CONNECTION_QUERY,
   });
 }
@@ -98,17 +133,30 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const comb = status?.agent_fs?.comb;
   const endpoint = combEndpoint(comb);
 
+  // The credential belongs to the dashboard user: switching users never reuses
+  // another user's key. A tab with no resolved user (pending or needs-pick)
+  // has no credential and never reads the legacy (user-less) key.
+  const currentUser = useCurrentUser();
+  const ownerId = currentUser.userId;
+  const ownerEmail = currentUser.user?.email ?? null;
+  const owner = useMemo<CredentialOwner | null>(
+    () => (ownerId ? { userId: ownerId, email: ownerEmail } : null),
+    [ownerId, ownerEmail],
+  );
+
   // Read during render, so a hard load never flashes `needs-connect`.
   const subscribe = useCallback(
     (onChange: () => void) =>
-      endpoint ? subscribeCredential(apiUrl, endpoint, onChange) : () => {},
-    [apiUrl, endpoint],
+      endpoint ? subscribeCredential(apiUrl, endpoint, owner, onChange) : () => {},
+    [apiUrl, endpoint, owner],
   );
   const getSnapshot = useMemo(
-    () => (endpoint ? credentialSnapshot(apiUrl, endpoint) : () => null),
-    [apiUrl, endpoint],
+    () => (endpoint && owner ? credentialSnapshot(apiUrl, endpoint, owner) : () => null),
+    [apiUrl, endpoint, owner],
   );
   const saved = useSyncExternalStore(subscribe, getSnapshot);
+  const runKey = autoConnectRunKey(apiUrl, endpoint, ownerId);
+  const autoConnect = useSyncExternalStore(subscribeSettled, () => settledOutcome(runKey));
 
   const apiKey = saved?.apiKey;
   const client = useMemo(
@@ -123,14 +171,19 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   const userId = saved?.userId ?? null;
 
   const health = useAgentFsHealth(endpoint);
+  const orgId = comb?.org_id ?? null;
+  const driveId = comb?.drive_id ?? null;
+  // Keyed by the key id too: a re-minted key for the same user checks again.
+  const keyId = saved?.keyId ?? null;
   const meKey = useMemo(
-    () => agentFsKey(endpoint ?? "", userId, null, null, "me"),
-    [endpoint, userId],
+    () => agentFsKey(endpoint ?? "", userId, orgId, driveId, "me", keyId),
+    [endpoint, userId, orgId, driveId, keyId],
   );
-  const meQuery = useAgentFsMe(meKey, client);
+  const meQuery = useAgentFsKeyCheck(meKey, client, credential, { orgId, driveId });
   const healthFeatures = health.data?.features;
   const features = useMemo(() => new Set(healthFeatures ?? []), [healthFeatures]);
   const maxUploadBytes = health.data?.maxUploadBytes ?? null;
+  const serverVersion = health.data?.version ?? null;
 
   // A 401 from any agent-fs query (a listing, a file) checks `me` again.
   useEffect(() => {
@@ -140,26 +193,27 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(
     (next: AgentFsCredential) => {
-      if (!endpoint) return;
+      if (!endpoint || !owner) return;
       // Drop results cached under an older key for the same user (a reset key
       // would otherwise keep its 401).
       queryClient.removeQueries({ queryKey: ["agent-fs", endpoint] });
-      writeCredential(apiUrl, endpoint, next);
+      writeCredential(apiUrl, endpoint, owner, next);
     },
-    [apiUrl, endpoint, queryClient],
+    [apiUrl, endpoint, owner, queryClient],
   );
 
   const disconnect = useCallback(() => {
-    if (endpoint) clearCredential(apiUrl, endpoint);
+    if (endpoint && owner) clearCredential(apiUrl, endpoint, owner);
     queryClient.removeQueries({ queryKey: ["agent-fs"] });
-  }, [apiUrl, endpoint, queryClient]);
+  }, [apiUrl, endpoint, owner, queryClient]);
 
   const refetchMe = meQuery.refetch;
   const retry = useCallback(() => {
     void refetchMe();
   }, [refetchMe]);
 
-  const statusPending = status === undefined && statusLoading;
+  // While the dashboard user is unknown, the credential to read is unknown too.
+  const statusPending = (status === undefined && statusLoading) || currentUser.state === "pending";
   const hasCredential = saved !== null;
   const me = meQuery.data;
   const meError = meQuery.error;
@@ -180,8 +234,6 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
   });
 
   // Memoized: every link and attachment row reads this context.
-  const orgId = comb?.org_id ?? null;
-  const driveId = comb?.drive_id ?? null;
   const liveUrl = comb?.live_url ?? null;
   const value = useMemo<AgentFsContextValue>(
     () => ({
@@ -195,7 +247,9 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       me: state === "ready" ? (me ?? null) : null,
       features,
       maxUploadBytes,
+      serverVersion,
       error,
+      autoConnect,
       connect,
       disconnect,
       retry,
@@ -215,7 +269,9 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       me,
       features,
       maxUploadBytes,
+      serverVersion,
       error,
+      autoConnect,
       connect,
       disconnect,
       retry,

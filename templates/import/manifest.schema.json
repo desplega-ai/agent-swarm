@@ -1,0 +1,136 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "description": "Manifest format version.",
+      "type": "number",
+      "const": 1
+    },
+    "workflows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "YAML or JSON workflow file."
+          }
+        },
+        "required": [
+          "id",
+          "file"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "dir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Directory holding SKILL.md and optional files/**."
+          }
+        },
+        "required": [
+          "id",
+          "dir"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "scripts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Global script name."
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Script source file."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "intent": {
+            "description": "Defaults to `description`.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "file",
+          "description"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Agent name. Use `id` when names repeat.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "id": {
+            "description": "Agent id, as the agent registers.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "instructions": {
+            "description": "Markdown role instructions. Written to the agent's IDENTITY.md profile field.",
+            "type": "string",
+            "minLength": 1
+          },
+          "skills": {
+            "description": "Ids of skills declared in this manifest to install on the agent.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$id": "https://github.com/desplega-ai/agent-swarm/blob/main/templates/import/manifest.schema.json",
+  "title": "Agent Swarm import manifest",
+  "description": "Optional swarm-import.{yaml,yml,json} at a package root. Item ids are source-local. Without it the directory convention applies: workflows/*.{yaml,yml,json}, skills/<id>/SKILL.md, scripts/*.ts, agents/<name>.md."
+}

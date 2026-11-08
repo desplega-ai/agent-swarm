@@ -78,6 +78,41 @@ export type IntegrationCategory =
   | "email"
   | "other";
 
+/** The Connect page that lists a category: channels, AI providers, or tools. */
+export function connectPagePath(category: IntegrationCategory): string {
+  if (category === "comm") return "/integrations/channels";
+  if (category === "llm") return "/integrations/ai";
+  return "/integrations/tools";
+}
+
+/** The name of `connectPagePath(category)`, as the sidebar shows it. */
+export function connectPageTitle(category: IntegrationCategory): string {
+  if (category === "comm") return "Channels";
+  if (category === "llm") return "AI providers";
+  return "Tools";
+}
+
+/** Integrations whose overview is a tab of Connect › AI providers. */
+const AI_TAB_OF: Record<string, string> = {
+  memory: "?tab=embeddings",
+  transcription: "?tab=transcription",
+};
+
+/**
+ * The path the sidebar highlights for `pathname`: an integration's own page
+ * (`/integrations/slack`) counts as the Connect page that lists it.
+ */
+export function navActivePath(pathname: string): string {
+  const match = /^\/integrations\/([^/]+)\/?$/.exec(pathname);
+  const def = match ? INTEGRATIONS.find((item) => item.id === match[1]) : undefined;
+  return def ? connectPagePath(def.category) : pathname;
+}
+
+/** The Connect page (and tab) that lists one integration. */
+export function connectPageHref(def: { id: string; category: IntegrationCategory }): string {
+  return `${connectPagePath(def.category)}${AI_TAB_OF[def.id] ?? ""}`;
+}
+
 export type IntegrationSpecialFlow =
   | "linear-oauth"
   | "jira-oauth"
@@ -139,8 +174,10 @@ export interface IntegrationDef {
   category: IntegrationCategory;
   /** Maps to a lucide-react icon name at render time. */
   iconKey: string;
-  /** Optional brand/logo asset path. Falls back to iconKey when unset. */
+  /** Optional monochrome brand mark (tinted with the text colour). Falls back to iconKey when unset. */
   logoSrc?: string;
+  /** Optional full-colour logo image (a PNG or multi-colour SVG). Wins over `logoSrc`. */
+  logoImg?: string;
   /**
    * Optional `ProviderIcon` glyph (an original drawing, not a vendor mark).
    * Wins over `logoSrc` and `iconKey` when set.
@@ -289,6 +326,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Chat with the swarm from Slack: assign tasks, get alerts, follow-up in threads.",
     category: "comm",
     iconKey: "message-square",
+    logoSrc: "/integration-logos/slack.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/slack",
     disableKey: "SLACK_DISABLE",
     restartRequired: true,
@@ -397,6 +435,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Chat with the swarm over WhatsApp via Kapso: inbound messages become tasks, agents reply in-thread.",
     category: "comm",
     iconKey: "message-circle",
+    logoSrc: "/integration-logos/whatsapp.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/kapso",
     recommendedSkills: [
       {
@@ -483,9 +522,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "github",
     name: "GitHub",
     description:
-      "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced.",
+      "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced. For GitHub Enterprise Server, set GITHUB_URL (and optionally GITHUB_API_URL) in the deployment env; they are not editable here.",
     category: "issues",
     iconKey: "github",
+    logoSrc: "/integration-logos/github.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/github",
     disableKey: "GITHUB_DISABLE",
     restartRequired: true,
@@ -582,6 +622,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to GitLab issues/MRs and push commits from agents. Supports self-hosted instances.",
     category: "issues",
     iconKey: "git-merge",
+    logoSrc: "/integration-logos/gitlab.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/gitlab",
     disableKey: "GITLAB_DISABLE",
     restartRequired: true,
@@ -716,6 +757,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Linear issues to tasks, comment from agents, respond to mentions. Uses OAuth.",
     category: "issues",
     iconKey: "square-check-big",
+    logoSrc: "/integration-logos/linear.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/linear",
     disableKey: "LINEAR_DISABLE",
     restartRequired: true,
@@ -758,6 +800,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Jira Cloud issues to tasks via OAuth 3LO. Inbound on assignee→bot or @-mention; outbound lifecycle comments back to the issue.",
     category: "issues",
     iconKey: "square-check-big",
+    logoSrc: "/integration-logos/jira.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/jira",
     disableKey: "JIRA_DISABLE",
     restartRequired: true,
@@ -848,6 +891,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Give agents access to Sentry issues and project info via the Sentry CLI.",
     category: "observability",
     iconKey: "activity",
+    logoSrc: "/integration-logos/sentry.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/sentry",
     fields: [
       {
@@ -877,6 +921,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Receive email and reply from agents. Useful for customer-support-like flows.",
     category: "email",
     iconKey: "mail",
+    logoImg: "/integration-logos/agentmail.png",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
@@ -941,6 +986,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Route agents to connected user accounts in Composio through the `x composio` CLI and `swarm_x` MCP tool.",
     category: "other",
     iconKey: "route",
+    logoImg: "/integration-logos/composio.png",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/composio",
     restartRequired: true,
     // No recommendedSkills entry: the composio skill (+ its google siblings) is
@@ -987,6 +1033,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Google search, news and scholar results for agent research, over the Serply REST API.",
     category: "other",
     iconKey: "search",
+    logoImg: "/integration-logos/serply.png",
     docsUrl: "https://serply.io/docs",
     recommendedSkills: [
       {
@@ -1020,6 +1067,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Claude API access for workers. Supports API key or OAuth (Claude Code).",
     category: "llm",
     iconKey: "brain",
+    providerIconKey: "anthropic",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
@@ -1055,6 +1103,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Route model calls through OpenRouter (Claude, Gemini, GPT, Mistral, etc.).",
     category: "llm",
     iconKey: "route",
+    providerIconKey: "openrouter",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
@@ -1083,6 +1132,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "OpenAI API access for Codex workers and other OpenAI-backed harnesses.",
     category: "llm",
     iconKey: "sparkles",
+    providerIconKey: "openai",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
@@ -1197,6 +1247,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Route pi/pi-mono and Claude Code harness calls to Amazon Bedrock with auth delegated to the AWS SDK credential chain.",
     category: "llm",
     iconKey: "cloud",
+    providerIconKey: "amazon-bedrock",
     docsUrl:
       "https://docs.agent-swarm.dev/docs/guides/harness-providers#pi-mono--amazon-bedrock-auth",
     restartRequired: true,
@@ -1409,6 +1460,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Authenticate codex workers with your ChatGPT accounts. Sign in with the codex-login CLI command.",
     category: "llm",
     iconKey: "key-round",
+    logoSrc: "/harness-logos/codex.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/provider-auth/codex-oauth",
     specialFlow: "codex-cli",
     restartRequired: true,
@@ -1428,6 +1480,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Run swarm tasks in Anthropic's managed cloud sandbox. Requires running the claude-managed-setup CLI once to create the Anthropic-side agent + environment.",
     category: "llm",
     iconKey: "cloud",
+    logoSrc: "/harness-logos/claude-managed.svg",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#claude-managed-agents",
     specialFlow: "claude-managed-cli",
     restartRequired: true,
@@ -1487,6 +1540,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Let reporting automations query Search Console performance data.",
     category: "observability",
     iconKey: "chart-line",
+    logoSrc: "/integration-logos/google-search-console.svg",
     docsUrl:
       "https://docs.agent-swarm.dev/docs/reference/environment-variables#google-search-console",
     alternatives: [
@@ -1522,7 +1576,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     name: "AgentFS",
     description: "Use shared persistent storage for agent work and task attachments.",
     category: "other",
-    iconKey: "cloud",
+    iconKey: "hard-drive",
     docsUrl: "https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment",
     fields: [
       {

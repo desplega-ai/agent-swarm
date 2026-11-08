@@ -6,6 +6,7 @@
  */
 import { formatDuration, formatSmartTime } from "@/lib/utils";
 import type { DetailListField, TableColumn } from "./catalog";
+import { numberFormatter, toFiniteNumber } from "./format-number";
 import { jsonPreview } from "./json-preview";
 
 /** Every rendering kind a `Table` column or a `DetailList` field can declare. */
@@ -20,9 +21,22 @@ export function progressPercent(value: unknown, max: number | undefined): number
   return Math.max(0, Math.min(100, Math.round((number / ceiling) * 100)));
 }
 
-/** One value → its display text, by declared kind. */
-export function formatValue(kind: ValueKind | undefined, value: unknown): string {
+/**
+ * One value → its display text, by declared kind. `currency` (ISO 4217,
+ * default USD) applies to `kind: "currency"`; `percent` reads ratios
+ * (0.42 = 42%). A non-numeric value under either kind shows as is.
+ */
+export function formatValue(
+  kind: ValueKind | undefined,
+  value: unknown,
+  currency?: string,
+): string {
   if (value === null || value === undefined) return "";
+  if (kind === "currency" || kind === "percent") {
+    const number = toFiniteNumber(value);
+    if (number === null) return String(value);
+    return numberFormatter(kind, currency)(number);
+  }
   if (kind === "duration") {
     const ms = typeof value === "number" ? value : Number(value);
     return Number.isFinite(ms) ? formatDuration(ms) : String(value);

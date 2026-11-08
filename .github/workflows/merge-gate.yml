@@ -227,11 +227,13 @@ jobs:
         run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
+        # Also templates/import/*.schema.json, generated from src/be/import/schema.ts.
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
         # ExtensionManifestSchema is published as templates/extensions/manifest.schema.json.
         run: |
           bun run check:extension-catalog
           bun run check:extension-schema
+          bun run check:import-schema
 
       # scripts/vendor/gitleaks/gitleaks.toml is converted to src/utils/secret-rules.generated.ts;
       # the check also verifies the vendored body against its pinned sha256.
@@ -1383,6 +1385,16 @@ jobs:
           # fetches the few blobs the scanned range touches on demand.
           fetch-depth: 0
           filter: blob:none
+
+      # The gitleaks tarball comes from a GitHub release URL that sometimes
+      # answers 504 for a minute or more. A cache hit skips the download;
+      # scripts/gitleaks.sh still verifies the SHA-256 on every run. Queue refs
+      # restore the entry gitleaks-cache.yml saves on main; keep both in sync.
+      - name: Cache gitleaks
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/agent-swarm/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('scripts/gitleaks.sh') }}
 
       - name: Self-test the scanner
         run: bash scripts/gitleaks-selftest.sh

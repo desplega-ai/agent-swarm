@@ -73,7 +73,34 @@ describe("Cmd+K route metadata", () => {
     }
     const paths = navEntries(appRoutes).map((entry) => entry.path);
     expect(paths).toContain("/settings/extensions");
+    expect(paths).not.toContain("/connections");
+    expect(paths).not.toContain("/mcp-servers");
+    expect(paths).not.toContain("/settings/api-keys");
+    expect(paths).not.toContain("/settings/integrations");
     expect(paths).not.toContain("/settings");
     expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  test("Connect pages and their moved entries resolve to the new paths", () => {
+    const byTitle = new Map(navEntries(appRoutes).map((entry) => [entry.title, entry]));
+    const expected: Array<[string, string, string | undefined]> = [
+      ["Channels", "/integrations/channels", "Connect"],
+      ["Tools", "/integrations/tools", "Connect"],
+      ["AI providers", "/integrations/ai", "Connect"],
+      ["MCP servers", "/integrations/tools/mcp-servers", "Connect"],
+      ["Script connections", "/integrations/tools/connections", "Connect"],
+      ["OAuth apps", "/integrations/tools/oauth-apps", "Connect"],
+      ["Templates", "/templates", undefined],
+      ["Servers", "/settings/connections", "Settings"],
+      ["Playground", "/settings/connection-playground", "Settings"],
+      ["Fetch credentials", "/settings/fetch-credentials", "Settings"],
+    ];
+    for (const [title, path, parent] of expected) {
+      const entry = byTitle.get(title);
+      expect({ title, path: entry?.path, parent: entry?.parent }).toEqual({ title, path, parent });
+    }
+    for (const title of ["Channels", "Tools", "AI providers", "MCP servers"]) {
+      expect(byTitle.get(title)?.adminOnly).toBe(true);
+    }
   });
 });

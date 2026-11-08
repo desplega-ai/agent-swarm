@@ -24,7 +24,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin for non-credentialed requests only (`credentials: "omit"` for bearer clients). Cookie-authenticated responses still require an allowlisted origin; this flag never grants credentials to unlisted origins. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
-| `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
+| `APP_URL` | — | Dashboard URL for Slack message links, and the default base of the file links that agents give people. A saved global config value reaches workers at their next poll. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
 | `SWARM_DASHBOARD_URL` | Falls back to `APP_URL` | Optional override for the dashboard base URL used to build the "View in Agent Swarm" link posted back to a Linear `AgentSession`. |
 | `TRUST_BODY_REQUESTED_BY_USER_ID` | `true` (unset/on) | When on (default), the server may honor a body-supplied `requestedByUserId` on `POST /api/tasks` (validated against a real user row) if no authenticated/owned-task identity is available — this keeps UI/API task attribution working under a shared operator key. Set to `false` in multi-tenant deployments where callers of the shared key are not all equally trusted, restoring the strict anti-spoofing behavior (body field ignored for operator/global-key callers). |
 | `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
@@ -42,6 +42,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `ASSET_KEY_AUDIT_DISABLE_STARTUP_HARD_FAIL` | `false` | Temporary recovery switch. When `true`, the startup asset-namespace audit logs structural key failures instead of aborting the server. Repair the data and remove the switch before normal operation; mapping-drift warnings never abort startup. See [Asset Namespaces](/docs/guides/asset-namespaces#audit-and-rollout). |
 | `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |
 | `SYSTEM_ONE_DEFAULT_PROVIDER` | `typesafe` | Decision host for a `system-one-decision` node or `system-one-decide` call that names no `provider`: `typesafe`, `openrouter`, `cloudflare`, `laya`, or `openai`. Read at each decision; a stored global value wins over the environment. See [SystemOne Decision](/docs/concepts/workflows#systemone-decision). |
+| `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` | `cloudflare` | Extraction host for a `system-one-extraction` node that names no `provider`. Only `cloudflare` is accepted. Read at each extraction. A stored global value takes precedence over the environment. See [SystemOne Extraction](/docs/concepts/workflows#systemone-extraction). |
 | `SCRIPT_EXECUTOR` | `native` | How the API server runs scripts. `native` spawns a sandboxed `bun` subprocess per run. `quickjs` (experimental) runs scripts in QuickJS (WASM) inside a pool of worker threads, with ~1 ms per-run overhead (against ~10 ms for `native` on Linux) and a smaller API surface. See [Scripts runtime § Executors](/docs/guides/scripts-runtime#executors). |
 | `SCRIPT_QUICKJS_POOL_SIZE` | `4` | Maximum QuickJS worker threads, an integer from 1 to 32. Read when the shared pool is first created; restart the API after changes. More workers trade memory for concurrent throughput. Separate from `SCRIPT_RUN_CONCURRENCY_CAP`. |
 | `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `quickjs` executor only: `true` lets scripts fetch private, loopback, link-local and metadata addresses. Default `false` refuses them after DNS resolution and on every redirect hop. The `native` executor does not enforce it yet. See [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy). |
@@ -65,6 +66,10 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SCRIPT_WORKFLOW_DEBUG` | `false` | When `true`, logs verbose debug output (auth override flag, resolved API key length) each time the script-run supervisor spawns a durable script-workflow subprocess. |
 | `WORKFLOW_MAX_ITERATIONS` | `100` | Max times a single workflow node may execute within one run before the engine aborts with an infinite-loop circuit-breaker error. |
 | `WORKFLOW_MAX_STEPS_PER_RUN` | `500` | Max total steps (across all nodes) allowed in a single workflow run before the engine's circuit breaker aborts it. |
+| `SEED_AUTOMATIONS_ENABLED` | `true` | Whether a freshly seeded zero-config workflow or schedule arrives enabled instead of disabled-but-inventoried. Read at boot. See [UI configuration](/docs/ui/configuration). |
+| `SEED_SCRIPTS_ENABLED` / `SEED_SKILLS_ENABLED` / `SEED_WORKFLOWS_ENABLED` / `SEED_SCHEDULES_ENABLED` | `true` | Set one to `false` to skip creating that kind's bundled catalog at all, at boot and by the seed CLI. Storage provisioning always runs. See [Per-kind seed suppression](/docs/ui/configuration#seed-suppression). |
+| `SWARM_IMPORT_SOURCES` | — | JSON array of file-import sources (workflows, skills, scripts, agent instructions) read at boot. Unset means no import. See [File import](/docs/guides/file-import). |
+| `SWARM_IMPORT_SOURCES_FILE` | — | Path to a JSON or YAML file holding the `SWARM_IMPORT_SOURCES` array. |
 | `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
 | `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
 | `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. Azure / Microsoft Foundry: `https://<resource>.services.ai.azure.com/openai/v1` (see [Embedding endpoints](/docs/architecture/memory#embedding-endpoints)). |
@@ -322,12 +327,13 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_TOKEN` | — | GitHub token for git operations |
 | `GITHUB_EMAIL` | `worker-agent@desplega.ai` | Git commit email |
 | `GITHUB_NAME` | `Worker Agent` | Git commit name |
+| `GITHUB_URL` | `https://github.com` | GitHub Enterprise Server host for git, `gh` and API calls; must match the API server |
 
 ## Slack Integration
 
 | Variable | Description |
 |----------|-------------|
-| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. HTTP is configuration-only until its receiver is installed and never falls back to Socket Mode. |
+| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. `http` serves signed requests at `POST /api/integrations/slack/events` and never falls back to Socket Mode. |
 | `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`), required in both modes |
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
@@ -366,6 +372,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
+| `GITHUB_URL` | GitHub Enterprise Server web base, e.g. `https://ghe.example.com` (default `https://github.com`). Set on the API and every worker. Deployment env only. See [GitHub Enterprise Server](/docs/integrations/github#github-enterprise-server) |
+| `GITHUB_API_URL` | GitHub REST base override (default derived from `GITHUB_URL`, `<GITHUB_URL>/api/v3` on GHES). Deployment env only |
 
 ## GitLab Integration
 
@@ -555,11 +563,11 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 | Variable | Description |
 |----------|-------------|
 | `AGENT_FS_API_URL` | Agent-fs API URL. When unset, the server uses `local-fs`; when set as env or global swarm config, it enables the persistent shared filesystem provider |
-| `AGENT_FS_LIVE_URL` | Agent-fs live host used to build shareable file links (`<AGENT_FS_LIVE_URL>/file/~/<org_id>/<drive_id>/<file_path>`). Falls back to the public `https://live.agent-fs.dev` host when unset; self-hosted agent-fs operators should override it |
-| `AGENT_FS_PUBLIC_URL` | Agent-fs URL that browsers use for [Comb](/docs/ui/comb). Defaults to `AGENT_FS_API_URL`; set it when the API reaches agent-fs on an internal hostname, which also turns Comb on when `COMB_ENABLED` is unset (e.g. `http://agent-fs:7433` in Docker Compose, where the browser needs `http://localhost:7433`). Must be an http(s) URL with no query string or fragment |
-| `AGENT_FS_LINK_TARGET` | Where people-facing file links point: task attachment links and the links agents give people. `dashboard` uses `APP_URL/file/~/<org>/<drive>/<path>` (attachments also need Comb on; workers need `APP_URL` in their own environment), `live` uses `AGENT_FS_LIVE_URL`. Unset or blank keeps the automatic choice. See [Links to agent-fs files](/docs/ui/comb#links-to-agent-fs-files) |
-| `AGENT_FS_PROXY` | `true` makes the API serve agent-fs (at `AGENT_FS_API_URL`) at `/agentfs/*`, plus agent-fs's public `/share/*` and `/site/*` pages (default `false`). Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. Only `Authorization: Bearer af_...` credentials reach agent-fs. `POST /agentfs/auth/register` needs a swarm credential (the operator key, or a user token for the user's own email) and is limited to 5 per minute per IP. Read per request. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api) |
-| `COMB_ENABLED` | Controls [Comb](/docs/ui/comb), the agent-fs review space in the dashboard. Unset, it is on when `AGENT_FS_API_URL` is set and a browser can reach agent-fs (`AGENT_FS_PUBLIC_URL` set, `AGENT_FS_PROXY` on, or a browser-reachable `AGENT_FS_API_URL`); `true` or `false` overrides that. No effect until `AGENT_FS_API_URL` is set. Saving it in swarm config reloads the API; the dashboard picks it up within one status poll (30 seconds at most) |
+| `AGENT_FS_LIVE_URL` | Agent-fs live host used to build shareable file links (`<AGENT_FS_LIVE_URL>/file/~/<org_id>/<drive_id>/<file_path>`). Falls back to the public `https://live.agent-fs.dev` host when unset; self-hosted agent-fs operators should override it. Its origin is also the only `return_to` that "Continue with your swarm" (`POST /api/fs/continue`) sends a key to |
+| `AGENT_FS_PUBLIC_URL` | Agent-fs URL that browsers use directly for [Comb](/docs/ui/comb). Unset, browsers go through the API proxy at `<public API URL>/agentfs` (or `AGENT_FS_API_URL` itself with `AGENT_FS_PROXY=false`). Must be an http(s) URL with no query string or fragment |
+| `AGENT_FS_LINK_TARGET` | Where people-facing file links point: task attachment links and the links agents give people. `dashboard` uses `APP_URL/file/~/<org>/<drive>/<path>` (attachments also need Comb on), `live` uses `AGENT_FS_LIVE_URL`. Unset or blank means `dashboard` when `APP_URL` is set and `COMB_ENABLED` is not `false`, else `live`. An explicit `COMB_ENABLED=false` also keeps agent links on `live` with `dashboard`. A live link carries `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set. See [Links to agent-fs files](/docs/ui/comb#links-to-agent-fs-files) |
+| `AGENT_FS_PROXY` | `true` makes the API serve agent-fs (at `AGENT_FS_API_URL`) at `/agentfs/*`, plus agent-fs's public `/share/*` and `/site/*` pages (default: on when `AGENT_FS_API_URL` is set, else off; `false` turns it off). Comb then uses `<public API URL>/agentfs` when `AGENT_FS_PUBLIC_URL` is blank. Only `Authorization: Bearer af_...` credentials reach agent-fs. `POST /agentfs/auth/register` needs a swarm credential (the operator key, or a user token for the user's own email) and is limited to 5 per minute per IP. Read per request. See [Bundled agent-fs behind the swarm API](/docs/guides/agent-fs-co-deployment#bundled-agent-fs-behind-the-swarm-api) |
+| `COMB_ENABLED` | Controls [Comb](/docs/ui/comb), the agent-fs review space in the dashboard. Unset: on when `AGENT_FS_API_URL` is set and `AGENT_FS_PUBLIC_URL` or `AGENT_FS_PROXY` gives the browser an agent-fs address. `true` turns it on, `false` turns it off. No effect until `AGENT_FS_API_URL` is set. Saving it in swarm config reloads the API; the dashboard picks it up within one status poll (30 seconds at most) |
 | `API_AGENT_FS_API_KEY` | API-owned bootstrap/service API key for agent-fs. Used only by the API server to seed the swarm org/drive and invite/register agents |
 | `AGENT_FS_API_KEY` | Per-agent API key for agent-fs CLI/MCP access. Generated by the API server and stored as an agent-scoped secret; workers should not share the API bootstrap key |
 | `AGENT_FS_SHARED_ORG_ID` | Shared org ID for the swarm's agent-fs organization. Auto-created by the lead on first boot |

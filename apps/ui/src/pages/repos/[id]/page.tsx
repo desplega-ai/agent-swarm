@@ -14,6 +14,7 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { useDeleteRepo, useRepo, useUpdateRepo } from "@/api/hooks/use-repos";
 import type { RepoGuidelines, SwarmRepo } from "@/api/types";
+import { useGitHubWebUrl } from "@/app/status-context";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +48,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { githubHostOf, githubOrigin } from "@/lib/swarm-links";
 import { formatSmartTime } from "@/lib/utils";
 
 interface RepoFormData {
@@ -77,6 +79,7 @@ function RepoEditDialog({
     autoClone: repo.autoClone,
     hooks: repo.hooks,
   });
+  const githubWebUrl = useGitHubWebUrl();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +100,7 @@ function RepoEditDialog({
               <Label htmlFor="repo-url">Repository URL</Label>
               <Input
                 id="repo-url"
-                placeholder="https://github.com/org/repo"
+                placeholder={`${githubOrigin(githubWebUrl)}/org/repo`}
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 required
@@ -227,10 +230,13 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
   );
 }
 
-function detectProvider(url: string): "github" | "gitlab" | "bitbucket" | null {
+function detectProvider(
+  url: string,
+  githubWebUrl: string,
+): "github" | "gitlab" | "bitbucket" | null {
   if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
   if (url.includes("bitbucket.org")) return "bitbucket";
-  if (url.includes("github.com")) return "github";
+  if (url.includes("github.com") || url.includes(githubHostOf(githubWebUrl))) return "github";
   return null;
 }
 
@@ -241,6 +247,7 @@ export default function RepoDetailPage() {
   const updateRepo = useUpdateRepo();
   const deleteRepo = useDeleteRepo();
   const [editOpen, setEditOpen] = useState(false);
+  const githubWebUrl = useGitHubWebUrl();
 
   if (isLoading) {
     return (
@@ -255,7 +262,7 @@ export default function RepoDetailPage() {
     return <p className="text-muted-foreground">Repository not found.</p>;
   }
 
-  const provider = detectProvider(repo.url);
+  const provider = detectProvider(repo.url, githubWebUrl);
 
   function handleEditSubmit(data: RepoFormData) {
     updateRepo.mutate({ id: repo!.id, data });
@@ -278,46 +285,64 @@ export default function RepoDetailPage() {
       <PageHeader
         className="shrink-0"
         title={
-          /* Repo name lives in the breadcrumb — badges only here. */
-          <div className="flex items-center gap-3 min-w-0">
-            {provider && (
-              <Badge variant="outline" size="tag">
-                {provider}
+          // Name as a wrapping h1, badges on their own wrapping row
+          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+            <h1 className="break-all text-base font-semibold leading-snug max-sm:line-clamp-2">
+              {repo.name}
+            </h1>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {provider && (
+                <Badge variant="outline" size="tag">
+                  {provider}
+                </Badge>
+              )}
+              <Badge
+                variant="outline"
+                size="tag"
+                className={
+                  repo.autoClone
+                    ? "bg-status-success/15 text-status-success-strong border-status-success/30"
+                    : ""
+                }
+              >
+                {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
               </Badge>
-            )}
-            <Badge
-              variant="outline"
-              size="tag"
-              className={
-                repo.autoClone
-                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
-                  : ""
-              }
-            >
-              {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
-            </Badge>
-            <Badge
-              variant="outline"
-              size="tag"
-              className={
-                repo.hooks.enabled
-                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
-                  : ""
-              }
-            >
-              {repo.hooks.enabled ? "Hooks ON" : "Hooks OFF"}
-            </Badge>
+              <Badge
+                variant="outline"
+                size="tag"
+                className={
+                  repo.hooks.enabled
+                    ? "bg-status-success/15 text-status-success-strong border-status-success/30"
+                    : ""
+                }
+              >
+                {repo.hooks.enabled ? "Hooks ON" : "Hooks OFF"}
+              </Badge>
+            </div>
           </div>
         }
         action={
           <>
-            <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
+            {/* Icon-only actions below sm so they never cover the badges */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              aria-label="Edit repository"
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Edit</span>
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button size="sm" variant="destructive-outline" className="gap-1">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                <Button
+                  size="sm"
+                  variant="destructive-outline"
+                  className="gap-1"
+                  aria-label="Delete repository"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />{" "}
+                  <span className="hidden sm:inline">Delete</span>
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -356,26 +381,39 @@ export default function RepoDetailPage() {
         rail={
           <DetailPageRail>
             <QuickStats>
+              {/* Label column hugs, the long value takes the rest and ellipsizes */}
               <QuickStat
                 label="URL"
+                className="grid-cols-[auto_minmax(0,1fr)]"
                 value={
                   <a
                     href={repo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                    title={repo.url}
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 align-bottom text-primary hover:underline"
                   >
                     <span className="truncate">{repo.url}</span>
                     <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
                   </a>
                 }
               />
-              <QuickStat label="Clone Path" value={repo.clonePath} mono />
+              <QuickStat
+                label="Clone Path"
+                className="grid-cols-[auto_minmax(0,1fr)]"
+                value={<span title={repo.clonePath}>{repo.clonePath}</span>}
+                mono
+              />
               <QuickStat
                 label="Default Branch"
+                className="grid-cols-[auto_minmax(0,1fr)]"
                 value={
-                  <span className="inline-flex items-center gap-1">
-                    <GitBranch className="h-3 w-3" /> {repo.defaultBranch}
+                  <span
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 align-bottom"
+                    title={repo.defaultBranch}
+                  >
+                    <GitBranch className="h-3 w-3 shrink-0" />{" "}
+                    <span className="truncate">{repo.defaultBranch}</span>
                   </span>
                 }
               />

@@ -6,7 +6,16 @@ import { cn } from "@/lib/utils";
 interface IntegrationStatusBadgeProps {
   status: IntegrationStatus;
   className?: string;
+  /** An account is signed in through OAuth. Wins over every status but "disabled". */
+  connected?: boolean;
 }
+
+const CONNECTED_META = {
+  label: "Connected",
+  className: "border-status-success/30 text-status-success-strong",
+  ariaLabel: "Status: Connected",
+  tooltip: "An account is signed in through OAuth.",
+};
 
 // Labels and colors are text-first (accessible to screen readers and users
 // with color-vision deficits); color is additive, not load-bearing.
@@ -43,8 +52,12 @@ const STATUS_META: Record<
   },
 };
 
-export function IntegrationStatusBadge({ status, className }: IntegrationStatusBadgeProps) {
-  const meta = STATUS_META[status];
+export function IntegrationStatusBadge({
+  status,
+  className,
+  connected,
+}: IntegrationStatusBadgeProps) {
+  const meta = connected && status !== "disabled" ? CONNECTED_META : STATUS_META[status];
   return (
     <Tooltip>
       <TooltipTrigger asChild>

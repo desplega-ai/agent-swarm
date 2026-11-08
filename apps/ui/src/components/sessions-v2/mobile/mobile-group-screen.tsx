@@ -6,17 +6,22 @@
  * opened here pushes over it, and back returns to it.
  */
 
-import { useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useId, useMemo, useRef, useState } from "react";
 import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import type { SessionListItem } from "@/api/types";
 import { MobileList } from "@/components/shared/mobile-list";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import type { SwipeSide } from "@/hooks/use-swipe-row";
+import { useUrlSearchState } from "@/hooks/use-url-search-state";
+import { parseGroupPane } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { GroupTab } from "../group-tab";
+import { GroupPanePending, useGroupPane } from "../overview/group-pane";
+import { OverviewTab } from "../overview/overview-tab";
 import { useLastValue } from "../sidebar/point-menu";
-import { useMinuteClock } from "../sidebar/session-tree";
 import { SnoozeDateDialog } from "../sidebar/snooze-picker";
 import type { TreeRow } from "../sidebar/tree-rows";
 import { useSessionSelection } from "../sidebar/use-session-selection";
@@ -45,6 +50,61 @@ export function MobileGroupScreen({
   onMove: Move;
 }) {
   const backRef = useRef<HTMLButtonElement>(null);
+  // A use-case group: underline tabs for its Overview and its list (step-10).
+  const { searchParams, setParam } = useUrlSearchState();
+  const { qualifies, pane } = useGroupPane(view, parseGroupPane(searchParams.get("tab")));
+  const list = (
+    <GroupTab
+      view={view}
+      onOpen={onOpen}
+      // One page scrolls: the search, the filter, the rows, then the pager.
+      className="overflow-y-auto overscroll-contain px-4 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      phoneList={(rows, { loading, label }) => (
+        <GroupRows
+          rows={rows}
+          loading={loading}
+          label={label}
+          view={view}
+          onOpen={onOpen}
+          // After a move the selection is gone: the focus goes to the back button.
+          onMove={(sessions) => onMove(sessions, () => backRef.current?.focus())}
+        />
+      )}
+    />
+  );
+  let body: ReactNode = list;
+  if (pane === "pending") body = <GroupPanePending />;
+  else if (qualifies) {
+    body = (
+      <Tabs
+        value={pane}
+        onValueChange={(next) => setParam("tab", next)}
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
+        <TabsList
+          variant="line"
+          className="h-11 w-full shrink-0 justify-start gap-4 border-b border-border-subtle px-4"
+        >
+          <TabsTrigger value="overview" className="h-full flex-none px-0.5">
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="list" className="h-full flex-none px-0.5">
+            Sessions
+          </TabsTrigger>
+        </TabsList>
+        {pane === "overview" ? (
+          <OverviewTab
+            view={view}
+            onOpen={onOpen}
+            onOpenList={() => setParam("tab", "list")}
+            className="overscroll-contain px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          />
+        ) : (
+          list
+        )}
+      </Tabs>
+    );
+  }
   return (
     <div
       inert={covered}
@@ -60,23 +120,7 @@ export function MobileGroupScreen({
       >
         <span className="truncate text-base font-medium text-muted-foreground">Sessions</span>
       </MobileTopBar>
-      <GroupTab
-        view={view}
-        onOpen={onOpen}
-        // One page scrolls: the search, the filter, the rows, then the pager.
-        className="overflow-y-auto overscroll-contain px-4 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-        phoneList={(rows, { loading, label }) => (
-          <GroupRows
-            rows={rows}
-            loading={loading}
-            label={label}
-            view={view}
-            onOpen={onOpen}
-            // After a move the selection is gone: the focus goes to the back button.
-            onMove={(sessions) => onMove(sessions, () => backRef.current?.focus())}
-          />
-        )}
-      />
+      {body}
     </div>
   );
 }

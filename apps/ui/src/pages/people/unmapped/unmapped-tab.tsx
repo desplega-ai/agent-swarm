@@ -6,6 +6,7 @@ import { useResolveUnmapped, useUnmapped } from "@/api/hooks/use-users";
 import type { UnmappedIdentity } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { IdentityBadge } from "../identity-badges";
@@ -74,6 +76,7 @@ function unmappedMatches(row: UnmappedIdentity, query: string): boolean {
 }
 
 export function UnmappedTab() {
+  const isMobile = useIsMobile();
   const { searchParams, setParam } = useUrlSearchState();
   const kind = coerceKind(readStringParam(searchParams, "kind", "all"));
   const [filterOpen, setFilterOpen] = useState(false);
@@ -271,7 +274,7 @@ export function UnmappedTab() {
               size="sm"
               role="combobox"
               aria-expanded={filterOpen}
-              className="h-9 w-[180px] shrink-0 justify-between font-normal"
+              className="h-9 w-[150px] shrink-0 justify-between font-normal md:w-[180px]"
             >
               <span className="flex items-center gap-1.5 min-w-0">
                 {kind === "all" ? (
@@ -334,6 +337,53 @@ export function UnmappedTab() {
           title="No unmapped identities"
           description="Inbound webhooks from unknown users will appear here for triage."
         />
+      ) : isMobile ? (
+        // The grid pushes the Link and Create buttons off a phone's screen;
+        // they sit under each row here.
+        <MobileList
+          label="Unmapped identities"
+          loading={isLoading}
+          emptyMessage="No unmapped identities for this filter."
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          {(filteredData ?? []).map((row) => (
+            <MobileListRow
+              key={`${row.kind}:${row.externalId}`}
+              onClick={() => copyId(row.externalId)}
+              leading={<IntegrationIcon kind={row.kind} className="size-4 text-foreground/70" />}
+              title={<span className="font-mono text-xs">{row.externalId}</span>}
+              titleLines={1}
+              meta={[
+                KIND_LABEL[coerceKind(row.kind)] ?? row.kind,
+                `${row.count.toLocaleString()} event${row.count === 1 ? "" : "s"}`,
+                row.lastSeenAt ? formatSmartTime(row.lastSeenAt) : null,
+              ]}
+              extras={
+                <div className="flex gap-2 px-4 pb-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setLinkTarget(row)}
+                    disabled={resolve.isPending}
+                  >
+                    <LinkIcon className="h-3 w-3 mr-1" />
+                    Link to user
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setCreateTarget(row)}
+                    disabled={resolve.isPending}
+                  >
+                    <UserPlus className="h-3 w-3 mr-1" />
+                    Create user
+                  </Button>
+                </div>
+              }
+            />
+          ))}
+        </MobileList>
       ) : (
         <DataGrid
           rowData={filteredData}

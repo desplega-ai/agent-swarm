@@ -6,6 +6,7 @@ import {
   type BudgetRefusalContext,
   emitBudgetRefusalSideEffects,
 } from "../be/budget-refusal-notify";
+import { firstOpenItem, markNudged, userGrantCanEditSwarm } from "../be/checklist";
 import {
   claimMentions,
   claimOfferedTask,
@@ -38,6 +39,8 @@ import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
 import {
+  type Agent,
+  type AgentTask,
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
   ModelProfileCredentialsSchema,
@@ -48,7 +51,9 @@ import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { readsRepoSecrets } from "./config";
+import { resolveAppUrl } from "./config-values";
 import {
   buildTaskRequestedBy,
   buildTaskThreadParticipants,
@@ -125,6 +130,15 @@ const PollTaskAssignedTriggerSchema = z.object({
     credentialAllowlist: ModelProfileCredentialsSchema.optional(),
   }),
   requestedBy: TaskRequestedBySchema.optional(),
+  checklistNudge: z
+    .object({
+      itemId: z.string(),
+      kind: z.string(),
+      label: z.string(),
+      // Absent without APP_URL: a relative link is dead in Slack or Telegram.
+      href: z.string().optional(),
+    })
+    .optional(),
   threadParticipants: TaskThreadParticipantsSchema.optional(),
 });
 
@@ -212,6 +226,35 @@ async function attachmentsForTrigger(
     mimeType: a.mimeType,
     sizeBytes: a.sizeBytes,
   }));
+}
+
+async function buildChecklistNudge(task: AgentTask, agent: Agent) {
+  const userId = task.requestedByUserId;
+  if (!agent.isLead || !userId || !["ui", "slack", "chat", "comb"].includes(task.source ?? "")) {
+    return undefined;
+  }
+  try {
+    return await getDbClient().transaction(async () => {
+      // RBAC off: the legacy policy lets the Lead edit swarm items.
+      const canEditSwarm = (await userGrantCanEditSwarm(userId)) ?? true;
+      const item = await firstOpenItem(userId, canEditSwarm);
+      if (!item) return undefined;
+      await markNudged(item.id, task.id, userId);
+      const appUrl = await resolveAppUrl();
+      return {
+        itemId: item.id,
+        kind: item.kind,
+        label: item.label,
+        ...(appUrl && { href: `${appUrl}${item.href ?? "/"}` }),
+      };
+    });
+  } catch (error) {
+    console.warn(
+      "[/api/poll] Checklist nudge failed:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -509,6 +552,7 @@ export async function handlePoll(
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTaskRequestedBy).
             const assignedRequestedBy = await buildTaskRequestedBy(pendingTask);
+            const nudge = await buildChecklistNudge(pendingTask, agent);
             const assignedThread = await buildTaskThreadParticipants(pendingTask);
             // The surface that started the whole chain, so the worker can tag
             // its session events with it (workers cannot read the task tree).
@@ -529,6 +573,7 @@ export async function handlePoll(
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
+                ...(nudge && { checklistNudge: nudge }),
                 ...(assignedThread && { threadParticipants: assignedThread }),
               },
             };

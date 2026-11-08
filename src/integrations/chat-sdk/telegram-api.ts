@@ -5,7 +5,11 @@ const TELEGRAM_TIMEOUT_MS = 10_000;
 
 /** A Bot API call that did not return `ok: true`. The message never carries the token. */
 export class TelegramBotApiError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** The HTTP status, when the Bot API answered. 401 means the token was rejected. */
+    readonly status?: number,
+  ) {
     super(message);
     this.name = "TelegramBotApiError";
   }
@@ -50,6 +54,7 @@ export async function callTelegramBotApi(
     const description = payload?.description ?? `HTTP ${response.status}`;
     throw new TelegramBotApiError(
       `Telegram ${method} failed: ${scrubSecrets(description.replaceAll(token, "[REDACTED]"))}`,
+      response.status,
     );
   }
   return payload.result;

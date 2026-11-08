@@ -17,12 +17,16 @@
  */
 
 import { initDb } from "../src/be/db";
-import { runAllSeeders } from "../src/be/seed";
+import { loadGlobalConfigsIntoEnv } from "../src/http/core";
 
 const dbPath = process.env.DATABASE_PATH ?? "./agent-swarm-db.sqlite";
 console.log(`[seed] database: ${dbPath}`);
 initDb(dbPath);
+await loadGlobalConfigsIntoEnv(true);
 
+// Catalog modules read startup flags when imported, after stored config wins
+// over the deployment env, just like the API boot path.
+const { runAllSeeders } = await import("../src/be/seed");
 const results = await runAllSeeders();
 const failed = results.reduce((n, r) => n + r.failed.length, 0);
 if (failed > 0) {

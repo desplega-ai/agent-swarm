@@ -110,6 +110,12 @@ export const SESSION_LEAF_KINDS = ["task", "thread", ...SESSION_RESOURCE_KINDS] 
 /** The leaves a namespace root (`shared/`, `personal/<me>/`) holds as No group. */
 export const NO_GROUP_LEAF_KINDS = ["task", "thread"] as const;
 const sessionLeafPattern = new RegExp(`/(${SESSION_LEAF_KINDS.join("|")}):[^/]+/$`);
+
+/** A user group key excludes namespace roots and resource leaves. */
+export function isGroupKey(key: string): boolean {
+  const parsed = parseAssetKey(key);
+  return parsed.relativeSegments.length > 0 && !sessionLeafPattern.test(parsed.key);
+}
 const resourceGroupPattern = new RegExp(
   `^(shared/|personal/[^/]+/)((${SESSION_RESOURCE_KINDS.join("|")}):([^/]+))/(?:(action:[^/]+)/)?`,
 );

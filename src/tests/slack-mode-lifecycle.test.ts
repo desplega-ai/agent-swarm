@@ -3,7 +3,7 @@ import { createApiClient, pollUntil } from "../../scripts/e2e/http";
 import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
 import { type Sut, startSut, stopSut } from "../../scripts/e2e/sut";
 
-test("config reload disconnects a live socket for HTTP and can return to Socket Mode", async () => {
+test("config reload swaps a live socket for the HTTP receiver and can return to Socket Mode", async () => {
   const slack = await startSlackMock(false);
   let sut: Sut | undefined;
   try {
@@ -25,8 +25,10 @@ test("config reload disconnects a live socket for HTTP and can return to Socket 
     expect(reload.json).toMatchObject({ success: true });
     expect(
       (reload.json as { integrationsReinitialized: string[] }).integrationsReinitialized,
-    ).not.toContain("slack");
+    ).toContain("slack");
+    // HTTP mode never asks for a socket.
     expect(slack.mock.apiCalls("apps.connections.open").length).toBe(opened);
+    expect(slack.mock.connectionCount).toBe(0);
     const socket = await api("PUT", "/api/config", {
       body: { scope: "global", key: "SLACK_MODE", value: "socket" },
     });
@@ -39,7 +41,7 @@ test("config reload disconnects a live socket for HTTP and can return to Socket 
   }
 }, 30_000);
 
-test("config reload recovers from an initial unavailable HTTP transport", async () => {
+test("HTTP mode boots without a socket and a reload can switch to Socket Mode", async () => {
   const slack = await startSlackMock(false);
   let sut: Sut | undefined;
   try {
@@ -53,7 +55,7 @@ test("config reload recovers from an initial unavailable HTTP transport", async 
     expect(initialReload.status).toBe(200);
     expect(
       (initialReload.json as { integrationsReinitialized: string[] }).integrationsReinitialized,
-    ).not.toContain("slack");
+    ).toContain("slack");
     expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(0);
 
     const socket = await api("PUT", "/api/config", {

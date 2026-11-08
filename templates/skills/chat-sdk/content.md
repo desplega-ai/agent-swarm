@@ -43,6 +43,13 @@ Write plain, short markdown: bold, italic, inline code, code blocks, bullet list
 | Slack | Converted to Slack mrkdwn: bold, italic, code, lists, links. Tables do not render well. | 4000 characters |
 | Teams | Basic markdown: bold, italic, code, lists, links. | 20000 characters |
 
+Tables and charts go in a `card` on `chat-reply`, not in the markdown text. It posts after the text, as its own message. When the card is the answer, keep the task `output` to one line pointing at it, because the swarm posts `output` too. What a card becomes:
+
+- Slack: native Block Kit tables and charts. A spec Slack cannot draw natively is rejected, so fix it and retry.
+- Teams: an Adaptive Card with native tables and fields. Charts fall back to text.
+- Discord: an embed. Tables become pipe-delimited text rows, and charts fall back to text.
+- Telegram: formatted text with link buttons as inline buttons. Tables and charts fall back to text.
+
 The swarm splits longer text into several messages at line breaks. Long answers are hard to read in chat, so keep the answer short and put long material in an artifact or page, then post the link.
 
 ## Attachments
@@ -67,6 +74,16 @@ The task text already holds the earlier swarm messages of the thread, so read th
 
 - `chat-post { adapter, threadId | channelId, text }` posts outside your task's thread. Lead only. Use it only when the task asks you to message another thread or channel.
 - `chat-open-dm { adapter, userId }` returns the direct-message thread id for a user. Lead only. Then post to it with `chat-post`.
+
+## Leads: use-case thread
+
+A use case (a schedule and its runs under one key, see the `scheduling` skill) can post a summary of each run to one chat thread.
+
+1. When you handle the follow-up of the first run (the planning session has usually ended by then), read `kv-get { namespace: "usecase:<key>", key: "thread" }`. A stored value means that you offered before: do not offer again.
+2. Offer once: "Do you want a summary of each run in a chat channel? Tell me the channel."
+3. On no: `kv-set { namespace: "usecase:<key>", key: "thread", value: { declined: true } }`.
+4. On yes: `chat-post { adapter, channelId, text }` with a one-line title, for example "Competitor watch: one summary per run". Then `kv-set { namespace: "usecase:<key>", key: "thread", value: { adapter, channelId, threadId: "<threadId from chat-post>" } }`.
+5. When you finish or review a run of the use case (the run itself, or the follow-up of a worker's run): `kv-get` the thread. When it has a `threadId`, `chat-post { adapter, threadId, text }` with the run summary and the link to its result file.
 
 ## Leads: `register-chat-channel`
 

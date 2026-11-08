@@ -7,6 +7,7 @@ import type { InboxItemState, SlackConnectMoment } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { SLACK_CONNECT_INVITE_KEY } from "@/hooks/use-slack-connect-invite";
 import { NOTIFICATION_DEFINITIONS } from "@/lib/notifications/definitions";
@@ -102,24 +103,31 @@ export function NotificationBell({ className }: { className?: string } = {}) {
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("relative size-8", className)}
-          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
-        >
-          <Bell className="size-4" />
-          {unreadCount > 0 ? (
-            <Badge
-              variant="destructive"
-              className="absolute -top-1 -right-1 size-4 min-w-4 justify-center rounded-full px-0 text-[10px] leading-none"
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("relative size-8", className)}
+              aria-label={
+                unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
+              }
             >
-              {unreadBadgeLabel(unreadCount)}
-            </Badge>
-          ) : null}
-        </Button>
-      </PopoverTrigger>
+              <Bell className="size-4" />
+              {unreadCount > 0 ? (
+                <Badge
+                  variant="destructive"
+                  className="absolute -top-1 -right-1 size-4 min-w-4 justify-center rounded-full px-0 text-[10px] leading-none"
+                >
+                  {unreadBadgeLabel(unreadCount)}
+                </Badge>
+              ) : null}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Notifications</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-96 p-0">
         <NotificationPanel
           definitions={NOTIFICATION_DEFINITIONS}

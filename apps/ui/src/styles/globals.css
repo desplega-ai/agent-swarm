@@ -52,6 +52,8 @@
      plane (bg step + quiet rules), not a boxed column. */
   --color-sidebar-border: oklch(0.945 0.003 286);
   --color-sidebar-ring: oklch(0.555 0.163 48.998);
+  /* The window canvas behind the inset sidebar and page panels. */
+  --color-canvas: oklch(0.955 0.003 286);
 
   /* Semantic status tokens, light mode. PALE SET (2026-08-06, Taras-approved
      board): same hues as the original Tailwind-500 stops, ~40% less chroma,
@@ -199,6 +201,7 @@
   --color-sidebar-accent-foreground: oklch(0.985 0 0);
   --color-sidebar-border: oklch(1 0 0 / 8%);
   --color-sidebar-ring: oklch(0.769 0.188 70.08);
+  --color-canvas: oklch(0.105 0.004 286);
 
   /* Semantic status tokens, dark mode. PALE SET (2026-08-06): same hues as
      the old *-400 stops with chroma pulled down, glows, not neon. `-strong`
@@ -481,12 +484,15 @@ button[data-slot="sidebar-rail"] {
   height: 8px;
 }
 
+/* Transparent track: a painted track drew a background-colored strip over
+ * the sidebar in dark mode. The thumb uses the muted text color at 40%,
+ * because the border color is close to invisible on the sidebar. */
 ::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: color-mix(in oklch, var(--color-muted-foreground) 40%, transparent);
   border-radius: 4px;
 }
 

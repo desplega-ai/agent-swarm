@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { buildPricingSeedRows } from "../be/seed-pricing";
 import {
   CREDENTIAL_PROVIDER_CHECKERS,
@@ -10,7 +9,6 @@ import {
 } from "../commands/provider-credentials";
 import { createProviderAdapter } from "../providers";
 import { PricingProviderSchema, type ProviderName, ProviderNameSchema } from "../types";
-import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 /**
  * Every `ProviderNameSchema` member must reach every mandatory touch point, or
@@ -210,7 +208,7 @@ describe("provider registration synchronization", () => {
 const entrypoint = await readRepoFile("docker-entrypoint.sh");
 
 const bootstrapStart = 'if [ "$HARNESS_PROVIDER" = "pi" ]; then';
-const bootstrapEnd = "# ---- Verify provider binary is reachable ----";
+const bootstrapEnd = "# ---- Git safe.directory backstop ----";
 const bootstrapBlock = entrypoint.slice(
   entrypoint.indexOf(bootstrapStart),
   entrypoint.indexOf(bootstrapEnd),
@@ -273,28 +271,6 @@ async function runCredentialBootstrap(provider: string): Promise<{
   }
 }
 
-function extractMarkedBlock(name: string): string {
-  const begin = entrypoint.indexOf(`# BEGIN ${name}`);
-  const end = entrypoint.indexOf(`# END ${name}`, begin);
-  if (begin === -1 || end === -1) {
-    throw new Error(`Could not find the # BEGIN/END ${name} markers in docker-entrypoint.sh.`);
-  }
-  return entrypoint.slice(begin, end);
-}
-
-/** Resolvable no-op stubs for every binary the verify chain may look up. */
-function makeBinaryStubDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "provider-registration-bin-"));
-  for (const name of ["claude", "codex", "opencode", "dsh", "amp", "grok", "fx"]) {
-    const file = join(dir, name);
-    writeFileSync(file, "#!/bin/sh\nexit 0\n");
-    chmodSync(file, 0o755);
-  }
-  // HARNESS_PROVIDER=opencode checks for the in-process SDK, not a binary.
-  writeFileSync(join(dir, "opencode-sdk.js"), "");
-  return dir;
-}
-
 describe.skipIf(process.platform === "win32")("docker-entrypoint.sh provider chains", () => {
   for (const provider of ProviderNameSchema.options) {
     const entry = BOOTSTRAP[provider] as (typeof BOOTSTRAP)[ProviderName] | undefined;
@@ -323,34 +299,5 @@ describe.skipIf(process.platform === "win32")("docker-entrypoint.sh provider cha
         );
       }
     });
-  }
-
-  // #1463 class: a provider with no branch of its own falls through to the
-  // catch-all and gets the claude CLI checked instead of its own binary.
-  const verifyChain = extractMarkedBlock("verify_provider_binary");
-  for (const provider of ProviderNameSchema.options) {
-    test(
-      `verify_provider_binary does not route ${provider} through another provider's check`,
-      async () => {
-        const stubDir = makeBinaryStubDir();
-        const result = await runChild(["bash", "-c", verifyChain], {
-          env: {
-            PATH: [stubDir, "/usr/bin", "/bin"].join(delimiter),
-            HARNESS_PROVIDER: provider,
-            ACP_TARGET: "opencode",
-            OPENCODE_SDK_PATH: join(stubDir, "opencode-sdk.js"),
-          },
-        });
-        await rm(stubDir, { recursive: true, force: true });
-        expect(result.exitCode).toBe(0);
-        const checkedClaude = result.stdout.includes("Claude CLI:");
-        if (checkedClaude !== (provider === "claude")) {
-          throw new Error(
-            `Provider "${provider}" ${checkedClaude ? "falls through to the claude CLI check" : "skips the claude CLI check"} in docker-entrypoint.sh verify_provider_binary. Give it its own elif, or add it to the final \`!= "pi"\` guard if it has no binary.`,
-          );
-        }
-      },
-      CHILD_PROCESS_TEST_BUDGET_MS,
-    );
   }
 });

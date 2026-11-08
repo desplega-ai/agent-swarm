@@ -5,9 +5,10 @@ import { refreshCredentialQueries } from "./use-pool-keys";
 export const CODEX_ACCOUNTS_QUERY_KEY = ["codex-accounts"] as const;
 
 /** The stored ChatGPT accounts, sorted by slot. Polls with the app default. */
-export function useCodexAccounts() {
+export function useCodexAccounts(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: CODEX_ACCOUNTS_QUERY_KEY,
+    enabled: options.enabled ?? true,
     queryFn: () => api.fetchCodexAccounts(),
     // A persisted snapshot can be stale: confirm the list with the server.
     refetchOnMount: "always",

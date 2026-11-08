@@ -26,6 +26,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.cursor.first_message",
   "system.agent.fx.system_prompt_file",
   "system.agent.lead",
+  "system.agent.lead.channel_thread",
   "system.agent.lead.docs",
   "system.agent.memory",
   "system.agent.memory.remote",
@@ -123,11 +124,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 37 system and session templates in total", () => {
+  test("registers 38 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 32 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(37);
+    // 33 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(38);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {
@@ -264,18 +265,61 @@ describe("Session templates: MUST pointers", () => {
     expect(result.text).not.toContain("/researching");
   });
 
+  test("the lead contract plans a use case under one key and links its Sessions group", () => {
+    const { text, unresolved } = resolveTemplate("system.agent.lead", {
+      appUrl: "https://app.example.test",
+    });
+    expect(unresolved).toEqual([]);
+    expect(text.split("A use case is work that repeats or continues").length).toBe(2);
+    expect(text.split("/sessions?view=").length).toBe(2);
+    expect(text).toContain(
+      '"This use case lives in Sessions → <slug>: https://app.example.test/sessions?view=<key>"',
+    );
+    expect(text).toContain("`shared/<slug>/`, or `personal/<user>/<slug>/`");
+    expect(text).toContain("`update-schedule` call with the new `taskTemplate`");
+    expect(text).toContain("as a `diff` block in your reply");
+  });
+
+  test("the channel-thread block keeps the rule and points at the skills", () => {
+    const { text } = resolveTemplate("system.agent.lead.channel_thread", {});
+    expect(text).toContain("## Use-case channel thread");
+    expect(text).toContain("offer once to post a summary of each run to a channel thread");
+    expect(text).toContain("`kv-get` with namespace `usecase:<key>` and key `thread`");
+    expect(text).toContain("The `slack-interaction` skill (Slack) and the `chat-sdk` skill");
+  });
+
+  test("the use-case task note names the key and no link", () => {
+    const { text, unresolved } = resolveTemplate("task.use_case", { key: "shared/acme/" });
+    expect(unresolved).toEqual([]);
+    expect(text).toContain("This task is in the use case with key `shared/acme/`.");
+    expect(text).not.toContain("sessions?view=");
+  });
+
   test("the outputs block takes its file-link base from fileLinkBase", () => {
     const definition = getAllTemplateDefinitions().find(
       (d) => d.eventType === "system.agent.outputs",
     );
-    expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase"]);
+    expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase", "fileLinkQuery"]);
     const result = resolveTemplate("system.agent.outputs", {
       fileLinkBase: "http://localhost:5274",
+      fileLinkQuery: "",
     });
     expect(result.text).toContain(
-      "Give people the live app link `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+      "Link files as `http://localhost:5274/file/~/<org>/<drive>/<path>`.",
+    );
+    expect(result.text).toContain("The drive path equals the key string");
+    expect(result.text).toContain("make a Page only when the requester asks for one");
+    expect(result.text).toContain(
+      "a `card` on `slack-reply` or `chat-reply` (max 1 table of 100 rows, 2 charts), not a file or Page. Bigger or document-shaped: agent-fs.",
     );
     expect(result.unresolved).toEqual([]);
+  });
+
+  test("the no-agent-fs outputs block keeps the Page rule", () => {
+    const result = resolveTemplate("system.agent.outputs.no_agent_fs", {});
+    expect(result.text).toContain("make a Page only when the requester asks for one");
+    expect(result.text).not.toContain("drive path");
+    expect(result.text).toContain("Bigger or document-shaped: a Markdown attachment.");
   });
 });
 
@@ -293,6 +337,7 @@ describe("Session templates: composite resolution", () => {
     role: "worker",
     agentId: "composite-agent-001",
     persona: "",
+    appUrl: "https://app.example.test",
   };
 
   for (const eventType of SESSION_TEMPLATES) {
@@ -447,11 +492,13 @@ describe("Session templates: getBasePrompt integration", () => {
   test("a local lead prompt opens with the lead composite verbatim", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
     const agentId = "integration-test-lead";
+    const { getAppUrl } = await import("../utils/constants");
     const composite = resolveTemplate("system.session.lead", {
       name: "an agent",
       role: "lead",
       agentId,
       persona: "",
+      appUrl: getAppUrl(),
     }).text;
 
     const result = await getBasePrompt({ role: "lead", agentId });
