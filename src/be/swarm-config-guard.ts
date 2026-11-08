@@ -335,6 +335,27 @@ export function validateTaskAutoTitleModel(value: unknown): string | null {
     : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
 }
 
+/**
+ * Docker runtime isolation keys. Empty clears the key. The Docker adapter
+ * applies the same rules (`src/runtime-providers/docker.ts`), so a value
+ * this guard accepts never fails `checkConfig`.
+ */
+export function validateDockerRuntime(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_RUNTIME (must be a string)";
+  const name = value.trim();
+  return !name || /^[A-Za-z0-9._-]+$/.test(name)
+    ? null
+    : "Invalid DOCKER_RUNTIME (use an OCI runtime name: letters, digits, '.', '-', '_')";
+}
+
+export function validateDockerPidsLimit(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_PIDS_LIMIT (must be a string)";
+  const limit = value.trim();
+  return !limit || (/^[1-9]\d*$/.test(limit) && Number.isSafeInteger(Number(limit)))
+    ? null
+    : "Invalid DOCKER_PIDS_LIMIT (must be a positive integer, or empty)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -348,7 +369,9 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
-  ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
+  ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
+  DOCKER_RUNTIME: validateDockerRuntime,
+  DOCKER_PIDS_LIMIT: validateDockerPidsLimit,
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   RUNTIME_CONTROLLER_TOKEN_TTL_DAYS: validateControllerTokenTtlDays,
