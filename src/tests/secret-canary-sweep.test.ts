@@ -54,6 +54,7 @@ import { createTrackerSync } from "../be/db-queries/tracker";
 import { getEmbeddingProvider } from "../be/memory";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { loadSecretRegistry } from "../be/secret-registry";
+import { getTaskUiSpec } from "../be/task-ui-spec";
 import { handleAssets } from "../http/assets";
 import { handleCore } from "../http/core";
 import { handleEvents } from "../http/events";
@@ -796,8 +797,11 @@ describe("drive every write path", () => {
     driven.push("approval");
   });
 
-  test("Linear and Jira outbound comments for a completed task", async () => {
+  test("Linear and Jira outbound comments for a completed task with a card", async () => {
     const storeProgress = mcpTool(registerStoreProgressTool, "store-progress");
+    const uiSpecFlags = ["UI_SPEC_ENABLED", "UI_SPEC_ACTIONS_ENABLED"] as const;
+    const previousUiSpecFlags = uiSpecFlags.map((key) => process.env[key]);
+    for (const key of uiSpecFlags) process.env[key] = "true";
     initLinearOutboundSync();
     initJiraOutboundSync();
     try {
@@ -816,13 +820,44 @@ describe("drive every write path", () => {
         });
         await startTask(task.id);
         const done = await storeProgress(
-          { taskId: task.id, status: "completed", output: payload(`${provider} output`) },
+          {
+            taskId: task.id,
+            status: "completed",
+            output: payload(`${provider} output`),
+            // The card's text reaches task_ui_specs and the tracker comment's fallback.
+            uiSpec: {
+              spec: {
+                root: "c",
+                elements: {
+                  c: {
+                    type: "Card",
+                    props: { title: payload(`${provider} card title`) },
+                    children: ["t", "a"],
+                  },
+                  t: {
+                    type: "Text",
+                    props: { content: payload(`${provider} card text`) },
+                    children: [],
+                  },
+                  a: { type: "Actions", props: {}, children: ["b"] },
+                  b: { type: "Button", props: { id: "rerun", label: "Run again" }, children: [] },
+                },
+              },
+              actions: { rerun: { kind: "follow_up", prompt: payload(`${provider} card action`) } },
+            },
+          },
           workerId,
         );
         expect(done.isError).toBeFalsy();
+        expect(await getTaskUiSpec(task.id)).not.toBeNull();
       }
       await Bun.sleep(100);
     } finally {
+      uiSpecFlags.forEach((key, i) => {
+        const previous = previousUiSpecFlags[i];
+        if (previous === undefined) delete process.env[key];
+        else process.env[key] = previous;
+      });
       teardownLinearOutboundSync();
       teardownJiraOutboundSync();
     }
@@ -831,7 +866,7 @@ describe("drive every write path", () => {
     expect(trackerCapture.some((e) => e.sink.startsWith("jira /rest/api/2/issue/KAN-42"))).toBe(
       true,
     );
-    driven.push("linear", "jira");
+    driven.push("linear", "jira", "uiSpec");
   });
 
   test("workflow run (notify to a swarm channel and to Slack)", async () => {

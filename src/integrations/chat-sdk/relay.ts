@@ -176,7 +176,9 @@ async function postChatRelayCard(
   }
   if (!uiSpec.fallbackText) return;
   try {
-    await postChatMessage({ adapter, threadId, text: uiSpec.fallbackText, taskId: task.id });
+    // Stored scrubbed; scrubbed again at egress like the answer text.
+    const text = scrubSecrets(uiSpec.fallbackText);
+    await postChatMessage({ adapter, threadId, text, taskId: task.id });
   } catch (error) {
     console.error(`[chat-sdk] Card fallback of task ${task.id} failed: ${errorMessage(error)}`);
   }

@@ -3425,15 +3425,9 @@
     "catalog": {
       "exempt": "enum or fixed-format value"
     },
-    "spec": {
-      "pending": "task UI spec: the store-progress uiSpec writer lands later on feat/task-ui-spec and must scrub before this flips"
-    },
-    "actions": {
-      "pending": "task UI spec: the store-progress uiSpec writer lands later on feat/task-ui-spec and must scrub before this flips"
-    },
-    "fallback_text": {
-      "pending": "task UI spec: the store-progress uiSpec writer lands later on feat/task-ui-spec and must scrub before this flips"
-    },
+    "spec": "scrubbed",
+    "actions": "scrubbed",
+    "fallback_text": "scrubbed",
     "created_at": {
       "exempt": "timestamp"
     },

@@ -1,6 +1,8 @@
 import * as z from "zod";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import type { TaskUiSpec } from "../utils/task-ui-spec";
 import { getDbClient } from "./db";
+import { scrubJsonValue } from "./scrub-json";
 
 /** The stored task UI spec, as task and session payloads return it. */
 export const TaskUiSpecSchema = z.object({
@@ -63,7 +65,11 @@ export async function getTaskUiSpecsForTasks(
   return byTask;
 }
 
-/** One spec per task: a second upsert replaces the first. */
+/**
+ * One spec per task: a second upsert replaces the first. Secrets are
+ * redacted before the write, so Slack, Linear and Jira, which read the
+ * stored row, never see them.
+ */
 export async function upsertTaskUiSpec(
   taskId: string,
   value: TaskUiSpec,
@@ -77,9 +83,9 @@ export async function upsertTaskUiSpec(
       updated_by=excluded.updated_by, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     [
       taskId,
-      JSON.stringify(value.spec),
-      value.actions === undefined ? null : JSON.stringify(value.actions),
-      value.fallbackText,
+      scrubJsonValue(value.spec),
+      value.actions === undefined ? null : scrubJsonValue(value.actions),
+      scrubSecrets(value.fallbackText),
       userId ?? null,
       userId ?? null,
     ],
