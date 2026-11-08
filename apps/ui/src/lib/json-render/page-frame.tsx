@@ -60,8 +60,10 @@ export function PageFrameComponent({ props }: { props: PageFrameProps }) {
   let body: ReactNode;
   if (!pageId) body = <EmptyState compact icon={Globe} title="No page selected" />;
   else if (!valid) body = <EmptyState compact icon={Globe} title="Not a page id" />;
-  else if (error) body = <EmptyState compact icon={Globe} title="This page could not be loaded" />;
-  else if (!revision) body = <Skeleton className="h-full min-h-40 w-full" />;
+  // A failed poll keeps the last good frame; only a first load that fails shows the error.
+  else if (!revision && error) {
+    body = <EmptyState compact icon={Globe} title="This page could not be loaded" />;
+  } else if (!revision) body = <Skeleton className="h-full min-h-40 w-full" />;
   else {
     body = (
       <Suspense fallback={<Skeleton className="h-full min-h-40 w-full" />}>

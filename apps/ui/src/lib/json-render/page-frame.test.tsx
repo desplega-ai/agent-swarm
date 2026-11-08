@@ -14,9 +14,13 @@ for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(SRC)) {
 const PAGE_ID = "8b8077e8b7a94dfc89c88636889a46ac";
 let updatedAt = "2026-11-08T10:00:00.000Z";
 let metadataCalls = 0;
+let pageFails = false;
 const realClient = await import(join(SRC, "api/client.ts"));
 const fakeApi = Object.assign(Object.create(realClient.api), {
-  getPage: async () => ({ id: PAGE_ID, updatedAt, title: "Demo" }),
+  getPage: async () => {
+    if (pageFails) throw new Error("getPage: 503");
+    return { id: PAGE_ID, updatedAt, title: "Demo" };
+  },
   fetchPageMetadata: async () => {
     metadataCalls++;
     return {
@@ -50,6 +54,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
   client = new QueryClient();
   metadataCalls = 0;
+  pageFails = false;
 });
 afterEach(async () => {
   await act(async () => {
@@ -120,4 +125,26 @@ test("mobile narrows the frame to 390 px; an empty or bad id renders a state, no
   const bad = await mount({ pageId: "../api/keys" });
   expect(bad.textContent).toContain("Not a page id");
   expect(bad.querySelector("iframe")).toBeNull();
+});
+
+test("a failed poll keeps the last good frame", async () => {
+  const host = await mount({ pageId: PAGE_ID });
+  expect(revisionOf(await settle(host, updatedAt))).toBe(updatedAt);
+  pageFails = true;
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["page-frame", PAGE_ID] });
+  });
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(client.getQueryState(["page-frame", PAGE_ID])?.status).toBe("error");
+  expect(host.textContent).not.toContain("could not be loaded");
+  expect(revisionOf(host.querySelector("iframe"))).toBe(updatedAt);
+});
+
+test("a first load that fails shows the error", async () => {
+  pageFails = true;
+  const host = await mount({ pageId: PAGE_ID });
+  for (let i = 0; i < 20 && !host.textContent?.includes("could not be loaded"); i++) {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+  expect(host.textContent).toContain("This page could not be loaded");
 });
