@@ -10,6 +10,7 @@ import {
   matchesDefaultIdentityMd,
 } from "../prompts/defaults";
 import { realtimeBus } from "../realtime/bus";
+import { TaskRoutingAuthorizationError } from "../tasks/errors";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
@@ -2729,7 +2730,9 @@ export async function createTaskExtended(
       if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {
         // Never let a corrupt parent affinity create an apparently untagged
         // continuation. This is a fail-closed quarantine, including recovery.
-        throw new Error(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
+        throw new TaskRoutingAuthorizationError(
+          `Cannot continue task ${parent.id}: routing affinity is invalid.`,
+        );
       }
       if (parent.routingAffinity && options.inheritParentRoutingAffinity !== false) {
         // Privilege cannot be shed by a continuation. A child can narrow or
@@ -2888,10 +2891,13 @@ export async function createTaskExtended(
             leadOnly: options.routingAffinity.leadOnly === true,
             targetAgentId,
             decision: "reject_ineligible_assignment",
+            parentTaskId: options.parentTaskId,
+            source: options.source,
+            contextKey: options.contextKey,
           },
         });
       } catch {}
-      throw new Error(
+      throw new TaskRoutingAuthorizationError(
         options.routingAffinity.leadOnly
           ? `Lead-only task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`
           : `Task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`,

@@ -62,7 +62,7 @@ import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
-import { TaskCreationBlockedError } from "../tasks/errors";
+import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -405,7 +405,7 @@ const createTask = route({
     },
     403: {
       description:
-        "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -1268,6 +1268,12 @@ export async function handleTasks(
           parentTaskId: parsed.body.parentTaskId || undefined,
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",
+          // Un mensaje humano abre trabajo nuevo; el padre conserva contexto, no requisitos del worker.
+          // Solo en respuestas a un hilo: sin padre no hay requisitos que heredar.
+          routingAffinity:
+            parsed.body.parentTaskId && (principal.kind === "user" || principal.kind === "operator")
+              ? { capabilities: [] }
+              : undefined,
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
@@ -1301,6 +1307,21 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      if (error instanceof TaskRoutingAuthorizationError) {
+        console.warn(
+          "[HTTP] Task assignment rejected:",
+          scrubSecrets(
+            JSON.stringify({
+              parentTaskId: parsed.body.parentTaskId,
+              source: parsed.body.source ?? "api",
+              contextKey: parsed.body.contextKey ?? parentTask?.contextKey,
+              reason: error.message,
+            }),
+          ),
+        );
+        jsonError(res, error.message, 403);
+        return true;
+      }
       if (error instanceof TaskCreationBlockedError) {
         createTask.respond(res, 422, { error: error.reason, extension: error.extension });
         return true;
