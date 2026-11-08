@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 
@@ -29,6 +29,7 @@ let server: Server;
 let baseUrl = "";
 let leadId = "";
 let workerId = "";
+let originalBlockExternalChannels: string | undefined;
 
 function postRequest(body: Record<string, unknown>, agentId: string | null): Promise<Response> {
   return fetch(`${baseUrl}/api/approval-requests`, {
@@ -95,10 +96,19 @@ describe("POST /api/approval-requests notifications", () => {
   });
 
   beforeEach(() => {
+    originalBlockExternalChannels = process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
     postMessage.mockClear();
     conversationsInfo.mockClear();
     resetExternalChannelStateForTesting();
     delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
+  });
+
+  afterEach(() => {
+    if (originalBlockExternalChannels === undefined) {
+      delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
+    } else {
+      process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = originalBlockExternalChannels;
+    }
   });
 
   test("posts one Slack card and stores its messageTs", async () => {
