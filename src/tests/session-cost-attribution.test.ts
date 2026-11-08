@@ -319,6 +319,11 @@ test("migration 307 preserves existing rows, manual plans, and null historical a
         "INSERT INTO api_key_status(keyType, keySuffix, keyIndex, scope, scopeId, plan, planSource, updatedAt) VALUES ('CODEX_OAUTH', ?, 0, 'global', '', 'chatgpt_pro', ?, '2026-11-01T00:00:00.000Z')",
         [source, source],
       );
+    for (const plan of ["chatgpt_pro_5x", "chatgpt_pro_500", "chatgpt_plus"])
+      db.run(
+        "INSERT INTO api_key_status(keyType, keySuffix, keyIndex, scope, scopeId, plan, planSource, updatedAt) VALUES ('CODEX_OAUTH', ?, 0, 'global', '', ?, 'detected', '2026-11-01T00:00:00.000Z')",
+        [plan, plan],
+      );
     runMigrations(db);
     runMigrations(db);
     expect(
@@ -344,6 +349,12 @@ test("migration 307 preserves existing rows, manual plans, and null historical a
         .query("SELECT plan, detectedPlanRaw FROM api_key_status WHERE keySuffix = 'detected'")
         .get(),
     ).toEqual({ plan: null, detectedPlanRaw: "pro" });
+    for (const plan of ["chatgpt_pro_5x", "chatgpt_pro_500", "chatgpt_plus"])
+      expect(
+        db
+          .query("SELECT plan, planSource, detectedPlanRaw FROM api_key_status WHERE keySuffix = ?")
+          .get(plan),
+      ).toEqual({ plan, planSource: "detected", detectedPlanRaw: null });
     expect(
       db
         .query(

@@ -13,11 +13,11 @@ ALTER TABLE session_costs ADD COLUMN cacheReadTokens INTEGER;
 UPDATE session_costs SET cacheReadTokens = legacyCacheReadTokens;
 ALTER TABLE session_costs DROP COLUMN legacyCacheReadTokens;
 
--- Old workers mapped an ambiguous raw Pro claim to a priced catalog ID.
+-- Old workers mapped the ambiguous raw Pro claim only to chatgpt_pro.
 -- Manual selections retain their stable IDs and prices.
 ALTER TABLE api_key_status ADD COLUMN detectedPlanRaw TEXT;
 UPDATE api_key_status
-SET detectedPlanRaw = CASE WHEN plan = 'chatgpt_pro' THEN 'pro' ELSE NULL END,
+SET detectedPlanRaw = 'pro',
     plan = NULL
 WHERE keyType = 'CODEX_OAUTH' AND planSource = 'detected'
-  AND plan IN ('chatgpt_pro', 'chatgpt_pro_5x', 'chatgpt_pro_500');
+  AND plan = 'chatgpt_pro';
