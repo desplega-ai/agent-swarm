@@ -25,6 +25,7 @@ import { spawnProviderProcess } from "../commands/runner";
 import { handleApiKeys } from "../http/api-keys";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
+import { resolveCodexAuthMode } from "../providers/codex-adapter";
 import type { CostData, ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { listenOnFreePort } from "./test-net";
@@ -35,7 +36,7 @@ const otherAgentId = crypto.randomUUID();
 let taskId: string;
 let runtimeToken: string;
 let taskToken: string;
-let poolSlot = 1;
+let poolSlot: number | null = 1;
 let server: Server;
 let base: string;
 beforeAll(async () => {
@@ -51,17 +52,20 @@ beforeAll(async () => {
     if (req.url?.startsWith("/api/config/resolved")) {
       res.writeHead(200, { "Content-Type": "application/json" }).end(
         JSON.stringify({
-          configs: [
-            {
-              key: `codex_oauth_${poolSlot}`,
-              value: JSON.stringify({
-                access: `fixture-access-${poolSlot}`,
-                refresh: "fixture-refresh",
-                expires: Date.now() + 86400000,
-                accountId: `fixture-account-${poolSlot}`,
-              }),
-            },
-          ],
+          configs:
+            poolSlot === null
+              ? []
+              : [
+                  {
+                    key: `codex_oauth_${poolSlot}`,
+                    value: JSON.stringify({
+                      access: `fixture-access-${poolSlot}`,
+                      refresh: "fixture-refresh",
+                      expires: Date.now() + 86400000,
+                      accountId: `fixture-account-${poolSlot}`,
+                    }),
+                  },
+                ],
         }),
       );
       return;
@@ -470,6 +474,112 @@ test("the worker captures each Pi credential before delayed completion and resum
   } finally {
     for (const complete of completions) complete();
     await Bun.$`rm -rf ${directory}`.quiet();
+  }
+});
+
+test.each([
+  "chatgpt",
+  "apikey",
+] as const)("Codex %s authentication determines cost attribution with an OpenAI API key", async (authMode) => {
+  const directory = `/tmp/provider-usage-standalone-${crypto.randomUUID()}`;
+  const envKeys = [
+    "HOME",
+    "CODEX_HOME",
+    "OPENAI_API_KEY",
+    "CODEX_PATH_OVERRIDE",
+    "CODEX_GATEWAY_BASE_URL",
+    "CODEX_GATEWAY_API_KEY",
+  ] as const;
+  const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const previousSlot = poolSlot;
+  await Bun.write(
+    `${directory}/.codex/auth.json`,
+    JSON.stringify({
+      auth_mode: authMode,
+      tokens: {
+        account_id: "acct-standalone",
+        access_token: "fixture-access-standalone",
+        refresh_token: "fixture-refresh-standalone",
+        id_token: "fixture-id-standalone",
+      },
+    }),
+  );
+  const cost: CostData = {
+    sessionId: "standalone-native",
+    agentId,
+    totalCostUsd: 1,
+    inputTokens: 100,
+    outputTokens: 20,
+    durationMs: 1,
+    numTurns: 1,
+    model: "gpt-5.6-sol",
+    isError: false,
+    provider: "codex",
+  };
+  const adapter = {
+    name: "codex",
+    traits: {},
+    async createSession(config: ProviderSessionConfig) {
+      expect(config.env?.OPENAI_API_KEY).toBe("fixture-openai-key");
+      expect(config.codexSlot).toBeUndefined();
+      expect(await resolveCodexAuthMode(config, () => {})).toBe(authMode);
+      return {
+        sessionId: cost.sessionId,
+        onEvent(listener: (event: ProviderEvent) => void) {
+          listener({ type: "result", cost, isError: false });
+        },
+        async waitForCompletion() {
+          return { exitCode: 0, isError: false, cost };
+        },
+        async abort() {},
+      };
+    },
+  } as unknown as Parameters<typeof spawnProviderProcess>[0];
+  try {
+    poolSlot = null;
+    process.env.HOME = directory;
+    process.env.CODEX_HOME = `${directory}/.codex`;
+    process.env.OPENAI_API_KEY = "fixture-openai-key";
+    process.env.CODEX_PATH_OVERRIDE = process.execPath;
+    delete process.env.CODEX_GATEWAY_BASE_URL;
+    delete process.env.CODEX_GATEWAY_API_KEY;
+    const running = await spawnProviderProcess(
+      adapter,
+      {
+        prompt: "fixture",
+        systemPrompt: "fixture",
+        logFile: `${directory}/session.jsonl`,
+        role: "worker",
+        apiUrl: base,
+        apiKey: runtimeToken,
+        agentId,
+        runnerSessionId: crypto.randomUUID(),
+        iteration: 1,
+        taskId,
+        model: cost.model,
+        harnessProvider: "codex",
+        cwd: directory,
+      },
+      directory,
+    );
+    await running.promise;
+    const expected =
+      authMode === "chatgpt"
+        ? { credentialKeyType: "CODEX_OAUTH", credentialKeySuffix: "alone-0" }
+        : { credentialKeyType: "OPENAI_API_KEY", credentialKeySuffix: "i-key" };
+    expect(running.lastCost?.value).toMatchObject(expected);
+    expect(running.result?.cost).toMatchObject(expected);
+    const saved = await post(running.result!.cost! as unknown as Record<string, unknown>);
+    expect(saved.status).toBe(201);
+    expect(saved.data.cost).toMatchObject(expected);
+  } finally {
+    poolSlot = previousSlot;
+    for (const key of envKeys) {
+      const value = previousEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await Bun.$`rm -r ${directory}`.quiet();
   }
 });
 
