@@ -1,4 +1,5 @@
 import { Github, Search } from "lucide-react";
+import { useState } from "react";
 import { useHealth, useStats } from "@/api/hooks/use-stats";
 import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
@@ -108,13 +109,33 @@ function PhoneDisconnected({ message }: { message: string | null }) {
   );
 }
 
+/**
+ * Header layouts under review on PR #2866. Pick one with
+ * `localStorage["agent-swarm:header-variant"] = "a" | "b" | "c"`. The switch
+ * goes away once one is chosen.
+ * - a: health pill and search, then the icons in one bordered toolbar.
+ * - b: a wide search in the centre; health as a dot with the icons on the right.
+ * - c: compact: health as a dot, search as an icon, ghost icons only.
+ */
+type HeaderVariant = "a" | "b" | "c";
+const HEADER_VARIANT_KEY = "agent-swarm:header-variant";
+
+function readHeaderVariant(): HeaderVariant {
+  try {
+    const value = window.localStorage.getItem(HEADER_VARIANT_KEY);
+    return value === "b" || value === "c" ? value : "a";
+  } catch {
+    return "a";
+  }
+}
+
 function DesktopHeader() {
-  const { theme, toggleTheme } = useTheme();
   const { data: health, isError, error: healthError } = useHealth();
   const stats = useStats();
   const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
   const openCommandMenu = useOpenCommandMenu();
+  const [variant] = useState(readHeaderVariant);
 
   const isHealthy = health && !isError;
   const devMode = Boolean(isHealthy && !stats.isError && stats.data?.devMode === true);
@@ -122,9 +143,93 @@ function DesktopHeader() {
   // key, CORS, ...) — prefer the `/status` error since it's the richer probe,
   // fall back to `/health`'s. `null` here means "still loading", not "ok".
   const connectionErrorMessage = statusError?.message || healthError?.message || null;
+  const compactHealth = variant !== "a";
 
-  return (
-    <header className="flex h-14 items-center gap-2 px-4">
+  // Aggregate health (components/layout/health-badge.tsx), with dev mode
+  // folded in. `/status` 404 (older API) → the binary /health probe.
+  const healthEl = status ? (
+    <HealthBadge status={status} devMode={devMode} compact={compactHealth} />
+  ) : (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex cursor-default items-center gap-2 text-xs text-muted-foreground">
+          <div
+            className={cn(
+              "size-2 rounded-full",
+              isHealthy ? "bg-status-success" : "bg-status-error",
+            )}
+          />
+          {compactHealth ? null : (
+            <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
+          )}
+          {devMode ? (
+            <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
+              Dev
+            </Badge>
+          ) : null}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs text-balance">
+        {isHealthy
+          ? "Connected"
+          : connectionErrorMessage
+            ? `Connection failed: ${connectionErrorMessage}${activeConnection ? ` (${activeConnection.apiUrl})` : ""}`
+            : "Connecting…"}
+      </TooltipContent>
+    </Tooltip>
+  );
+
+  const icons = (
+    <>
+      <ImprovementHeaderButton />
+      <NotificationBell />
+      <ContextPanelToggle />
+      <GitHubLink />
+      <ThemeToggle />
+    </>
+  );
+
+  const searchLabel = variant === "b" ? "Search tasks, sessions, pages…" : "Search";
+  const search =
+    variant === "c" ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={openCommandMenu}
+            aria-label="Search"
+            aria-keyshortcuts="Meta+K Control+K"
+            className="size-8"
+          >
+            <Search className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Search {modKeyLabel()}K</TooltipContent>
+      </Tooltip>
+    ) : (
+      // Cmd+K's visible door.
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={openCommandMenu}
+        aria-label="Search"
+        aria-keyshortcuts="Meta+K Control+K"
+        className={cn(
+          "h-8 gap-2 px-2 text-muted-foreground max-sm:size-8 sm:justify-start",
+          variant === "b" ? "w-full max-w-md" : "sm:w-44",
+        )}
+      >
+        <Search className="size-4" />
+        <span className="truncate max-sm:hidden">{searchLabel}</span>
+        <Kbd aria-hidden className="ml-auto max-sm:hidden">
+          {modKeyLabel()}K
+        </Kbd>
+      </Button>
+    );
+
+  const lead = (
+    <>
       <SidebarTrigger className="md:hidden" />
       <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
       {isDemoMode ? (
@@ -132,122 +237,93 @@ function DesktopHeader() {
           Demo
         </span>
       ) : null}
-
-      {/* The trail owns the header's free space (no fixed spacer) so long
-          entity names only truncate when the width is actually exhausted. */}
-      <div className="flex flex-1 items-center min-w-0">
+      {/* The trail owns the free space, so long names truncate only when the
+          width runs out. */}
+      <div className="flex min-w-0 flex-1 items-center">
         <Breadcrumbs />
       </div>
+    </>
+  );
 
-      {/* Two groups: status and search, then one tight cluster of icon
-          buttons. Tighter below sm so the breadcrumb keeps room on a phone. */}
+  if (variant === "b") {
+    return (
+      <header className="grid h-14 grid-cols-[minmax(0,1fr)_minmax(0,28rem)_minmax(0,1fr)] items-center gap-3 px-4">
+        <div className="flex min-w-0 items-center gap-2">{lead}</div>
+        <div className="flex justify-center">{search}</div>
+        <div className="flex items-center justify-end gap-0.5">
+          <SetupPill />
+          <div className="mr-1">{healthEl}</div>
+          {icons}
+        </div>
+      </header>
+    );
+  }
+
+  return (
+    <header className="flex h-14 items-center gap-2 px-4">
+      {lead}
       <div className="flex items-center gap-1 sm:gap-2">
-        {/* Aggregate health (components/layout/health-badge.tsx), with dev
-            mode folded in. `/status` 404 (older API) → fall back to the
-            binary /health probe. */}
-        {status ? (
-          <HealthBadge status={status} devMode={devMode} />
-        ) : (
-          // Fallback for older API servers that don't expose /status — keep
-          // the binary green/red dot driven by /health alone, but surface the
-          // actual fetch error on hover instead of a bare "Disconnected" —
-          // a silent badge left users staring at an empty dashboard with no
-          // signal of *why* (dead apiUrl, bad key, CORS, ...).
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground cursor-default">
-                <div
-                  className={cn(
-                    "size-2 rounded-full",
-                    isHealthy ? "bg-status-success" : "bg-status-error",
-                  )}
-                />
-                <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs text-balance">
-              {isHealthy
-                ? "Connected"
-                : connectionErrorMessage
-                  ? `Connection failed: ${connectionErrorMessage}${activeConnection ? ` (${activeConnection.apiUrl})` : ""}`
-                  : "Connecting…"}
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {!status && devMode ? (
-          <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
-            Dev
-          </Badge>
-        ) : null}
-
+        {healthEl}
         <SetupPill />
-        {/* Cmd+K's visible door: the only one on a phone. */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={openCommandMenu}
-          aria-label="Search"
-          aria-keyshortcuts="Meta+K Control+K"
-          className="h-8 gap-2 px-2 text-muted-foreground max-sm:size-8 sm:w-44 sm:justify-start"
-        >
-          <Search className="size-4" />
-          <span className="max-sm:hidden">Search</span>
-          <Kbd aria-hidden className="ml-auto max-sm:hidden">
-            {modKeyLabel()}K
-          </Kbd>
-        </Button>
+        {search}
       </div>
-
-      <div className="flex items-center gap-0.5">
-        <ImprovementHeaderButton />
-        <NotificationBell />
-        <ContextPanelToggle />
-
-        {/* GitHub repo link. Hidden below sm: the phone header needs the
-            room for the breadcrumb more than a repo link. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="size-8 max-sm:hidden"
-              aria-label="Open agent-swarm on GitHub"
-            >
-              <a
-                href="https://github.com/desplega-ai/agent-swarm"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Github className="size-4" />
-                <span className="sr-only">GitHub repository</span>
-              </a>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">View on GitHub</TooltipContent>
-        </Tooltip>
-
-        {/* Theme toggle */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="size-8"
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {/* Animated icons (lucide-animated): rays fade in / moon tilts
-                  on hover — affordance feedback on an interactive control. */}
-              {theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-              <span className="sr-only">Toggle theme</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          </TooltipContent>
-        </Tooltip>
-      </div>
+      {variant === "a" ? (
+        <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5 shadow-xs">
+          {icons}
+        </div>
+      ) : (
+        <div className="flex items-center gap-0.5">{icons}</div>
+      )}
     </header>
+  );
+}
+
+/** The GitHub repo link. Hidden below sm: a phone needs the room for the trail. */
+function GitHubLink() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          asChild
+          variant="ghost"
+          size="icon"
+          className="size-8 max-sm:hidden"
+          aria-label="Open agent-swarm on GitHub"
+        >
+          <a
+            href="https://github.com/desplega-ai/agent-swarm"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Github className="size-4" />
+            <span className="sr-only">GitHub repository</span>
+          </a>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">View on GitHub</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  const label = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleTheme}
+          className="size-8"
+          aria-label={label}
+        >
+          {/* Animated icons (lucide-animated): rays fade in / moon tilts on hover. */}
+          {theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+          <span className="sr-only">Toggle theme</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }

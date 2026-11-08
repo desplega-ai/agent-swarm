@@ -7,30 +7,33 @@ export function usageDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-export interface SpendStats {
-  /** Spend on `today`, 0 when the day has no row yet. */
+export interface DailySeries {
+  /** Today's value, 0 when the day has no row yet. */
   today: number;
-  /** Mean daily spend over the days before `today` in the rows, null with none. */
-  average: number | null;
-  /** Daily spend, oldest first, ending with `today`. */
+  /** One value a day, oldest first, ending with `today`. */
   series: number[];
 }
 
-/** Today's spend against the average of the earlier days in `daily`. */
-export function spendStats(daily: UsageSummaryDailyRow[], today: string): SpendStats {
-  const rows = [...daily].sort((a, b) => a.date.localeCompare(b.date));
-  const before = rows.filter((row) => row.date < today);
-  const todayCost = rows.find((row) => row.date === today)?.costUsd ?? 0;
-  const average =
-    before.length > 0 ? before.reduce((sum, row) => sum + row.costUsd, 0) / before.length : null;
-  return { today: todayCost, average, series: [...before.map((row) => row.costUsd), todayCost] };
+/** Daily spend, ending with `today`. */
+export function spendStats(daily: UsageSummaryDailyRow[], today: string): DailySeries {
+  return dailySeries(daily, today, (row) => row.costUsd);
 }
 
-/** `+23%` / `-8%` of `value` against `base`, or null when there is no base. */
-export function percentDelta(value: number, base: number | null): string | null {
-  if (base === null || base <= 0) return null;
-  const pct = Math.round(((value - base) / base) * 100);
-  return `${pct > 0 ? "+" : ""}${pct}%`;
+/** Daily cost per session, ending with `today`. A day without sessions is 0. */
+export function costPerSessionSeries(daily: UsageSummaryDailyRow[], today: string): DailySeries {
+  return dailySeries(daily, today, (row) => (row.sessions > 0 ? row.costUsd / row.sessions : 0));
+}
+
+function dailySeries(
+  daily: UsageSummaryDailyRow[],
+  today: string,
+  value: (row: UsageSummaryDailyRow) => number,
+): DailySeries {
+  const rows = [...daily].sort((a, b) => a.date.localeCompare(b.date));
+  const before = rows.filter((row) => row.date < today).map(value);
+  const todayRow = rows.find((row) => row.date === today);
+  const todayValue = todayRow ? value(todayRow) : 0;
+  return { today: todayValue, series: [...before, todayValue] };
 }
 
 /** Share of the prompt tokens served from the cache, as a whole percent. */

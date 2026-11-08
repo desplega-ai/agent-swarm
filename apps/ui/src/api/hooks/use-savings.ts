@@ -106,23 +106,14 @@ export function useSchedulesSavings() {
   });
 }
 
-/**
- * Home's savings at the page's default tier: the 30-day fleet summary (the
- * same cache entry as /usage/savings) and the last 7 days, for today's point.
- */
+/** Home's 30-day fleet summary at the page's default tier (the same cache entry as /usage/savings). */
 export function useHomeSavings() {
-  const opts = { staleTime: STALE_MS, retry: false } as const;
   const window30: SavingsWindow = { days: 30, tier: "smart" };
-  const window7: SavingsWindow = { days: 7, tier: "smart" };
   const summary = useQuery({
     queryKey: ["savings", "fleet", window30],
     queryFn: () => api.getSavingsSummary(window30),
-    ...opts,
+    staleTime: STALE_MS,
+    retry: false,
   });
-  const daily = useQuery({
-    queryKey: ["savings", "fleet-daily", window7],
-    queryFn: () => api.getSavingsDaily(undefined, window7),
-    ...opts,
-  });
-  return { summary, daily };
+  return { summary };
 }

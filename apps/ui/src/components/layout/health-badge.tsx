@@ -69,11 +69,14 @@ const TARGET_NOTE: Record<WorkerTarget, string> = {
 export function HealthBadge({
   status,
   devMode = false,
+  compact = false,
   className,
 }: {
   status: StatusResponse;
   /** Dev mode (UI version checks bypassed): a muted "dev" after the label. */
   devMode?: boolean;
+  /** The dot only; the label shows on hover and stays in the accessible name. */
+  compact?: boolean;
   /** The phone bar passes its 44 px touch-target size here. */
   className?: string;
 }) {
@@ -85,6 +88,7 @@ export function HealthBadge({
     <button
       type="button"
       aria-label={`Swarm health: ${HEALTH_LABEL[health]}${devMode ? ", dev mode" : ""}`}
+      title={compact ? HEALTH_LABEL[health] : undefined}
       className={cn(
         "hit-area flex items-center gap-2 rounded-md px-2 py-1 text-xs",
         "hover:bg-accent transition-colors data-[state=open]:bg-accent",
@@ -95,7 +99,7 @@ export function HealthBadge({
       <span className={cn("size-2 rounded-full", HEALTH_DOT_CLASS[health])} />
       {/* The connection name and version live in the sidebar swarm
           switcher; the header only carries health. */}
-      <span className="hidden sm:inline">{HEALTH_LABEL[health]}</span>
+      {compact ? null : <span className="hidden sm:inline">{HEALTH_LABEL[health]}</span>}
       {devMode ? (
         <span
           className="rounded-sm border border-border px-1 font-mono text-[10px] uppercase leading-4 tracking-wide"

@@ -3,14 +3,18 @@ import { ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSubscriptionPlans } from "@/api/hooks/use-api-keys";
-import type { SubscriptionPlan, UsageSummaryByCredentialRow } from "@/api/types";
+import type { UsageSummaryByCredentialRow } from "@/api/types";
 import { PlanPicker } from "@/components/shared/plan-picker";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  credentialKey,
+  type SubscriptionLine,
+  subscriptionSavings,
+} from "@/lib/subscription-savings";
 import { cn } from "@/lib/utils";
-import { DAY_MS, formatCount, formatDay, formatUsd } from "./usage-format";
+import { formatCount, formatDay, formatUsd } from "./usage-format";
 
 /** Average month length, used to prorate a monthly list price to days. */
-const DAYS_PER_MONTH = 30.44;
 
 const SUBSCRIPTION_LABELS: Record<string, string> = {
   CLAUDE_CODE_OAUTH_TOKEN: "Claude",
@@ -33,18 +37,6 @@ const PAY_AS_YOU_GO_LABELS: Record<string, string> = {
 
 /** Desktop row layout. Below it, each row stacks and the amounts carry their own labels. */
 const ROW_GRID = "@3xl:grid-cols-[minmax(0,1fr)_17rem_6rem_6rem_8rem]";
-
-interface SubscriptionLine {
-  key: string;
-  row: UsageSummaryByCredentialRow;
-  plan: SubscriptionPlan | null;
-  planCost: number | null;
-  saved: number | null;
-}
-
-function credentialKey(row: UsageSummaryByCredentialRow): string {
-  return `${row.keyType ?? "none"}:${row.keySuffix ?? "none"}`;
-}
 
 /** Saved share of the API value, as a whole percent. */
 function savedPercent(saved: number, apiValue: number): string {
@@ -75,30 +67,10 @@ export function SubscriptionsCard({
 }) {
   const { data: catalog } = useSubscriptionPlans();
 
-  const { lines, payg } = useMemo(() => {
-    const now = Date.now();
-    const byCost = (a: UsageSummaryByCredentialRow, b: UsageSummaryByCredentialRow) =>
-      b.costUsd - a.costUsd;
-    const lines: SubscriptionLine[] = rows
-      .filter((row) => row.subscription)
-      .sort(byCost)
-      .map((row) => {
-        const plan =
-          catalog?.plans.find((p) => p.id === row.plan && p.keyType === row.keyType) ?? null;
-        if (!plan) return { key: credentialKey(row), row, plan, planCost: null, saved: null };
-        const billedFrom = Math.max(windowStartMs, Date.parse(row.firstSessionAt));
-        const billedDays = Math.max(1, (now - billedFrom) / DAY_MS);
-        const planCost = (plan.monthlyUsd * billedDays) / DAYS_PER_MONTH;
-        return { key: credentialKey(row), row, plan, planCost, saved: row.costUsd - planCost };
-      });
-    const payg = rows.filter((row) => !row.subscription).sort(byCost);
-    return { lines, payg };
-  }, [rows, catalog, windowStartMs]);
-
-  const counted = lines.filter((line) => line.plan);
-  const apiValue = counted.reduce((sum, line) => sum + line.row.costUsd, 0);
-  const plansCost = counted.reduce((sum, line) => sum + (line.planCost ?? 0), 0);
-  const saved = apiValue - plansCost;
+  const { lines, payg, counted, apiValue, plansCost, saved } = useMemo(
+    () => subscriptionSavings(rows, catalog?.plans ?? [], windowStartMs, Date.now()),
+    [rows, catalog, windowStartMs],
+  );
   const missing = lines.length - counted.length;
   const paygTotal = payg.reduce((sum, row) => sum + row.costUsd, 0);
 
