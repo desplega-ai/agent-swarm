@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createTaskExtended, createWorkflow, getDbClient, initDb } from "../be/db";
-import { pendingHumanFreeReclassifications } from "../be/db/tasks/human-free";
+import {
+  drainHumanFreeReclassifyQueue,
+  HUMAN_FREE_RECLASSIFY_BATCH,
+  pendingHumanFreeReclassifications,
+} from "../be/db/tasks/human-free";
 import * as retentionDb from "../be/db/workflow-run-retention";
 import {
   deleteWorkflowRunRetentionBatch,
@@ -26,6 +30,10 @@ const CUTOFF = "2026-11-05 12:00:00";
 const DAYS_KEY = "WORKFLOW_RUNS_RETENTION_DAYS";
 const POLICY = DB_RETENTION_TABLES.find((table) => table.table === "workflow_runs")!;
 let workflowId: string;
+// The restart regression must reopen the persisted queue, not a fresh copy of
+// the preload's in-memory migration template.
+const testGlobals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
+let migrationTemplate: Uint8Array | undefined;
 
 async function removeDbFiles() {
   for (const suffix of ["", "-wal", "-shm"]) await unlink(DB_PATH + suffix).catch(() => {});
@@ -71,7 +79,20 @@ async function batch(limit = 50) {
   return await deleteWorkflowRunRetentionBatch(CUTOFF, limit, Date.now() + 30_000);
 }
 
+async function taskDescendants(rootId: string, count: number, shape: "wide" | "deep" = "wide") {
+  await getDbClient().run(
+    `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < ?)
+     INSERT INTO agent_tasks (id, task, parentTaskId, source, isHumanFree, createdAt, lastUpdatedAt)
+     SELECT 'child-' || v, 'child',
+       CASE WHEN ? = 'wide' OR v = 1 THEN ? ELSE 'child-' || (v - 1) END,
+       'workflow', 1, datetime('now'), datetime('now') FROM n`,
+    [count, shape, rootId],
+  );
+}
+
 beforeAll(async () => {
+  migrationTemplate = testGlobals.__testMigrationTemplate;
+  testGlobals.__testMigrationTemplate = undefined;
   closeDb();
   await removeDbFiles();
   initDb(DB_PATH);
@@ -100,6 +121,7 @@ afterAll(async () => {
   delete process.env[DAYS_KEY];
   delete process.env.DB_RETENTION_DRY_RUN;
   closeDb();
+  testGlobals.__testMigrationTemplate = migrationTemplate;
   await removeDbFiles();
 });
 
@@ -233,7 +255,7 @@ describe("workflow run retention", () => {
     expect(await ids()).toHaveLength(36);
   });
 
-  test("unlinks run-only and step-only tasks, deletes dependents and atomically reclassifies wide task trees", async () => {
+  test("unlinks tasks and deletes dependents atomically, then drains overflow classification", async () => {
     await run("old");
     await run("kept", "waiting");
     await step("old-step", "old");
@@ -242,12 +264,7 @@ describe("workflow run retention", () => {
       source: "workflow",
       workflowRunId: "old",
     });
-    await getDbClient().run(
-      `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < 1100)
-       INSERT INTO agent_tasks (id, task, parentTaskId, source, isHumanFree, createdAt, lastUpdatedAt)
-       SELECT 'child-' || v, 'child', ?, 'workflow', 1, datetime('now'), datetime('now') FROM n`,
-      [root.id],
-    );
+    await taskDescendants(root.id, 1100);
     await getDbClient().run(
       "INSERT INTO agent_tasks (id, task, workflowRunStepId, createdAt, lastUpdatedAt) VALUES ('step-only', 'task', 'old-step', datetime('now'), datetime('now'))",
     );
@@ -271,9 +288,82 @@ describe("workflow run retention", () => {
     expect(await ids("approval_requests")).toEqual(["kept"]);
     expect(await ids("wait_states")).toEqual(["kept"]);
     expect(await ids("workflow_run_steps")).toEqual(["kept-step"]);
+    expect(await pendingHumanFreeReclassifications()).toBeGreaterThan(0);
+    expect((await drainHumanFreeReclassifyQueue()).remaining).toBe(0);
     expectFlagsMatchLegacy(await storedFlags(), await legacyHumanFreeIds());
     expect(await pendingHumanFreeReclassifications()).toBe(0);
     expect(await getDbClient().query("PRAGMA foreign_key_check")).toEqual([]);
+  });
+
+  test.each([
+    "wide",
+    "deep",
+  ] as const)("a large %s task tree commits one classification batch and resumes from the durable queue", async (shape) => {
+    await run("old");
+    const root = await createTaskExtended("scheduled root", {
+      source: "workflow",
+      workflowRunId: "old",
+    });
+    const descendants = HUMAN_FREE_RECLASSIFY_BATCH * 20;
+    await taskDescendants(root.id, descendants, shape);
+    process.env[DAYS_KEY] = "1";
+    const oldBudget = process.env.DB_RETENTION_TICK_BUDGET_MS;
+    process.env.DB_RETENTION_TICK_BUDGET_MS = "1000";
+    const startedAt = Date.now();
+    let clock = startedAt;
+    let classifications = 0;
+    let changedInline = 0;
+    const clockSpy = spyOn(Date, "now").mockImplementation(() => clock);
+    const originalRun = getDbClient().run.bind(getDbClient());
+    const runSpy = spyOn(getDbClient(), "run").mockImplementation(async (sql, params) => {
+      const result = await originalRun(sql, params);
+      if (sql.includes("WITH RECURSIVE affected")) {
+        classifications++;
+        changedInline += result.changes;
+        // Model a slow classifier deterministically: a second batch would
+        // exhaust the tick and roll back the run deletion before this fix.
+        clock += 500;
+      }
+      return result;
+    });
+    try {
+      await runDbRetentionTick({ now: NOW });
+      expect(getDbRetentionStats().workflowRuns).toMatchObject({
+        rowsDeleted: 1,
+        backlogRemaining: 0,
+        outcome: "converged",
+        drained: true,
+      });
+      expect(clock - startedAt).toBeLessThan(1000);
+      await runDbRetentionTick({ now: NOW });
+      expect(getDbRetentionStats().workflowRuns).toMatchObject({
+        rowsDeleted: 0,
+        cumulativeRowsDeleted: 1,
+        drained: true,
+      });
+      expect(classifications).toBe(1);
+      expect(changedInline).toBe(HUMAN_FREE_RECLASSIFY_BATCH);
+    } finally {
+      runSpy.mockRestore();
+      clockSpy.mockRestore();
+      if (oldBudget === undefined) delete process.env.DB_RETENTION_TICK_BUDGET_MS;
+      else process.env.DB_RETENTION_TICK_BUDGET_MS = oldBudget;
+    }
+    expect(await ids()).toEqual([]);
+    expect(await ids("agent_tasks")).toHaveLength(descendants + 1);
+    expect(await pendingHumanFreeReclassifications()).toBe(1);
+    closeDb();
+    initDb(DB_PATH);
+    expect(await pendingHumanFreeReclassifications()).toBe(1);
+    let passes = 0;
+    while ((await pendingHumanFreeReclassifications()) > 0) {
+      const result = await drainHumanFreeReclassifyQueue({ maxBatches: 1 });
+      expect(result.batches).toBe(1);
+      expect(result.changed).toBeLessThanOrEqual(HUMAN_FREE_RECLASSIFY_BATCH);
+      expect(++passes).toBeLessThan(50);
+    }
+    expect(passes).toBeGreaterThan(1);
+    expectFlagsMatchLegacy(await storedFlags(), await legacyHumanFreeIds());
   });
 
   test("reclaims only the deleted runs' unreferenced snapshots in the same transaction", async () => {
@@ -296,7 +386,7 @@ describe("workflow run retention", () => {
     ]);
   });
 
-  test("failure after unlink and reclassification rolls back tasks, runs, steps and snapshots", async () => {
+  test("failure after reclassification rolls back tasks, runs, steps, snapshots and queued work", async () => {
     await getDbClient().run("INSERT INTO workflow_run_definitions VALUES ('pin', '{}', ?)", [OLD]);
     await run("old", "completed", OLD, { hash: "pin" });
     await step("old-step", "old");
@@ -304,6 +394,7 @@ describe("workflow run retention", () => {
       source: "workflow",
       workflowRunId: "old",
     });
+    await taskDescendants(task.id, 1100);
     await getDbClient().run(
       "CREATE TEMP TRIGGER fail_retention BEFORE DELETE ON workflow_run_definitions BEGIN SELECT RAISE(ABORT, 'rollback-retention'); END",
     );
@@ -319,6 +410,8 @@ describe("workflow run retention", () => {
       expect(await getDbClient().get("SELECT hash FROM workflow_run_definitions")).toEqual({
         hash: "pin",
       });
+      expect(await pendingHumanFreeReclassifications()).toBe(0);
+      expectFlagsMatchLegacy(await storedFlags(), await legacyHumanFreeIds());
     } finally {
       await getDbClient().run("DROP TRIGGER fail_retention");
     }

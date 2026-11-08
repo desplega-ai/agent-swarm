@@ -1,5 +1,5 @@
 import { getDbClient } from "./runtime";
-import { reclassifyTaskHumanFreeAtomically } from "./tasks/human-free";
+import { reclassifyTaskHumanFree } from "./tasks/human-free";
 import { deleteOrphanedRunDefinitions } from "./workflow-run-definitions";
 import { WORKFLOW_RUN_TREE_MAX_DEPTH } from "./workflow-runs";
 
@@ -85,10 +85,10 @@ export async function deleteWorkflowRunRetentionBatch(
       }
       await tx.run(`DELETE FROM workflow_run_steps WHERE runId IN (${runIds})`, [ids]);
       await tx.run(`DELETE FROM workflow_runs WHERE id IN (${runIds})`, [ids]);
-      await reclassifyTaskHumanFreeAtomically(
-        tasks.map((task) => task.id),
-        deadlineAt,
-      );
+      // Reclassify one bounded task batch. Overflow is queued in this same
+      // transaction and drained after commit, so a large task tree cannot
+      // repeatedly exhaust the retention deadline and roll back its run.
+      await reclassifyTaskHumanFree(tasks.map((task) => task.id));
       await deleteOrphanedRunDefinitions([
         ...new Set(runs.flatMap((run) => (run.definitionHash ? [run.definitionHash] : []))),
       ]);
