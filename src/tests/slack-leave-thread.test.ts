@@ -352,7 +352,7 @@ describe("slack-leave-thread", () => {
 
   test("replies buffered before the thread was left create no task when they flush", async () => {
     const task = await seedThread("C_LEAVE_G", "2400.0001");
-    bufferThreadMessage("C_LEAVE_G", "2400.0001", "still chatting", HUMAN, "2400.0002");
+    await bufferThreadMessage("C_LEAVE_G", "2400.0001", "still chatting", HUMAN, "2400.0002");
     await buildTool().handler({ taskId: task.id }, meta(worker.id));
 
     await instantFlush("C_LEAVE_G:2400.0001");

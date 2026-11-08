@@ -114,7 +114,7 @@ async function pendingMentionTask(channelId: string, threadTs: string, triggerTs
 
 async function flush(channelId: string, threadTs: string, text: string, user: string, ts: string) {
   threadMessages.push({ ts, user, text });
-  bufferThreadMessage(channelId, threadTs, text, user, ts);
+  await bufferThreadMessage(channelId, threadTs, text, user, ts);
   await instantFlush(`${channelId}:${threadTs}`);
 }
 
@@ -185,8 +185,8 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
 
     // A Slack retry after a restart buffers the same messages again: the
     // folded one and the task's own trigger.
-    bufferThreadMessage(channelId, threadTs, "only once", "U0ROOT", "3000.0003");
-    bufferThreadMessage(channelId, threadTs, "please look at this", "U0ROOT", "3000.0002");
+    await bufferThreadMessage(channelId, threadTs, "only once", "U0ROOT", "3000.0003");
+    await bufferThreadMessage(channelId, threadTs, "please look at this", "U0ROOT", "3000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
     const after = (await getTaskById(target.id))!;
@@ -206,7 +206,7 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
       ["burst two", "6100.0003"],
     ] as const) {
       threadMessages.push({ ts, user: "U0ROOT", text });
-      bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
+      await bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
     }
     await instantFlush(`${channelId}:${threadTs}`);
     const [task] = await getSlackTasksInThread(channelId, threadTs);
@@ -217,7 +217,7 @@ describe("buffered follow-ups fold into a pending Lead task", () => {
       ["burst one", "6100.0002"],
       ["burst two", "6100.0003"],
     ] as const) {
-      bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
+      await bufferThreadMessage(channelId, threadTs, text, "U0ROOT", ts);
       await instantFlush(`${channelId}:${threadTs}`);
     }
 
