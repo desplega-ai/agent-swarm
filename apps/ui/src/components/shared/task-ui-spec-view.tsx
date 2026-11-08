@@ -250,6 +250,9 @@ function UiSpecActionButton({
                     ? openPreview({ kind: "task", taskId: spawned })
                     : navigate(`/tasks/${spawned}`),
               },
+              // A sheet (the mobile preview, the task sheet) is modal: Radix sets
+              // `pointer-events: none` on the body, and the toast lives there.
+              actionButtonStyle: { pointerEvents: "auto" },
             }
           : undefined,
       );
