@@ -27,6 +27,7 @@ for (const alias of [
   "@/lib/recharts-tooltip-style",
   "@/lib/relative-time",
   "@/lib/status-labels",
+  "@/lib/task-reason",
   "@/lib/task-title",
   "@/lib/utils",
 ]) {
@@ -199,6 +200,13 @@ describe("the task preview", () => {
     task = makeTask({ output: undefined });
     await render({ scoped: true });
     expect(document.querySelector('[data-slot="ui-spec-card"]')).not.toBeNull();
+  });
+
+  test("a task with no result yet says so", async () => {
+    task = makeTask({ status: "pending", output: undefined, uiSpec: undefined });
+    await render({ scoped: true });
+    expect(document.body.textContent).toContain("No result yet.");
+    expect(document.querySelector('[data-slot="ui-spec-card"]')).toBeNull();
   });
 
   test("a card button's Open shows the spawned task in the preview", async () => {

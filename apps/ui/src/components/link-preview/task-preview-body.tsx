@@ -7,6 +7,7 @@
 import type { AgentTask } from "@/api/types";
 import { TaskOutcome } from "@/components/sessions/task-outcome";
 import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
+import { taskReason } from "@/lib/task-reason";
 
 export function TaskPreviewBody({ task }: { task: AgentTask }) {
   // `TaskOutcome` renders the card under a completed answer; a card with no answer still shows.
@@ -15,6 +16,9 @@ export function TaskPreviewBody({ task }: { task: AgentTask }) {
     <div data-testid="task-preview-body" className="flex min-w-0 flex-col gap-3 p-3">
       <TaskOutcome task={task} />
       {task.uiSpec && !outcomeHasCard ? <TaskUiSpecView task={task} /> : null}
+      {!task.output?.trim() && !task.uiSpec && !taskReason(task) ? (
+        <p className="text-sm text-muted-foreground">No result yet.</p>
+      ) : null}
     </div>
   );
 }
