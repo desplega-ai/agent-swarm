@@ -9,6 +9,8 @@ import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { registerActionHandlers } from "../slack/actions";
 import * as slackEnrichModule from "../slack/enrich";
 import * as externalChannelModule from "../slack/external-channel";
+import * as siblingAwarenessModule from "../tasks/sibling-awareness";
+import { runTaskUiAction } from "../ui-spec/actions";
 
 const TEST_DB_PATH = "./test-task-ui-actions.sqlite";
 const previousEnv = {
@@ -159,5 +161,35 @@ describe("Slack card Button clicks", () => {
     expect(ephemeral.mock.calls[0]?.[0]).toMatchObject({
       text: "Card buttons are turned off on this swarm.",
     });
+  });
+});
+
+describe("runTaskUiAction", () => {
+  test("a failed follow-up create releases the reservation, so a retry starts the task", async () => {
+    const taskId = await taskWithButton();
+    const createSpy = spyOn(
+      siblingAwarenessModule,
+      "createTaskWithSiblingAwareness",
+    ).mockImplementationOnce(async () => {
+      throw new Error("create failed");
+    });
+    try {
+      const run = () =>
+        runTaskUiAction({ taskId, actionId: "rerun", surface: "web", actorUserId: requesterId });
+      await expect(run()).rejects.toThrow("create failed");
+      expect(await followUps(taskId)).toHaveLength(0);
+      const reservation = await getDbClient().get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM task_ui_action_runs WHERE task_id = ?",
+        [taskId],
+      );
+      expect(reservation?.n).toBe(0);
+
+      const retry = await run();
+      expect(retry.status).toBe("started");
+      expect(await followUps(taskId)).toHaveLength(1);
+      expect((await run()).status).toBe("already_done");
+    } finally {
+      createSpy.mockRestore();
+    }
   });
 });

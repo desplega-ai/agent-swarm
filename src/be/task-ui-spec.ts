@@ -113,6 +113,18 @@ export async function reserveTaskUiActionRun({
   return changes === 1 ? "reserved" : "exists";
 }
 
+/**
+ * Drops a reservation whose follow-up task never started, so the button can
+ * run again. A finished run (with a result task) stays.
+ */
+export async function releaseTaskUiActionRun(taskId: string, actionId: string): Promise<void> {
+  await getDbClient().run(
+    `DELETE FROM task_ui_action_runs
+    WHERE task_id = ? AND action_id = ? AND result_task_id IS NULL`,
+    [taskId, actionId],
+  );
+}
+
 export async function setTaskUiActionResult(
   taskId: string,
   actionId: string,
