@@ -146,34 +146,72 @@ function mergedCorrectness(reporter: number): DeterministicCheck {
 
 // ---- delegation (swarm only) ----
 
-/** Words only a query for the incident DATA carries (a lead checking on its children does not). */
-const DATASET_QUERY_RE = /region|INC-\d|downtime|root_cause/i;
+/** Tags the seeded incident rows carry (fixtures/fanout-research-history.sql). */
+const SEEDED_TAGS = new Set(["incident", ...SHARDS.map((s) => `region:${s.region}`)]);
 
-function limitAtLeast(input: string, min: number): boolean {
-  const m = /"limit"\s*:\s*(\d+)/.exec(input);
-  return m !== null && Number(m[1]) >= min;
+/**
+ * A `search` only a query for the incident DATA makes: an incident id or record field, or a
+ * bare `region` / `region: <r>` (both match every record of the shard). Words from the lead's
+ * own shard briefs ("region shard", "incident review region") match no record.
+ */
+const DATASET_SEARCH_RE = /INC-\d|downtime|root[_ ]?cause|^\W*region\b\W*(?:emea|amer|apac)?\W*$/i;
+
+/** Seeded row ids in shard order (fixtures/generate-fanout-research-history.ts `id()`). */
+const SHARD_SEED_IDS: string[][] = SHARDS.map((shard, i) => {
+  const first = SHARDS.slice(0, i).reduce((n, s) => n + s.incidents, 1);
+  return Array.from(
+    { length: shard.incidents },
+    (_, k) => `fa0e7a5e-f000-4000-b000-${(first + k).toString(16).padStart(12, "0")}`,
+  );
+});
+
+/** Did a list filter select the incident records? Tags count only when they are seeded tags. */
+function filterSelectsDataset(f: { search?: unknown; tags?: unknown; limit?: unknown }): boolean {
+  const tags = Array.isArray(f.tags) ? f.tags : typeof f.tags === "string" ? f.tags.split(",") : [];
+  return (
+    tags.some((t) => typeof t === "string" && SEEDED_TAGS.has(t.trim().toLowerCase())) ||
+    (typeof f.search === "string" && DATASET_SEARCH_RE.test(f.search)) ||
+    Number(f.limit) >= 30
+  );
+}
+
+/** Tool arguments: Codex MCP calls nest them under `arguments`; other harnesses pass them flat. */
+function toolArgs(input: unknown): Record<string, unknown> {
+  const flat =
+    typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+  const nested = flat.arguments;
+  return typeof nested === "object" && nested !== null ? (nested as Record<string, unknown>) : flat;
 }
 
 /**
  * Did the lead pull the incident records itself? Every route, per Rule 5:
- * `db-query`; a get-tasks/list-tasks call filtered on the dataset (search/tags
- * naming a region or incident field) or paging 30+ rows; a Bash/fetch against
- * the `/api/tasks?` list endpoint with the same shape. Reading its own child
- * tasks is mandatory and never flagged: get-task-details, get-tasks without a
- * dataset filter (full text included, to read worker output), `/api/tasks/<id>`.
+ * `db-query`; any call whose result holds every seeded record of a region; a
+ * get-tasks/list-tasks call filtered on the dataset (a seeded tag, a search for
+ * an incident field) or paging 30+ rows; a Bash/fetch against the `/api/tasks?`
+ * list endpoint with the same query. Reading its own child tasks is mandatory
+ * and never flagged: get-task-details, get-tasks without a dataset filter (full
+ * text included, to read worker output), by a tag the lead set on its own
+ * send-task calls, `/api/tasks/<id>`.
  */
 function leadPulledDataset(tools: ToolUse[]): ToolUse | undefined {
   return tools.find((u) => {
     if (toolUseMatches(u.toolName, ["db-query", "db_query"])) return true;
-    const input = safeStringify(u.input);
+    const result = u.result ?? "";
+    if (SHARD_SEED_IDS.some((ids) => ids.every((id) => result.includes(id)))) return true;
     if (toolUseMatches(u.toolName, ["get-tasks", "list-tasks", "get_tasks", "list_tasks"])) {
-      return DATASET_QUERY_RE.test(input) || limitAtLeast(input, 30);
+      return filterSelectsDataset(toolArgs(u.input));
     }
     if (toolUseMatches(u.toolName, [/^bash$/i, "command_execution"])) {
-      return (
-        /\/api\/tasks\?/i.test(input) &&
-        (DATASET_QUERY_RE.test(input) || /limit=(?:[3-9]\d|\d{3,})/i.test(input))
-      );
+      const { command } = toolArgs(u.input);
+      const text = typeof command === "string" ? command : safeStringify(u.input);
+      const query = /\/api\/tasks\?([^\s"'`\\]+)/i.exec(text)?.[1];
+      if (query === undefined) return false;
+      const params = new URLSearchParams(query);
+      return filterSelectsDataset({
+        search: params.get("search") ?? undefined,
+        tags: params.get("tags") ?? undefined,
+        limit: params.get("limit") ?? undefined,
+      });
     }
     return false;
   });
@@ -360,7 +398,7 @@ const SOLO_PREAMBLE = "You are working alone: do all of the research yourself.\n
 
 export const fanoutResearch: Scenario = {
   id: "fanout-research",
-  version: 1,
+  version: 2,
   name: "Fan-out research",
   description: [
     "A lead fans an incident-history analysis out to three researchers, one region each, in",

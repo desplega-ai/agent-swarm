@@ -68,6 +68,7 @@ import {
   SWARM_TOOL_GROUP,
   textChars,
 } from "./request-composition-hook";
+import { resolveOpencodeSdkSpecifier } from "./runtime-dependencies";
 import type {
   CostData,
   CredCheckOptions,
@@ -206,22 +207,7 @@ function defaultOpencodeSkillsDir(): string {
 // The worker image installs `@opencode/sdk` with `npm install -g`. It stays on
 // disk instead of being bundled into the compiled binary because it carries
 // native modules (pty, file watcher, tree-sitter).
-const OPENCODE_SDK_GLOBAL_ROOTS = ["/usr/lib/node_modules", "/usr/local/lib/node_modules"];
-const OPENCODE_SDK_SUBPATH = "@opencode/sdk/dist/index.js";
-
-/**
- * `OPENCODE_SDK_PATH` wins, then the global npm roots, then the bare package
- * name (resolved from the repo's node_modules when running from source).
- */
-export function resolveOpencodeSdkSpecifier(): string {
-  const override = process.env.OPENCODE_SDK_PATH;
-  if (override) return override;
-  for (const root of OPENCODE_SDK_GLOBAL_ROOTS) {
-    const candidate = join(root, OPENCODE_SDK_SUBPATH);
-    if (existsSync(candidate)) return candidate;
-  }
-  return "@opencode/sdk";
-}
+export { resolveOpencodeSdkSpecifier } from "./runtime-dependencies";
 
 type OpencodeSdk = typeof import("@opencode/sdk");
 type LoadedOpencodeSdk = { sdk: OpencodeSdk; version?: string };
@@ -237,8 +223,10 @@ function readOpencodeSdkVersion(entry: string): string | undefined {
 }
 
 // A variable specifier keeps `bun build --compile` from bundling the SDK.
-async function loadOpencodeSdk(): Promise<LoadedOpencodeSdk> {
-  const specifier = resolveOpencodeSdkSpecifier();
+async function loadOpencodeSdk(
+  env: Record<string, string | undefined> = process.env,
+): Promise<LoadedOpencodeSdk> {
+  const specifier = resolveOpencodeSdkSpecifier(env);
   const sdk = (await import(specifier)) as OpencodeSdk;
   const entry = specifier.startsWith("/") ? specifier : Bun.resolveSync(specifier, import.meta.dir);
   return { sdk, version: readOpencodeSdkVersion(entry) };
@@ -1075,7 +1063,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       isLead: config.role === "lead",
       env: config.env,
     };
-    const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
+    const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl(env);
     let listTools: OpencodeToolLister | undefined;
     let onContext: ((event: OpencodeRequestContext) => void) | undefined;
     const billing = config.model.startsWith("openrouter/") ? new OpenRouterBilling() : undefined;

@@ -458,6 +458,16 @@
         "slack-delegation-late-child"
       ]
     },
+    "slack-http-native": {
+      "description": "Built-in Slack in SLACK_MODE=http, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands acked inside 3s with an ephemeral reply, a signed Cancel click that cancels the task and updates its card, forged, stale, future, unsigned, foreign-workspace and replayed requests, and a retry after an API restart that creates no second task",
+      "scenarios": [
+        "slack-http-mention",
+        "slack-http-command",
+        "slack-http-interactivity",
+        "slack-http-signature-retry",
+        "slack-http-restart-redelivery"
+      ]
+    },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
       "scenarios": ["slack-skipped-task-legacy", "slack-skipped-task-v2"]

@@ -21,7 +21,7 @@ export function isSocketNotReadyError(error: unknown): boolean {
  */
 const ORDER_DEPENDENT_EVENTS = new Set(["assistant_thread_context_changed"]);
 
-function isOrderDependentEvent(body: unknown): boolean {
+export function isOrderDependentEvent(body: unknown): boolean {
   const type = (body as { event?: { type?: unknown } } | undefined)?.event?.type;
   return typeof type === "string" && ORDER_DEPENDENT_EVENTS.has(type);
 }
@@ -211,17 +211,11 @@ async function rememberInline(payload: SocketEnvelope, envelope: string): Promis
   }
 }
 
-/**
- * Install the not-ready ack tolerance on the receiver's client and the durable
- * drain that runs the receipts it stores. The caller owns the drain: `wake()` it
- * after boot recovery to pick up receipts stored before a restart, `stop()` it
- * on shutdown.
- */
-export function installSocketAckRecovery(
-  client: SocketModeReceiver["client"],
+/** The durable drain that hands stored receipts back to Bolt. Shared by both transports. */
+export function createBoltInboundDrain(
   app: Pick<App, "processEvent">,
 ): ReturnType<typeof createSlackInboundDrain> {
-  const drain = createSlackInboundDrain(
+  return createSlackInboundDrain(
     async ({ receipt, rawBody }) => {
       await app.processEvent({
         body: JSON.parse(rawBody),
@@ -232,6 +226,19 @@ export function installSocketAckRecovery(
     },
     { requireBoltDispatch: true },
   );
+}
+
+/**
+ * Install the not-ready ack tolerance on the receiver's client and the durable
+ * drain that runs the receipts it stores. The caller owns the drain: `wake()` it
+ * after boot recovery to pick up receipts stored before a restart, `stop()` it
+ * on shutdown.
+ */
+export function installSocketAckRecovery(
+  client: SocketModeReceiver["client"],
+  app: Pick<App, "processEvent">,
+): ReturnType<typeof createSlackInboundDrain> {
+  const drain = createBoltInboundDrain(app);
   tolerateSocketNotReadyAcks(client, { onAdmitted: () => void drain.wake() });
   return drain;
 }

@@ -373,13 +373,15 @@ function checkRateLimit(userId: string): boolean {
 
 export function registerMessageHandler(app: App): void {
   // Handle all message events
-  app.event("message", async ({ event, body, client, say }) => {
+  app.event("message", async ({ event, body, context, client, say }) => {
     // Slack retries deliveries on 3s timeout / 5xx. Drop the duplicates
     // before any task-creation work runs (DES-293). A delivery admitted from a
     // durable receipt was already deduplicated by its unique key.
     const eventId = body?.event_id;
     if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
-      console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+      console.log(
+        `[Slack] dropping Slack retry: event_id=${eventId ?? "unknown"} channel=${event.channel ?? "unknown"} ts=${event.ts ?? "unknown"} thread_ts=${("thread_ts" in event ? event.thread_ts : undefined) ?? "unknown"} retry_num=${context?.retryNum ?? "unknown"} retry_reason=${context?.retryReason ?? "unknown"}`,
+      );
       return ignoreSlackInbound("duplicate_event");
     }
 
@@ -563,7 +565,7 @@ export function registerMessageHandler(app: App): void {
 
         noteSlackInboundSideEffect("thread_flush");
         if (nowMessage || hasFiles) {
-          bufferThreadMessage(
+          await bufferThreadMessage(
             msg.channel,
             msg.thread_ts,
             nowMessage,
@@ -607,7 +609,7 @@ export function registerMessageHandler(app: App): void {
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
         noteSlackInboundSideEffect("thread_buffer");
-        bufferThreadMessage(
+        await bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
           messageText,

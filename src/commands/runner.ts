@@ -53,6 +53,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { effectiveReasoningEffort } from "../providers/reasoning-effort.ts";
+import { validateProviderDependencies } from "../providers/runtime-dependencies.ts";
 import {
   createSkillInvokeTracker,
   isSkillLoaderCall,
@@ -4813,6 +4814,11 @@ export async function spawnProviderProcess(
     reasoningEffort: reasoningEffortOverride,
     onPromptSkill: skillInvokes.promptSkill,
   };
+
+  // Both new and resumed tasks reach this boundary with the current harness
+  // and resolved env. The caller fails the task and removes its active session
+  // if a dependency is missing, before any provider session starts.
+  await validateProviderDependencies(opts.harnessProvider, config);
 
   // Create the long-lived `worker.session` span up front so the provider
   // session — and the harness subprocess it spawns — is created within its

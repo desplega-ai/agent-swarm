@@ -19,6 +19,18 @@ describe("docs-suggestion rubric", () => {
     expect(res.pass).toBe(true);
   });
 
+  test("replies are found on live tasks, whose title is the server's, not the spec title", async () => {
+    // The runner sends no title; the API auto-titles. Matching on spec.title found no reply,
+    // so every attempt scored 2/5 (the negatives) and failed the reply gate.
+    const ctx = repliesContext(REFERENCE_REPLIES);
+    const live = {
+      ...ctx,
+      tasks: ctx.tasks.map((t, i) => ({ ...t, title: `Reply to Maya's message ${i + 1}` })),
+    };
+    expect((await repliesWritten.fn(live)).pass).toBe(true);
+    expect((await docsOfferCheck.fn(live)).score).toBe(1);
+  });
+
   test("a lead that never offers scores only the negative requests", async () => {
     const res = await docsOfferCheck.fn(
       repliesContext({

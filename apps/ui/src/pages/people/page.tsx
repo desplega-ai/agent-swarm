@@ -12,12 +12,14 @@ import {
   HIDE_WHEN_COMPACT,
   useDataGridColumns,
 } from "@/components/shared/data-grid";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelative } from "@/lib/relative-time";
 import { useIsAdmin } from "@/lib/use-can";
@@ -60,6 +62,7 @@ function PeopleTable({
   onRowClick: (id: string) => void;
   columns: DataGridColumnsState;
 }) {
+  const isMobile = useIsMobile();
   const columnDefs = useMemo<ColDef<User>[]>(
     () => [
       {
@@ -162,6 +165,40 @@ function PeopleTable({
     [],
   );
 
+  // The grid clips every column but the first two at phone width; rows keep
+  // the role and the identity count in view.
+  if (isMobile) {
+    return (
+      <MobileList
+        label="People"
+        loading={isLoading}
+        emptyMessage="No users yet. Add the first one with the New user button."
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        {(users ?? []).map((user) => (
+          <MobileListRow
+            key={user.id}
+            to={`/people/${user.id}`}
+            title={user.name}
+            titleLines={1}
+            status={<UserStatusPill status={user.status} />}
+            meta={[
+              user.email,
+              user.role ? (
+                <span key="role" className="capitalize">
+                  {user.role}
+                </span>
+              ) : null,
+              user.identities?.length
+                ? `${user.identities.length} identit${user.identities.length === 1 ? "y" : "ies"}`
+                : null,
+            ]}
+          />
+        ))}
+      </MobileList>
+    );
+  }
+
   return (
     <DataGrid
       rowData={users}
@@ -189,6 +226,7 @@ export default function PeoplePage() {
       ? "unmapped"
       : "people";
 
+  const isMobile = useIsMobile();
   const { data: users, isLoading } = useUsers();
   const { data: unmapped } = useUnmapped();
   const unmappedCount = unmapped?.length ?? 0;
@@ -238,9 +276,9 @@ export default function PeoplePage() {
             active — the Unmapped tab owns its own search input. `ml-auto` on
             the tabs container guarantees right-alignment regardless of
             whether the search input is present or what width it takes. */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0 md:flex-nowrap">
           {tab === "people" && (
-            <div className="relative flex-1 max-w-md min-w-0">
+            <div className="relative min-w-0 flex-1 basis-full max-md:order-last md:max-w-md md:basis-40">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 value={query}
@@ -256,13 +294,13 @@ export default function PeoplePage() {
             </div>
           )}
 
-          <TabsList className="shrink-0 ml-auto">
-            <TabsTrigger value="people">
-              <Users className="h-3.5 w-3.5 mr-1.5" />
+          <TabsList className="shrink-0 max-md:min-w-0 max-md:flex-1 md:ml-auto">
+            <TabsTrigger value="people" className="max-md:flex-1">
+              <Users className="mr-1.5 h-3.5 w-3.5 max-md:hidden" />
               People ({users?.length ?? 0})
             </TabsTrigger>
-            <TabsTrigger value="unmapped">
-              <Inbox className="h-3.5 w-3.5 mr-1.5" />
+            <TabsTrigger value="unmapped" className="max-md:flex-1">
+              <Inbox className="mr-1.5 h-3.5 w-3.5 max-md:hidden" />
               Unmapped
               {unmappedCount > 0 && (
                 <Badge
@@ -275,7 +313,7 @@ export default function PeoplePage() {
               )}
             </TabsTrigger>
           </TabsList>
-          {tab === "people" ? <DataGridColumnsMenu state={gridColumns} /> : null}
+          {tab === "people" && !isMobile ? <DataGridColumnsMenu state={gridColumns} /> : null}
           {/* Page actions ride the toolbar, right of the tabs — no lone
               header action row. */}
           <Tooltip>
@@ -313,7 +351,7 @@ export default function PeoplePage() {
               onClick={() => setInviteOpen(true)}
             >
               <Send />
-              Invite
+              <span className="max-md:sr-only">Invite</span>
             </Button>
           ) : null}
         </div>
