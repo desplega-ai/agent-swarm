@@ -239,12 +239,13 @@ export function SettingsLayout() {
   );
 }
 
-// Settings tab strip hid 7 of 10 sections, add edge fade + chevrons
 /**
  * Wraps the shared `SectionTabs` strip (whose scrollbar is hidden) with an
  * edge fade and a chevron on each side that still has hidden tabs, so a phone
  * shows that more sections exist past the screen edge. Page-local: it finds
  * the strip's scroller in the DOM instead of changing the shared component.
+ * The scroller gets an inline scroll padding as wide as a chevron, so the
+ * active tab that `SectionTabs` scrolls into view never sits under one.
  */
 function OverflowCue({ children, className }: { children: ReactNode; className?: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -273,7 +274,7 @@ function OverflowCue({ children, className }: { children: ReactNode; className?:
   };
 
   return (
-    <div ref={rootRef} className={cn("relative", className)}>
+    <div ref={rootRef} className={cn("relative [&_nav>div]:scroll-px-10", className)}>
       {children}
       {edges.left ? (
         <button

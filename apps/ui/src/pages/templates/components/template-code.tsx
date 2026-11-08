@@ -1,16 +1,17 @@
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/hooks/use-theme";
-import { MAIN_BLEED } from "@/lib/main-gutter";
+import { MAIN_BLEED_Y } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 
 /**
  * The Monaco body view/editor shared by the template detail and version
  * pages. It fills the height its parent gives it.
  *
- * On a phone it runs edge to edge (it bleeds out of the page gutter, so the
- * lines get 32px more width and wrap less), drops the line-number gutter, the
+ * On a phone it runs to the bottom edge, drops the line-number gutter, the
  * glyph margin and folding (about 50px of width the lines need more), and
- * uses a 12px font. Desktop keeps the bordered box with line numbers.
+ * uses a 12px font. It does not bleed sideways: the page renders inside the
+ * settings layout, whose content column clips a horizontal bleed and would
+ * cut the first characters of every line. Desktop keeps line numbers.
  */
 export function TemplateCode({
   value,
@@ -30,7 +31,9 @@ export function TemplateCode({
     <div
       className={cn(
         "flex-1 min-h-0 overflow-hidden",
-        phone ? cn(MAIN_BLEED, "border-y border-border") : "rounded-md border border-border",
+        phone
+          ? cn(MAIN_BLEED_Y, "rounded-t-md border border-b-0 border-border")
+          : "rounded-md border border-border",
       )}
     >
       <Editor
