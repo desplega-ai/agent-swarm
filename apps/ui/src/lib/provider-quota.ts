@@ -159,7 +159,8 @@ function removals(statuses: ApiKeyStatus[]): Map<string, number> {
  * rows (global and per agent). A window is gone once its reset passes. Without
  * a reset, a window of known length is gone once a full length has passed
  * since it was seen. A newer explicit Codex slot removal hides older reports.
- * Equal windows from several rows count once: the newest observation wins.
+ * Select the newest observation across scopes before checking expiry.
+ * An expired latest report must not reveal an older report with a later reset.
  */
 export function currentQuotaWindows(statuses: ApiKeyStatus[], nowMs: number): QuotaWindow[] {
   const removed = removals(statuses);
@@ -175,14 +176,6 @@ export function currentQuotaWindows(statuses: ApiKeyStatus[], nowMs: number): Qu
         typeof window.resetsAt === "number" && Number.isFinite(window.resetsAt)
           ? window.resetsAt * 1000
           : null;
-      if (resetsAtMs !== null && resetsAtMs <= nowMs) continue;
-      if (
-        resetsAtMs === null &&
-        durationMins !== null &&
-        seenMs + durationMins * MINUTE_MS <= nowMs
-      ) {
-        continue;
-      }
       const period = durationMins === null ? null : formatPeriod(durationMins);
       const resetAt = window.fieldObservedAt?.resetsAt ?? null;
       const candidate: QuotaWindow = {
@@ -214,6 +207,11 @@ export function currentQuotaWindows(statuses: ApiKeyStatus[], nowMs: number): Qu
     }
   }
   return [...best.values()]
+    .filter(({ window, seenMs }) =>
+      window.resetsAtMs !== null
+        ? window.resetsAtMs > nowMs
+        : window.durationMins === null || seenMs + window.durationMins * MINUTE_MS > nowMs,
+    )
     .map((entry) => entry.window)
     .sort(
       (a, b) =>

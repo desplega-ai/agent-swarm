@@ -201,7 +201,7 @@ describe("current quota windows", () => {
     expect(currentQuotaWindows([tie, global], NOW)[0]?.statusId).toBe("status-global");
   });
 
-  test("an expired newer report does not hide a current older one", () => {
+  test("an expired newer report hides an older report with a later reset", () => {
     const fresh = row({
       five_hour: {
         status: "allowed",
@@ -221,7 +221,27 @@ describe("current quota windows", () => {
       },
       { id: "status-agent", scope: "agent" },
     );
-    expect(currentQuotaWindows([fresh, older], NOW).map((w) => w.percent)).toEqual([30]);
+    expect(currentQuotaWindows([fresh, older], NOW)).toEqual([]);
+    expect(currentQuotaWindows([older, fresh], NOW)).toEqual([]);
+  });
+
+  test("a newer report that expires by age cannot resurrect an older scope", () => {
+    const newer = row({
+      five_hour: { status: "allowed", utilization: 0.9, lastSeenAt: iso(NOW - 6 * H) },
+    });
+    const older = row(
+      {
+        five_hour: {
+          status: "allowed",
+          utilization: 0.3,
+          resetsAt: sec(NOW + H),
+          lastSeenAt: iso(NOW - 7 * H),
+        },
+      },
+      { id: "status-agent", scope: "agent" },
+    );
+    expect(currentQuotaWindows([newer, older], NOW)).toEqual([]);
+    expect(currentQuotaWindows([older, newer], NOW)).toEqual([]);
   });
 
   test("a newer explicit slot removal on any row hides an older report of that slot", () => {

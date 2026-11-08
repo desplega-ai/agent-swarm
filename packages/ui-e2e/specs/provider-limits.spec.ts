@@ -138,6 +138,23 @@ test("provider limits show current windows, account facts, and Swarm usage", asy
       },
     });
 
+    // The older scope must not return when the newer global window expires.
+    await report({
+      keyType: "CLAUDE_CODE_OAUTH_TOKEN",
+      keySuffix: claudeMaxSuffix,
+      keyIndex: 1,
+      scope: "agent",
+      scopeId: agent.id,
+      windows: {
+        five_hour: {
+          status: "allowed",
+          utilization: 0.34,
+          resetsAt: sec(now + H),
+          lastSeenAt: iso(now - 10 * 60_000),
+        },
+      },
+    });
+
     // Codex: a weekly-only primary, the secondary explicitly removed, and account facts.
     const codexAt = iso(now - 4 * 60_000);
     await report({
