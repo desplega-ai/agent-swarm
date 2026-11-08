@@ -1,15 +1,18 @@
 /**
  * `UI_SPEC_SCRIPT_ACTIONS` is human-only: only an admin user may write or
  * delete it. The operator key (held by every worker), agents (the Lead
- * included) and guests are refused, on both the HTTP route and MCP tools.
+ * included), guests and page sessions are refused, on the HTTP routes, the
+ * HITL config answer path and MCP tools.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { closeDb, createAgent, createUser, initDb, upsertSwarmConfig } from "../be/db";
 import { attachRole, setUserRoles } from "../be/rbac-roles";
 import { validateConfigValue } from "../be/swarm-config-guard";
 import { findUserById } from "../be/users";
+import { handleApprovalRequests } from "../http/approval-requests";
 import { handleConfig } from "../http/config";
+import * as core from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
@@ -37,6 +40,8 @@ let server: Server;
 let baseUrl: string;
 let adminId = "";
 let plainUserId = "";
+const reloadSpy = spyOn(core, "scheduleIntegrationsReload").mockImplementation(() => {});
+const PAGE_ERROR = "cannot be changed from a page session";
 
 beforeAll(async () => {
   initDb(":memory:");
@@ -49,26 +54,32 @@ beforeAll(async () => {
   registerDeleteConfigTool(mcp as never);
 
   server = createServer(async (req, res) => {
-    // `x-test-user-id` makes a user principal, `x-test-guest` a guest; else the operator key.
+    // `x-test-user-id` makes a user principal (`x-test-page` binds it to a page
+    // session, as auth.ts does for a uid cookie), `x-test-guest` a guest; else
+    // the operator key.
     const userId = req.headers["x-test-user-id"] as string | undefined;
     if (userId) {
       const user = await findUserById(userId);
-      setRequestAuth(req, user ? { kind: "user", userId: user.id, user } : null);
+      const page = req.headers["x-test-page"]
+        ? { page: { id: "p1", executionAgentId: LEAD_ID } }
+        : {};
+      setRequestAuth(req, user ? { kind: "user", userId: user.id, user, ...page } : null);
     } else if (req.headers["x-test-guest"]) {
       setRequestAuth(req, { kind: "guest" });
     } else {
       setRequestAuth(req, { kind: "operator", fingerprint: "config-guard-test" });
     }
-    if (
-      await handleConfig(req, res, getPathSegments(req.url ?? ""), parseQueryParams(req.url ?? ""))
-    )
-      return;
+    const segments = getPathSegments(req.url ?? "");
+    const query = parseQueryParams(req.url ?? "");
+    if (await handleConfig(req, res, segments, query)) return;
+    if (await handleApprovalRequests(req, res, segments, query)) return;
     res.writeHead(404).end();
   });
   baseUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
 });
 
 afterAll(async () => {
+  reloadSpy.mockRestore();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
 });
@@ -115,6 +126,22 @@ describe("PUT and DELETE /api/config", () => {
     expect((await put({ "x-test-user-id": adminId }, "github-metrics")).status).toBe(400);
   });
 
+  test("an admin's page session is refused, with its own message", async () => {
+    const response = await put({ "x-test-user-id": adminId, "x-test-page": "1" });
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain(PAGE_ERROR);
+  });
+
+  test("an admin's page session cannot delete it", async () => {
+    const row = await upsertSwarmConfig({ scope: "global", key: KEY, value: PIN });
+    const response = await fetch(`${baseUrl}/api/config/${row.id}`, {
+      method: "DELETE",
+      headers: { "x-test-user-id": adminId, "x-test-page": "1" },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain(PAGE_ERROR);
+  });
+
   test("only an admin user deletes it", async () => {
     const row = await upsertSwarmConfig({ scope: "global", key: KEY, value: PIN });
     const del = (headers: Record<string, string>) =>
@@ -138,5 +165,32 @@ describe("set-config and delete-config tools", () => {
     const result = await tools.get("delete-config")!({ id: row.id }, meta);
     expect(result.structuredContent?.success).toBe(false);
     expect(result.structuredContent?.message).toContain("can only be changed by an admin user");
+  });
+});
+
+describe("HITL config answer", () => {
+  test("an admin's page session cannot set it; the admin can", async () => {
+    const created = await fetch(`${baseUrl}/api/approval-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Pin a card script",
+        approvers: { policy: "any" },
+        questions: [{ id: "cfg", type: "config", config: { key: KEY, scope: "global" } }],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { approvalRequest } = (await created.json()) as { approvalRequest: { id: string } };
+    const answer = (headers: Record<string, string>) =>
+      fetch(`${baseUrl}/api/approval-requests/${approvalRequest.id}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ responses: { cfg: { action: "set", value: PIN } } }),
+      });
+
+    const fromPage = await answer({ "x-test-user-id": adminId, "x-test-page": "1" });
+    expect(fromPage.status).toBe(403);
+    expect(await fromPage.text()).toContain(PAGE_ERROR);
+    expect((await answer({ "x-test-user-id": adminId })).status).toBe(200);
   });
 });

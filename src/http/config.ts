@@ -19,6 +19,7 @@ import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   humanOnlyConfigKeyError,
+  humanOnlyConfigKeyPageError,
   internalConfigKeyError,
   isApiOnlyConfigKey,
   isHumanOnlyConfigKey,
@@ -190,7 +191,8 @@ export async function ensureConfigAdmin(
 /**
  * A human-only key (see `isHumanOnlyConfigKey`) needs an admin user: a user
  * token or a dashboard session. The operator key resolves to the operator,
- * and every worker holds it, so it is refused like an agent or a guest.
+ * and every worker holds it, so it is refused like an agent or a guest. A
+ * page session is refused whoever its viewer is.
  * Returns true when the request may proceed; on denial it writes a 403.
  */
 export async function ensureHumanOnlyConfigWrite(
@@ -199,7 +201,15 @@ export async function ensureHumanOnlyConfigWrite(
   key: string,
 ): Promise<boolean> {
   if (!isHumanOnlyConfigKey(key)) return true;
-  const userId = authUserId(getRequestAuth(req));
+  const auth = getRequestAuth(req);
+  // A page session carries its viewer's identity, but the page's code is
+  // agent-authored and the page proxy forwards any /api/* route, so a
+  // user-bound page session would pass as that admin. Refuse every page.
+  if (auth?.page) {
+    jsonError(res, humanOnlyConfigKeyPageError(key), 403);
+    return false;
+  }
+  const userId = authUserId(auth);
   if (userId && (!isRbacEnabled() || (await getUserGrant(userId)).grantsAll)) return true;
   jsonError(res, humanOnlyConfigKeyError(key), 403);
   return false;

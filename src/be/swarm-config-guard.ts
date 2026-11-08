@@ -135,6 +135,11 @@ export function humanOnlyConfigKeyError(key: string): string {
   return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
 }
 
+/** A page session acts for its viewer but runs the page author's code. */
+export function humanOnlyConfigKeyPageError(key: string): string {
+  return `Key '${key}' cannot be changed from a page session. Change it from the dashboard or with a user token.`;
+}
+
 export function isReservedConfigKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toUpperCase());
 }
