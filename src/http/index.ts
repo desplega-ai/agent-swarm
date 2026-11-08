@@ -28,6 +28,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { startResourceReconciler, stopResourceReconciler } from "../be/resources/reconciler";
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
@@ -500,6 +501,7 @@ globalState.__transportActivityUser = transportActivityUser;
 globalState.__stopExtensions = stopExtensionRuntime;
 
 async function shutdown() {
+  await stopResourceReconciler();
   globalState.__closeRealtime?.();
   console.log("Shutting down HTTP server...");
   telemetry.server("shutdown", {
@@ -671,6 +673,9 @@ try {
     scrubSecrets(err instanceof Error ? err.message : String(err)),
   );
 }
+
+// Fail closed if durable runtime-owner initialization fails: cleanup cannot run without it.
+await startResourceReconciler();
 
 try {
   await seedRuntimePools();

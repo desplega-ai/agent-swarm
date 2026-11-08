@@ -1,3 +1,4 @@
+import { ResourceProviderError } from "../../resource-providers/types";
 import {
   type BrowserProfile,
   BrowserProfileSchema,
@@ -176,6 +177,16 @@ export async function createResource(
     ) {
       throw new Error("The source task cannot use this browser profile.");
     }
+    if (
+      input.profileId &&
+      (await client.get("SELECT 1 FROM resources WHERE profileId=? AND liveReservation=1", [
+        input.profileId,
+      ]))
+    )
+      throw new ResourceProviderError(
+        "conflict",
+        "The browser profile already has an active session.",
+      );
     const template = input.templateId
       ? await client.get<SandboxTemplate>(
           "SELECT * FROM sandbox_templates WHERE id = ? AND deletedAt IS NULL",
@@ -328,12 +339,24 @@ export async function insertResourceOperation(
   });
 }
 export async function insertResourceCost(
-  input: Omit<ResourceCost, "id"> & { checkpointKey: string },
+  input: Omit<ResourceCost, "id"> & {
+    checkpointKey: string;
+    rateUsdPerMs?: number;
+    rateEffectiveAt?: string;
+  },
   actor?: Actor,
 ): Promise<void> {
+  const resource = await getResource(input.resourceId);
+  if (
+    !resource ||
+    resource.creatorAgentId !== input.agentId ||
+    resource.requestedByUserId !== input.requestedByUserId ||
+    resource.sourceTaskId !== input.sourceTaskId
+  )
+    throw new Error("Resource cost attribution must match its canonical resource.");
   const timestamp = now();
   await getDbClient().run(
-    `INSERT INTO resource_costs (id, resourceId, generation, dimension, agentId, requestedByUserId, sourceTaskId, intervalStart, intervalEnd, amountUsd, costSource, checkpointKey, createdAt, updatedAt, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(checkpointKey) DO NOTHING`,
+    `INSERT INTO resource_costs (id, resourceId, generation, dimension, agentId, requestedByUserId, sourceTaskId, intervalStart, intervalEnd, amountUsd, costSource, checkpointKey, rateUsdPerMs, rateEffectiveAt, createdAt, updatedAt, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(checkpointKey) DO NOTHING`,
     [
       crypto.randomUUID(),
       input.resourceId,
@@ -347,10 +370,12 @@ export async function insertResourceCost(
       input.amountUsd,
       input.costSource,
       input.checkpointKey,
+      input.rateUsdPerMs ?? null,
+      input.rateEffectiveAt ?? null,
       timestamp,
       timestamp,
-      actorId(actor),
-      actorId(actor),
+      actor === null ? null : actorId(actor),
+      actor === null ? null : actorId(actor),
     ],
   );
 }
@@ -365,33 +390,42 @@ export async function loadResourceSecrets(): Promise<{ count: number; failed: nu
     "sandbox_templates",
     "resource_operations",
   ] as const) {
-    const rows = await getDbClient().query<{
-      id: string;
-      privateConfig: string;
-      providerHandle?: string | null;
-    }>(`SELECT id, privateConfig${table === "resources" ? ", providerHandle" : ""} FROM ${table}`);
-    for (const row of rows)
-      for (const [field, value] of Object.entries({
-        privateConfig: row.privateConfig,
-        providerHandle: row.providerHandle,
-      })) {
-        if (!value) continue;
-        try {
-          if (field === "providerHandle")
-            registerResourceHandle(
-              openSealedJson(value) as ResourcePrivateHandle,
-              `resource:${row.id}`,
-            );
-          else
-            registerResourceConfig(
-              openSealedJson(value) as ResourcePrivateConfig,
-              `resource:${row.id}`,
-            );
-          count++;
-        } catch {
-          failed++;
+    let cursor = "";
+    while (true) {
+      const rows = await getDbClient().query<{
+        id: string;
+        privateConfig: string;
+        providerHandle?: string | null;
+        resourceId?: string;
+      }>(
+        `SELECT id, privateConfig${table === "resources" ? ", providerHandle" : table === "resource_operations" ? ", resourceId" : ""} FROM ${table} WHERE id > ? ORDER BY id LIMIT 200`,
+        [cursor],
+      );
+      if (!rows.length) break;
+      cursor = rows[rows.length - 1]!.id;
+      for (const row of rows)
+        for (const [field, value] of Object.entries({
+          privateConfig: row.privateConfig,
+          providerHandle: row.providerHandle,
+        })) {
+          if (!value) continue;
+          try {
+            if (field === "providerHandle")
+              registerResourceHandle(
+                openSealedJson(value) as ResourcePrivateHandle,
+                `resource:${row.id}`,
+              );
+            else
+              registerResourceConfig(
+                openSealedJson(value) as ResourcePrivateConfig,
+                `${table === "browser_profiles" ? "resource-profile" : table === "sandbox_templates" ? "resource-template" : "resource"}:${row.resourceId ?? row.id}`,
+              );
+            count++;
+          } catch {
+            failed++;
+          }
         }
-      }
+    }
   }
   return { count, failed };
 }

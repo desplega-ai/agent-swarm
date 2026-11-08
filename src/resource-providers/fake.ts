@@ -1,5 +1,6 @@
 import {
   type ProviderCreate,
+  type ProviderOperationContext,
   type ProviderState,
   type ResourceHandle,
   type ResourceProvider,
@@ -7,7 +8,10 @@ import {
 } from "./types";
 
 /** Deterministic in-memory adapter for tests. It performs no network operations. */
-export function createFakeResourceProvider(kind: "sandbox" | "browser"): ResourceProvider {
+export function createFakeResourceProvider(
+  kind: "sandbox" | "browser",
+  now: () => Date = () => new Date(),
+): ResourceProvider {
   const sessions = new Map<
     string,
     { handle: ResourceHandle; state: ProviderState; expiresAt: string }
@@ -24,6 +28,8 @@ export function createFakeResourceProvider(kind: "sandbox" | "browser"): Resourc
     ) {
       throw new ResourceProviderError("not-found", "The resource generation does not exist.");
     }
+    if (row.state === "running" && Date.parse(row.expiresAt) <= now().getTime())
+      row.state = kind === "sandbox" ? "paused" : "stopped";
     return row;
   };
   const unsupported = () => {
@@ -32,15 +38,42 @@ export function createFakeResourceProvider(kind: "sandbox" | "browser"): Resourc
       "Browser sessions do not support pause or resume.",
     );
   };
+  const check = (context?: ProviderOperationContext) => {
+    if (context?.signal.aborted || (context && Date.parse(context.deadlineAt) <= now().getTime()))
+      throw new ResourceProviderError("deadline", "The provider mutation deadline expired.");
+    if (context?.sessionDeadlineAt && Date.parse(context.sessionDeadlineAt) <= now().getTime())
+      throw new ResourceProviderError("deadline", "The provider session deadline expired.");
+  };
   const common = {
     provider: "fake" as const,
+    rates: [{ dimension: "runtime", usdPerMs: 0.000001, effectiveAt: "2026-01-01T00:00:00.000Z" }],
+    async renewLease(
+      handle: ResourceHandle,
+      timeoutMs: number,
+      context?: ProviderOperationContext,
+    ) {
+      check(context);
+      if (common.traits.leaseRenewal === "fixed")
+        throw new ResourceProviderError(
+          "unsupported",
+          "This session has a fixed deadline. Reconnect after it stops. Open tabs will be lost.",
+        );
+      const row = lookup(handle);
+      if (row.state !== "running")
+        throw new ResourceProviderError("conflict", "The session is not running.");
+      row.expiresAt =
+        context?.sessionDeadlineAt ?? new Date(now().getTime() + timeoutMs).toISOString();
+      return handle;
+    },
     traits: {
       supportsPause: kind === "sandbox",
+      leaseRenewal: "extendable" as "extendable" | "fixed",
       maxContinuousMs: 60_000,
       previewAccess: kind === "sandbox" ? ("public" as const) : ("none" as const),
       preservesTabsOnStop: false as const,
     },
-    async create(input: ProviderCreate) {
+    async create(input: ProviderCreate, context?: ProviderOperationContext) {
+      check(context);
       const externalId = `${input.resourceId}:${input.generation}`;
       if (sessions.has(externalId))
         throw new ResourceProviderError("conflict", "The resource generation already exists.");
@@ -53,33 +86,40 @@ export function createFakeResourceProvider(kind: "sandbox" | "browser"): Resourc
       sessions.set(externalId, {
         handle,
         state: "running",
-        expiresAt: new Date(Date.now() + input.timeoutMs).toISOString(),
+        expiresAt:
+          context?.sessionDeadlineAt ?? new Date(now().getTime() + input.timeoutMs).toISOString(),
       });
       return handle;
     },
-    async status(handle: ResourceHandle) {
+    async status(handle: ResourceHandle, context?: ProviderOperationContext) {
+      check(context);
       return lookup(handle).state;
     },
-    async pause(handle: ResourceHandle) {
+    async pause(handle: ResourceHandle, context?: ProviderOperationContext) {
+      check(context);
       if (kind === "browser") unsupported();
       const row = lookup(handle);
       if (row.state === "destroyed")
         throw new ResourceProviderError("conflict", "The resource is destroyed.");
       row.state = "paused";
     },
-    async resume(handle: ResourceHandle, timeoutMs: number) {
+    async resume(handle: ResourceHandle, timeoutMs: number, context?: ProviderOperationContext) {
+      check(context);
       if (kind === "browser") unsupported();
       const row = lookup(handle);
       if (row.state === "destroyed")
         throw new ResourceProviderError("conflict", "The resource is destroyed.");
       row.state = "running";
-      row.expiresAt = new Date(Date.now() + timeoutMs).toISOString();
+      row.expiresAt =
+        context?.sessionDeadlineAt ?? new Date(now().getTime() + timeoutMs).toISOString();
       return handle;
     },
-    async destroy(handle: ResourceHandle) {
+    async destroy(handle: ResourceHandle, context?: ProviderOperationContext) {
+      check(context);
       lookup(handle).state = "destroyed";
     },
-    async listOwned(ownerId: string) {
+    async listOwned(ownerId: string, context?: ProviderOperationContext) {
+      check(context);
       return [...sessions.values()]
         .filter((row) => row.handle.ownerId === ownerId && row.state !== "destroyed")
         .map((row) => row.handle);
@@ -112,7 +152,8 @@ export function createFakeResourceProvider(kind: "sandbox" | "browser"): Resourc
   return {
     ...common,
     kind,
-    async stop(handle) {
+    async stop(handle, context) {
+      check(context);
       const row = lookup(handle);
       if (row.state === "destroyed")
         throw new ResourceProviderError("conflict", "The resource is destroyed.");

@@ -140,12 +140,13 @@ test("resource storage encrypts private values and preserves provenance and idem
 });
 
 const migrations = (await Array.fromAsync(new Bun.Glob("*.sql").scan("src/be/migrations")))
-  .filter((file) => Number.parseInt(file, 10) <= 306)
+  .filter((file) => Number.parseInt(file, 10) <= 311)
   .sort();
 const previousTail = Math.max(
-  ...migrations.map((file) => Number.parseInt(file, 10)).filter((version) => version < 306),
+  ...migrations.map((file) => Number.parseInt(file, 10)).filter((version) => version < 310),
 );
-for (const tail of new Set([297, previousTail])) {
+// Verify both pre-resource upgrades and the Phase 1 -> billing upgrade.
+for (const tail of new Set([297, previousTail, 310])) {
   test(`fresh and tail ${tail} upgrade produce identical schemas and preserve worker-token bindings`, async () => {
     const dir = `/tmp/resources-migrations-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${dir}`.quiet();

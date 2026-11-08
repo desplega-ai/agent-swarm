@@ -97,6 +97,12 @@ const SessionCostByCredentialRowSchema = z.object({
 
 /** Mirrors the return type of `getSessionCostSummary` in src/be/db.ts. */
 const SessionCostSummarySchema = z.object({
+  resourceCosts: z.object({
+    estimatedCostUsd: z.number(),
+    providerCostUsd: z.number(),
+    totalCostUsd: z.number(),
+  }),
+  combinedCostUsd: z.number(),
   totals: SessionCostSummaryTotalsSchema,
   daily: z.array(SessionCostDailyRowSchema),
   byAgent: z.array(SessionCostByAgentRowSchema),

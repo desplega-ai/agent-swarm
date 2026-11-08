@@ -5,7 +5,7 @@ autonomy: critical
 
 # Browser and Sandbox Primitives Implementation Plan
 
-Status: Phase 1 implemented, verified, and manually accepted on `t3/sandbox-browser-primitives`. Phase 2 is paused and has not started. Taras accepted the plan on 2026-11-08 after file-review closed without saved comments.
+Status: Phase 1 committed as `98636252e` after verification and manual acceptance. Taras authorized continuing; Phase 2 implementation is in progress on `t3/sandbox-browser-primitives`. Taras accepted the plan on 2026-11-08 after file-review closed without saved comments.
 Each phase requires automated verification, automatic standards/spec review, and Taras's manual checkpoint before a commit. Continue on the existing branch; commit once per approved phase.
 
 ## Overview
@@ -306,6 +306,39 @@ New tests: `resources-db.test.ts`, `resources-access.test.ts`, and `resources-ht
 
 ## Phase 2: Lifecycle, capacity, and resource costs
 
+### Implementation progress
+
+Started from Phase 1 commit `98636252e` after Taras explicitly requested continuation. Fake providers only; no live allocation or Phase 3 work. Taras explicitly authorized renumbering our unshipped migrations after PR #2870 independently reserved 306/307. The Phase 1 commit is preserved; this change renames `306_resources.sql` to `310_resources.sql` and Phase 2's initial `309_resource_billing.sql` to `311_resource_billing.sql`, without changing the Phase 1 SQL body or any deployed database. Refreshed main still ends at 302; inspected all open PR migration files, with reservations through 308. Fresh/upgrade tests now cover pre-resource and Phase 1-to-billing paths. Local databases made with the old unshipped ordinals must be discarded/recreated, not opened against the renamed chain. Initial implementation passed its targeted tests but independent reviews found recovery/compensation bugs and misleading lease semantics; the repairs and verification below address those findings. Taras selected a 30-minute default lease (not the initial five-minute choice) to align with the planned idle timeout. Budget accounting must split/reserve each crossed UTC day rather than stop every resource at midnight. Browser renewal must respect actual provider capabilities and its hard session deadline, never allocate an unbudgeted longer-lived session merely to enable renewal. Both reviewers traced intermittent DB failures to concurrent test processes sharing fixed test paths; Phase 2 tests now use per-run UUID paths. Automated verification, independent standards/spec reviews, and Taras's acceptance of defaults and cost presentation are required before the Phase 2 commit.
+
+#### Parent repair and verification checkpoint
+
+The second independent review round reproduced three remaining Important defects: user cleanup could bypass uncertain-start recovery, renewal recovery could mistake the old running lease for a successful extension, and compensated reaper operations poisoned their retry keys. The parent took over repairs. Five new regression tests failed against the prior implementation before the fixes.
+
+- User lifecycle actions now wait for uncertain creates/resumes to reconcile. Discovery reports live provider sessions behind unreserved or destroyed local records without classifying genuinely paused retained sandboxes as orphans.
+- Renewal recovery cannot claim success from a still-valid previous lease. It waits through the previous deadline plus recovery grace before using running status as evidence; failed renewal retains uncertainty until authoritative settlement. Real adapters must honor their hard-deadline contract.
+- Reaper attempts use fresh internal request keys under the existing transactional active-operation guard. Operation and resource failures are isolated per item, and rejected provider factories are evicted from the cache.
+- Failed browser reopen compensation preserves monotonic generations and never restores an older handle. Compensation errors are scrubbed and logged unless another claim owns recovery. Dispatch already recorded durably is allowed to finish during shutdown; new work remains rejected.
+- Calls use the persisted operation-claim expiry. Fake status/list/stop now honor cancellation and deadlines. Authoritative absence marks a missing sandbox destroyed, not resumable. Unshipped migration 311 defines its billing fields directly; 310 remains byte-identical to Phase 1.
+- Resource Usage filters now apply the existing human-free classification while preserving canonical resource requester/budget attribution. Deleted-task resource attribution remains retained.
+
+The next Standards/Spec round closed those three findings, then identified durable pre-dispatch cleanup backoff, stale cleanup eligibility, and resume of an expired running lease as remaining Important issues. The parent added six regressions that failed before repair (including invalid-config cleanup and missing-snapshot capacity safety), then repaired them:
+
+- Migration 311 now stores per-resource cleanup retry time/count. Definite pre-dispatch cleanup failures back off 5/10/20/40/60 seconds across restarts; confirmed lifecycle outcomes reset the backoff. Fresh operation keys remain protected by the transactional active-operation guard.
+- `cleanup()` selects its own action from the current row inside the write transaction. It rechecks lease, activity, expiry, reservation and retry time; the stale page cannot supply a destructive action. Tests renew a later item while the first provider call runs, and advance expiry during that call.
+- Resume on a locally running but expired lease is rejected before admission. A queued renewal rechecks the previous lease before dispatch. Recovery can settle a confirmed non-running or absent renewal after its old deadline plus grace, because renewal cannot resume or recreate a stopped provider session. Two additional regressions first failed, then passed: authoritative absence uses this same deadline, and reduced budget/configuration cannot shorten the existing reservation through renewal. A shorter lease requires explicit stop and a new admission.
+- Cleanup reads only its idle setting; invalid admission settings cannot disable it. Invalid idle configuration warns once and falls back to the default, while new admission remains strict. Without a compensation snapshot, existing reservations/billing are preserved rather than assuming remote absence.
+- Operator docs now explicitly describe conservative full-lease estimates for uncertain creates, retry backoff, and stale-activity protection. Runtime-owner initialization has an explicit fail-closed comment.
+
+Parent verification: lifecycle/cost suites **58 tests × five serial runs = 290 passes**; budget and resource/session-cost regressions **127 passes**; UI configuration tests **24 passes**; `core-session-data` and `resources-read` black-box scenarios both pass. Backend `tsc:check:tsc`, UI `tsc -b`, root/UI lint, anti-slop lint, changed-file Biome, promise checks, DB/API-key/async boundaries, migration numbering, TEXT/audit checks and `git diff --check` pass. Lint reports only warnings/info in untouched files (root: five warnings/four infos; UI: three warnings). OpenAPI regeneration completed. No full test suite, full contract gate, browser evidence, or live-provider acceptance is claimed.
+
+The latest independent Standards and Spec reviews found no Critical or Important defects and closed all remaining Important findings. Spec independently ran 57 lifecycle/cost tests three times (171 passes), 60 resource/budget regressions, 83 session-cost regressions, and seven scratch probes; all six fake-provider QA goals were met. Standards was deliberately static-only to avoid shared test-path contention.
+
+After those reviews, Taras selected a narrow usability exception: permit destroy and browser stop during an uncertain renewal of the same known handle. A parent fake-provider probe showed that allowing sandbox pause would be unsafe if the handle resumed before a late renewal arrived, so Taras explicitly chose to keep pause blocked. The implemented exception proves the prior state was running and matches owner, resource, generation and external handle. Uncertain creates, paused/stopped resumes, missing/changed handles, and unauthorized callers remain blocked. Failed termination retains capacity; confirmed termination supersedes old uncertainty. Parent regressions cover lost termination responses before/after effects, late renewal after browser reopen at a new generation, and replacement sandbox allocation. The three cosmetic standards findings were also addressed locally, without launching more delegates for minor findings.
+
+Remaining nonblocking caveats for manual acceptance: estimates can exceed actual runtime until provider reports replace them (including an entire uncertain-create lease); delayed recovery can overestimate a failed renewal by grace/backoff; an applied renewal already expired at observation is labelled failed because no running session remains; missing compensation metadata fails closed into `error` until cleanup. No live adapter or resource-cost UI acceptance is claimed.
+
+The prior round accepted retaining the storage guards and fail-closed boot. Follow-ups before live adapters: bound discovery work and isolate provider failures; define provider-specific settlement grace; revisit very short configurable intervals against measured provider latency. The fake-only checkpoint keeps the approved 30-minute defaults. Minor review dispositions: defer broad decomposition of `execute()` until its corrected behavior is accepted; retain low-level profile/attribution guards as storage invariants; retain fail-closed startup if durable runtime-owner initialization fails rather than serving without a reconciler. These are explicit judgments, not silently dropped findings. Review synthesis and manual acceptance are complete. On 2026-11-08, Taras explicitly selected “Accept and commit Phase 2,” accepting the defaults and conservative API cost semantics and authorizing `[phase 2] enforce resource lifecycle and budgets`. The file-review invocation timed out with no saved comments; acceptance came only through the subsequent explicit checkpoint. No push, PR, live-provider work, or Phase 3 continuation is authorized. Final pre-commit checks passed for staged script/extension type freshness, Bun's type checker, and the test spawn boundary. The refreshed base tail is now 303; a paginated inspection of every open PR's migration files found no reservation of 310 or 311.
+
 ### Overview
 
 Create a restart-safe resource reconciler and cost accounting against the fake adapter.
@@ -345,27 +378,27 @@ Prove that denied creation, denied resume, and rejected private mode cause zero 
 
 #### Automated Verification:
 
-- [ ] `bun run test:root -- src/tests/resources-lifecycle.test.ts`
-- [ ] `bun run test:root -- src/tests/resources-costs.test.ts`
-- [ ] `bun run test:root -- src/tests/budget-admission.test.ts`
-- [ ] `bun run test:root -- src/tests/budget-user-scope.test.ts`
-- [ ] `bun run test:root -- src/tests/budget-claim-gate.test.ts`
-- [ ] `bun scripts/check-floating-promises.ts`
-- [ ] `bun scripts/check-promise-sinks.ts`
-- [ ] `bash scripts/check-async-db-seam.sh`
+- [x] `bun run test:root -- src/tests/resources-lifecycle.test.ts`
+- [x] `bun run test:root -- src/tests/resources-costs.test.ts`
+- [x] `bun run test:root -- src/tests/budget-admission.test.ts`
+- [x] `bun run test:root -- src/tests/budget-user-scope.test.ts`
+- [x] `bun run test:root -- src/tests/budget-claim-gate.test.ts`
+- [x] `bun scripts/check-floating-promises.ts`
+- [x] `bun scripts/check-promise-sinks.ts`
+- [x] `bash scripts/check-async-db-seam.sh`
 
 #### Automated QA:
 
-- [ ] Simultaneous create and resume requests cannot exceed either live cap.
-- [ ] Restart between provider creation and DB completion produces one owned resource, not two.
-- [ ] Pause, destroy, and refresh races cannot restore an older provider generation.
-- [ ] A failed remote stop retains its cap reservation until the provider confirms termination.
-- [ ] Costs survive task completion and split correctly across budget days without duplicate charges.
-- [ ] Budget exhaustion prevents new leases and stops or pauses resources at the admitted lease boundary.
+- [x] Simultaneous create and resume requests cannot exceed either live cap.
+- [x] Restart between provider creation and DB completion produces one owned resource, not two.
+- [x] Pause, destroy, and refresh races cannot restore an older provider generation.
+- [x] A failed remote stop retains its cap reservation until the provider confirms termination.
+- [x] Costs survive task completion and split correctly across budget days without duplicate charges.
+- [x] Budget exhaustion prevents new leases and stops or pauses resources at the admitted lease boundary.
 
 #### Manual Verification:
 
-- [ ] Taras accepts the defaults and the visible distinction between estimated and provider-reported costs.
+- [x] Taras accepts the defaults and the visible distinction between estimated and provider-reported costs (API fields at this phase; dashboard presentation remains Phase 8).
 
 **Implementation Note:** Stop for manual confirmation, then commit `[phase 2] enforce resource lifecycle and budgets`.
 

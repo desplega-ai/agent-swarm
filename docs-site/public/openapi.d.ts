@@ -19956,6 +19956,12 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            resourceCosts: {
+                                estimatedCostUsd: number;
+                                providerCostUsd: number;
+                                totalCostUsd: number;
+                            };
+                            combinedCostUsd: number;
                             totals: {
                                 totalCostUsd: number;
                                 totalInputTokens: number;

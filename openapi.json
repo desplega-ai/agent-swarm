@@ -51508,6 +51508,28 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "resourceCosts": {
+                      "type": "object",
+                      "properties": {
+                        "estimatedCostUsd": {
+                          "type": "number"
+                        },
+                        "providerCostUsd": {
+                          "type": "number"
+                        },
+                        "totalCostUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "estimatedCostUsd",
+                        "providerCostUsd",
+                        "totalCostUsd"
+                      ]
+                    },
+                    "combinedCostUsd": {
+                      "type": "number"
+                    },
                     "totals": {
                       "type": "object",
                       "properties": {
@@ -51753,6 +51775,8 @@
                     }
                   },
                   "required": [
+                    "resourceCosts",
+                    "combinedCostUsd",
                     "totals",
                     "daily",
                     "byAgent",

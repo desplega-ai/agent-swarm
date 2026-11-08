@@ -207,6 +207,17 @@ async function sessionCosts(
   expectStatus(response, [200], "summary by agent");
   const summary = asRecord(response.json);
   const totals = asRecord(summary.totals);
+  const resourceCosts = asRecord(summary.resourceCosts);
+  expect(
+    resourceCosts.estimatedCostUsd === 0 &&
+      resourceCosts.providerCostUsd === 0 &&
+      resourceCosts.totalCostUsd === 0,
+    "Resource dimensions remain separate for session-only usage",
+  );
+  expect(
+    summary.combinedCostUsd === totals.totalCostUsd,
+    "Combined cost includes the separate resource dimension",
+  );
   expect(
     totals.totalSessions === 2 &&
       totals.totalInputTokens === 1000 + 1000 &&
