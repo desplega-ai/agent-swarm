@@ -428,7 +428,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, pre-task-create block",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -437,6 +437,7 @@
         "slack-reaction-override",
         "slack-relay-restart",
         "slack-task-output-citations",
+        "slack-task-output-ui-spec",
         "slack-pre-task-create-block"
       ]
     },
@@ -491,6 +492,10 @@
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
+    },
+    "task-ui-actions": {
+      "description": "Complete a task with a card Button that declares a follow_up action, then click it twice over HTTP: started, then already_done",
+      "scenarios": ["task-ui-actions"]
     },
     "task-steering": {
       "description": "Steer outcomes per harness, worker callbacks, accept-steer, promotion of undelivered steering",

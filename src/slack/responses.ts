@@ -1,6 +1,7 @@
 import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { getAgentById, markTaskSlackReplySent } from "../be/db";
 import type { Agent, AgentTask } from "../types";
+import { withUiSpecFallback } from "../ui-spec/fallback";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,
@@ -88,7 +89,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
   const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
-    output: slackTaskOutput(task) ?? "",
+    output: await withUiSpecFallback(task.id, slackTaskOutput(task) ?? ""),
   });
 
   try {
@@ -139,7 +140,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 
   try {
     if (task.status === "completed") {
-      const output = slackTaskOutput(task) || "Task completed.";
+      const output = await withUiSpecFallback(task.id, slackTaskOutput(task) || "Task completed.");
       const slackOutput = markdownToSlack(output);
       const attachmentsBlock = formatAttachmentsBlockForSlack(
         await getSlackOutputAttachments(task.id),

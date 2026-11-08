@@ -1,4 +1,5 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { withUiSpecFallback } from "../ui-spec/fallback";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { jiraFetch } from "./client";
@@ -99,9 +100,10 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
 
   const trimmed = (output ?? "").slice(0, OUTPUT_TRUNCATE_CHARS);
   const ellipsized = output && output.length > OUTPUT_TRUNCATE_CHARS ? `${trimmed}…` : trimmed;
-  const body = ellipsized
-    ? `✅ Swarm task completed.\n\n${ellipsized}`
-    : "✅ Swarm task completed.";
+  const body = await withUiSpecFallback(
+    taskId,
+    ellipsized ? `✅ Swarm task completed.\n\n${ellipsized}` : "✅ Swarm task completed.",
+  );
 
   await postLifecycleComment(taskId, "task.completed", body);
 }

@@ -1,5 +1,6 @@
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@desplega/model-catalog";
 import type { TaskCitation } from "../../../../src/utils/task-citations";
+import type { TaskUiSpec } from "../../../../src/utils/task-ui-spec";
 import type { AcquisitionSource, TeamSize, UseCase, UserFunction } from "../lib/company-profile";
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
@@ -538,6 +539,7 @@ export interface AgentTask {
   /** Pointer-based artifacts attached to the task, when included by the API response. */
   attachments?: TaskAttachment[];
   citations?: TaskCitation[];
+  uiSpec?: TaskUiSpec | null;
   /**
    * Steering (≥1.122.1), derived server-side: true when the assigned agent is
    * the Lead. Only present on task *read* responses (`GET /api/tasks/:id`,
