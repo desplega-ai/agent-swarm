@@ -700,6 +700,8 @@ describe("script connections", () => {
       // These migrations alter api_key_status and session_costs, which this fixture lacks.
       markMigrationApplied(database, "306_provider_account_telemetry.sql");
       markMigrationApplied(database, "307_session_cost_credential_attribution.sql");
+      // This one alters session_logs, which this fixture lacks.
+      markMigrationApplied(database, "310_session_logs_reasoning.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
