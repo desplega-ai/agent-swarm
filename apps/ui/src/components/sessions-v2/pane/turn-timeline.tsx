@@ -274,11 +274,11 @@ function PartView({
           <Reply task={part.result} onToggle={onStepToggle} />
         </div>
       ) : null}
-      {/* The lead works again: a live line under the latest answer, never in its place. */}
-      {part.live ? <SwarmReply task={part.live} /> : null}
       {approvals.map((approval) => (
         <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
+      {/* The lead works again: a live line under the latest answer, never in its place. */}
+      {part.live ? <SwarmReply task={part.live} /> : null}
     </div>
   );
 }
