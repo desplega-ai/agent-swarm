@@ -5128,6 +5128,16 @@ export interface SessionCostByUserRow {
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
 /**
+ * Sessions recorded before migration 307 carry no credential of their own.
+ * Those legacy rows fall back to their task's credential, as usage read it
+ * before 307. Newer rows keep their own, null included. Needs `t` joined.
+ */
+const LEGACY_CREDENTIAL_SQL =
+  "(sc.credentialKeyType IS NULL AND sc.createdAt < (SELECT applied_at FROM _migrations WHERE version = 307))";
+const CREDENTIAL_TYPE_SQL = `CASE WHEN ${LEGACY_CREDENTIAL_SQL} THEN t.credentialKeyType ELSE sc.credentialKeyType END`;
+const CREDENTIAL_SUFFIX_SQL = `CASE WHEN ${LEGACY_CREDENTIAL_SQL} THEN t.credentialKeySuffix ELSE sc.credentialKeySuffix END`;
+
+/**
  * True for a session whose task is structurally human-free (`isHumanFree`, set
  * when the task is created; rule in `src/be/db/tasks/human-free.ts`). A session
  * with no task row is not human-free.
@@ -5184,7 +5194,7 @@ export async function getSessionCostSummary(opts: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const subscriptionSql = `sc.credentialKeyType IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
+  const subscriptionSql = `${CREDENTIAL_TYPE_SQL} IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
 
   // Totals
   type TotalsRow = {
@@ -5222,9 +5232,9 @@ export async function getSessionCostSummary(opts: {
         COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
         COALESCE(SUM(CASE WHEN ${subscriptionSql}
           THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
-        COALESCE(SUM(CASE WHEN sc.credentialKeyType IS NULL
+        COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
           THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-        COUNT(CASE WHEN sc.credentialKeyType IS NULL THEN 1 END) as credentialUnattributedSessions
+        COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
       ${from} ${where}`,
     params,
   );
@@ -5275,9 +5285,9 @@ export async function getSessionCostSummary(opts: {
           COUNT(*) as sessions,
           COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
             as subscriptionCostUsd,
-          COALESCE(SUM(CASE WHEN sc.credentialKeyType IS NULL
+          COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
             THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-          COUNT(CASE WHEN sc.credentialKeyType IS NULL THEN 1 END) as credentialUnattributedSessions
+          COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
         ${from} ${where}
         GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
@@ -5337,8 +5347,8 @@ export async function getSessionCostSummary(opts: {
     >;
     const rows = await getDbClient().query<CredentialRow>(
       `SELECT
-          sc.credentialKeyType as keyType,
-          sc.credentialKeySuffix as keySuffix,
+          ${CREDENTIAL_TYPE_SQL} as keyType,
+          ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
@@ -5346,7 +5356,7 @@ export async function getSessionCostSummary(opts: {
           MIN(sc.createdAt) as firstSessionAt,
           MAX(sc.createdAt) as lastSessionAt
         ${from} ${where}
-        GROUP BY sc.credentialKeyType, sc.credentialKeySuffix
+        GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}
         ORDER BY costUsd DESC`,
       params,
     );
@@ -12351,29 +12361,30 @@ export interface KeyCostSummary {
 }
 
 /**
- * Aggregate cost data using immutable session credentials.
+ * Aggregate cost data using immutable session credentials (legacy rows: the task's).
  */
 export async function getKeyCostSummary(keyType?: string): Promise<KeyCostSummary[]> {
-  const conditions = ["sc.credentialKeySuffix IS NOT NULL"];
+  const conditions = [`${CREDENTIAL_SUFFIX_SQL} IS NOT NULL`];
   const params: string[] = [];
 
   if (keyType) {
-    conditions.push("sc.credentialKeyType = ?");
+    conditions.push(`${CREDENTIAL_TYPE_SQL} = ?`);
     params.push(keyType);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return getDbClient().query<KeyCostSummary>(
     `SELECT
-        sc.credentialKeyType as keyType,
-        sc.credentialKeySuffix as keySuffix,
+        ${CREDENTIAL_TYPE_SQL} as keyType,
+        ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
         COUNT(DISTINCT sc.taskId) as taskCount
       FROM session_costs sc
+      LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId
       ${where}
-      GROUP BY sc.credentialKeyType, sc.credentialKeySuffix`,
+      GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}`,
     params,
   );
 }
