@@ -1,10 +1,11 @@
 import { parseToolUses } from "../src/judge/session-log-parse.ts";
-import type {
-  CheckResult,
-  DeterministicCheck,
-  JudgeContext,
-  Scenario,
-  SwarmTask,
+import {
+  type CheckResult,
+  type DeterministicCheck,
+  type JudgeContext,
+  type Scenario,
+  type SwarmTask,
+  scenarioTaskText,
 } from "../src/types.ts";
 import { fetchSessionLogs } from "./orchestration-utils.ts";
 
@@ -189,8 +190,14 @@ export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): b
   });
 }
 
+/** The request's task, found by the text the runner sent (a live task's title is the server's). */
+function taskFor(ctx: JudgeContext, request: Request): SwarmTask | undefined {
+  const text = scenarioTaskText({ title: request.title, description: brief(request) });
+  return ctx.tasks.find((t: SwarmTask) => t.description === text);
+}
+
 function replyFor(ctx: JudgeContext, request: Request): string {
-  const task = ctx.tasks.find((t: SwarmTask) => t.title === request.title);
+  const task = taskFor(ctx, request);
   return typeof task?.result === "string" ? task.result : "";
 }
 
@@ -239,7 +246,7 @@ const docsOfferCheck: DeterministicCheck = {
     for (const request of REQUESTS) {
       let { score, note } = scoreReply(replyFor(ctx, request), request.expect);
       if (request.expect === null && score > 0) {
-        const task = ctx.tasks.find((t: SwarmTask) => t.title === request.title);
+        const task = taskFor(ctx, request);
         const uses = task ? parseToolUses(await fetchSessionLogs(ctx, task.id)) : [];
         if (loadedSwarmDocs(uses)) {
           score = 0;
@@ -260,7 +267,7 @@ const docsOfferCheck: DeterministicCheck = {
 
 export const docsSuggestion: Scenario = {
   id: "docs-suggestion",
-  version: 2,
+  version: 3,
   name: "Docs suggestion",
   description: [
     "A person sends the lead five requests: three setup asks that each match one docs playbook",
