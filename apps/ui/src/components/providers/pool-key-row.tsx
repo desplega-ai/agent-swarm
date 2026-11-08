@@ -1,5 +1,5 @@
-import { ChevronRight, CircleAlert, MoreHorizontal, Timer } from "lucide-react";
-import { useId, useState } from "react";
+import { CircleAlert, MoreHorizontal, RotateCcw, Timer } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
   useClearApiKeyRateLimit,
@@ -8,7 +8,6 @@ import {
 } from "@/api/hooks/use-api-keys";
 import { useRemoveCodexAccount } from "@/api/hooks/use-codex-accounts";
 import { useRemovePoolKey } from "@/api/hooks/use-pool-keys";
-import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
 import {
   AlertDialog,
@@ -38,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useMinuteClock } from "@/hooks/use-minute-clock";
 import {
   type AiProvider,
@@ -52,7 +52,9 @@ import {
   planDisplay,
   type QuotaWindow,
   quotaIsHigh,
-  usageCreditsLabel,
+  quotaLabel,
+  quotaRemaining,
+  quotaResetIn,
 } from "@/lib/provider-quota";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { KeyQuotaDetails, QuotaBar } from "./key-quota-details";
@@ -84,55 +86,68 @@ function modelName(model: string): string {
   return model.charAt(0).toUpperCase() + model.slice(1);
 }
 
-/** Older than this, a meter says when the provider last reported it. */
-const STALE_MS = 60 * 60_000;
-/** Meters in the row. The details list every window. */
-const ROW_METERS = 3;
+/** Meters in the row. The popover lists every window. */
+const ROW_METERS = 2;
 
-/**
- * One current window: its name ("7 d", "Fable 7 d"), a short bar, the percent
- * as reported (it can pass 100), and when it resets. An old observation says
- * so. A window without a reported percent shows no bar, never 0%.
- */
 function Meter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
-  const high = quotaIsHigh(window.percent);
-  const stale = nowMs - Date.parse(window.observedAt) > STALE_MS;
-  const credits = usageCreditsLabel(window);
+  const label = quotaLabel(window);
+  const warning = window.limited || window.overageStatus === "rejected";
   return (
-    <span className="inline-flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground">
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <span className="max-w-28 truncate" title={window.name}>
-          {window.name}
+    <span className="flex min-w-0 items-center gap-2 text-xs">
+      <span className="min-w-0 flex-1 truncate text-left text-foreground/70" title={label}>
+        {label}
+      </span>
+      {warning ? (
+        <CircleAlert
+          aria-label="Limit or credits restricted"
+          className="size-3 text-status-warning-strong"
+        />
+      ) : null}
+      {window.percent === null ? (
+        <span className="text-foreground/70">Unknown</span>
+      ) : (
+        <>
+          <QuotaBar percent={window.percent} className="w-10 shrink-0" />
+          <span
+            className={cn(
+              "shrink-0 tabular-nums",
+              quotaIsHigh(window.percent) && "text-status-warning-strong",
+            )}
+          >
+            {quotaRemaining(window.percent)}% left
+          </span>
+        </>
+      )}
+      {window.resetsAtMs !== null ? (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 text-foreground/70"
+          title={`Resets ${resetLabel(window.resetsAtMs)}`}
+        >
+          <RotateCcw aria-hidden className="size-3" />
+          {quotaResetIn(window.resetsAtMs, nowMs)}
         </span>
-        {window.percent === null ? (
-          <span>use not reported</span>
-        ) : (
-          <>
-            <QuotaBar percent={window.percent} className="w-10 shrink-0" />
-            <span className={cn("font-mono", high && "text-status-warning-strong")}>
-              {window.percent}%
-            </span>
-          </>
-        )}
-      </span>
-      <span>
-        {window.resetsAtMs === null
-          ? "Reset not reported"
-          : `Resets ${resetLabel(window.resetsAtMs)}`}
-        {stale ? `, seen ${formatRelativeTime(window.observedAt)}` : ""}
-      </span>
-      {window.limited ? <span className="text-status-warning-strong">Limit reached</span> : null}
-      {credits ? <span>{credits}</span> : null}
+      ) : null}
     </span>
   );
 }
 
 /** A badge per model whose weekly window the provider closed ("Fable limit, resets 14:00"). */
-function ModelLimitBadges({ status, nowMs }: { status: ProviderKey["status"]; nowMs: number }) {
+function ModelLimitBadges({
+  statuses,
+  nowMs,
+}: {
+  statuses: ProviderKey["statuses"];
+  nowMs: number;
+}) {
   // `active` is the server's view when it answered: the clock hides a passed reset.
-  const active = (status?.modelLimits ?? []).filter(
-    (limit) => limit.active && limit.resetsAt * 1000 > nowMs,
-  );
+  const active = [
+    ...new Map(
+      statuses
+        .flatMap((status) => status.modelLimits ?? [])
+        .filter((limit) => limit.active && limit.resetsAt * 1000 > nowMs)
+        .map((limit) => [limit.window, limit]),
+    ).values(),
+  ];
   if (active.length === 0) return null;
   return (
     <span className="flex flex-wrap gap-1">
@@ -175,7 +190,7 @@ function KeySubLine({ k }: { k: ProviderKey }) {
     return <span className="text-xs text-muted-foreground">Not checked yet</span>;
   }
   return (
-    <span className="text-xs text-muted-foreground">
+    <span className="hidden text-xs text-muted-foreground md:inline">
       {k.lastUsedAt ? `Used ${formatRelativeTime(k.lastUsedAt)}` : "Not used yet"}
     </span>
   );
@@ -207,14 +222,16 @@ export function PoolKeyRow({
   const removeAccount = useRemoveCodexAccount();
   const { data: plans } = useSubscriptionPlans();
   const nowMs = useMinuteClock();
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const detailsId = useId();
   const isCodex = k.keyType === "CODEX_OAUTH";
   const subscription = isSubscriptionKeyType(k.keyType);
   const status = k.status;
   const plan = planDisplay(k, plans?.plans);
   const windows = currentQuotaWindows(k.statuses, nowMs);
-  const hasDetails = subscription || k.statuses.length > 0;
+  const modelRestricted = k.statuses.some((row) =>
+    row.modelLimits?.some((limit) => limit.active && limit.resetsAt * 1000 > nowMs),
+  );
+  const hasDetails =
+    subscription || windows.length > 0 || k.statuses.some((row) => row.providerAccount);
   const suffix = k.suffix ? `…${k.suffix}` : null;
   const removing = removePoolKey.isPending || removeAccount.isPending;
 
@@ -272,7 +289,12 @@ export function PoolKeyRow({
 
   return (
     <li>
-      <div className={cn(PROVIDER_GRID, "flex items-start gap-3 px-4 py-2.5 md:py-2")}>
+      <div
+        className={cn(
+          PROVIDER_GRID,
+          "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4 py-2.5 md:py-2",
+        )}
+      >
         <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <span
             role="img"
@@ -282,12 +304,17 @@ export function PoolKeyRow({
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="truncate text-sm font-medium">{k.label}</span>
+              {modelRestricted ? (
+                <CircleAlert
+                  aria-label="Model limit reached"
+                  className="size-3 shrink-0 text-status-warning-strong"
+                />
+              ) : null}
               {suffix && k.label !== `Key ending ${k.suffix}` ? (
                 <span className="shrink-0 font-mono text-xs text-muted-foreground">{suffix}</span>
               ) : null}
             </span>
             <KeySubLine k={k} />
-            <ModelLimitBadges status={status} nowMs={nowMs} />
             {/* Phone: the plan and today's amount, under the key. */}
             <span className="text-xs text-muted-foreground md:hidden">
               {subscription && plan.known
@@ -295,27 +322,6 @@ export function PoolKeyRow({
                 : ""}
               today {formatCost(k.costToday, { placeholder: "$0" })}
             </span>
-            {hasDetails ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                aria-expanded={detailsOpen}
-                aria-controls={detailsId}
-                aria-label={`Limits and usage for ${k.label}`}
-                onClick={() => setDetailsOpen((open) => !open)}
-                className="w-fit text-muted-foreground"
-              >
-                <ChevronRight
-                  aria-hidden
-                  className={cn(
-                    "size-3 transition-transform duration-150 ease-snappy",
-                    detailsOpen && "rotate-90",
-                  )}
-                />
-                Limits and usage
-              </Button>
-            ) : null}
           </div>
         </div>
         <div className="hidden min-w-0 flex-col md:col-span-2 md:flex">
@@ -335,17 +341,42 @@ export function PoolKeyRow({
             <span className="text-sm text-muted-foreground">Pay per token</span>
           )}
         </div>
-        <div className="hidden min-w-0 flex-wrap gap-x-3 gap-y-1 md:flex">
-          {windows.slice(0, ROW_METERS).map((w) => (
-            <Meter key={w.key} window={w} nowMs={nowMs} />
-          ))}
-          {windows.length > ROW_METERS ? (
-            <span className="self-center text-[11px] text-muted-foreground">
-              +{windows.length - ROW_METERS} more
-            </span>
-          ) : null}
-          {windows.length === 0 && subscription ? (
-            <span className="text-[11px] text-muted-foreground">No current limit data</span>
+        <div className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:row-auto">
+          {hasDetails ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Limits and usage for ${k.label}`}
+                  className="h-auto min-h-9 w-full flex-col items-stretch gap-1 px-1.5 py-1.5 font-normal md:min-h-8"
+                >
+                  {windows.slice(0, ROW_METERS).map((w) => (
+                    <Meter key={w.key} window={w} nowMs={nowMs} />
+                  ))}
+                  {windows.length > ROW_METERS ? (
+                    <span className="text-left text-xs text-muted-foreground">
+                      +{windows.length - ROW_METERS} more
+                    </span>
+                  ) : null}
+                  {windows.length === 0 ? (
+                    <span className="text-left text-xs text-muted-foreground">
+                      No current limit data
+                    </span>
+                  ) : null}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                collisionPadding={16}
+                aria-label={`${k.label} quota details`}
+                className="max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-2rem)] space-y-3 overflow-y-auto"
+              >
+                <ModelLimitBadges statuses={k.statuses} nowMs={nowMs} />
+                <KeyQuotaDetails poolKey={k} windows={windows} nowMs={nowMs} />
+              </PopoverContent>
+            </Popover>
           ) : null}
         </div>
         <span className="hidden text-right font-mono text-xs md:block">
@@ -354,7 +385,7 @@ export function PoolKeyRow({
         <span className="hidden text-right font-mono text-xs md:block">
           {formatCost(k.cost7d, { placeholder: "$0" })}
         </span>
-        <div className="flex justify-end">
+        <div className="col-start-2 row-start-1 flex justify-end md:col-auto md:row-auto">
           {hasMenu ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -400,9 +431,6 @@ export function PoolKeyRow({
           ) : null}
         </div>
       </div>
-      <AnimatedReveal open={detailsOpen}>
-        <KeyQuotaDetails id={detailsId} poolKey={k} windows={windows} nowMs={nowMs} />
-      </AnimatedReveal>
 
       <Dialog open={dialog === "rename"} onOpenChange={(open) => !open && close()}>
         <DialogContent className="sm:max-w-md">

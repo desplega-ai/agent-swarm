@@ -5,6 +5,8 @@ import {
   currentQuotaWindows,
   formatPeriod,
   planDisplay,
+  quotaRemaining,
+  quotaResetIn,
   usageCreditsLabel,
 } from "./provider-quota";
 
@@ -375,5 +377,19 @@ describe("plan display", () => {
       known: false,
       label: "No plan set",
     });
+  });
+});
+
+describe("compact quota values", () => {
+  test("remaining allowance clamps provider overage and negative readings", () => {
+    expect(quotaRemaining(64)).toBe(36);
+    expect(quotaRemaining(125)).toBe(0);
+    expect(quotaRemaining(-5)).toBe(100);
+  });
+
+  test("reset countdown preserves days and hours without implying an early reset", () => {
+    expect(quotaResetIn(NOW + 500, NOW)).toBe("1m");
+    expect(quotaResetIn(NOW + 90 * 60_000, NOW)).toBe("1h 30m");
+    expect(quotaResetIn(NOW + 75 * 3_600_000, NOW)).toBe("3d 3h");
   });
 });

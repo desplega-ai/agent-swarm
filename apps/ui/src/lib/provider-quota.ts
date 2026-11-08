@@ -44,6 +44,25 @@ export function quotaIsHigh(percent: number | null): boolean {
   return percent !== null && percent >= 75;
 }
 
+export function quotaRemaining(percent: number): number {
+  return Math.min(100, Math.max(0, 100 - percent));
+}
+
+export function quotaLabel(window: QuotaWindow): string {
+  return window.durationMins === 10080
+    ? ["Weekly", window.scope].filter(Boolean).join(" · ")
+    : window.name;
+}
+
+/** A short countdown, rounded up so an active window never reads zero minutes. */
+export function quotaResetIn(resetsAtMs: number, nowMs: number): string {
+  const minutes = Math.max(1, Math.ceil((resetsAtMs - nowMs) / MINUTE_MS));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+  return `${Math.floor(hours / 24)}d${hours % 24 ? ` ${hours % 24}h` : ""}`;
+}
+
 export interface QuotaWindow {
   /** The `rateLimitWindows` key, for example `seven_day` or `codex:codex:primary`. */
   key: string;

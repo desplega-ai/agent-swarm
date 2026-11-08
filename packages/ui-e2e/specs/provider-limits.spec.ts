@@ -252,36 +252,44 @@ test("provider limits show current windows, account facts, and Swarm usage", asy
     await page.getByRole("button", { name: /^Claude subscription/ }).click();
     const claude = page.getByRole("region", { name: "Claude subscription tokens" });
     const claudeKey = claude.getByRole("listitem").filter({ hasText: claudeLabel });
-    await expect(claudeKey.getByText("Fable 7 d", { exact: true })).toBeVisible();
-    await expect(claudeKey.getByText("64%", { exact: true })).toBeVisible();
-    await expect(claudeKey).toContainText(
+    await expect(claudeKey.getByText("Weekly · Fable", { exact: true })).toBeVisible();
+    await expect(claudeKey.getByText("36% left", { exact: true })).toBeVisible();
+    await expect(claudeKey).not.toContainText(
       "Usage credits: rejected · group zero credit limit · not in use",
     );
     await expect(claudeKey).not.toContainText("87%");
     await expect(claudeKey).not.toContainText("5 h");
     const maxKey = claude.getByRole("listitem").filter({ hasText: claudeMaxLabel });
-    await expect(maxKey.getByText("42%", { exact: true })).toBeVisible();
+    await expect(maxKey.getByText("58% left", { exact: true })).toBeVisible();
 
     // Three minutes later the 5 h window has reset. The server still reports it.
     await page.clock.fastForward("03:00");
-    await expect(maxKey).not.toContainText("42%");
+    await expect(maxKey).not.toContainText("58% left");
     await expect(maxKey.getByText("No current limit data")).toBeVisible();
 
     const toggle = claudeKey.getByRole("button", { name: `Limits and usage for ${claudeLabel}` });
+    const closedHeight = (await claudeKey.boundingBox())!.height;
     await toggle.focus();
     await page.keyboard.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     const details = page.getByRole("region", { name: `${claudeLabel} limits and usage` });
+    expect((await claudeKey.boundingBox())!.height).toBe(closedHeight);
+    await expect(details).toContainText("Usage credits: rejected · group zero credit limit");
+    await details.getByText("Swarm usage", { exact: true }).first().click();
     // The weekly card shows what the API counted for that window.
     await expect(details.getByText("Swarm runs: 1 session, 1 task completed")).toBeVisible();
     await expect(details).toContainText("1.2K");
+
+    await page.keyboard.press("Escape");
+    await expect(toggle).toBeFocused();
+    await expect(details).not.toBeVisible();
 
     await page.getByRole("button", { name: /^Codex \(ChatGPT\)/ }).click();
     const codex = page.getByRole("region", { name: "Codex (ChatGPT) accounts" });
     const codexKey = codex.getByRole("listitem").filter({ hasText: codexEmail });
     await expect(codexKey.getByText("ChatGPT Pro", { exact: true })).toBeVisible();
     await expect(codexKey.getByText("Price tier unknown", { exact: true })).toBeVisible();
-    await expect(codexKey.getByText("7 d", { exact: true })).toBeVisible();
+    await expect(codexKey.getByText("Weekly", { exact: true })).toBeVisible();
     await expect(codexKey).not.toContainText("71%");
     await codexKey.getByRole("button", { name: `Limits and usage for ${codexEmail}` }).click();
     const codexDetails = page.getByRole("region", { name: `${codexEmail} limits and usage` });
@@ -295,6 +303,23 @@ test("provider limits show current windows, account facts, and Swarm usage", asy
     );
     await expect(codexDetails).not.toContainText("75% left");
 
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileTrigger = codexKey.getByRole("button", {
+      name: `Limits and usage for ${codexEmail}`,
+    });
+    await expect(mobileTrigger).toContainText("78% left");
+    await mobileTrigger.click();
+    await expect(codexDetails).toBeVisible();
+    const popover = await page
+      .getByRole("dialog", { name: `${codexEmail} quota details` })
+      .boundingBox();
+    expect(popover!.x).toBeGreaterThanOrEqual(0);
+    expect(popover!.x + popover!.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
+    await page.keyboard.press("Escape");
     await clean.assertClean();
   } finally {
     // The worker's disposable API retains status telemetry, the completed task,

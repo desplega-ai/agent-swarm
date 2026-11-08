@@ -50,6 +50,7 @@ for (const path of [
   "components/ui/dropdown-menu",
   "components/ui/info-row",
   "components/ui/input",
+  "components/ui/popover",
   "components/ui/select",
   "components/ui/sheet",
   "components/ui/skeleton",
@@ -505,8 +506,9 @@ describe("PoolKeyRow: usage limits", () => {
       </ul>,
     );
     expect(text()).toContain("5 h");
-    expect(text()).toContain("62%");
-    expect(text()).toContain("Fable limit, resets");
+    expect(text()).toContain("38% left");
+    expect(document.querySelector('[aria-label="Model limit reached"]')).not.toBeNull();
+    expect(text()).not.toContain("Fable limit, resets");
     expect(text()).not.toContain("Opus limit");
     expect(ticks.length).toBeGreaterThan(0);
 
@@ -515,9 +517,9 @@ describe("PoolKeyRow: usage limits", () => {
       for (const tick of ticks) tick();
     });
     expect(text()).not.toContain("5 h");
-    expect(text()).not.toContain("62%");
-    expect(text()).toContain("7 d");
-    expect(text()).toContain("41%");
+    expect(text()).not.toContain("38% left");
+    expect(text()).toContain("Weekly");
+    expect(text()).toContain("59% left");
     // No status or usage request refreshed the row: the clock alone hid the window.
     expect(calls.map((c) => c.path)).toEqual(["/api/keys/plans"]);
     await view.cleanup();
@@ -553,7 +555,7 @@ describe("PoolKeyRow: usage limits", () => {
       </ul>,
     );
     expect(text()).toContain("50%");
-    expect(text()).toContain("Usage credits: rejected · group zero credit limit · not in use");
+    expect(text()).not.toContain("Usage credits: rejected · group zero credit limit · not in use");
     await click(button("Limits and usage for claude-credit-test"));
     await settle();
     const detail = document.querySelector(
@@ -724,7 +726,7 @@ describe("PoolKeyRow: usage limits", () => {
     await settle();
     expect(text()).toContain("ChatGPT Pro");
     expect(text()).toContain("Price tier unknown");
-    expect(text()).toContain("58%");
+    expect(text()).toContain("42% left");
     expect(text()).not.toContain("40%");
     expect(calls.some((c) => c.path === "/api/keys/window-usage")).toBe(false);
 
@@ -736,7 +738,7 @@ describe("PoolKeyRow: usage limits", () => {
     const request = calls.find((c) => c.path === "/api/keys/window-usage");
     expect(request?.search).toBe("?keyType=CODEX_OAUTH&keySuffix=11x11-1");
     const body = text();
-    expect(body).toContain("7 d58% used");
+    expect(body).toContain("Weekly42% left");
     expect(body).toContain("Swarm runs: 3 sessions (1 with errors), 2 tasks completed");
     expect(body).not.toContain("99 sessions");
     expect(body).toContain("6.0K (2 of 3 sessions)");

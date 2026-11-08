@@ -11,6 +11,8 @@ import {
   type Fact,
   type QuotaWindow,
   quotaIsHigh,
+  quotaLabel,
+  quotaRemaining,
   usageCreditsLabel,
 } from "@/lib/provider-quota";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -35,7 +37,7 @@ function plural(count: number, noun: string): string {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** The bar stops at 100%. The number keeps what the provider reported. */
+/** Filled space represents the remaining allowance. */
 export function QuotaBar({ percent, className }: { percent: number; className?: string }) {
   return (
     <span aria-hidden className={cn("block h-1 overflow-hidden rounded-full bg-muted", className)}>
@@ -44,7 +46,7 @@ export function QuotaBar({ percent, className }: { percent: number; className?: 
           "block h-full rounded-full",
           quotaIsHigh(percent) ? "bg-status-warning" : "bg-foreground/50",
         )}
-        style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+        style={{ width: `${quotaRemaining(percent)}%` }}
       />
     </span>
   );
@@ -67,7 +69,7 @@ function ObservedUsage({
   state: "loading" | "error" | "ready";
   nowMs: number;
 }) {
-  const muted = "text-xs text-muted-foreground";
+  const muted = "text-xs text-foreground/70";
   if (state === "loading") return <p className={muted}>Loading Swarm usage…</p>;
   if (state === "error") return <p className={muted}>Swarm usage is not available.</p>;
   // A cached answer can outlive the window: the client clock decides.
@@ -86,7 +88,7 @@ function ObservedUsage({
   return (
     <div className="space-y-1.5">
       <p className="text-xs">
-        <span className="text-muted-foreground">Swarm runs: </span>
+        <span className="text-foreground/70">Swarm runs: </span>
         {plural(usage.sessions, "session")}
         {usage.errorSessions > 0 ? ` (${usage.errorSessions} with errors)` : ""},{" "}
         {plural(usage.completedTasks, "task")} completed
@@ -95,7 +97,7 @@ function ObservedUsage({
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
           {COUNTERS.map(([key, label]) => (
             <div key={key} className="contents">
-              <dt className="text-muted-foreground">{label}</dt>
+              <dt className="text-foreground/70">{label}</dt>
               <dd className="font-mono tabular-nums">
                 {counterText(usage.tokens[key], usage.sessions)}
               </dd>
@@ -117,7 +119,8 @@ function ObservedUsage({
         </p>
       ) : null}
       <p className={muted}>
-        Counted when each cost report arrived, through {resetLabel(Date.parse(match.dataThrough))}.
+        Swarm sessions only, counted when each cost report arrived, through{" "}
+        {resetLabel(Date.parse(match.dataThrough))}.
       </p>
     </div>
   );
@@ -138,8 +141,8 @@ function WindowCard({
   return (
     <li className="space-y-2 rounded-md border border-border-subtle bg-card px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-medium" title={window.name}>
-          {window.name}
+        <span className="min-w-0 truncate text-sm font-medium" title={quotaLabel(window)}>
+          {quotaLabel(window)}
         </span>
         <span
           className={cn(
@@ -147,11 +150,11 @@ function WindowCard({
             quotaIsHigh(window.percent) && "text-status-warning-strong",
           )}
         >
-          {window.percent === null ? "Use not reported" : `${window.percent}% used`}
+          {window.percent === null ? "Use not reported" : `${quotaRemaining(window.percent)}% left`}
         </span>
       </div>
       {window.percent !== null ? <QuotaBar percent={window.percent} /> : null}
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-foreground/70">
         {window.resetsAtMs === null
           ? "Reset not reported"
           : `Resets ${resetLabel(window.resetsAtMs)}`}
@@ -169,8 +172,15 @@ function WindowCard({
           Limit reached
         </Badge>
       ) : null}
-      {credits ? <p className="text-xs text-muted-foreground">{credits}</p> : null}
-      <ObservedUsage match={match} state={state} nowMs={nowMs} />
+      {credits ? <p className="text-xs text-foreground/70">{credits}</p> : null}
+      <details className="text-xs">
+        <summary className="cursor-pointer rounded-sm text-foreground/70 outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+          Swarm usage
+        </summary>
+        <div className="pt-2">
+          <ObservedUsage match={match} state={state} nowMs={nowMs} />
+        </div>
+      </details>
     </li>
   );
 }
@@ -184,7 +194,7 @@ function FactValue<T>({
   render: (v: T) => string;
   expiredAtMs?: number | null;
 }) {
-  if (!fact) return <span className="text-muted-foreground">Not reported</span>;
+  if (!fact) return <span className="text-foreground/70">Not reported</span>;
   return (
     <span>
       {expiredAtMs != null && Date.parse(fact.at) <= expiredAtMs
@@ -192,7 +202,7 @@ function FactValue<T>({
         : fact.value === null
           ? "Not reported"
           : render(fact.value)}
-      <span className="block text-xs text-muted-foreground">
+      <span className="block text-xs text-foreground/70">
         reported {formatRelativeTime(fact.at)}
       </span>
     </span>
@@ -208,12 +218,12 @@ function LimitFacts({ limit, nowMs }: { limit: AccountLimit; nowMs: number }) {
   return (
     <>
       {planRaw ? (
-        <InfoRow label="Plan reported">
+        <InfoRow className="[&>span]:text-foreground/70" label="Plan reported">
           <FactValue fact={planRaw} render={(v) => String(v)} />
         </InfoRow>
       ) : null}
       {credits ? (
-        <InfoRow label="Credits">
+        <InfoRow className="[&>span]:text-foreground/70" label="Credits">
           <FactValue
             fact={credits}
             render={(v) =>
@@ -229,7 +239,7 @@ function LimitFacts({ limit, nowMs }: { limit: AccountLimit; nowMs: number }) {
         </InfoRow>
       ) : null}
       {spend ? (
-        <InfoRow label="Spend control">
+        <InfoRow className="[&>span]:text-foreground/70" label="Spend control">
           <FactValue
             fact={spend}
             render={(v) =>
@@ -241,12 +251,12 @@ function LimitFacts({ limit, nowMs }: { limit: AccountLimit; nowMs: number }) {
         </InfoRow>
       ) : null}
       {spendControlReached ? (
-        <InfoRow label="Spend cap reached">
+        <InfoRow className="[&>span]:text-foreground/70" label="Spend cap reached">
           <FactValue fact={spendControlReached} render={yesNo} expiredAtMs={expiredAtMs} />
         </InfoRow>
       ) : null}
       {reachedType?.value ? (
-        <InfoRow label="Blocked by">
+        <InfoRow className="[&>span]:text-foreground/70" label="Blocked by">
           <FactValue
             fact={reachedType}
             render={(v) => v.replaceAll("_", " ")}
@@ -258,7 +268,7 @@ function LimitFacts({ limit, nowMs }: { limit: AccountLimit; nowMs: number }) {
   );
 }
 
-const FACT_GRID = "grid gap-3 sm:grid-cols-2 lg:grid-cols-4";
+const FACT_GRID = "grid grid-cols-2 gap-3";
 
 /** Account facts. One limit shares the grid with the account rows; several get a heading each. */
 function AccountSection({ facts, nowMs }: { facts: AccountFacts; nowMs: number }) {
@@ -266,15 +276,15 @@ function AccountSection({ facts, nowMs }: { facts: AccountFacts; nowMs: number }
   const single = rest.length === 0;
   return (
     <div className="space-y-3">
-      <p className="text-xs font-medium text-muted-foreground">Account</p>
+      <p className="text-xs font-medium text-foreground/70">Account</p>
       <div className={FACT_GRID}>
         {facts.ordinaryUsageAllowed ? (
-          <InfoRow label="Included use allowed">
+          <InfoRow className="[&>span]:text-foreground/70" label="Included use allowed">
             <FactValue fact={facts.ordinaryUsageAllowed} render={yesNo} />
           </InfoRow>
         ) : null}
         {facts.resetCreditsAvailable ? (
-          <InfoRow label="Reset credits">
+          <InfoRow className="[&>span]:text-foreground/70" label="Reset credits">
             <FactValue fact={facts.resetCreditsAvailable} render={(v) => v.toLocaleString()} />
           </InfoRow>
         ) : null}
@@ -300,12 +310,10 @@ function AccountSection({ facts, nowMs }: { facts: AccountFacts; nowMs: number }
  * the provider reported (credits, spend control, blocking reasons).
  */
 export function KeyQuotaDetails({
-  id,
   poolKey: k,
   windows,
   nowMs,
 }: {
-  id: string;
   poolKey: ProviderKey;
   windows: QuotaWindow[];
   nowMs: number;
@@ -315,22 +323,18 @@ export function KeyQuotaDetails({
   const facts = accountFacts(k.statuses);
   const codex = k.keyType === "CODEX_OAUTH";
   return (
-    <section
-      id={id}
-      aria-label={`${k.label} limits and usage`}
-      className="space-y-4 border-t border-border-subtle px-4 py-3 md:pl-8"
-    >
+    <section aria-label={`${k.label} limits and usage`} className="space-y-3">
       <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Current limits</p>
+        <p className="text-xs font-medium text-foreground/70">Current limits</p>
         {windows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-foreground/70">
             No current limit data.{" "}
             {codex
               ? "Native Codex runs report quota. Runs through pi do not."
               : "The provider reports limits while agents run."}
           </p>
         ) : (
-          <ul className="grid items-start gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid items-start gap-2">
             {windows.map((w) => (
               <WindowCard
                 key={w.key}
@@ -346,10 +350,6 @@ export function KeyQuotaDetails({
         )}
       </div>
       {facts ? <AccountSection facts={facts} nowMs={nowMs} /> : null}
-      <p className="text-xs text-muted-foreground">
-        Swarm usage counts only this swarm's sessions on this credential. It is not the provider's
-        allowance or remaining quota. Limits that overlap never add up.
-      </p>
     </section>
   );
 }
