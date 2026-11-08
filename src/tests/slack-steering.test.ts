@@ -103,7 +103,13 @@ describe("Slack thread steering", () => {
     const threadTs = "1000.0001";
     const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
-    bufferThreadMessage(channelId, threadTs, "follow up after the current task", "U1", "1000.0002");
+    await bufferThreadMessage(
+      channelId,
+      threadTs,
+      "follow up after the current task",
+      "U1",
+      "1000.0002",
+    );
     await instantFlush(`${channelId}:${threadTs}`);
 
     expect(await getSteeringMessagesForTask(leadTask.id)).toEqual([]);
@@ -180,7 +186,7 @@ describe("Slack thread steering", () => {
       await requestSlackThreadSteering({ channelId, threadTs, message: "do not steer the worker" }),
     ).toBeNull();
 
-    bufferThreadMessage(channelId, threadTs, "create a normal follow-up", "U1", "3000.0002");
+    await bufferThreadMessage(channelId, threadTs, "create a normal follow-up", "U1", "3000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
     expect(await getSteeringMessagesForTask(workerTask.id)).toEqual([]);
@@ -198,7 +204,7 @@ describe("Slack thread steering", () => {
       await requestSlackThreadSteering({ channelId, threadTs, message: "follow up" }),
     ).toBeNull();
 
-    bufferThreadMessage(channelId, threadTs, "normal follow-up", "U1", "4000.0002");
+    await bufferThreadMessage(channelId, threadTs, "normal follow-up", "U1", "4000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
     expect(await getSteeringMessagesForTask(leadTask.id)).toEqual([]);
@@ -212,8 +218,8 @@ describe("Slack thread steering", () => {
     const threadTs = "5000.0001";
     const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
-    bufferThreadMessage(channelId, threadTs, "first correction", "U1", "5000.0002");
-    bufferThreadMessage(channelId, threadTs, "second correction", "U1", "5000.0003");
+    await bufferThreadMessage(channelId, threadTs, "first correction", "U1", "5000.0002");
+    await bufferThreadMessage(channelId, threadTs, "second correction", "U1", "5000.0003");
     await instantFlush(`${channelId}:${threadTs}`);
 
     const messages = await getSteeringMessagesForTask(leadTask.id);
@@ -250,17 +256,23 @@ describe("Slack thread steering", () => {
       },
     } as unknown as NonNullable<ReturnType<typeof slackApp.getSlackApp>>);
     try {
-      bufferThreadMessage(channelId, threadTs, "first", "U_TARAS_STEER", "5100.0002");
-      bufferThreadMessage(channelId, threadTs, "second", "U_TARAS_STEER", "5100.0003");
-      bufferThreadMessage(channelId, threadTs, "other correction", "U_OTHER_STEER", "5100.0004");
-      bufferThreadMessage(
+      await bufferThreadMessage(channelId, threadTs, "first", "U_TARAS_STEER", "5100.0002");
+      await bufferThreadMessage(channelId, threadTs, "second", "U_TARAS_STEER", "5100.0003");
+      await bufferThreadMessage(
+        channelId,
+        threadTs,
+        "other correction",
+        "U_OTHER_STEER",
+        "5100.0004",
+      );
+      await bufferThreadMessage(
         channelId,
         threadTs,
         "unmapped correction",
         "U_UNKNOWN_STEER",
         "5100.0005",
       );
-      bufferThreadMessage(channelId, threadTs, "last", "U_TARAS_STEER", "5100.0006");
+      await bufferThreadMessage(channelId, threadTs, "last", "U_TARAS_STEER", "5100.0006");
       await instantFlush(`${channelId}:${threadTs}`);
 
       const messages = await getSteeringMessagesForTask(task.id);

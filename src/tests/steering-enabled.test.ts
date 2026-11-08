@@ -342,7 +342,13 @@ describe("STEERING_ENABLED defaults and overrides", () => {
             message: "take the fallback path",
           }),
         ).toBeNull();
-        bufferThreadMessage(channelId, threadTs, "create the normal follow-up", "U1", "1.0002");
+        await bufferThreadMessage(
+          channelId,
+          threadTs,
+          "create the normal follow-up",
+          "U1",
+          "1.0002",
+        );
         await instantFlush(`${channelId}:${threadTs}`);
       });
 
