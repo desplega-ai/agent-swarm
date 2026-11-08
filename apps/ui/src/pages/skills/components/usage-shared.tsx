@@ -31,13 +31,16 @@ export function readUsageWindow(searchParams: URLSearchParams): SkillUsageWindow
 export function UsageWindowControl({
   value,
   onChange,
+  size = "sm",
 }: {
   value: SkillUsageWindow;
   onChange: (value: SkillUsageWindow) => void;
+  /** `default` is the 36px phone tap target. */
+  size?: "default" | "sm";
 }) {
   return (
     <SegmentedControl
-      size="sm"
+      size={size}
       aria-label="Usage window"
       value={value}
       onValueChange={onChange}

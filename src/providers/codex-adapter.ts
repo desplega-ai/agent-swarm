@@ -2023,7 +2023,7 @@ export async function createInProcessCodexSession(
     env.OPENAI_API_KEY = selectCredential(env.OPENAI_API_KEY, undefined, "OPENAI_API_KEY").selected;
   }
 
-  const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+  const codexPathOverride = config.env?.CODEX_PATH_OVERRIDE ?? process.env.CODEX_PATH_OVERRIDE;
 
   // Native resume is deprecated. Follow-up continuity is delivered via the
   // context preamble (see src/commands/context-preamble.ts). Any stray

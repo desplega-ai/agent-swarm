@@ -27,12 +27,24 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
     { version: 2, hash: "2a1dc408cb6a731e" },
   ],
   "tool-routing": [{ version: 1, hash: "e41b42bf3bcc1a9a" }],
-  "fanout-research": [{ version: 1, hash: "4ad89cd28b49d168" }],
-  "fanout-research-solo": [{ version: 1, hash: "d78c739359c4ee4d" }],
+  "fanout-research": [
+    { version: 1, hash: "4ad89cd28b49d168" },
+    { version: 2, hash: "3041db2ab3dd6923" },
+  ],
+  "fanout-research-solo": [
+    { version: 1, hash: "d78c739359c4ee4d" },
+    { version: 2, hash: "070cbf22a94c7426" },
+  ],
   "worker-recovery": [{ version: 1, hash: "fd694b7a337a206d" }],
   "worker-recovery-solo": [{ version: 1, hash: "1c9099583f923431" }],
-  "implement-review": [{ version: 1, hash: "cb8b5f8260c133e9" }],
-  "implement-review-solo": [{ version: 1, hash: "ab6e075a48cb8f69" }],
+  "implement-review": [
+    { version: 1, hash: "cb8b5f8260c133e9" },
+    { version: 2, hash: "1b9ab9ed47ad8306" },
+  ],
+  "implement-review-solo": [
+    { version: 1, hash: "ab6e075a48cb8f69" },
+    { version: 2, hash: "b47974f1eba79ce7" },
+  ],
   "capability-routing": [{ version: 1, hash: "07161180e8236cb8" }],
   "human-in-loop": [{ version: 1, hash: "61ac1c21766960da" }],
   "human-in-loop-solo": [{ version: 1, hash: "7cfc7a2d2e3303f3" }],
@@ -40,5 +52,6 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "docs-suggestion": [
     { version: 1, hash: "8c5077d6ea442fc6" },
     { version: 2, hash: "32d131bdab3b2e4b" },
+    { version: 3, hash: "338f0dc6a6a519bf" },
   ],
 };

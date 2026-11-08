@@ -250,10 +250,16 @@ function testsUnmodified(worker: number): DeterministicCheck {
 
 type Verdict = "approve" | "request-changes" | null;
 
+/** The first verdict in a review: a `VERDICT: X` line, or a JSON `"verdict": "X"` field (also escaped). */
 export function verdictOf(result: string | null | undefined): Verdict {
-  const m = /VERDICT:\s*\**\s*(APPROVE|REQUEST[_ ]CHANGES)/i.exec(result ?? "");
+  const m =
+    /VERDICT:\s*\**\s*(APPROVE|REQUEST[_ ]CHANGES)|\\?"verdict\\?"\s*:\s*\\?"(APPROVE|REQUEST[_ ]CHANGES)\\?"/i.exec(
+      result ?? "",
+    );
   if (!m) return null;
-  return (m[1] as string).toUpperCase().startsWith("APPROVE") ? "approve" : "request-changes";
+  return ((m[1] ?? m[2]) as string).toUpperCase().startsWith("APPROVE")
+    ? "approve"
+    : "request-changes";
 }
 
 /** A review that names the planted bug: shipping, plus the boundary. */
@@ -413,7 +419,7 @@ const EFFICIENCY: Dimension = { name: "efficiency", weight: 1 };
 
 export const implementReview: Scenario = {
   id: "implement-review",
-  version: 1,
+  version: 2,
   name: "Implement and review",
   description: [
     "A lead runs a coder and a reviewer on a tiny TypeScript repo with a failing coupon test. The",

@@ -121,6 +121,10 @@ describe("implement-review verdict parsing", () => {
     ["**VERDICT:** REQUEST_CHANGES", "request-changes"],
     ["verdict: request changes", "request-changes"],
     ["Looks good to me", null],
+    ['{"verdict":"APPROVE","notes":"all acceptance tests pass"}', "approve"],
+    ['```json\n{ "verdict": "REQUEST_CHANGES", "findings": ["shipping"] }\n```', "request-changes"],
+    ['{\\"verdict\\":\\"APPROVE\\"}', "approve"],
+    ['{"verdict":"PENDING"}', null],
   ])("%p -> %p", (text, verdict) => {
     expect(verdictOf(text)).toBe(verdict as ReturnType<typeof verdictOf>);
   });
@@ -171,6 +175,22 @@ describe("implement-review review rubric", () => {
       ]),
     );
     expect(res.score).toBe(0.5);
+  });
+
+  test("JSON verdicts score the same review flow as VERDICT: lines", async () => {
+    // The lead may ask the reviewer to answer in JSON; the grader scores the flow, not the format.
+    const changes = JSON.stringify({
+      verdict: "REQUEST_CHANGES",
+      findings: ["shippingCents uses `> 5000`; orders of $50.00 or more ship free"],
+    });
+    const children = [
+      child("coder-1", 0, "diff", 10, 100),
+      child("review-1", 1, changes, 105, 160),
+      child("coder-2", 0, "diff", 165, 220),
+      child("review-2", 1, '{"verdict":"APPROVE"}', 225, 260),
+    ];
+    expect((await reviewCheck.fn(ctxWith(children))).score).toBe(1);
+    expect((await processCheck.fn(ctxWith(children))).score).toBe(1);
   });
 
   test("SHIPPED before the approval zeroes process; no SHIPPED at all zeroes it too", async () => {

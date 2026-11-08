@@ -27,10 +27,13 @@ export function repliesContext(
   replies: Record<string, string>,
   logs: Record<string, Record<string, unknown>[]> = {},
 ) {
-  const tasks = nullTasks(docsSuggestion).map((task): SwarmTask => {
-    const request = key.REQUESTS.find((r) => r.title === task.title);
-    return { ...task, agentId: "lead", result: replies[request?.id ?? ""] ?? "" };
-  });
+  const tasks = nullTasks(docsSuggestion).map(
+    (task, i): SwarmTask => ({
+      ...task,
+      agentId: "lead",
+      result: replies[key.REQUESTS[i]?.id ?? ""] ?? "",
+    }),
+  );
   return makeContext(docsSuggestion, { tasks, logs });
 }
 

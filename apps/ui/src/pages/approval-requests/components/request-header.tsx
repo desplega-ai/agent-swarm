@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
 import { UserChip } from "@/components/shared/user-chip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useUserLookup } from "@/hooks/use-user-name";
 import {
   approvalRequestSource,
@@ -49,6 +50,8 @@ export function RequestHeader({
   const source = approvalRequestSource(request);
   const quorum = quorumLabel(request.approvalProgress);
   const lookupUser = useUserLookup();
+  // A long title clamps to three lines on a phone, so the questions start higher; a tap opens it.
+  const [titleOpen, setTitleOpen] = useState(false);
   const sourceTo = request.workflowRunId
     ? `/workflow-runs/${request.workflowRunId}`
     : request.sourceTaskId
@@ -72,7 +75,8 @@ export function RequestHeader({
           </TooltipTrigger>
           <TooltipContent side="bottom">Back to the list (Esc)</TooltipContent>
         </Tooltip>
-        <StatusBadge status={request.status} />
+        {/* A pending request says so in the status line below; the chip is only for outcomes on a phone. */}
+        <StatusBadge status={request.status} className={cn(isPending && "max-sm:hidden")} />
         <span className="flex-1" />
         {showKeys ? (
           <button
@@ -88,7 +92,14 @@ export function RequestHeader({
         ) : null}
       </div>
 
-      <h1 className={cn("text-lg font-semibold leading-snug tracking-tight sm:text-xl", WRAP)}>
+      <h1
+        onClick={() => setTitleOpen((open) => !open)}
+        className={cn(
+          "text-lg font-semibold leading-snug tracking-tight sm:text-xl",
+          !titleOpen && "max-sm:line-clamp-3",
+          WRAP,
+        )}
+      >
         {request.title}
       </h1>
 
@@ -146,7 +157,11 @@ function ApproversLine({
   approvers: ApprovalRequest["approvers"];
   lookupUser: ReturnType<typeof useUserLookup>;
 }) {
-  const { lead, people, tail } = approverParts(approvers);
+  const { lead, people: allPeople, tail } = approverParts(approvers);
+  // Five approver chips wrap to three lines on a phone; show two and a count.
+  const isMobile = useIsMobile();
+  const people = isMobile && allPeople.length > 2 ? allPeople.slice(0, 2) : allPeople;
+  const hidden = allPeople.length - people.length;
   return (
     <span
       className={cn(
@@ -169,6 +184,7 @@ function ApproversLine({
           {index < people.length - 1 ? <span aria-hidden>,</span> : null}
         </span>
       ))}
+      {hidden > 0 ? <span>+{hidden} more</span> : null}
       {tail ? <span>{tail}</span> : null}
     </span>
   );
