@@ -178,6 +178,9 @@ type ErrorItem = Extract<ThreadItem, { type: "error" }>;
 type FileChangeItem = Extract<ThreadItem, { type: "file_change" }>;
 type McpToolCallItem = Extract<ThreadItem, { type: "mcp_tool_call" }>;
 type ReasoningItem = Extract<ThreadItem, { type: "reasoning" }>;
+
+/** `turn/start` reasoning summary: OpenAI returns summaries only, never raw reasoning. */
+export const CODEX_REASONING_SUMMARY = "detailed";
 type TodoListItem = Extract<ThreadItem, { type: "todo_list" }>;
 type WebSearchItem = Extract<ThreadItem, { type: "web_search" }>;
 
@@ -771,6 +774,9 @@ class AppServerCodexThread implements CodexThread {
       const response = await this.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.id,
         input: textInput(input),
+        // The bundled model catalog defaults the reasoning summary to `none`,
+        // so reasoning items arrived with empty `summary` and `content`.
+        summary: CODEX_REASONING_SUMMARY,
       });
       if (!finished) this.setActiveTurn(response.turn.id);
     } catch (error) {

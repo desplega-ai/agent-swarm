@@ -149,9 +149,9 @@ async function setUpBareFixture(bare: string): Promise<void> {
 }
 
 /** Fake Bun.Subprocess that behaves as a process that exited cleanly with no output. */
-function makeFakeProc(): ReturnType<typeof Bun.spawn> {
+function makeFakeProc(stdout: string | null = null): ReturnType<typeof Bun.spawn> {
   return {
-    stdout: null,
+    stdout: stdout === null ? null : new Response(stdout).body,
     stderr: null,
     stdin: null,
     exited: Promise.resolve(0),
@@ -703,8 +703,11 @@ describe("CLAUDE_BINARY env override", () => {
   /** Every non-git spawn, including the `--version` probe. */
   let claudeSpawns: Array<readonly string[]>;
   let spawnedEnvs: Array<Record<string, string> | undefined>;
+  /** What the fake `claude --version` prints; null prints nothing (unknown version). */
+  let probeVersion: string | null;
 
   beforeEach(async () => {
+    probeVersion = null;
     originalClaudeTransport = process.env.CLAUDE_TRANSPORT;
     delete process.env.CLAUDE_TRANSPORT;
     originalClaudeBinary = process.env.CLAUDE_BINARY;
@@ -725,10 +728,9 @@ describe("CLAUDE_BINARY env override", () => {
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[], opts?: unknown) => {
       if (isGit(cmd)) return (realSpawn as (...a: unknown[]) => unknown)(cmd, opts);
       claudeSpawns.push(cmd);
-      if (cmd.at(-1) !== "--version") {
-        spawnedArgs.push(cmd);
-        spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
-      }
+      if (cmd.at(-1) === "--version") return makeFakeProc(probeVersion);
+      spawnedArgs.push(cmd);
+      spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
       return makeFakeProc();
     }) as typeof Bun.spawn);
 
@@ -789,6 +791,64 @@ describe("CLAUDE_BINARY env override", () => {
     expect(JSON.parse(argv[at + 1] ?? "")).toEqual({
       claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, userClaudeMdExclude()],
       enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
+      showThinkingSummaries: true,
+    });
+  });
+
+  describe("--thinking-display", () => {
+    const displayOf = (argv: readonly string[]) => {
+      const at = argv.indexOf("--thinking-display");
+      return at === -1 ? undefined : argv[at + 1];
+    };
+
+    test("asks for summaries on a CLI that accepts the flag", async () => {
+      probeVersion = "2.1.319 (Claude Code)";
+      await createCompletedSession(new ClaudeAdapter(), makeConfig());
+      expect(displayOf(spawnedArgs[0] ?? [])).toBe("summarized");
+    });
+
+    test.each([
+      ["too old", "2.1.80 (Claude Code)"],
+      ["unknown", null],
+    ])("leaves the flag off when the CLI version is %s", async (_, version) => {
+      probeVersion = version;
+      await createCompletedSession(new ClaudeAdapter(), makeConfig());
+      expect(spawnedArgs[0]).not.toContain("--thinking-display");
+    });
+
+    test("a caller showThinkingSummaries:false asks for omitted thinking", async () => {
+      probeVersion = "2.1.319 (Claude Code)";
+      await createCompletedSession(
+        new ClaudeAdapter(),
+        makeConfig({
+          additionalArgs: ["--settings", JSON.stringify({ showThinkingSummaries: false })],
+        }),
+      );
+      const argv = spawnedArgs[0] ?? [];
+      expect(displayOf(argv)).toBe("omitted");
+      expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "").showThinkingSummaries).toBe(
+        false,
+      );
+    });
+
+    test("a caller --thinking-display is kept and not doubled", async () => {
+      probeVersion = "2.1.319 (Claude Code)";
+      await createCompletedSession(
+        new ClaudeAdapter(),
+        makeConfig({ additionalArgs: ["--thinking-display", "omitted"] }),
+      );
+      const argv = spawnedArgs[0] ?? [];
+      expect(argv.filter((arg) => arg === "--thinking-display")).toHaveLength(1);
+      expect(displayOf(argv)).toBe("omitted");
+    });
+
+    test("claude-bridge relies on the setting, not the flag", async () => {
+      probeVersion = "2.1.319 (Claude Code)";
+      process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
+      await createCompletedSession(new ClaudeAdapter(), makeConfig());
+      const argv = spawnedArgs[0] ?? [];
+      expect(argv[0]).toBe("claude-bridge");
+      expect(argv).not.toContain("--thinking-display");
     });
   });
 
@@ -832,6 +892,7 @@ describe("CLAUDE_BINARY env override", () => {
           userClaudeMdExclude(),
         ],
         enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
+        showThinkingSummaries: true,
       });
       expect(argv[0]).toBe("claude");
       expect(argv.slice(argv.indexOf("--max-turns"), argv.indexOf("--max-turns") + 2)).toEqual([
