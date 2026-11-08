@@ -52,6 +52,6 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "docs-suggestion": [
     { version: 1, hash: "8c5077d6ea442fc6" },
     { version: 2, hash: "32d131bdab3b2e4b" },
-    { version: 3, hash: "34f20aebdd7c5d17" },
+    { version: 3, hash: "338f0dc6a6a519bf" },
   ],
 };

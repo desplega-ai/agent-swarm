@@ -190,10 +190,13 @@ export function loadedSwarmDocs(uses: { toolName: string; input: unknown }[]): b
   });
 }
 
-/** The request's task, found by the text the runner sent (a live task's title is the server's). */
+/**
+ * The request's task, found by the text the runner sent (a live task's title is the server's).
+ * `includes`, not equality: create hooks may wrap the text. Upfront tasks come first in ctx.tasks.
+ */
 function taskFor(ctx: JudgeContext, request: Request): SwarmTask | undefined {
   const text = scenarioTaskText({ title: request.title, description: brief(request) });
-  return ctx.tasks.find((t: SwarmTask) => t.description === text);
+  return ctx.tasks.find((t: SwarmTask) => t.description.includes(text));
 }
 
 function replyFor(ctx: JudgeContext, request: Request): string {
