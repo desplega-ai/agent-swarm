@@ -1,5 +1,5 @@
 -- Index every column that references users(id) and had no leading index, and
--- backfill workflow_runs.created_by for runs that predate it.
+-- the requester that workflow_runs stores inside its JSON context.
 --
 -- Incident 2026-11-09: merging two users froze the API for 278 s on an 85 GB
 -- production database. deleteUser rewrites every nullable user FK column
@@ -10,22 +10,8 @@
 -- DELETE 10 s. Every statement is synchronous bun:sqlite on the event loop.
 --
 -- deleteUser also rewrites context.swarm.requestedByUserId inside the
--- workflow_runs JSON. It now narrows that pass with created_by = ?, which
--- relies on the engine (src/workflows/engine.ts) writing created_by and the
--- context requester from the same value. The engine has done that since
--- PR #1191 (2026-08-19); the context requester exists since PR #621, so older
--- runs carry a requester with created_by NULL. Backfill them once so the
--- invariant holds for existing rows. Existing attribution wins, the LIKE
--- prefilter spares rows without the key the JSON parse, and the users
--- subselect keeps the FK valid (foreign_keys is OFF while migrations run).
--- This runs before the index creation so the UPDATE does not maintain the
--- new created_by index row by row.
-UPDATE workflow_runs
-SET created_by = json_extract(context, '$.swarm.requestedByUserId')
-WHERE created_by IS NULL
-  AND context LIKE '%"requestedByUserId"%'
-  AND json_valid(context)
-  AND json_extract(context, '$.swarm.requestedByUserId') IN (SELECT id FROM users);
+-- workflow_runs JSON. Those two passes parsed the JSON of every row (153 s and
+-- 23 s on prod). The expression index at the end of this file serves them.
 
 -- Partial indexes (WHERE col IS NOT NULL) serve "col = ?" lookups and the FK
 -- check equally, and cost nothing for rows with no user attribution. The list
@@ -154,3 +140,14 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_updated_by ON workflow_runs(updated
 CREATE INDEX IF NOT EXISTS idx_workflow_versions_created_by ON workflow_versions(created_by) WHERE created_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_workflow_versions_updated_by ON workflow_versions(updated_by) WHERE updated_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_workflows_updated_by ON workflows(updated_by) WHERE updated_by IS NOT NULL;
+
+-- The requester inside the workflow context. deleteUser's JSON passes filter
+-- on this exact expression (src/be/db/user-references.ts); SQLite matches an
+-- expression index only against an identical expression. The CASE guard keeps
+-- malformed JSON out of json_extract, which would otherwise raise during the
+-- index build. created_by is not a substitute: a node whose id is "swarm"
+-- can overwrite ctx.swarm, so the two values are not guaranteed to agree.
+-- Building this index parses the context of every run once.
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_context_requester
+  ON workflow_runs(CASE WHEN json_valid(context) THEN json_extract(context, '$.swarm.requestedByUserId') END)
+  WHERE CASE WHEN json_valid(context) THEN json_extract(context, '$.swarm.requestedByUserId') END IS NOT NULL;

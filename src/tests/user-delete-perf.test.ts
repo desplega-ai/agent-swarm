@@ -1,6 +1,5 @@
-import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, unlinkSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import {
   closeDb,
   createUser,
@@ -12,14 +11,22 @@ import {
   initDb,
   updateWorkflowRun,
 } from "../be/db";
-import { runMigrations } from "../be/migrations/runner";
+import {
+  USER_REFERENCE_COLUMNS_SQL,
+  type UserReferenceRow,
+  userReferenceRewriteSql,
+  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
+  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
+} from "../be/db/user-references";
 import { openSealedJson } from "../be/sealed-json";
 
 // Incident 2026-11-09: merging two users ran deleteUser on an 85 GB prod DB
 // and every UPDATE on the large audit tables scanned the full table while the
 // workflow_runs JSON passes parsed the context of all 493k rows. The API froze
-// for 278 s. Migration 319 indexes the user FK columns and deleteUser narrows
-// the JSON passes by created_by. These tests pin both via EXPLAIN QUERY PLAN.
+// for 278 s. Migration 319 indexes the user FK columns and the context
+// requester expression. These tests explain the exact statements deleteUser
+// runs (src/be/db/user-references.ts) and pin every plan to an index.
 
 const TEST_DB_PATH = `./test-user-delete-perf-${crypto.randomUUID()}.sqlite`;
 
@@ -50,19 +57,20 @@ async function explain(sql: string, params: string[]): Promise<string> {
   return rows.map((row) => row.detail).join(" | ");
 }
 
-async function runRequestedBy(userId: string): Promise<string> {
+async function runRequestedBy(
+  userId: string,
+  opts: { createdBy?: string | null } = {},
+): Promise<string> {
   const workflow = await createWorkflow({
     name: `delete-perf-${crypto.randomUUID()}`,
     definition: { nodes: [] },
   });
   const runId = crypto.randomUUID();
-  // Mirrors src/workflows/engine.ts: created_by and context.swarm.requestedByUserId
-  // come from the same requester.
   await createWorkflowRun({
     id: runId,
     workflowId: workflow.id,
     triggerType: "manual",
-    createdBy: userId,
+    createdBy: opts.createdBy === undefined ? userId : (opts.createdBy ?? undefined),
   });
   await updateWorkflowRun(runId, {
     status: "running",
@@ -99,52 +107,58 @@ afterAll(() => {
 });
 
 describe("deleteUser query plans", () => {
+  test("the discovery query returns every heavy column", async () => {
+    const references = await getDbClient().query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
+    const pairs = new Set(references.map((r) => `${r.tableName}.${r.columnName}`));
+    for (const [table, column] of HEAVY_COLUMNS) {
+      expect(pairs.has(`${table}.${column}`)).toBe(true);
+    }
+  });
+
+  test("every discovered column rewrite searches an index", async () => {
+    const references = await getDbClient().query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
+    expect(references.length).toBeGreaterThan(HEAVY_COLUMNS.length);
+    const scans: string[] = [];
+    for (const reference of references) {
+      const detail = await explain(userReferenceRewriteSql(reference), ["replacement", "source"]);
+      if (!/SEARCH \S+ USING (COVERING )?INDEX/.test(detail) || /\bSCAN\b/.test(detail)) {
+        scans.push(`${reference.tableName}.${reference.columnName}: ${detail}`);
+      }
+    }
+    expect(scans).toEqual([]);
+  });
+
   for (const [table, column] of HEAVY_COLUMNS) {
     test(`UPDATE ${table}.${column} uses idx_${table}_${column}`, async () => {
-      const detail = await explain(`UPDATE "${table}" SET "${column}" = ? WHERE "${column}" = ?`, [
-        "replacement",
-        "source",
-      ]);
+      const detail = await explain(
+        userReferenceRewriteSql({ tableName: table, columnName: column }),
+        ["replacement", "source"],
+      );
       expect(detail).toMatch(
         new RegExp(`SEARCH ${table} USING (COVERING )?INDEX idx_${table}_${column}`),
       );
-      expect(detail).not.toMatch(new RegExp(`SCAN ${table}( |$)`));
     });
   }
 
-  test("the sealed-context SELECT searches workflow_runs by created_by", async () => {
-    const detail = await explain(
-      `SELECT id, context_replay FROM workflow_runs
-       WHERE created_by = ?
-         AND context_replay IS NOT NULL
-         AND json_valid(context)
-         AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-      ["source", "source"],
-    );
-    expect(detail).toMatch(/SEARCH workflow_runs USING INDEX idx_workflow_runs_created_by/);
+  test("the sealed-context SELECT searches the context requester index", async () => {
+    const detail = await explain(WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL, ["source"]);
+    expect(detail).toMatch(/SEARCH workflow_runs USING INDEX idx_workflow_runs_context_requester/);
     expect(detail).not.toMatch(/SCAN workflow_runs/);
   });
 
-  test("the context json_set and json_remove UPDATEs search workflow_runs by created_by", async () => {
-    for (const setter of [
-      "json_set(context, '$.swarm.requestedByUserId', ?)",
-      "json_remove(context, '$.swarm.requestedByUserId')",
-    ]) {
-      const params = setter.includes("?")
-        ? ["replacement", "source", "source"]
-        : ["source", "source"];
-      const detail = await explain(
-        `UPDATE workflow_runs
-         SET context = ${setter}
-         WHERE created_by = ?
-           AND json_valid(context)
-           AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-        params,
+  test("the context json_set and json_remove UPDATEs search the context requester index", async () => {
+    for (const [sql, params] of [
+      [WORKFLOW_CONTEXT_SET_REQUESTER_SQL, ["replacement", "source"]],
+      [WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL, ["source"]],
+    ] as const) {
+      const detail = await explain(sql, [...params]);
+      expect(detail).toMatch(
+        /SEARCH workflow_runs USING INDEX idx_workflow_runs_context_requester/,
       );
-      expect(detail).toMatch(/SEARCH workflow_runs USING INDEX idx_workflow_runs_created_by/);
       expect(detail).not.toMatch(/SCAN workflow_runs/);
     }
   });
+
   test("DELETE FROM users runs its FK parent-delete checks without a table scan", async () => {
     // A partial index with an unrelated predicate does not count: session_shares_user
     // (migration 230, WHERE revokedAt IS NULL) left SCAN session_shares in this plan
@@ -183,6 +197,29 @@ describe("deleteUser workflow context rewrite", () => {
     expect(JSON.parse(other.context).swarm).toEqual({ requestedByUserId: bystander.id });
   });
 
+  test("a merge rewrites the context requester even when created_by names another user or nobody", async () => {
+    // created_by and context.swarm.requestedByUserId can disagree: legacy runs
+    // predate created_by, and a node whose id is "swarm" can overwrite ctx.swarm.
+    // The rewrite must find the run through the context, not through created_by.
+    const source = await createUser({ name: "context-only source" });
+    const target = await createUser({ name: "context-only target" });
+    const creator = await createUser({ name: "different creator" });
+    const legacyRunId = await runRequestedBy(source.id, { createdBy: null });
+    const mismatchRunId = await runRequestedBy(source.id, { createdBy: creator.id });
+
+    expect(await deleteUser(source.id, target.id)).toBe(true);
+
+    for (const runId of [legacyRunId, mismatchRunId]) {
+      const stored = await storedColumns(runId);
+      expect(JSON.parse(stored.context).swarm).toEqual({ requestedByUserId: target.id });
+      expect((openSealedJson(stored.context_replay) as { swarm: unknown }).swarm).toEqual({
+        requestedByUserId: target.id,
+      });
+    }
+    expect((await storedColumns(legacyRunId)).created_by).toBeNull();
+    expect((await storedColumns(mismatchRunId)).created_by).toBe(creator.id);
+  });
+
   test("a delete without a replacement clears created_by and removes the requester from both copies", async () => {
     const source = await createUser({ name: "plain delete" });
     const runId = await runRequestedBy(source.id);
@@ -198,111 +235,24 @@ describe("deleteUser workflow context rewrite", () => {
     expect(replay.swarm).toEqual({});
     expect((await getWorkflowRun(runId))?.context?.swarm).toEqual({});
   });
-});
 
-describe("migration 319 created_by backfill", () => {
-  // Runs written before PR #1191 (2026-08-19) carry context.swarm.requestedByUserId
-  // with created_by NULL. deleteUser narrows its JSON pass by created_by, so the
-  // migration has to make the invariant true for those rows first.
-  const BACKFILL_DB_PATH = `./test-user-delete-backfill-${crypto.randomUUID()}.sqlite`;
-  const MIGRATION_319 = "319_user_fk_indexes";
+  test("a run with malformed context JSON neither breaks the indexed lookup nor matches it", async () => {
+    const source = await createUser({ name: "malformed neighbour source" });
+    const target = await createUser({ name: "malformed neighbour target" });
+    const runId = await runRequestedBy(source.id);
+    const brokenRunId = await runRequestedBy(source.id);
+    // Bypass the API so the stored context is not valid JSON; the CASE guard in
+    // the index expression must yield NULL here instead of raising.
+    await getDbClient().run("UPDATE workflow_runs SET context = ? WHERE id = ?", [
+      "{not json",
+      brokenRunId,
+    ]);
 
-  afterAll(() => {
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try {
-        unlinkSync(`${BACKFILL_DB_PATH}${suffix}`);
-      } catch {
-        // ignore
-      }
-    }
-  });
+    expect(await deleteUser(source.id, target.id)).toBe(true);
 
-  test("fills created_by from the context requester only where a known user is named", () => {
-    const database = new Database(BACKFILL_DB_PATH);
-    try {
-      // Apply everything except 319, so legacy rows can be written first.
-      const sql = readFileSync(`src/be/migrations/${MIGRATION_319}.sql`, "utf-8");
-      database.run(
-        `CREATE TABLE IF NOT EXISTS _migrations (
-           version INTEGER PRIMARY KEY, name TEXT NOT NULL,
-           applied_at TEXT NOT NULL, checksum TEXT NOT NULL)`,
-      );
-      database
-        .prepare(
-          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
-        )
-        .run(
-          319,
-          MIGRATION_319,
-          new Date().toISOString(),
-          new Bun.CryptoHasher("sha256").update(sql).digest("hex"),
-        );
-      runMigrations(database);
-
-      const requester = crypto.randomUUID();
-      const other = crypto.randomUUID();
-      const workflowId = crypto.randomUUID();
-      database
-        .prepare("INSERT INTO users (id, name) VALUES (?, ?), (?, ?)")
-        .run(requester, "legacy requester", other, "other user");
-      database
-        .prepare("INSERT INTO workflows (id, name, definition) VALUES (?, ?, ?)")
-        .run(workflowId, "legacy workflow", '{"nodes":[]}');
-      const insertRun = database.prepare(
-        "INSERT INTO workflow_runs (id, workflowId, created_by, context) VALUES (?, ?, ?, ?)",
-      );
-      const legacy = crypto.randomUUID();
-      const ghost = crypto.randomUUID();
-      const noRequester = crypto.randomUUID();
-      const attributed = crypto.randomUUID();
-      insertRun.run(
-        legacy,
-        workflowId,
-        null,
-        JSON.stringify({ swarm: { requestedByUserId: requester } }),
-      );
-      insertRun.run(
-        ghost,
-        workflowId,
-        null,
-        JSON.stringify({ swarm: { requestedByUserId: "deleted-user" } }),
-      );
-      insertRun.run(
-        noRequester,
-        workflowId,
-        null,
-        JSON.stringify({ trigger: { kind: "schedule" } }),
-      );
-      insertRun.run(
-        attributed,
-        workflowId,
-        other,
-        JSON.stringify({ swarm: { requestedByUserId: requester } }),
-      );
-
-      database.run("DELETE FROM _migrations WHERE version = 319");
-      runMigrations(database);
-
-      const createdBy = (id: string) =>
-        database
-          .query<{ created_by: string | null }, [string]>(
-            "SELECT created_by FROM workflow_runs WHERE id = ?",
-          )
-          .get(id)?.created_by;
-      expect(createdBy(legacy)).toBe(requester);
-      expect(createdBy(ghost)).toBeNull();
-      expect(createdBy(noRequester)).toBeNull();
-      expect(createdBy(attributed)).toBe(other);
-      expect(database.query("PRAGMA foreign_key_check").all()).toEqual([]);
-      expect(
-        database
-          .query<{ name: string }, []>(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_session_shares_userId'",
-          )
-          .get()?.name,
-      ).toBe("idx_session_shares_userId");
-    } finally {
-      database.close();
-    }
+    expect(JSON.parse((await storedColumns(runId)).context).swarm).toEqual({
+      requestedByUserId: target.id,
+    });
+    expect((await storedColumns(brokenRunId)).context).toBe("{not json");
   });
 });
