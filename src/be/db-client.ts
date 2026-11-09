@@ -280,21 +280,36 @@ function timedStatement<T>(sql: string, run: () => T): T {
 const SLICE_MS = 25;
 let sliceStartedAt = 0;
 
-/** Called before each statement; yields to timers and sockets once the slice is spent. */
+function markSlice(): void {
+  if (sliceStartedAt !== 0) return;
+  sliceStartedAt = performance.now();
+  // Fires at the next macrotask boundary, whoever caused it: the slice is over.
+  // A timer, not setImmediate: the yield below owns setImmediate.
+  setTimeout(() => {
+    sliceStartedAt = 0;
+  }, 0);
+}
+
+/** Starts the slice if none is open; yields to timers and sockets once it is spent. */
 async function yieldIfSliceSpent(): Promise<void> {
-  const now = performance.now();
-  if (sliceStartedAt === 0) {
-    sliceStartedAt = now;
-    // Fires at the next macrotask boundary, whoever caused it: the slice is over.
-    // A timer, not setImmediate: the yield below owns setImmediate.
-    setTimeout(() => {
-      sliceStartedAt = 0;
-    }, 0);
-    return;
-  }
-  if (now - sliceStartedAt < SLICE_MS) return;
+  markSlice();
+  if (performance.now() - sliceStartedAt < SLICE_MS) return;
   await new Promise<void>((resolve) => setImmediate(resolve));
   sliceStartedAt = 0;
+}
+
+/**
+ * In-transaction statement: runs NOW, before any await, exactly as it did
+ * before slicing, so an interleaved rollback or commit cannot overtake it
+ * (a statement parked on a yield would resume after the transaction closed
+ * and autocommit outside it). Only the caller's continuation waits for the
+ * yield. A throw skips the yield: the caller is about to unwind anyway.
+ */
+async function runThenYield<T>(run: () => T): Promise<T> {
+  markSlice();
+  const result = run();
+  await yieldIfSliceSpent();
+  return result;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -627,9 +642,8 @@ class BunSqliteClient implements DbClient {
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) {
       const db = this.getDatabase();
-      // The transaction already holds the lock, so yielding lets only timers and sockets run.
-      await yieldIfSliceSpent();
-      return timed(() => op(db));
+      // The transaction holds the lock: the yield after the statement lets only timers and sockets run.
+      return runThenYield(() => timed(() => op(db)));
     }
     let sleptMs = 0;
     let sawBusy = false;
@@ -728,31 +742,31 @@ class BunSqliteClient implements DbClient {
       return this.getDatabase();
     };
     return {
-      query: async <T>(sql: string, params: DbParam[] = []): Promise<T[]> => {
-        await yieldIfSliceSpent();
-        return timedStatement(sql, () =>
-          guard()
-            .query<T, DbParam[]>(sql)
-            .all(...params),
-        );
-      },
-      get: async <T>(sql: string, params: DbParam[] = []): Promise<T | null> => {
-        await yieldIfSliceSpent();
-        return timedStatement(sql, () =>
-          guard()
-            .query<T, DbParam[]>(sql)
-            .get(...params),
-        );
-      },
-      run: async (sql: string, params: DbParam[] = []): Promise<{ changes: number }> => {
-        await yieldIfSliceSpent();
-        const result = timedStatement(sql, () =>
-          guard()
-            .query(sql)
-            .run(...params),
-        );
-        return { changes: result.changes };
-      },
+      query: <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
+        runThenYield(() =>
+          timedStatement(sql, () =>
+            guard()
+              .query<T, DbParam[]>(sql)
+              .all(...params),
+          ),
+        ),
+      get: <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
+        runThenYield(() =>
+          timedStatement(sql, () =>
+            guard()
+              .query<T, DbParam[]>(sql)
+              .get(...params),
+          ),
+        ),
+      run: (sql: string, params: DbParam[] = []): Promise<{ changes: number }> =>
+        runThenYield(() => {
+          const result = timedStatement(sql, () =>
+            guard()
+              .query(sql)
+              .run(...params),
+          );
+          return { changes: result.changes };
+        }),
     };
   }
 }

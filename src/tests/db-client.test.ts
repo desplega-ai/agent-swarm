@@ -483,6 +483,99 @@ describe("db-client event-loop time slicing", () => {
   });
 });
 
+describe("db-client time slicing keeps transaction boundaries", () => {
+  const burn = (ms: number) => {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {
+      // spin: exhausts the 25 ms slice
+    }
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const insert = (e: DbExecutor | DbClient, name: string) =>
+    e.run("INSERT INTO items (name) VALUES (?)", [name]);
+
+  test("ambient sibling of a failing statement cannot escape a rolled-back transaction", async () => {
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "inside");
+        burn(35);
+        await Promise.all([
+          client.run("INSERT INTO missing VALUES (1)"),
+          insert(client, "escaped"),
+        ]);
+      }),
+    ).rejects.toThrow();
+    await settle();
+    expect(await names()).toEqual([]);
+  });
+
+  test("tx-executor sibling of a failing statement cannot escape a rolled-back transaction", async () => {
+    await expect(
+      client.transaction(async (tx) => {
+        await insert(tx, "inside");
+        burn(35);
+        await Promise.all([tx.run("INSERT INTO missing VALUES (1)"), insert(tx, "escaped")]);
+      }),
+    ).rejects.toThrow();
+    await settle();
+    expect(await names()).toEqual([]);
+  });
+
+  test("sibling inside a rolled-back savepoint cannot escape it", async () => {
+    await client.transaction(async () => {
+      await insert(client, "kept");
+      await expect(
+        client.transaction(async () => {
+          await insert(client, "inner");
+          burn(35);
+          await Promise.all([
+            client.run("INSERT INTO missing VALUES (1)"),
+            insert(client, "escaped"),
+          ]);
+        }),
+      ).rejects.toThrow();
+      await settle();
+    });
+    expect(await names()).toEqual(["kept"]);
+  });
+
+  test("an unawaited statement still belongs to its transaction after the slice is spent", async () => {
+    await client.transaction(async () => {
+      await insert(client, "inside");
+      burn(35);
+      void insert(client, "late"); // runs at call time, as before slicing
+    });
+    expect(await names()).toEqual(["inside", "late"]);
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "gone");
+        burn(35);
+        void insert(client, "gone-late");
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await settle();
+    expect(await names()).toEqual(["inside", "late"]);
+  });
+
+  test("concurrent ambient statements after a rollback all land, none leak from the rollback", async () => {
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "rolled-back");
+        burn(35);
+        await Promise.all([
+          client.run("INSERT INTO missing VALUES (1)"),
+          insert(client, "escaped"),
+        ]);
+      }),
+    ).rejects.toThrow();
+    burn(35);
+    await Promise.all(["a", "b", "c"].map((n) => insert(client, n)));
+    await settle();
+    expect((await names()).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
 describe("db-client slow statement warning", () => {
   // A recursive CTE is pure CPU inside one driver call, so it blocks the
   // event loop the same way a slow production query does.
