@@ -19,7 +19,7 @@ Agent Swarm fits a narrower case: the check needs several sources read together,
 
 What follows is an illustration of how the documented pieces fit together. It is not a customer run and not a measured result, and adapting it to your help center is configuration work.
 
-1. The operator fixes the scope. They choose a defined set of current help articles and one approved policy source, and record the version or date of each. That set is the boundary of the check: the agent reads these articles and this policy and nothing else.
+1. The operator fixes the scope. They choose a defined set of current help articles and one approved policy source, and record the version or date of each. That set is what the check covers, and the operator limits the agent's tools and credentials to it. Choosing the set does not restrict access on its own.
 2. An agent reads the set and lists candidate conflicts. Each entry carries both links and both dates, with the exact quoted passages side by side. Quoting matters more than summarizing, because the owner's first question will be what the article says.
 3. The support owner checks applicability. Do the two passages cover the same product, the same plan, the same version, the same region, the same customer type? Then the owner decides which source governs, or that neither does.
 4. The agent drafts a proposed correction to the article the owner named. It drafts one change per decision, so the owner reviews a proposal rather than a rewritten page.
@@ -37,7 +37,7 @@ Step three is where the hours go, and it should not be automated. Two statements
 
 **False positives.** Passages that look contradictory but cover different cases will be common. The workflow should expect them and make dismissal cheap, with the reason recorded, because an owner who has to argue with a tool stops using it.
 
-**Access boundaries.** The agent reads only the articles and the policy the operator gives it. Draft content and internal notes stay out, and so does anything the operator did not explicitly grant. That is also why the operator names the set instead of pointing the agent at the whole help center. Credentials follow the same rule: an external API is reached through a [script connection](/docs/guides/script-connections) with a credential binding, so the raw secret never enters script source.
+**Access boundaries.** Naming the set defines the scope of the check. It does not restrict the agent's reach by itself: an agent whose tools or credentials also open other drives, repositories or APIs can still read material outside the set. The boundary has to be enforced before the run. Limit the tool surface with `SWARM_ENABLED_TOOLS` or `CAPABILITIES`, so the tools that reach other systems are never registered for the agent that runs the check; the [agent capabilities guide](/docs/guides/agent-capabilities) sets out how that list resolves. Then scope the credentials: register a [script connection](/docs/guides/script-connections) only for the sources in scope, so an export or a help-center API is called through a bound credential injected at egress, and the raw secret never enters script source. Draft content and internal notes stay out through the same controls, not through the choice of article set.
 
 ## When a conflict stays unresolved
 
