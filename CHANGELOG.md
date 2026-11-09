@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-11-09
+
+### Added
+- Tasks: first-class json-render UI specs on task output through `store-progress` `uiSpec`, rendered in Slack outcome cards, the session view and Chat SDK channels; gated by `UI_SPEC_ENABLED` and `UI_SPEC_ACTIONS_ENABLED` (#2876).
+- Providers: reasoning text is captured for claude, codex and pi (#2869), and `session_logs` stores per-line reasoning counts (#2893).
+- Usage: current provider limits and observed window usage (#2870); subscription cards with quota meters on the Usage page (#2890).
+- Apps: an `app.action` step can start a SessionThread session (#2889); the PageFrame component plus three app-component fixes (#2884).
+- Runtime pools: opt-in Docker isolation keys `DOCKER_RUNTIME`, `DOCKER_HARDENED` and `DOCKER_PIDS_LIMIT` for provisioned workers (#2881).
+
+### Changed
+- Docker: bumped amp and qwen (#2874), and amp again (#2886).
+- Docs: weekly release notes for the week of 2026-11-09 (#2899); heartbeat spec synced (#2878); env var and MCP tool references cover `uiSpec` and the UI spec flags.
+
+### Fixed
+- Usage: pre-307 sessions are attributed to their task credential (#2898).
+- Extensions: `sql-admin-only` allows `db-query` when the source task id has no task row (#2897).
+- Workflows: a superseded step task is marked superseded once its retry is queued, and `defer-task` `wakeOn` counts it as failed (#2892).
+- Slack: human thread replies no longer depend on worker routing requirements (#2628); a reload during the boot Slack start no longer returns 500 (#2873).
+- UI: task cards show in the link preview split screen (#2887); chart axis labels stay apart and Home rows stay readable on phones (#2871).
+- Heartbeat: TLC memory and auto workers are bounded (#2875).
+- CI: gitleaks fetches ride out GitHub release 504s (#2885); Slack Visuals Publish validation accepts fork PRs (#2877).
+- Tests: the Slack approval test environment is isolated (#2895); inherited System One test defaults are cleared (#2872).
+
 ## [2.9.0] - 2026-11-08
 
 ### Added

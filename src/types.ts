@@ -500,6 +500,24 @@ export const ModelProfileSchema = z.object({
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 
 /**
+ * A model group: a named, ordered list of profiles that may span harnesses
+ * (runbooks/model-tiers.md § Model groups). Groups and profiles share one name
+ * space.
+ */
+export const ModelGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  /** `tier:<tier>` for a boot seed, null otherwise. */
+  seededFrom: z.string().nullable(),
+  /** Profile names, first preferred. */
+  members: z.array(z.string()),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type ModelGroup = z.infer<typeof ModelGroupSchema>;
+
+/**
  * Why a provider session ended in a way another profile may survive. Set by
  * the worker's classifier (`src/commands/provider-error-class.ts`); never a
  * task failure, tool error, context overflow, cancellation or budget refusal.
@@ -1918,6 +1936,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_citation_check_refused",
   // store-progress refused a completion once because its uiSpec was invalid
   "task_ui_spec_check_refused",
+  // A card `script` action ran and failed; the old card stays
+  "task_ui_script_action_failed",
   "channel_message",
   // Service registry events
   "service_registered",

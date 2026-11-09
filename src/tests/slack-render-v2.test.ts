@@ -58,6 +58,7 @@ import {
   isSlackRenderV2Enabled,
   isTerminalSlackError,
   processSlackRenderV2,
+  refreshSlackOutcomeCard,
   renderThreadTree,
   slackErrorSummary,
   streamOutcomeCard,
@@ -4768,6 +4769,59 @@ describe("Slack outcome card from a task uiSpec", () => {
       specBlocks: [],
       stopStreamMarkdownText: stops[0]?.payload.markdown_text,
     });
+  });
+
+  test("refreshSlackOutcomeCard edits the settled outcome message with the new card", async () => {
+    const { ask } = await slackAskTask("Card refresh");
+    await storeUiSpec(ask.id, await readUiSpecFixture("deploys"));
+    await completeTask(ask.id, "Deploys are up.");
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const outcome = await getSlackOutcomeMessage(ask.id);
+    expect(outcome?.finalizedAt).toBeTruthy();
+
+    await storeUiSpec(ask.id, await readUiSpecFixture("video"));
+    calls.length = 0;
+    expect(await refreshSlackOutcomeCard(ask.id)).toBe(true);
+
+    const updates = calls.filter((call) => call.method === "chat.update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.payload.ts).toBe(outcome?.ts);
+    const blocks = updates[0]?.payload.blocks as Block[];
+    expect(blocks[0]).toEqual({ type: "markdown", text: "✅ Deploys are up." });
+    expect(blocks.some((block) => block.type === "data_table")).toBe(true);
+    expect(isFooter(blocks.at(-1), ask.id)).toBe(true);
+  });
+
+  test("refreshSlackOutcomeCard falls back to the card text when Slack refuses the blocks", async () => {
+    const { ask } = await slackAskTask("Card refresh refused");
+    await completeTask(ask.id, "Q3 is up.");
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const fallbackText = await storeUiSpec(ask.id, await readUiSpecFixture("video"));
+    rejectedBlockType = "data_table";
+    calls.length = 0;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await refreshSlackOutcomeCard(ask.id)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+
+    const updates = calls.filter((call) => call.method === "chat.update");
+    expect(updates).toHaveLength(2);
+    const text = `✅ Q3 is up.\n\n${fallbackText}`;
+    expect(updates[1]?.payload.text).toBe(text);
+    const blocks = updates[1]?.payload.blocks as Block[];
+    expect(blocks[0]).toEqual({ type: "markdown", text });
+    expect(blocks.some((block) => block.type === "data_table")).toBe(false);
+  });
+
+  test("refreshSlackOutcomeCard skips a task with no settled outcome message", async () => {
+    const { ask } = await slackAskTask("Card refresh none");
+    calls.length = 0;
+    expect(await refreshSlackOutcomeCard(ask.id)).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 
   test("an ask card never shows a worker child's spec", async () => {

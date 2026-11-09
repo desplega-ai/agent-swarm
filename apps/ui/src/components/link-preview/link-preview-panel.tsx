@@ -1,16 +1,18 @@
 /**
  * The link preview panel: an agent-fs file or a swarm Page opened from a link
- * in task or session content (see `link-preview-state.tsx`). The page places
+ * in task or session content (see `link-preview-state.tsx`), or a task opened
+ * from a card's Open toast. The page places
  * it inline in its own body (`link-preview-dock.tsx`), or it opens as a sheet
  * over the page. Preview only: no editing, comments, or folder navigation.
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, Globe, X } from "lucide-react";
+import { AlertCircle, ExternalLink, Globe, ListTodo, X } from "lucide-react";
 import { lazy, type ReactNode, Suspense } from "react";
 import { api } from "@/api/client";
 import { useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { usePage } from "@/api/hooks/use-pages";
+import { useTask } from "@/api/hooks/use-tasks";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
@@ -24,12 +26,19 @@ import { AgentFsError } from "@/lib/agent-fs/client";
 import { formatBytes } from "@/lib/format-bytes";
 import { type LinkPreviewTarget, linkPreviewOpenHref } from "@/lib/link-preview";
 import { formatRelative } from "@/lib/relative-time";
+import { statusLabel } from "@/lib/status-labels";
+import { taskListTitle } from "@/lib/task-title";
 
 const PAGE_ID_RE = /^[a-f0-9]{32}$/i;
 
 // The page route module carries the frame and auth plumbing; load it on first use.
 const PagePreviewBody = lazy(() =>
   import("@/pages/pages/[id]/page").then((m) => ({ default: m.PagePreviewBody })),
+);
+
+// The task body renders the outcome, whose link chips import this panel.
+const TaskPreviewBody = lazy(() =>
+  import("./task-preview-body").then((m) => ({ default: m.TaskPreviewBody })),
 );
 
 /** The panel for one target: the header, then the file or page body. */
@@ -40,11 +49,13 @@ export function LinkPreviewContent({
   target: LinkPreviewTarget;
   onClose: () => void;
 }) {
-  return target.kind === "file" ? (
-    <FilePreview key={target.route} target={target} onClose={onClose} />
-  ) : (
-    <PagePreview key={`${target.id}${target.query}`} target={target} onClose={onClose} />
-  );
+  if (target.kind === "file") {
+    return <FilePreview key={target.route} target={target} onClose={onClose} />;
+  }
+  if (target.kind === "task") {
+    return <TaskPreview key={target.taskId} target={target} onClose={onClose} />;
+  }
+  return <PagePreview key={`${target.id}${target.query}`} target={target} onClose={onClose} />;
 }
 
 /** The preview as a sheet over the page, where the page has no room for it inline. */
@@ -65,7 +76,7 @@ export function LinkPreviewSheet({
       >
         <SheetTitle className="sr-only">Link preview</SheetTitle>
         <SheetDescription className="sr-only">
-          A preview of the linked file or page.
+          A preview of the linked file, page or task.
         </SheetDescription>
         <LinkPreviewContent target={target} onClose={onClose} />
       </SheetContent>
@@ -280,6 +291,53 @@ function PagePreview({
       detail={page?.slug ?? (bySlug ? target.id : undefined)}
       meta={meta}
       openHref={linkPreviewOpenHref(target, { pageId })}
+      onClose={onClose}
+    >
+      {body}
+    </PreviewFrame>
+  );
+}
+
+function TaskPreview({
+  target,
+  onClose,
+}: {
+  target: Extract<LinkPreviewTarget, { kind: "task" }>;
+  onClose: () => void;
+}) {
+  const { data: task, error } = useTask(target.taskId);
+
+  let body: ReactNode;
+  if (task) {
+    body = (
+      <Suspense
+        fallback={
+          <Loading>
+            <Skeleton className="m-3 h-40" />
+          </Loading>
+        }
+      >
+        <TaskPreviewBody task={task} />
+      </Suspense>
+    );
+  } else if (error) {
+    body = <Unavailable title="Could not open this task">{error.message}</Unavailable>;
+  } else {
+    body = (
+      <Loading>
+        <Skeleton className="m-3 h-40" />
+      </Loading>
+    );
+  }
+
+  return (
+    <PreviewFrame
+      icon={<ListTodo className="size-4" />}
+      kind="Task"
+      title={task ? taskListTitle(task) : "Task"}
+      detail={target.taskId.slice(0, 8)}
+      meta={task ? statusLabel(task.status) : undefined}
+      openHref={linkPreviewOpenHref(target)}
       onClose={onClose}
     >
       {body}

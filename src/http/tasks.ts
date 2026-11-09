@@ -796,20 +796,32 @@ const runTaskUiActionRoute = route({
   rbac: { permission: "task.action.own" },
   summary: "Run the action a task card Button declares",
   description:
-    "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+    "Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.",
   tags: ["Tasks"],
   params: z.object({ id: z.string(), actionId: z.string() }),
   responses: {
     200: {
-      description: "The action started, or it already ran",
+      description:
+        "The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`)",
       schema: z.object({
-        status: z.enum(["started", "already_done"]),
+        status: z.enum(["started", "already_done", "refreshed"]),
         taskId: z.string().optional(),
+        uiSpec: TaskUiSpecSchema.optional(),
       }),
     },
-    403: { description: "Only the task requester may run the action" },
+    403: {
+      description:
+        "Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted",
+    },
     404: { description: "Task or action not found" },
-    409: { description: "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)" },
+    409: {
+      description:
+        "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`)",
+    },
+    422: { description: "The script failed or returned an invalid card; the old card stays" },
+    429: {
+      description: "The script action ran recently; `Retry-After` says when it can run again",
+    },
   },
 });
 
@@ -820,7 +832,7 @@ const supersedeTaskRoute = route({
   session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
-    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.',
+    "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z
@@ -2235,7 +2247,30 @@ export async function handleTasks(
         runTaskUiActionRoute.respond(res, 200, { status: "already_done" });
         return true;
       case "started":
+      case "refreshed":
         runTaskUiActionRoute.respond(res, 200, result);
+        return true;
+      case "not_allowlisted":
+        jsonError(res, "This action's script is not allowlisted (UI_SPEC_SCRIPT_ACTIONS)", 403);
+        return true;
+      case "script_changed":
+        jsonError(
+          res,
+          "This action's script changed since it was allowlisted; an admin must re-pin it in UI_SPEC_SCRIPT_ACTIONS",
+          403,
+        );
+        return true;
+      case "running":
+        res.setHeader("Retry-After", String(result.retryAfterSec));
+        jsonError(res, "This action is already running", 409);
+        return true;
+      case "rate_limited":
+        res.setHeader("Retry-After", String(result.retryAfterSec));
+        jsonError(res, `This action ran recently; try again in ${result.retryAfterSec}s`, 429);
+        return true;
+      case "script_failed":
+      case "invalid_output":
+        jsonError(res, `Refresh failed: ${result.error}`, 422);
         return true;
     }
   }
@@ -2352,8 +2387,9 @@ export async function handleTasks(
     }
 
     // Workflow-step tasks: fail back to the engine instead of superseding.
-    // Check this BEFORE the supersede UPDATE so we don't leave a workflow
-    // step in `superseded` if the engine expects `failed`.
+    // Check this BEFORE the supersede UPDATE: the engine's retry path runs off
+    // `task.failed`. Once it queues the step's retry it moves the task to
+    // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
       if (task.agentId) {

@@ -691,3 +691,58 @@ test("historical credential coverage separates unknown spend from known billing 
   });
   expect(summary.byCredential.find((row) => row.keyType === null)?.costUsd).toBe(7);
 });
+
+test("sessions recorded before migration 307 read their task's credential", async () => {
+  const legacyAgentId = crypto.randomUUID();
+  await createAgent({ id: legacyAgentId, name: "Legacy worker", isLead: false, status: "idle" });
+  const task = await createTaskExtended("Legacy attribution", {
+    agentId: legacyAgentId,
+    source: "system",
+  });
+  // The task's credential moved on to another key after the legacy run.
+  await getDbClient().run(
+    "UPDATE agent_tasks SET credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN', credentialKeySuffix = 'legcy' WHERE id = ?",
+    [task.id],
+  );
+  const session = async (
+    totalCostUsd: number,
+    credential: { credentialKeyType: string; credentialKeySuffix: string } | null,
+  ) => {
+    const cost = await createSessionCost({
+      sessionId: crypto.randomUUID(),
+      taskId: task.id,
+      agentId: legacyAgentId,
+      ...credential,
+      totalCostUsd,
+      durationMs: 1,
+      numTurns: 1,
+      model: "claude-sonnet",
+    });
+    return cost.id;
+  };
+  const legacy = await session(5, null);
+  await getDbClient().run("UPDATE session_costs SET createdAt = ? WHERE id = ?", [
+    "2020-01-01T00:00:00.000Z",
+    legacy,
+  ]);
+  await session(3, { credentialKeyType: "OPENAI_API_KEY", credentialKeySuffix: "own01" });
+  await session(2, null);
+
+  const summary = await getSessionCostSummary({ agentId: legacyAgentId, groupBy: "both" });
+  expect(summary.totals).toMatchObject({
+    totalCostUsd: 10,
+    subscriptionCostUsd: 5,
+    credentialUnattributedCostUsd: 2,
+    credentialUnattributedSessions: 1,
+  });
+  expect(
+    summary.byCredential.map(({ keyType, keySuffix, costUsd }) => [keyType, keySuffix, costUsd]),
+  ).toEqual([
+    ["CLAUDE_CODE_OAUTH_TOKEN", "legcy", 5],
+    ["OPENAI_API_KEY", "own01", 3],
+    [null, null, 2],
+  ]);
+  expect(
+    (await getKeyCostSummary("CLAUDE_CODE_OAUTH_TOKEN")).find((row) => row.keySuffix === "legcy"),
+  ).toMatchObject({ totalCost: 5, taskCount: 1 });
+});
