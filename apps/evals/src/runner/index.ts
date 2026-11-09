@@ -33,6 +33,7 @@ import {
   type JudgeLiveHandle,
 } from "../judge/live-registry.ts";
 import { judgeWithLlm } from "../judge/llm.ts";
+import { parseToolUses } from "../judge/session-log-parse.ts";
 import {
   beginAttemptProgress,
   finishAttemptProgress,
@@ -44,6 +45,7 @@ import {
 } from "../live/attempt-progress.ts";
 import { normalizeOutcome } from "../normalize-outcome.ts";
 import { dimensionScoreFromChecks, efficiencyScore, finalizeScore } from "../scoring.ts";
+import { listApiExtensionKv, listApiExtensionRuns, toolCoverage } from "../swarm/api-extension.ts";
 import {
   type AgentJson,
   flattenTranscript,
@@ -62,6 +64,7 @@ import {
   type WorkerHandle,
 } from "../swarm/sandbox.ts";
 import {
+  type ApiExtensionPlan,
   type AttemptRow,
   CASCADE_SKIP_RE,
   type CostSource,
@@ -311,6 +314,7 @@ export function buildSandboxInfo(stack: StackHandle): SandboxInfo {
     domain: stack.apiSandbox.domain ?? null,
     apiStartedAt: stack.apiSandbox.startedAt ?? null,
     apiVersion: stack.apiVersion,
+    ...(stack.apiExtension ? { apiExtension: stack.apiExtension } : {}),
     workers: stack.workers.map((w) => ({
       index: w.index,
       sandboxId: w.sandbox.sandboxID,
@@ -1127,6 +1131,8 @@ async function runAttemptOnce(opts: {
   /** Config catalog — member overrides resolve against it (v7 §12.3). */
   configs: Map<string, HarnessConfig>;
   judgeModel: string | null;
+  /** Opt-in api extension installed in the sandbox API (the run's option). */
+  apiExtension?: ApiExtensionPlan | null;
   /** Cancel signal — checked at every phase boundary and inside every polling await. */
   signal?: AbortSignal;
   log: (msg: string) => void;
@@ -1181,6 +1187,7 @@ async function runAttemptOnce(opts: {
       members,
       swarmSlug: `evals-${attempt.runId}`,
       preBootSql,
+      ...(opts.apiExtension ? { apiExtension: opts.apiExtension } : {}),
       timeoutSec,
       signal,
       log: (msg) => log(`[boot] ${msg}`),
@@ -1987,6 +1994,52 @@ async function runAttemptOnce(opts: {
         content: stack.redact(jsonl).slice(0, 2_000_000),
       });
     }
+    // Opt-in api extension: its recorded hook runs and gated-vs-all tool-call coverage.
+    if (stack.apiExtension) {
+      try {
+        const runs = await listApiExtensionRuns(
+          stack.apiUrl,
+          stack.swarmKey,
+          stack.apiExtension.id,
+        );
+        // The extension sees every agent's calls (lead, workers, spawned tasks), so the
+        // denominator needs every ran task's session logs, not only the upfront ones.
+        const covered = new Set(activeTasks.map((t) => t.id));
+        const spawnedRows = (
+          await Promise.all(
+            ctxTasks
+              .filter((t) => !covered.has(t.id) && t.origin !== "seed")
+              .map((t) => client.getSessionLogs(t.id).catch(() => [])),
+          )
+        ).flat();
+        const coverage = toolCoverage(
+          runs,
+          parseToolUses([...logRows, ...spawnedRows]).map((t) => t.toolName),
+        );
+        log(
+          `[extension] ${stack.apiExtension.name}: ${coverage.gatedCalls}/${coverage.allCalls} tool calls gated`,
+        );
+        for (const [name, content] of [
+          ["extension-runs.json", runs],
+          ["extension-coverage.json", { extension: stack.apiExtension, ...coverage }],
+          [
+            "extension-state.json",
+            await listApiExtensionKv(stack.apiUrl, stack.swarmKey, stack.apiExtension),
+          ],
+        ] as const) {
+          await insertArtifact(db, {
+            id: crypto.randomUUID(),
+            attemptId: attempt.id,
+            kind: "meta",
+            name,
+            content: stack.redact(JSON.stringify(content, null, 2)),
+          });
+        }
+      } catch (err) {
+        // Telemetry only: a failed read must not fail a graded attempt.
+        log(`[extension] could not read hook runs: ${err instanceof Error ? err.message : err}`);
+      }
+    }
     // The harness's own raw session files (collected pre-judging above),
     // namespaced per worker (v6 §0.5: `worker-<i>/<absolute path>`).
     for (const workerFiles of sessionFilesByWorker) {
@@ -2129,6 +2182,7 @@ export async function runAttemptWithRetry(opts: {
   registry: Registry;
   maxRetries: number;
   judgeModel: string | null;
+  apiExtension?: ApiExtensionPlan | null;
   signal?: AbortSignal;
   log: (msg: string) => void;
   /** Test seam: the single-try executor. */
@@ -2161,6 +2215,7 @@ export async function runAttemptWithRetry(opts: {
         config,
         configs: registry.configs,
         judgeModel: opts.judgeModel,
+        apiExtension: opts.apiExtension,
         signal: opts.signal,
         // Raw log — runAttemptOnce wraps it once for the live registry itself.
         log: opts.log,
@@ -2389,6 +2444,7 @@ export async function executeRun(opts: {
         registry,
         maxRetries: opts.maxRetries ?? DEFAULT_MAX_RETRIES,
         judgeModel: run.judgeModel,
+        apiExtension: run.apiExtension,
         signal,
         log: (msg) =>
           baseLog(`[${attempt.scenarioId} × ${attempt.configId} #${attempt.attemptIndex}] ${msg}`),

@@ -151,6 +151,7 @@ import { handleStatus } from "./status";
 import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTelemetryUi } from "./telemetry-ui";
+import { handleToolHooks } from "./tool-hooks";
 import { handleTrackers } from "./trackers";
 import { handleUsedBy } from "./used-by";
 import { handleUserRoles } from "./user-roles";
@@ -426,6 +427,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleToolHooks(req, res, pathSegments, queryParams, myAgentId),
         () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
