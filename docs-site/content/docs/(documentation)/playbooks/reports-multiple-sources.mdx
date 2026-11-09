@@ -71,6 +71,8 @@ Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-too
 - [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — digests skip on a quiet day instead of posting an empty report.
 - For preparing a supplier renewal briefing from several documents for a human owner, see the [supplier renewal decision guide](https://www.agent-swarm.dev/blog/omnia/ai-supplier-renewal-decision).
 
+The same fetch-then-synthesize split applied to booking records, where a person owns any change, is worked through in [Investigating booking discrepancies with AI agents](https://www.agent-swarm.dev/blog/omnia/ai-booking-exception-triage).
+
 ## Tips for new swarm users
 
 - **Use deterministic `swarm-script` nodes for "fetch + JSON" sections.** Keep the LLM out of the loop where it adds no value — faster, cheaper, more reliable.
