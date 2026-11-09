@@ -64,7 +64,15 @@ export const BASELINE_ENV_KEYS = [
   "SLACK_SIGNING_SECRET",
   "STEERING_ENABLED",
   "AGENT_FS_API_URL",
+  // Prompt-shaping keys the test clears too: without them a capture run in a
+  // live worker env bakes its link base and rich-cards flag into the baseline.
+  "AGENT_FS_LINK_TARGET",
+  "AGENT_FS_LIVE_URL",
+  "AGENT_FS_PUBLIC_URL",
+  "APP_URL",
+  "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
+  "UI_SPEC_ENABLED",
 ] as const;
 
 export const baselineKey = (deployment: string, name: string): string => `${deployment} / ${name}`;
