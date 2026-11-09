@@ -112,7 +112,7 @@ docker compose config | grep -E 'image: .*(agent-swarm|agent-swarm-worker):'
 ```
 
 <Callout type="warn">
-**Leaving `AGENT_SWARM_VERSION` blank tracks `:latest`, which is not a release.** `:latest` moves to a newer `main` build up to three times a day; a version tag is published only when the release version changes. The compose example sets `pull_policy: always`, so an unpinned deployment can move to a newer build on any `up -d` or restart — including one you did not intend as an upgrade. Pin anything you depend on.
+**Leaving `AGENT_SWARM_VERSION` blank tracks `:latest`, which is not a release.** `:latest` is rebuilt and moved on every commit to `main`; a version tag is published only when the release version changes. The compose example sets `pull_policy: always`, so an unpinned deployment can move to a newer build on any `up -d` or restart — including one you did not intend as an upgrade. Pin anything you depend on.
 </Callout>
 
 Changing this value later is an upgrade, not a restart. Migrations are forward-only, so re-pinning to an older tag does **not** roll back a schema change — a database backup taken before the upgrade does. Back up first ([Backing Up the Database](#backing-up-the-database) and [Backing up the key](#backing-up-the-key)), then:
@@ -555,7 +555,7 @@ Run individual Claude workers in containers without Compose.
 ### Pull from Registry
 
 ```bash
-# Pin a release. `:latest` moves to a newer `main` build up to three times a day and is not a release.
+# Pin a release. `:latest` moves on every commit to `main` and is not a release.
 docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```
 

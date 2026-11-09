@@ -86,7 +86,7 @@ Removing personal volumes also removes generated IDs.
 
 **Step 4:** Pin the image version.
 
-`AGENT_SWARM_VERSION` in `.env` drives the tag for the API and every agent service. Leaving it blank resolves to `:latest`, which moves to a newer `main` build up to three times a day — it is not a release. A version tag is published only when the release version changes. Because the example sets `pull_policy: always`, an unpinned deployment can move to a newer build on any `up -d` or container restart, which lets the API and the agents drift onto different code.
+`AGENT_SWARM_VERSION` in `.env` drives the tag for the API and every agent service. Leaving it blank resolves to `:latest`, which is rebuilt and moved on **every commit to `main`** — it is not a release. A version tag is published only when the release version changes. Because the example sets `pull_policy: always`, an unpinned deployment can move to a newer build on any `up -d` or container restart, which lets the API and the agents drift onto different code.
 
 Pin a version from [releases](https://github.com/desplega-ai/agent-swarm/releases) and confirm every service resolved the same tag:
 
@@ -236,7 +236,7 @@ Run individual Claude workers in containers.
 ### Pull from Registry
 
 ```bash
-# Pin a release. `:latest` moves to a newer `main` build up to three times a day and is not a release.
+# Pin a release. `:latest` is rebuilt on every commit to `main` and is not a release.
 docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 
 # Slim variant for CI/E2E (all four harnesses, no playwright/postgres/redis/glab
