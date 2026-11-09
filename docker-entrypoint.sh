@@ -307,9 +307,22 @@ git config --system --add safe.directory '*' 2>/dev/null || true
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
+# BEGIN chown_no_follow
+# A persistent workspace keeps worker-written files across boots, so a worker can
+# leave a symlink where root chowns next boot. Chown only a path with no symlink
+# in it, and never dereference.
+chown_no_follow() {
+    local path="$1"
+    if [ "$(realpath -m -- "$path" 2>/dev/null)" != "$path" ]; then
+        echo "  Warning: not chowning ${path}: it resolves through a symlink"
+        return 0
+    fi
+    chown -h worker:worker "$path" 2>/dev/null || true
+}
+# END chown_no_follow
 # chown individual dirs (not -R) to avoid EPERM on mount-managed system files
-chown worker:worker /workspace/personal 2>/dev/null || true
-chown worker:worker /workspace/personal/memory 2>/dev/null || true
+chown_no_follow /workspace/personal
+chown_no_follow /workspace/personal/memory
 # A reused named volume keeps the owner from its first mount, which may be root.
 chown worker:worker /logs 2>/dev/null || true
 
@@ -694,7 +707,7 @@ if [ -n "$AGENT_ID" ]; then
                 # gosu-dropped clone/pull below can write into it. Lenient chown
                 # mirrors the pattern used for /workspace/personal subdirs above.
                 mkdir -p "$(dirname "$REPO_DIR")"
-                chown worker:worker "$(dirname "$REPO_DIR")" 2>/dev/null || true
+                chown_no_follow "$(dirname "$REPO_DIR")"
 
                 # Run clone/pull as the worker user so .git ends up worker-owned
                 # — otherwise the runner (post-gosu) hits "dubious ownership".
