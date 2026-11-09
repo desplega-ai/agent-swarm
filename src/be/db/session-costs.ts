@@ -2,6 +2,7 @@ import { chatgptSubscriptionModelId } from "@desplega/model-catalog";
 import {
   type ProviderName,
   type SessionCost,
+  type SessionCostKind,
   type SessionCostModelBreakdown,
   SessionCostModelBreakdownSchema,
   type SessionCostSource,
@@ -39,6 +40,7 @@ export type SessionCostRow = {
   model: string;
   isError: number;
   costSource: string;
+  kind: string;
   harnessCostUsd: number | null;
   cacheWrite5mTokens: number | null;
   cacheWrite1hTokens: number | null;
@@ -79,6 +81,7 @@ export function rowToSessionCost(row: SessionCostRow): SessionCost {
     model: row.model,
     isError: row.isError === 1,
     costSource: (row.costSource as SessionCostSource) ?? "harness",
+    kind: (row.kind as SessionCostKind) ?? "harness",
     harnessCostUsd: row.harnessCostUsd,
     cacheWrite5mTokens: row.cacheWrite5mTokens,
     cacheWrite1hTokens: row.cacheWrite1hTokens,
@@ -120,6 +123,8 @@ export interface CreateSessionCostInput {
    *                       (amp with a failed thread export).
    */
   costSource?: SessionCostSource;
+  /** Migration 318: 'system-one' for a SystemOne decision made for the task. */
+  kind?: SessionCostKind;
   harnessCostUsd?: number | null;
   cacheWrite5mTokens?: number | null;
   cacheWrite1hTokens?: number | null;
@@ -172,9 +177,9 @@ export async function insertSessionCost(
          reasoningOutputTokens, thinkingTokens,
          durationMs, numTurns, model, isError,
          costSource, harnessCostUsd, cacheWrite5mTokens, cacheWrite1hTokens,
-         modelBreakdown, credentialKeyType, credentialKeySuffix, harness, createdAt
+         modelBreakdown, credentialKeyType, credentialKeySuffix, harness, kind, createdAt
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(id) DO NOTHING`,
       [
         id,
@@ -209,6 +214,7 @@ export async function insertSessionCost(
         input.credentialKeyType ?? null,
         input.credentialKeySuffix ?? null,
         input.harness ?? null,
+        input.kind ?? "harness",
       ],
     );
 

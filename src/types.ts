@@ -2009,6 +2009,11 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+// Migration 318: what incurred the row. 'harness' is a worker session;
+// 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
+export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
+export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;
+
 export const SessionCostModelBreakdownSchema = z
   .object({
     model: z.string(),
@@ -2056,6 +2061,7 @@ export const SessionCostSchema = z
     //   'estimated'      — the API priced fallback token counts at an assumed
     //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
+    kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
     cacheWrite5mTokens: z.number().int().nullable().optional(),
@@ -4184,6 +4190,9 @@ export const PricingProviderSchema = z.enum([
   "cursor",
   "grok",
   "fx",
+  // SystemOne decisions recorded on a task; model keys are `<host>/<model>`
+  // (e.g. `cloudflare/clef`). No seeded rows: unpriced until an operator adds one.
+  "system-one",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 
