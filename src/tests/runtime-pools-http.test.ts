@@ -310,12 +310,12 @@ describe("runtime pools HTTP", () => {
     expect(pool.status).toBe(200);
     expect(pool.data.pool.kind).toBe("k8s");
   });
-  test("user controller writers cannot configure Kubernetes host file paths", async () => {
+  test("user controller writers cannot configure Kubernetes host files or deployment detection", async () => {
     const input = { name: "k8s-files", kind: "k8s", placement: "builtin" };
     const created = await dispatch("/api/runtime-controllers", "POST", input, "user");
     expect(created.status).toBe(200);
     const id = created.data.controller.id;
-    for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"]) {
+    for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE", "KUBERNETES_SERVICE_HOST"]) {
       for (const field of ["config", "secretConfig"]) {
         const patch = { [field]: { [key]: "/var/run/secrets/kubernetes.io/serviceaccount/token" } };
         const rejected = await dispatch(

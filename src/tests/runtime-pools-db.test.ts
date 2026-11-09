@@ -20,6 +20,7 @@ import {
   getPoolForAgent,
   getRuntimeController,
   getRuntimeControllerSecrets,
+  getRuntimeControllerTarget,
   getRuntimePool,
   listAgentsForPool,
   listRuntimeControllers,
@@ -52,6 +53,24 @@ beforeEach(async () => {
 });
 
 describe("runtime pools persistence", () => {
+  test("Kubernetes deployment detection ignores controller overrides from existing rows", async () => {
+    const controller = await createRuntimeController({
+      name: "cluster-auth",
+      kind: "k8s",
+      placement: "builtin",
+    });
+    await getDbClient().run("UPDATE runtime_controllers SET config = ? WHERE id = ?", [
+      JSON.stringify({ KUBERNETES_SERVICE_HOST: "controller-host" }),
+      controller.id,
+    ]);
+    const stored = (await getRuntimeController(controller.id))!;
+    expect((await getRuntimeControllerTarget(stored, {})).KUBERNETES_SERVICE_HOST).toBeUndefined();
+    expect(
+      (await getRuntimeControllerTarget(stored, { KUBERNETES_SERVICE_HOST: "deployment-host" }))
+        .KUBERNETES_SERVICE_HOST,
+    ).toBe("deployment-host");
+  });
+
   test("pool caches default off, persist across edits, and can be disabled explicitly", async () => {
     const controller = await createRuntimeController({ name: "cache-controller", kind: "docker" });
     const base = {

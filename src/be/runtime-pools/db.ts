@@ -96,6 +96,11 @@ function validateRuntimeController(controller: {
   for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"])
     if (key in controller.config || typeof controller.secretConfig?.[key] === "string")
       throw new RuntimePoolError("Kubernetes controller file paths are not supported.");
+  if (
+    "KUBERNETES_SERVICE_HOST" in controller.config ||
+    typeof controller.secretConfig?.KUBERNETES_SERVICE_HOST === "string"
+  )
+    throw new RuntimePoolError("Kubernetes deployment detection overrides are not supported.");
 }
 
 export async function listRuntimeControllers(): Promise<RuntimeController[]> {
@@ -129,7 +134,6 @@ export async function getRuntimeControllerTarget(
   for (const [key, value] of Object.entries(secrets))
     registerVolatileSecret(value, `runtime-controller:${controller.id}:${key}`);
   return {
-    KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,
     DOCKER_HOST: env.DOCKER_HOST,
     DOCKER_NETWORK: env.DOCKER_NETWORK,
     DOCKER_EXTRA_HOSTS: env.DOCKER_EXTRA_HOSTS,
@@ -153,6 +157,7 @@ export async function getRuntimeControllerTarget(
       : {}),
     ...controller.config,
     ...secrets,
+    KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,
   };
 }
 
