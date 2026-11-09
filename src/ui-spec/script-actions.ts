@@ -1,5 +1,5 @@
 import { createLogEntry, getDbClient, getSwarmConfigs } from "../be/db";
-import { getScript } from "../be/scripts/db";
+import { getGlobalScriptContentHashes, getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import {
   acquireTaskUiScriptActionRun,
@@ -130,7 +130,8 @@ function argsIssue(actionId: string, action: ScriptAction, script: ScriptRecord)
 /**
  * Write-time issues of every `script` action in `actions`. Empty when all pass.
  * Reads the allowlist once and each named script once. store-progress calls
- * it before its write transaction, so no lookup runs under the write lock.
+ * it before its write transaction, then re-checks only the pins inside it
+ * with `scriptActionPinIssues`.
  */
 export async function scriptActionIssues(
   actions: Record<string, TaskUiSpecAction> | undefined,
@@ -147,6 +148,37 @@ export async function scriptActionIssues(
     const resolved = await resolveScriptAction(actionId, action, lookups);
     const issue = resolved.ok ? argsIssue(actionId, action, resolved.script) : resolved.issue;
     if (issue) issues.push(issue);
+  }
+  return issues;
+}
+
+/**
+ * The pin re-check that runs inside the write transaction of every uiSpec
+ * store (store-progress and a click refresh), after `scriptActionIssues`
+ * passed outside it. It closes the gap where a pin is removed, or a script
+ * edited, between that check and the write. Bounded: one
+ * allowlist read and one hash query, whatever the number of actions.
+ */
+export async function scriptActionPinIssues(
+  actions: Record<string, TaskUiSpecAction> | undefined,
+): Promise<string[]> {
+  const scriptActions = Object.entries(actions ?? {}).filter(
+    (entry): entry is [string, ScriptAction] => entry[1].kind === "script",
+  );
+  if (scriptActions.length === 0) return [];
+  const allPins = parseScriptActionAllowlist(await readScriptActionAllowlist()).pins;
+  const hashes = await getGlobalScriptContentHashes([
+    ...new Set(scriptActions.map(([, action]) => action.script)),
+  ]);
+  const issues: string[] = [];
+  for (const [actionId, action] of scriptActions) {
+    const hash = hashes.get(action.script)?.toLowerCase();
+    const pins = allPins.filter((pin) => pin.name === action.script);
+    if (!hash || !pins.some((pin) => hash.startsWith(pin.hashPrefix))) {
+      issues.push(
+        `Action "${actionId}": script "${action.script}" is no longer allowlisted at its current contentHash in UI_SPEC_SCRIPT_ACTIONS.`,
+      );
+    }
   }
   return issues;
 }
@@ -274,6 +306,18 @@ export async function runTaskUiScriptAction({
     };
   }
 
+  if (outcome.ok) {
+    // Re-check the new card's pins in the write itself, so a pin removed while
+    // the script ran never lands as an armed button.
+    const okOutcome = outcome;
+    const pinIssue = await getDbClient().transaction(async () => {
+      const [issue] = await scriptActionPinIssues(okOutcome.uiSpec.actions);
+      if (!issue) await upsertTaskUiSpec(task.id, okOutcome.uiSpec, actorUserId);
+      return issue;
+    });
+    if (pinIssue) outcome = { ok: false, kind: "invalid_output", error: pinIssue };
+  }
+
   if (!outcome.ok) {
     const error = shortError(outcome.error);
     await finishTaskUiScriptActionRun(task.id, actionId, error);
@@ -287,7 +331,6 @@ export async function runTaskUiScriptAction({
     return { status: outcome.kind, error };
   }
 
-  await upsertTaskUiSpec(task.id, outcome.uiSpec, actorUserId);
   await finishTaskUiScriptActionRun(task.id, actionId, null);
   getDbClient().afterCommit(() =>
     workflowEventBus.emit(TASK_UI_SPEC_UPDATED_EVENT, { taskId: task.id }),

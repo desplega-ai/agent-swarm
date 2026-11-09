@@ -82,6 +82,21 @@ async function taskWithRefresh(): Promise<string> {
   return task.id;
 }
 
+type StoreProgressHandler = (
+  a: unknown,
+  m: unknown,
+) => Promise<{ structuredContent: { success: boolean; message: string } }>;
+
+function storeProgressHandler(): StoreProgressHandler {
+  const server = new McpServer({ name: "script-action-test", version: "1" });
+  registerStoreProgressTool(server);
+  return (
+    server as unknown as {
+      _registeredTools: Record<string, { handler: StoreProgressHandler }>;
+    }
+  )._registeredTools["store-progress"]!.handler;
+}
+
 const click = (taskId: string, actorUserId = requesterId) =>
   runTaskUiAction({ taskId, actionId: "refresh", surface: "web", actorUserId });
 
@@ -234,21 +249,7 @@ describe("write-time checks", () => {
       return realGetSwarmConfigs(filter);
     });
     process.env.UI_SPEC_SCRIPT_ACTIONS = "";
-    const server = new McpServer({ name: "script-action-test", version: "1" });
-    registerStoreProgressTool(server);
-    const handler = (
-      server as unknown as {
-        _registeredTools: Record<
-          string,
-          {
-            handler: (
-              a: unknown,
-              m: unknown,
-            ) => Promise<{ structuredContent: { success: boolean; message: string } }>;
-          }
-        >;
-      }
-    )._registeredTools["store-progress"]!.handler;
+    const handler = storeProgressHandler();
     const task = await createTaskExtended("Refuse script", { agentId, source: "system" });
     await startTask(task.id);
     const args = {
@@ -267,6 +268,63 @@ describe("write-time checks", () => {
     expect(await getTaskUiSpec(task.id)).toBeNull();
     configSpy.mockRestore();
     expect(allowlistReadsInTransaction).toEqual([false, false]);
+  });
+
+  test("store-progress re-checks pins inside the transaction with bounded work", async () => {
+    const handler = storeProgressHandler();
+    const meta = { requestInfo: { headers: { "x-agent-id": agentId } } };
+    const realGetSwarmConfigs = dbModule.getSwarmConfigs;
+    const reads: boolean[] = [];
+    let revokeAfterPrecheck = false;
+    const configSpy = spyOn(dbModule, "getSwarmConfigs").mockImplementation(async (filter) => {
+      if (filter?.key !== "UI_SPEC_SCRIPT_ACTIONS") return realGetSwarmConfigs(filter);
+      reads.push(isInTransaction());
+      // The pre-check has passed; the pin is gone by the time the transaction reads it.
+      if (revokeAfterPrecheck && isInTransaction()) process.env.UI_SPEC_SCRIPT_ACTIONS = "";
+      return realGetSwarmConfigs(filter);
+    });
+    const scriptSpy = spyOn(scriptsDbModule, "getScript");
+    const hashSpy = spyOn(scriptsDbModule, "getGlobalScriptContentHashes");
+    const complete = async (title: string) => {
+      const task = await createTaskExtended(title, { agentId, source: "system" });
+      await startTask(task.id);
+      const actions = Object.fromEntries(
+        Array.from({ length: UI_SPEC_MAX_ACTIONS - 1 }, (_, i) => [`a${i}`, refreshAction]),
+      );
+      const result = await handler(
+        {
+          taskId: task.id,
+          status: "completed",
+          output: "Done",
+          uiSpec: { spec: card("Deploys"), actions: { refresh: refreshAction, ...actions } },
+        },
+        meta,
+      );
+      return { taskId: task.id, result };
+    };
+    try {
+      // Positive control: the pin holds, the card is stored, and the
+      // transaction did one allowlist read and one hash query.
+      const kept = await complete("Pin holds");
+      expect(kept.result.structuredContent.success).toBe(true);
+      expect(await getTaskUiSpec(kept.taskId)).not.toBeNull();
+      expect(reads).toEqual([false, true]);
+      expect(hashSpy).toHaveBeenCalledTimes(1);
+      expect(scriptSpy).toHaveBeenCalledTimes(1);
+
+      reads.length = 0;
+      revokeAfterPrecheck = true;
+      const revoked = await complete("Pin revoked before BEGIN");
+      expect(revoked.result.structuredContent.success).toBe(false);
+      expect(revoked.result.structuredContent.message).toContain("no longer allowlisted");
+      expect(await getTaskUiSpec(revoked.taskId)).toBeNull();
+      expect((await getTaskById(revoked.taskId))?.status).not.toBe("completed");
+      expect(reads).toEqual([false, true]);
+    } finally {
+      configSpy.mockRestore();
+      scriptSpy.mockRestore();
+      hashSpy.mockRestore();
+    }
   });
 });
 
@@ -357,6 +415,27 @@ describe("runTaskUiAction with a script action", () => {
     const result = await click(taskId);
     expect(result).toMatchObject({ status: "invalid_output" });
     expect((result as { error: string }).error).toContain('names action "refresh"');
+  });
+
+  test("a pin removed after the output check keeps the old card", async () => {
+    const taskId = await taskWithRefresh();
+    const realGetSwarmConfigs = dbModule.getSwarmConfigs;
+    const configSpy = spyOn(dbModule, "getSwarmConfigs").mockImplementation(async (filter) => {
+      // Every check outside the write passes; the pin is gone when the write re-reads it.
+      if (filter?.key === "UI_SPEC_SCRIPT_ACTIONS" && isInTransaction())
+        process.env.UI_SPEC_SCRIPT_ACTIONS = "";
+      return realGetSwarmConfigs(filter);
+    });
+    try {
+      const result = await click(taskId);
+      expect(result).toMatchObject({ status: "invalid_output" });
+      expect((result as { error: string }).error).toContain("no longer allowlisted");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect((await getTaskUiSpec(taskId))?.fallbackText).toBe("Deploys: 1");
+      expect((await runRow(taskId))?.lockedUntil).toBeNull();
+    } finally {
+      configSpy.mockRestore();
+    }
   });
 
   test("a failed script keeps the old card", async () => {

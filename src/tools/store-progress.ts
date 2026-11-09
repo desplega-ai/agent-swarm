@@ -40,7 +40,7 @@ import {
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { TaskUiSpecInputSchema } from "@/ui-spec/schema";
-import { scriptActionIssues } from "@/ui-spec/script-actions";
+import { scriptActionIssues, scriptActionPinIssues } from "@/ui-spec/script-actions";
 import { validateTaskUiSpec } from "@/ui-spec/validate";
 import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -407,9 +407,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
       }
 
       let learningWrite: Promise<TaskLearningResult> | undefined;
-      // Script-action checks read config and scripts. They run here, before the
-      // BEGIN IMMEDIATE below, so those reads never hold the write lock. A click
-      // re-checks the allowlist, so a pin removed in between still disarms it.
+      // The full script-action checks (allowlist, scripts, args schemas) run
+      // here, before the BEGIN IMMEDIATE below, so they never hold the write
+      // lock. The transaction re-checks only the pins, with bounded work, so a
+      // pin removed in between refuses the card instead of storing it.
       const uiSpecScriptIssues =
         uiSpec && status === "completed" && isEnvFlagEnabled("UI_SPEC_ENABLED", false)
           ? await scriptActionIssues(uiSpec.actions)
@@ -634,9 +635,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
           uiSpecNote = 'uiSpec is stored only with status "completed".';
         } else if (uiSpec) {
           // Script actions are checked first, so a bad one uses the same single refusal.
-          const validation =
+          const scriptIssues =
             uiSpecScriptIssues.length > 0
-              ? { ok: false as const, issues: uiSpecScriptIssues }
+              ? uiSpecScriptIssues
+              : await scriptActionPinIssues(uiSpec.actions);
+          const validation =
+            scriptIssues.length > 0
+              ? { ok: false as const, issues: scriptIssues }
               : validateTaskUiSpec(uiSpec, {
                   taskId,
                   actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),
