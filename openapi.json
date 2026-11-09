@@ -5569,6 +5569,19 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                     }
                   },
                   "required": [
@@ -6334,6 +6347,19 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                     }
                   },
                   "required": [
@@ -71351,6 +71377,19 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                             }
                           },
                           "required": [
@@ -71772,6 +71811,19 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                             }
                           },
                           "required": [
@@ -73014,6 +73066,41 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "skipped": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "event-not-allowed"
+                      ]
+                    },
+                    "event": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "skipped",
+                    "reason",
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
           "201": {
             "description": "Webhook processed",
             "content": {
