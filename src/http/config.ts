@@ -192,7 +192,8 @@ export async function ensureConfigAdmin(
  * A human-only key (see `isHumanOnlyConfigKey`) needs an admin user: a user
  * token or a dashboard session. The operator key resolves to the operator,
  * and every worker holds it, so it is refused like an agent or a guest. A
- * page session is refused whoever its viewer is.
+ * page session is refused whoever its viewer is. The operator key can still
+ * mint an admin user token; see the limit on `HUMAN_ONLY_CONFIG_KEYS`.
  * Returns true when the request may proceed; on denial it writes a 403.
  */
 export async function ensureHumanOnlyConfigWrite(

@@ -124,6 +124,14 @@ export function internalConfigKeyError(key: string): Error {
  * delete: never an agent, the Lead included, a guest, or the shared operator
  * key, which every worker holds. The deployment env can still seed them.
  * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
+ *
+ * shortcut: this stops direct writes, not a determined holder of the
+ * operator key. That key is root: it can create an admin user and mint a
+ * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
+ * nothing from a pin, because a script action runs as the card's own agent,
+ * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * (deployment-env only, or an out-of-band human approval) if workers stop
+ * holding the operator key.
  */
 const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
 
