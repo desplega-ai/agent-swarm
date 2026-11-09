@@ -261,12 +261,24 @@ describe("migration 117 consolidated connections-redesign schema", () => {
           new Date().toISOString(),
           new Bun.CryptoHasher("sha256").update(migration213).digest("hex"),
         );
+      // 318 indexes the oauth tables that 117 creates, so it must wait for 117 too.
+      const migration318 = readFileSync("src/be/migrations/318_user_fk_indexes.sql", "utf-8");
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          318,
+          "318_user_fk_indexes",
+          new Date().toISOString(),
+          new Bun.CryptoHasher("sha256").update(migration318).digest("hex"),
+        );
       runMigrations(database);
       database.run(
         `INSERT INTO script_connections (id, slug, kind, base_url)
          VALUES ('existing', 'existing', 'raw', 'https://api.vendor.test')`,
       );
-      database.run("DELETE FROM _migrations WHERE version IN (117, 213)");
+      database.run("DELETE FROM _migrations WHERE version IN (117, 213, 318)");
       runMigrations(database);
       expect(
         database
