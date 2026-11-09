@@ -1,3 +1,4 @@
+import { validateOutputSchema } from "./output-schema-validation";
 import {
   getDbClient,
   getRetryableSteps,
@@ -180,7 +181,19 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 await resumeFromChildRun(step.id, registry);
               }
             } else {
-              // Success! Re-run validation if configured before checkpointing.
+              // Success! Validate outputSchema then re-run validation if configured before checkpointing.
+              const schemaError = validateOutputSchema(node, result);
+              if (schemaError) {
+                await checkpointStepFailure(
+                  run.id,
+                  step.id,
+                  schemaError,
+                  step.retryCount,
+                  undefined,
+                  { fence },
+                );
+                continue;
+              }
               let validationPassed: boolean | undefined;
               if (node.validation) {
                 const validationResult = await runStepValidation(

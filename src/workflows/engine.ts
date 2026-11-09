@@ -51,6 +51,7 @@ import { parkAndDriveForeach } from "./foreach-driver";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
+import { validateOutputSchema } from "./output-schema-validation";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
@@ -1172,19 +1173,13 @@ async function runClaimedStep(
   }
 
   // 6b. Validate output against node-level outputSchema if defined
-  if (node.outputSchema && result.status === "success") {
-    const outputErrors = validateJsonSchema(
-      node.outputSchema as Record<string, unknown>,
-      result.output,
-    );
-    if (outputErrors.length > 0) {
-      const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
-      const { stale: lost } = await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, {
-        fence,
-      });
-      if (lost) return stale;
-      throw new Error(errorMsg);
-    }
+  const schemaError = validateOutputSchema(node, result);
+  if (schemaError) {
+    const { stale: lost } = await checkpointStepFailure(runId, stepId, schemaError, 0, undefined, {
+      fence,
+    });
+    if (lost) return stale;
+    throw new Error(schemaError);
   }
 
   // 7. Run validation if configured
