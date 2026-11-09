@@ -27,6 +27,6 @@ Run `bash ./test-tlc.sh` to check the launcher's caps and argument forwarding wi
 
 `run-props.sh` checks the invariants in one TLC run and the temporal properties in another. TLC stops at the first violation, so a violation it names is reported and the run repeats with the rest; an unnamed temporal violation or a TLC error re-checks that group one property per run. Each line still names one property. `TLC_SPLIT=1` runs one TLC per property, as before.
 
-Set `TLC_CACHE_DIR` to a directory that survives restarts to keep each verdict, keyed by a hash of the `.tla` modules, the generated cfg, `tlc.sh` and `tla2tools.jar`. A re-run with the same inputs prints the stored line marked `cached` instead of running TLC, so a restart mid-run loses only the TLC run in flight. TLC errors are never stored. Run `bash ./test-run-props.sh` to check the grouping and the cache with a stub TLC.
+Set `TLC_CACHE_DIR` to a directory that survives restarts to keep each verdict, keyed by a hash of the `.tla` modules, the root module name, the generated cfg, `tlc.sh` and `tla2tools.jar`. A re-run with the same inputs prints the stored line marked `cached` instead of running TLC, so a restart mid-run loses only the TLC run in flight. TLC errors are never stored. Run `bash ./test-run-props.sh` to check the grouping and the cache with a stub TLC.
 
 A green run proves the model, not the code. When a file named in `ACTIONS.md` changes, re-check that its row is still true.
