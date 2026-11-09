@@ -148,13 +148,9 @@ describe("runtime pools persistence", () => {
     expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
   });
 
-  test("workspace pools are accepted on Docker, rejected elsewhere, and kept on update", async () => {
-    for (const kind of ["static", "e2b", "boxd", "k8s"] as const) {
-      const controller = await createRuntimeController({
-        name: `${kind}-ws-validation`,
-        kind,
-        ...(kind === "k8s" ? { placement: "builtin" as const } : {}),
-      });
+  test("workspace pools are accepted on Docker and k8s, rejected elsewhere, and kept on update", async () => {
+    for (const kind of ["static", "e2b", "boxd"] as const) {
+      const controller = await createRuntimeController({ name: `${kind}-ws-validation`, kind });
       await expect(
         createRuntimePool({
           name: `unsupported-workspace-${kind}`,
@@ -165,6 +161,19 @@ describe("runtime pools persistence", () => {
         }),
       ).rejects.toThrow(`${kind} does not support persistent workspaces`);
     }
+    const k8s = await createRuntimeController({
+      name: "k8s-ws-validation",
+      kind: "k8s",
+      placement: "builtin",
+    });
+    const k8sPool = await createRuntimePool({
+      name: "k8s-workspace",
+      kind: "k8s",
+      placements: [k8s.id],
+      image: "worker:test",
+      workspace: { sizeGb: 10 },
+    });
+    expect(k8sPool.workspace).toEqual({ sizeGb: 10 });
     const docker = await createRuntimeController({ name: "docker-ws-validation", kind: "docker" });
     await expect(
       createRuntimePool({

@@ -8,6 +8,8 @@ import {
   type RuntimeProvider,
   type RuntimeStatus,
   type RuntimeTargetConfig,
+  WORKSPACE_LABEL,
+  WORKSPACE_MOUNT_PATH,
 } from "./types";
 
 const SERVICE_ACCOUNT_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
@@ -25,13 +27,20 @@ type Pod = {
   status?: { phase?: string };
 };
 
+type PersistentVolumeClaim = {
+  metadata: { name: string; labels?: Record<string, string> };
+};
+
+type KubernetesResource = "pods" | "persistentvolumeclaims";
+
 class KubernetesApiError extends Error {
   constructor(
     readonly statusCode: number,
     method: string,
+    resource: KubernetesResource,
   ) {
     // Kubernetes validation errors can echo the complete pod, including worker credentials.
-    super(`Kubernetes ${method} pods failed (${statusCode})`);
+    super(`Kubernetes ${method} ${resource} failed (${statusCode})`);
   }
 }
 
@@ -75,6 +84,7 @@ async function kubernetesApi<T>(
   method: string,
   suffix = "",
   body?: unknown,
+  resource: KubernetesResource = "pods",
 ): Promise<T> {
   const config = configuration(target);
   const token = target.K8S_TOKEN?.trim() || (await Bun.file(config.tokenFile!).text()).trim();
@@ -83,7 +93,7 @@ async function kubernetesApi<T>(
     target.K8S_CA_CERT || (config.caFile ? await Bun.file(config.caFile).text() : undefined);
   try {
     const response = await fetch(
-      new URL(`/api/v1/namespaces/${config.namespace}/pods${suffix}`, config.url),
+      new URL(`/api/v1/namespaces/${config.namespace}/${resource}${suffix}`, config.url),
       {
         method,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -95,7 +105,7 @@ async function kubernetesApi<T>(
     );
     if (!response.ok) {
       await response.body?.cancel();
-      throw new KubernetesApiError(response.status, method);
+      throw new KubernetesApiError(response.status, method, resource);
     }
     return (await response.json()) as T;
   } catch (error) {
@@ -117,6 +127,63 @@ function podHandle(pod: Pod): RuntimeHandle {
   };
 }
 
+/**
+ * Gets or creates the agent's workspace claim. ReadWriteOncePod lets one pod mount it at a
+ * time, which is the infra fence against a second runtime in the same slot. No
+ * ownerReferences: the claim outlives the pod and the pool, and the swarm never deletes it.
+ */
+async function ensureWorkspaceClaim(
+  target: RuntimeTargetConfig,
+  req: ProvisionRequest,
+  workspace: NonNullable<ProvisionRequest["workspace"]>,
+): Promise<void> {
+  const path = `/${encodeURIComponent(workspace.key)}`;
+  let claim: PersistentVolumeClaim;
+  try {
+    claim = await kubernetesApi<PersistentVolumeClaim>(
+      target,
+      "GET",
+      path,
+      undefined,
+      "persistentvolumeclaims",
+    );
+  } catch (error) {
+    if (!(error instanceof KubernetesApiError && error.statusCode === 404)) throw error;
+    claim = await kubernetesApi<PersistentVolumeClaim>(
+      target,
+      "POST",
+      "",
+      {
+        apiVersion: "v1",
+        kind: "PersistentVolumeClaim",
+        metadata: {
+          name: workspace.key,
+          namespace: configuration(target).namespace,
+          labels: {
+            [RUNTIME_LABELS.owner]: req.ownerId,
+            [RUNTIME_LABELS.agentId]: req.agentId,
+            [WORKSPACE_LABEL]: "true",
+          },
+        },
+        spec: {
+          accessModes: ["ReadWriteOncePod"],
+          resources: { requests: { storage: `${workspace.sizeGb ?? 20}Gi` } },
+          ...(target.K8S_STORAGE_CLASS ? { storageClassName: target.K8S_STORAGE_CLASS } : {}),
+        },
+      },
+      "persistentvolumeclaims",
+    );
+  }
+  const labels = claim.metadata.labels;
+  if (
+    claim.metadata.name !== workspace.key ||
+    labels?.[RUNTIME_LABELS.owner] !== req.ownerId ||
+    labels?.[RUNTIME_LABELS.agentId] !== req.agentId ||
+    labels?.[WORKSPACE_LABEL] !== "true"
+  )
+    throw new Error(`Workspace claim ${workspace.key} is not owned by this swarm and agent`);
+}
+
 function handlePath(target: RuntimeTargetConfig, handle: RuntimeHandle): string {
   if (
     handle.kind !== "k8s" ||
@@ -129,7 +196,12 @@ function handlePath(target: RuntimeTargetConfig, handle: RuntimeHandle): string 
 
 export class KubernetesRuntimeProvider implements RuntimeProvider {
   readonly kind = "k8s" as const;
-  readonly traits = { canProvision: true, ephemeralDisk: true, supportsPause: false };
+  readonly traits = {
+    canProvision: true,
+    ephemeralDisk: true,
+    supportsPause: false,
+    persistentWorkspace: true,
+  };
 
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
     try {
@@ -154,6 +226,8 @@ export class KubernetesRuntimeProvider implements RuntimeProvider {
         ...(req.resources?.cpu ? { cpu: String(req.resources.cpu) } : {}),
         ...(req.resources?.memoryMb ? { memory: `${req.resources.memoryMb}Mi` } : {}),
       };
+      // Fail closed: a runtime never starts without its workspace.
+      if (req.workspace) await ensureWorkspaceClaim(target, req, req.workspace);
       const name = `swarm-rt-${req.runtimeId}`;
       const pod = await kubernetesApi<Pod>(target, "POST", "", {
         apiVersion: "v1",
@@ -177,11 +251,26 @@ export class KubernetesRuntimeProvider implements RuntimeProvider {
               image: req.image,
               env: Object.entries(req.env).map(([name, value]) => ({ name, value })),
               ...(Object.keys(limits).length ? { resources: { requests: limits, limits } } : {}),
+              ...(req.workspace
+                ? { volumeMounts: [{ name: "workspace", mountPath: WORKSPACE_MOUNT_PATH }] }
+                : {}),
             },
           ],
+          ...(req.workspace
+            ? {
+                volumes: [
+                  {
+                    name: "workspace",
+                    persistentVolumeClaim: { claimName: req.workspace.key },
+                  },
+                ],
+              }
+            : {}),
         },
       });
-      return podHandle(pod);
+      const handle = podHandle(pod);
+      if (req.workspace) handle.meta = { ...handle.meta, workspaceKey: req.workspace.key };
+      return handle;
     } catch (error) {
       throw new Error(redactWithEnv(scrubSecrets(String(error)), req.env));
     }

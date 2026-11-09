@@ -4,6 +4,7 @@ import {
   type ProvisionRequest,
   RUNTIME_LABELS,
   type RuntimeTargetConfig,
+  WORKSPACE_LABEL,
 } from "../runtime-providers/types";
 
 const provider = new KubernetesRuntimeProvider();
@@ -97,6 +98,8 @@ describe("Kubernetes runtime provider", () => {
         request,
       ),
     ).toEqual(handle);
+    // No workspace: one pod request, no claim call, and the exact pod body from before.
+    expect(calls).toHaveLength(1);
     expect(calls[0]?.method).toBe("POST");
     expect(new URL(calls[0]!.url).pathname).toBe("/api/v1/namespaces/workers/pods");
     expect(calls[0]?.headers.get("Authorization")).toBe(`Bearer ${target.K8S_TOKEN}`);
@@ -299,5 +302,109 @@ describe("Kubernetes runtime provider", () => {
       provider.provision(target, { ...request, cache: { key: "cache", mountPath: "/cache" } }),
     ).rejects.toThrow("do not support persistent caches");
     expect(calls).toHaveLength(0);
+  });
+
+  describe("persistent workspace", () => {
+    const key = `swarm-ws-${request.agentId.toLowerCase()}-0`;
+    const claimPath = `/api/v1/namespaces/workers/persistentvolumeclaims/${key}`;
+    const claimLabels = {
+      [RUNTIME_LABELS.owner]: request.ownerId,
+      [RUNTIME_LABELS.agentId]: request.agentId,
+      [WORKSPACE_LABEL]: "true",
+    };
+    let bodies: Array<{ method: string; path: string; body: Record<string, unknown> | null }>;
+    function serve(existingClaim: Response | null) {
+      bodies = [];
+      handler = async (req) => {
+        const path = new URL(req.url).pathname;
+        const text = await req.text();
+        bodies.push({ method: req.method, path, body: text ? JSON.parse(text) : null });
+        if (path.includes("/persistentvolumeclaims")) {
+          if (req.method === "GET") return existingClaim ?? Response.json({}, { status: 404 });
+          return Response.json({ metadata: { name: key, labels: claimLabels } });
+        }
+        return Response.json({ metadata });
+      };
+    }
+
+    test("creates a ReadWriteOncePod claim, mounts it at /workspace/personal and echoes the key", async () => {
+      serve(null);
+      const created = await provider.provision(
+        { ...target, K8S_STORAGE_CLASS: "fast-rwop" },
+        { ...request, workspace: { key, sizeGb: 50 } },
+      );
+      expect(created.meta?.workspaceKey).toBe(key);
+      expect(bodies.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        `GET ${claimPath}`,
+        "POST /api/v1/namespaces/workers/persistentvolumeclaims",
+        "POST /api/v1/namespaces/workers/pods",
+      ]);
+      expect(bodies[1]?.body).toEqual({
+        apiVersion: "v1",
+        kind: "PersistentVolumeClaim",
+        metadata: { name: key, namespace: "workers", labels: claimLabels },
+        spec: {
+          accessModes: ["ReadWriteOncePod"],
+          resources: { requests: { storage: "50Gi" } },
+          storageClassName: "fast-rwop",
+        },
+      });
+      const spec = bodies[2]!.body!.spec as {
+        containers: Array<{ volumeMounts?: unknown }>;
+        volumes?: unknown;
+      };
+      expect(spec.containers[0]?.volumeMounts).toEqual([
+        { name: "workspace", mountPath: "/workspace/personal" },
+      ]);
+      expect(spec.volumes).toEqual([
+        { name: "workspace", persistentVolumeClaim: { claimName: key } },
+      ]);
+    });
+
+    test("defaults to 20Gi and the cluster storage class", async () => {
+      serve(null);
+      await provider.provision(target, { ...request, workspace: { key } });
+      expect(bodies[1]?.body?.spec).toEqual({
+        accessModes: ["ReadWriteOncePod"],
+        resources: { requests: { storage: "20Gi" } },
+      });
+    });
+
+    test("reuses an owned claim without creating one", async () => {
+      serve(Response.json({ metadata: { name: key, labels: claimLabels } }));
+      await provider.provision(target, { ...request, workspace: { key } });
+      expect(bodies.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        `GET ${claimPath}`,
+        "POST /api/v1/namespaces/workers/pods",
+      ]);
+    });
+
+    test("rejects a claim with foreign labels before creating the pod", async () => {
+      serve(
+        Response.json({
+          metadata: { name: key, labels: { ...claimLabels, [RUNTIME_LABELS.owner]: "other" } },
+        }),
+      );
+      await expect(provider.provision(target, { ...request, workspace: { key } })).rejects.toThrow(
+        "not owned by this swarm and agent",
+      );
+      expect(bodies.some(({ path }) => path.endsWith("/pods"))).toBe(false);
+    });
+
+    test("a claim lookup failure fails the provision instead of starting without it", async () => {
+      serve(Response.json({}, { status: 403 }));
+      await expect(provider.provision(target, { ...request, workspace: { key } })).rejects.toThrow(
+        "Kubernetes GET persistentvolumeclaims failed (403)",
+      );
+      expect(bodies.some(({ path }) => path.endsWith("/pods"))).toBe(false);
+    });
+
+    test("terminate deletes only the pod and never the claim", async () => {
+      serve(null);
+      await provider.terminate(target, handle);
+      expect(bodies.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        `DELETE /api/v1/namespaces/workers/pods/${metadata.name}`,
+      ]);
+    });
   });
 });

@@ -207,6 +207,7 @@ Configure these keys on the controller:
 | `K8S_CA_CERT` | Optional PEM certificate authority for the cluster. |
 | `K8S_SERVICE_ACCOUNT` | Optional service account for worker pods. Workers receive no Kubernetes API token. |
 | `K8S_IMAGE_PULL_SECRETS` | Optional comma-separated names of registry Secrets in the worker namespace. |
+| `K8S_STORAGE_CLASS` | Optional storage class for persistent workspace claims. Defaults to the cluster default. |
 
 These are controller settings, not deployment environment variables.
 When the API runs inside Kubernetes, omit `K8S_API_URL` and token settings.
@@ -218,6 +219,7 @@ External endpoints require an explicit token and cannot inherit the API's mounte
 TLS verification always remains enabled.
 Set `K8S_NAMESPACE` explicitly when workers must use a namespace other than `default`.
 The API service account needs `get`, `list`, `create`, and `delete` permissions on pods in that namespace.
+Pools with a persistent workspace also need `get` and `create` on `persistentvolumeclaims`.
 Use a dedicated namespace to limit the controller's authority.
 This configuration supports an API deployed inside a managed cluster such as GKE.
 An API outside the cluster must configure its HTTPS endpoint, token, and certificate authority explicitly.
@@ -232,6 +234,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "create", "delete"]
+  # Only for pools with a persistent workspace. The swarm never deletes claims.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -425,7 +431,10 @@ controller drops the unknown `workspace` field) terminates the runtime and count
 a provision failure with an upgrade message. Docker creates the volume with
 `swarm.owner`, `swarm.agent-id` and `swarm.workspace=true` labels, refuses foreign
 labels, and keeps the workspace mount when the cache mount fallback retries.
-No code path deletes a workspace; operators remove volumes by hand.
+Kubernetes gets or creates a `ReadWriteOncePod` claim with the same labels and no
+`ownerReferences`, refuses foreign labels, and mounts it in the pod spec; the access
+mode is its in-use fence. Terminate deletes only the pod.
+No code path deletes a workspace; operators remove volumes and claims by hand.
 
 ## e2b
 
