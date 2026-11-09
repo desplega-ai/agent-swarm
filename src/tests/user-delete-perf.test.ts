@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
@@ -57,6 +58,37 @@ async function explain(sql: string, params: string[]): Promise<string> {
   return rows.map((row) => row.detail).join(" | ");
 }
 
+/**
+ * Records every statement the process sends to bun:sqlite while fn runs. The
+ * db client funnels get / query / run through Database.prototype.query, so
+ * this sees the SQL deleteUser executes, not a copy of it.
+ */
+async function recordStatements(fn: () => Promise<void>): Promise<string[]> {
+  const seen: string[] = [];
+  const original = Database.prototype.query;
+  Database.prototype.query = function patched(this: Database, sql: string, ...rest: unknown[]) {
+    seen.push(sql);
+    return (original as (this: Database, sql: string, ...rest: unknown[]) => unknown).call(
+      this,
+      sql,
+      ...rest,
+    );
+  } as typeof Database.prototype.query;
+  try {
+    await fn();
+  } finally {
+    Database.prototype.query = original;
+  }
+  return seen;
+}
+
+/** Explains a recorded statement with one placeholder value per `?`. */
+async function explainRecorded(sql: string): Promise<string[]> {
+  const params = Array.from({ length: (sql.match(/\?/g) ?? []).length }, () => "x");
+  const rows = await getDbClient().query<ExplainRow>(`EXPLAIN QUERY PLAN ${sql}`, params);
+  return rows.map((row) => row.detail);
+}
+
 async function runRequestedBy(
   userId: string,
   opts: { createdBy?: string | null } = {},
@@ -113,6 +145,37 @@ describe("deleteUser query plans", () => {
     for (const [table, column] of HEAVY_COLUMNS) {
       expect(pairs.has(`${table}.${column}`)).toBe(true);
     }
+  });
+
+  test("every write statement a real deleteUser executes searches an index", async () => {
+    const source = await createUser({ name: "spy source" });
+    const target = await createUser({ name: "spy target" });
+    await runRequestedBy(source.id);
+    const references = await getDbClient().query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
+
+    const statements = await recordStatements(async () => {
+      expect(await deleteUser(source.id, target.id)).toBe(true);
+    });
+
+    const rewrites = statements.filter((sql) => /^\s*UPDATE\s/i.test(sql));
+    const sealedSelects = statements.filter((sql) => /context_replay FROM workflow_runs/.test(sql));
+    const deletes = statements.filter((sql) => /^\s*DELETE FROM users\b/i.test(sql));
+    // Every discovered column, the context json_set, and the sealed replay copy.
+    expect(rewrites.length).toBeGreaterThanOrEqual(references.length + 2);
+    expect(sealedSelects.length).toBe(1);
+    expect(deletes.length).toBe(1);
+
+    const scans: string[] = [];
+    for (const sql of [...rewrites, ...sealedSelects, ...deletes]) {
+      const plan = await explainRecorded(sql);
+      if (plan.some((detail) => detail.startsWith("SCAN"))) {
+        scans.push(`${sql.replace(/\s+/g, " ").trim().slice(0, 120)} => ${plan.join(" | ")}`);
+      }
+    }
+    expect(scans).toEqual([]);
+    expect(
+      sealedSelects.concat(rewrites.filter((sql) => /json_set|json_remove/.test(sql))).length,
+    ).toBe(2);
   });
 
   test("every discovered column rewrite searches an index", async () => {
