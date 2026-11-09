@@ -8,6 +8,16 @@ import {
 } from "../../types";
 import { getDbClient } from "./runtime";
 
+/**
+ * Sessions recorded before migration 307 carry no credential of their own.
+ * Those legacy rows fall back to their task's credential, as usage read it
+ * before 307. Newer rows keep their own, null included. Needs `t` joined.
+ */
+const LEGACY_CREDENTIAL_SQL =
+  "(sc.credentialKeyType IS NULL AND sc.createdAt < (SELECT applied_at FROM _migrations WHERE version = 307))";
+export const CREDENTIAL_TYPE_SQL = `CASE WHEN ${LEGACY_CREDENTIAL_SQL} THEN t.credentialKeyType ELSE sc.credentialKeyType END`;
+export const CREDENTIAL_SUFFIX_SQL = `CASE WHEN ${LEGACY_CREDENTIAL_SQL} THEN t.credentialKeySuffix ELSE sc.credentialKeySuffix END`;
+
 export type SessionCostRow = {
   id: string;
   sessionId: string;

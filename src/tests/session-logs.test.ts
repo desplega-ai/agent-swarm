@@ -256,6 +256,89 @@ describe("Session Logs API", () => {
       expect(bySession.map((l) => l.content)).toEqual(written);
     });
 
+    test("sets reasoning columns at insert and classifies a Claude update across POSTs", async () => {
+      const claude = (id: string, block: Record<string, unknown>) =>
+        JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [block] } });
+      const thinking = (text: string) => ({ type: "thinking", thinking: text, signature: "S" });
+      const toolUse = { type: "tool_use", id: "tu", name: "Read", input: {} };
+      const lines = [
+        '{"type":"system","subtype":"init"}',
+        // Sample shape (every post-deploy message): one thinking block, then tool_use.
+        claude("msg_1", thinking("plan")),
+        claude("msg_1", toolUse),
+        // Omitted thinking keeps chars 0, not NULL.
+        claude("msg_2", thinking("")),
+        claude("msg_2", { type: "text", text: "ok" }),
+        // Two thinking blocks before tool_use, split across two POSTs.
+        claude("msg_3", thinking("first")),
+        claude("msg_3", thinking("update")),
+      ];
+      await createSessionLogs({
+        sessionId: "reasoning-session",
+        iteration: 1,
+        cli: "claude",
+        lines,
+      });
+      await createSessionLogs({
+        sessionId: "reasoning-session",
+        iteration: 1,
+        cli: "claude",
+        lines: [claude("msg_3", toolUse)],
+      });
+      await createSessionLogs({
+        sessionId: "reasoning-codex",
+        iteration: 1,
+        cli: "codex",
+        lines: [
+          JSON.stringify({ type: "item.completed", item: { type: "reasoning", summary: ["a"] } }),
+          JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "x" } }),
+        ],
+      });
+
+      const rows = await getDbClient().query<{
+        lineNumber: number;
+        reasoningChars: number | null;
+        reasoningKind: string | null;
+      }>(
+        `SELECT lineNumber, reasoningChars, reasoningKind FROM session_logs
+         WHERE sessionId IN ('reasoning-session', 'reasoning-codex') ORDER BY rowid`,
+      );
+      expect(rows.map((r) => [r.lineNumber, r.reasoningChars, r.reasoningKind])).toEqual([
+        [0, null, null],
+        [1, 4, "reasoning"],
+        [2, null, null],
+        [3, 0, "reasoning"],
+        [4, null, null],
+        [5, 5, "reasoning"],
+        [6, 6, "update"],
+        [7, null, null],
+        [0, 1, "reasoning"],
+        [1, null, null],
+      ]);
+    });
+
+    test("reasoning queries use the partial index", async () => {
+      const plan = async (sql: string, params: string[]) =>
+        (await getDbClient().query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params)).map(
+          (r) => r.detail,
+        );
+      const stats = await plan(
+        `SELECT cli, reasoningKind, count(*), sum(reasoningChars > 0), sum(reasoningChars)
+         FROM session_logs
+         WHERE reasoningChars IS NOT NULL AND createdAt >= ? AND createdAt < ?
+         GROUP BY cli, reasoningKind`,
+        ["2026-11-01T00:00:00.000Z", "2026-11-08T00:00:00.000Z"],
+      );
+      expect(stats.join("\n")).toContain("USING COVERING INDEX idx_session_logs_reasoning");
+      const lookup = await plan(
+        `SELECT id, lineNumber, json_extract(content, '$.message.id') AS messageId
+         FROM session_logs INDEXED BY idx_session_logs_reasoning
+         WHERE reasoningChars IS NOT NULL AND createdAt >= ? AND cli = 'claude' AND sessionId = ?`,
+        ["2026-11-08T00:00:00.000Z", "s"],
+      );
+      expect(lookup.join("\n")).toContain("USING INDEX idx_session_logs_reasoning");
+    });
+
     test("reads rows stored with per-flush lineNumbers in write order", async () => {
       const task = await createTaskExtended("Task with legacy session log rows");
       // Rows written before the fix: lineNumber restarts per POST, and

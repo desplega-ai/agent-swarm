@@ -33,9 +33,27 @@ mock.module("@/components/ui/button", () => ({
     return <span data-button={disabled ? "disabled" : "enabled"}>{children}</span>;
   },
 }));
-const runTaskUiAction = mock(async () => ({ status: "started" as const, taskId: "child" }));
+const runTaskUiAction = mock(async () => ({
+  status: "started" as "started" | "already_done",
+  taskId: "child",
+}));
 mock.module("@/api/client", () => ({ api: { runTaskUiAction } }));
-mock.module("sonner", () => ({ toast: { success: () => {}, error: () => {} } }));
+const navigate = mock(() => {});
+mock.module("react-router-dom", () => ({ useNavigate: () => navigate }));
+// A card inside a link preview scope with a context panel opens the spawned
+// task in the split screen; otherwise Open navigates.
+let inPreviewScope = false;
+const openPreview = mock((_target: unknown) => {});
+mock.module("@/components/link-preview/link-preview-scope", () => ({
+  useLinkPreviewScope: () => (inPreviewScope ? { registerDock: () => () => {} } : null),
+}));
+mock.module("@/components/context-panel/context-panel-state", () => ({
+  useOptionalContextPanel: () => ({ openPreview }),
+}));
+const toastSuccess = mock(
+  (_message: string, _options?: { action: { label: string; onClick: () => void } }) => {},
+);
+mock.module("sonner", () => ({ toast: { success: toastSuccess, error: () => {} } }));
 mock.module("@/components/ui/card", () => ({
   Card: stub("section"),
   CardHeader: stub("header"),
@@ -136,6 +154,49 @@ describe("TaskUiSpecView", () => {
     expect(lastButtonClick).toBeDefined();
     lastButtonClick?.();
     expect(runTaskUiAction).toHaveBeenCalledWith("task-1", "rerun");
+  });
+
+  test("outside a preview scope, Open navigates to the spawned task", async () => {
+    toastSuccess.mockClear();
+    navigate.mockClear();
+    openPreview.mockClear();
+    inPreviewScope = false;
+    render(specWith("Button", { id: "rerun", label: "Re-run" }));
+    lastButtonClick?.();
+    await Promise.resolve();
+    const [message, options] = toastSuccess.mock.calls[0]!;
+    expect(message).toBe("Follow-up started.");
+    expect(options?.action.label).toBe("Open");
+    expect(navigate).not.toHaveBeenCalled();
+    options?.action.onClick();
+    expect(navigate).toHaveBeenCalledWith("/tasks/child");
+    expect(openPreview).not.toHaveBeenCalled();
+  });
+
+  test("inside a preview scope, Open shows the spawned task in the split screen", async () => {
+    toastSuccess.mockClear();
+    navigate.mockClear();
+    openPreview.mockClear();
+    inPreviewScope = true;
+    try {
+      render(specWith("Button", { id: "rerun", label: "Re-run" }));
+      lastButtonClick?.();
+      await Promise.resolve();
+      toastSuccess.mock.calls[0]![1]?.action.onClick();
+      expect(openPreview).toHaveBeenCalledWith({ kind: "task", taskId: "child" });
+      expect(navigate).not.toHaveBeenCalled();
+    } finally {
+      inPreviewScope = false;
+    }
+  });
+
+  test("an already-run action offers no new task navigation", async () => {
+    toastSuccess.mockClear();
+    runTaskUiAction.mockResolvedValueOnce({ status: "already_done", taskId: "child" });
+    render(specWith("Button", { id: "rerun", label: "Re-run" }));
+    lastButtonClick?.();
+    await Promise.resolve();
+    expect(toastSuccess.mock.calls[0]).toEqual(["This button already ran.", undefined]);
   });
 
   test("the plan example renders its field, table rows and link", () => {

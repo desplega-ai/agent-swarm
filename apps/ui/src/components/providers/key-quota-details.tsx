@@ -314,7 +314,8 @@ export function KeyQuotaDetails({
   windows,
   nowMs,
 }: {
-  poolKey: ProviderKey;
+  /** A pool key, or any credential with the same fields (the Usage page's subscriptions). */
+  poolKey: Pick<ProviderKey, "keyType" | "suffix" | "label" | "statuses">;
   windows: QuotaWindow[];
   nowMs: number;
 }) {
