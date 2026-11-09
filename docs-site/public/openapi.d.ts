@@ -12017,6 +12017,381 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List model groups
+         * @description Every model group with its member profiles in order, by name.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Model groups */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            groups: {
+                                id: string;
+                                name: string;
+                                description: string | null;
+                                seededFrom: string | null;
+                                members: string[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create a model group
+         * @description A group is an ordered list of model profiles that may span harnesses. Every member must be an existing profile, listed once. The name may not be a model profile's (groups and profiles share one name space; 409). Lead, operator or dashboard user.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        description?: string | null;
+                        /** @description Profile names in preference order, first preferred. Any harness; no repeats. */
+                        members: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Group created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A group or profile with that name exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-groups/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one model group */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The model group */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete a model group
+         * @description Refused (409) for a shipped tier group (`smol`, `regular`, `smart`, `ultra`; edit it instead, it would come back at the next boot), and while a schedule names the group or a task holds it (unfinished, or superseded and still owed its resume). Lead, operator or dashboard user.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Group deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            deleted: true;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The group is a seed or still in use */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a model group
+         * @description Changes the description (`null` clears it). The name is fixed; reorder or replace members with `PUT /api/model-groups/{name}/members`. Lead, operator or dashboard user.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        description: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Group updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/model-groups/{name}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a model group's members
+         * @description Replaces the whole ordered member list in one transaction; send the full list to reorder. Every member must be an existing profile, listed once. Lead, operator or dashboard user.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Profile names in preference order, first preferred. Any harness; no repeats. */
+                        members: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Members replaced */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model-profiles": {
         parameters: {
             query?: never;
@@ -12072,7 +12447,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. The name may not be a model group's (one name space; 409). Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -12145,7 +12520,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A profile with that name exists */
+                /** @description A profile or model group with that name exists */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -12222,7 +12597,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, a model group lists it as a member, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
