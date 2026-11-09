@@ -845,9 +845,9 @@ describe("script connections", () => {
         );
       // 213 rebuilds script_connections with the post-117 columns; skip it with 117.
       markMigrationApplied(database, "213_script_connections_sql.sql");
-      // 318 indexes the oauth tables that 117 creates; skip it with 117.
-      markMigrationApplied(database, "318_user_fk_indexes.sql");
-      runMigrations(database); // applies every migration except 117, 213 and 318
+      // 319 indexes the oauth tables that 117 creates; skip it with 117.
+      markMigrationApplied(database, "319_user_fk_indexes.sql");
+      runMigrations(database); // applies every migration except 117, 213 and 319
 
       const now = new Date().toISOString();
       // A user-created STANDALONE binding: source='user', arbitrary config_key

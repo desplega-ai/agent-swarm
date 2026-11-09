@@ -12657,7 +12657,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     //
     // The engine (src/workflows/engine.ts) writes workflow_runs.created_by and
     // context.swarm.requestedByUserId from the same options.requestedByUserId,
-    // and a resume rehydrates the requester from run.createdBy. Migration 318
+    // and a resume rehydrates the requester from run.createdBy. Migration 319
     // backfilled created_by from the context requester for runs older than
     // that engine change. So every row whose context names this user also has
     // created_by = this user, and the indexed created_by column can narrow
@@ -12715,7 +12715,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       );
     }
 
-    // Migration 318 indexes every discovered column (the user-delete-perf test
+    // Migration 319 indexes every discovered column (the user-delete-perf test
     // pins the plans), so these are index lookups rather than table scans.
     for (const reference of references) {
       const table = quoteSqlIdentifier(reference.tableName);

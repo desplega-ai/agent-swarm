@@ -270,17 +270,17 @@ describe("vendored OpenAPI", () => {
           new Date().toISOString(),
           new Bun.CryptoHasher("sha256").update(migration213).digest("hex"),
         );
-      // 318 indexes the oauth tables that 117 creates, so it must wait for 117 too.
-      const migration318 = readFileSync("src/be/migrations/318_user_fk_indexes.sql", "utf-8");
+      // 319 indexes the oauth tables that 117 creates, so it must wait for 117 too.
+      const migration319 = readFileSync("src/be/migrations/319_user_fk_indexes.sql", "utf-8");
       database
         .prepare(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
         )
         .run(
-          318,
-          "318_user_fk_indexes",
+          319,
+          "319_user_fk_indexes",
           new Date().toISOString(),
-          new Bun.CryptoHasher("sha256").update(migration318).digest("hex"),
+          new Bun.CryptoHasher("sha256").update(migration319).digest("hex"),
         );
       runMigrations(database);
       database
@@ -288,7 +288,7 @@ describe("vendored OpenAPI", () => {
           "INSERT INTO script_connections (id, slug, kind, openapi_spec_json) VALUES (?, ?, ?, ?)",
         )
         .run("legacy-row", "legacy", "openapi", "{}");
-      database.run("DELETE FROM _migrations WHERE version IN (117, 213, 318)");
+      database.run("DELETE FROM _migrations WHERE version IN (117, 213, 319)");
       runMigrations(database);
       expect(
         database.query<{ id: string }, []>("SELECT id FROM script_connections").get()?.id,

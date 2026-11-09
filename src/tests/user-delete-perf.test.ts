@@ -18,7 +18,7 @@ import { openSealedJson } from "../be/sealed-json";
 // Incident 2026-11-09: merging two users ran deleteUser on an 85 GB prod DB
 // and every UPDATE on the large audit tables scanned the full table while the
 // workflow_runs JSON passes parsed the context of all 493k rows. The API froze
-// for 278 s. Migration 318 indexes the user FK columns and deleteUser narrows
+// for 278 s. Migration 319 indexes the user FK columns and deleteUser narrows
 // the JSON passes by created_by. These tests pin both via EXPLAIN QUERY PLAN.
 
 const TEST_DB_PATH = `./test-user-delete-perf-${crypto.randomUUID()}.sqlite`;
@@ -148,7 +148,7 @@ describe("deleteUser query plans", () => {
   test("DELETE FROM users runs its FK parent-delete checks without a table scan", async () => {
     // A partial index with an unrelated predicate does not count: session_shares_user
     // (migration 230, WHERE revokedAt IS NULL) left SCAN session_shares in this plan
-    // until migration 318 added idx_session_shares_userId.
+    // until migration 319 added idx_session_shares_userId.
     const rows = await getDbClient().query<ExplainRow>(
       "EXPLAIN QUERY PLAN DELETE FROM users WHERE id = ?",
       ["source"],
@@ -200,12 +200,12 @@ describe("deleteUser workflow context rewrite", () => {
   });
 });
 
-describe("migration 318 created_by backfill", () => {
+describe("migration 319 created_by backfill", () => {
   // Runs written before PR #1191 (2026-08-19) carry context.swarm.requestedByUserId
   // with created_by NULL. deleteUser narrows its JSON pass by created_by, so the
   // migration has to make the invariant true for those rows first.
   const BACKFILL_DB_PATH = `./test-user-delete-backfill-${crypto.randomUUID()}.sqlite`;
-  const MIGRATION_318 = "318_user_fk_indexes";
+  const MIGRATION_319 = "319_user_fk_indexes";
 
   afterAll(() => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -220,8 +220,8 @@ describe("migration 318 created_by backfill", () => {
   test("fills created_by from the context requester only where a known user is named", () => {
     const database = new Database(BACKFILL_DB_PATH);
     try {
-      // Apply everything except 318, so legacy rows can be written first.
-      const sql = readFileSync(`src/be/migrations/${MIGRATION_318}.sql`, "utf-8");
+      // Apply everything except 319, so legacy rows can be written first.
+      const sql = readFileSync(`src/be/migrations/${MIGRATION_319}.sql`, "utf-8");
       database.run(
         `CREATE TABLE IF NOT EXISTS _migrations (
            version INTEGER PRIMARY KEY, name TEXT NOT NULL,
@@ -232,8 +232,8 @@ describe("migration 318 created_by backfill", () => {
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
         )
         .run(
-          318,
-          MIGRATION_318,
+          319,
+          MIGRATION_319,
           new Date().toISOString(),
           new Bun.CryptoHasher("sha256").update(sql).digest("hex"),
         );
@@ -280,7 +280,7 @@ describe("migration 318 created_by backfill", () => {
         JSON.stringify({ swarm: { requestedByUserId: requester } }),
       );
 
-      database.run("DELETE FROM _migrations WHERE version = 318");
+      database.run("DELETE FROM _migrations WHERE version = 319");
       runMigrations(database);
 
       const createdBy = (id: string) =>
