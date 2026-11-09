@@ -13,6 +13,11 @@ cat > tlc.sh <<'TLC'
 cfg=$2
 names=$(awk '/^(INVARIANTS|PROPERTIES)/{on=1;next} on && NF{print $1}' "$cfg" | paste -sd, -)
 echo "$names" >> runs.log
+if [[ -n ${BAD_SPEC:-} && $1 == "$BAD_SPEC" ]]; then
+  echo "Error: Invariant ${names%%,*} is violated."
+  echo "12 states generated, 7 distinct states found, 0 states left on queue."
+  exit 12
+fi
 for n in ${names//,/ }; do
   for b in ${BAD:-}; do
     if [[ $n == "$b" ]]; then
@@ -84,6 +89,15 @@ for change in "echo '\\* edit' >> M.tla" "true" "echo '# edit' >> tlc.sh"; do
   if [[ $change == true ]]; then BAD=B bash "$runner" M M.cfg N=3 > /dev/null; else BAD=B bash "$runner" M M.cfg > /dev/null; fi
   expect "A,B,C;A,C;P,Q"
 done
+
+# Two root modules in one directory with the same cfg keep separate verdicts.
+rm -rf "$TLC_CACHE_DIR" runs.log
+echo '---- MODULE N ----' > N.tla
+bash "$runner" M M.cfg > /dev/null
+rm runs.log
+out=$(BAD_SPEC=N bash "$runner" N M.cfg)
+[[ -s runs.log ]] || fail "spec N reused spec M's cached verdicts"
+grep -qx "A | Error: Invariant A is violated. | distinct=7" <<< "$out" || fail "spec N line: $out"
 
 # A TLC error is never cached.
 rm -rf "$TLC_CACHE_DIR" runs.log

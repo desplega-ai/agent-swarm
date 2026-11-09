@@ -10,9 +10,9 @@
 # TLC_SPLIT=1 runs one TLC per property, as before.
 #
 # TLC_CACHE_DIR (optional): keep each verdict in that directory, keyed by a hash of the *.tla
-# modules, the generated cfg, tlc.sh and tla2tools.jar. A later run with the same inputs prints the
-# stored line with "| cached" instead of running TLC, so a restart mid-run loses at most the TLC run
-# in flight. Only "No error has been found" and violations are stored, never a TLC error.
+# modules, the root module name, the generated cfg, tlc.sh and tla2tools.jar. A later run with the
+# same inputs prints the stored line with "| cached" instead of running TLC, so a restart mid-run
+# loses at most the TLC run in flight. Only "No error has been found" and violations are stored, never a TLC error.
 set -uo pipefail
 spec=$1; base=$2; shift 2
 work=$(mktemp -d /tmp/hb-XXXX)
@@ -30,6 +30,7 @@ if [[ -n $cache ]]; then
     echo "tlc.sh $(digest < tlc.sh)"
     echo "jar $(digest < "${TLC_HOME:-/workspace/personal/fv}/tla2tools.jar" 2>/dev/null)"
     for f in *.tla; do [[ $f == *_TTrace_* ]] || echo "$f $(digest < "$f")"; done
+    echo "spec $spec"
     echo "cfg $(digest < "$work/head.cfg")"
   } | digest)
 fi
