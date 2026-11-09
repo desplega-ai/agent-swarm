@@ -286,3 +286,46 @@ describe("check-pr-body: PR_TEMPLATE_PATH", () => {
     }
   });
 });
+
+describe("check-pr-body: PR_BODY_PROBLEMS_FILE", () => {
+  // pr-body-comment.yml posts this file as the fork PR comment.
+  test("a failing body writes its problems as a Markdown list; a passing body writes nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pr-body-problems-"));
+    try {
+      const templatePath = join(dir, "template.md");
+      const bodyPath = join(dir, "body.md");
+      const problemsPath = join(dir, "problems.md");
+      await Bun.write(
+        templatePath,
+        "**Why:** <!-- one line -->\n\n## Only section\n\n<!-- guidance -->\n",
+      );
+      const run = (body: string) =>
+        Bun.write(bodyPath, body).then(() =>
+          runChild(["bun", "scripts/check-pr-body.ts", "--body-file", bodyPath], {
+            env: {
+              PATH: process.env.PATH,
+              HOME: process.env.HOME,
+              PR_TITLE: "chore: x",
+              PR_AUTHOR: "someone",
+              PR_CHANGED_FILES_FILE: bodyPath,
+              PR_TEMPLATE_PATH: templatePath,
+              PR_BODY_PROBLEMS_FILE: problemsPath,
+            },
+          }),
+        );
+
+      const failing = await run("## Summary\n\nWrote my own headings.\n");
+      expect(failing.exitCode).toBe(1);
+      expect(await Bun.file(problemsPath).text()).toBe(
+        "- missing line: **Why:**\n- missing section: ## Only section\n",
+      );
+
+      await rm(problemsPath);
+      const passing = await run("**Why:** reason.\n\n## Only section\n\nFilled.\n");
+      expect(passing.exitCode).toBe(0);
+      expect(await Bun.file(problemsPath).exists()).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
