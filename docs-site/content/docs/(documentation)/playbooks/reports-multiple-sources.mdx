@@ -70,6 +70,8 @@ Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-too
 
 - [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — digests skip on a quiet day instead of posting an empty report.
 
+For an illustrative adaptation of these patterns to CRM records, where deterministic checks flag missing or contradictory deal fields for a revenue operations owner to verify before a forecast, see the [pipeline data review guide](https://www.agent-swarm.dev/blog/omnia/ai-pipeline-data-quality-review).
+
 ## Tips for new swarm users
 
 - **Use deterministic `swarm-script` nodes for "fetch + JSON" sections.** Keep the LLM out of the loop where it adds no value — faster, cheaper, more reliable.
