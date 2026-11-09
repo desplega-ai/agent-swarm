@@ -160,6 +160,24 @@ describe("system-one-decide session cost", () => {
     expect(row).toMatchObject({ kind: "system-one", agentId });
   });
 
+  test("a failed cost write still returns the decision", async () => {
+    // A pool task has no agent, so the row falls back to the caller's id; an
+    // unregistered extension identity then fails the agentId foreign key.
+    const poolTask = (await createTaskExtended("Pool post", { source: "mcp" })).id;
+    const result = await call({ taskId: poolTask }, { "x-agent-id": crypto.randomUUID() }, true);
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent.answers.reason.choice).toBe("reply");
+    expect(result.structuredContent.cost).toBeUndefined();
+    expect(await getSessionCostsByTaskId(poolTask)).toHaveLength(0);
+  });
+
+  test("X-Source-Task-Id of another agent's task records nothing", async () => {
+    const result = await call({}, { "x-agent-id": otherAgentId, "x-source-task-id": taskId });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent.cost).toBeUndefined();
+    expect(await getSessionCostsByTaskId(taskId)).toHaveLength(0);
+  });
+
   test("harness rows default to kind harness", async () => {
     await insertSessionCost({
       sessionId: "harness-session",
