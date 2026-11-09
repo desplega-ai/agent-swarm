@@ -2009,7 +2009,7 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
-// Migration 318: what incurred the row. 'harness' is a worker session;
+// Migration 320: what incurred the row. 'harness' is a worker session;
 // 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
 export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
 export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;

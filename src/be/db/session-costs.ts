@@ -123,7 +123,7 @@ export interface CreateSessionCostInput {
    *                       (amp with a failed thread export).
    */
   costSource?: SessionCostSource;
-  /** Migration 318: 'system-one' for a SystemOne decision made for the task. */
+  /** Migration 320: 'system-one' for a SystemOne decision made for the task. */
   kind?: SessionCostKind;
   harnessCostUsd?: number | null;
   cacheWrite5mTokens?: number | null;
