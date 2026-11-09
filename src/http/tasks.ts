@@ -796,20 +796,32 @@ const runTaskUiActionRoute = route({
   rbac: { permission: "task.action.own" },
   summary: "Run the action a task card Button declares",
   description:
-    "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+    "Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.",
   tags: ["Tasks"],
   params: z.object({ id: z.string(), actionId: z.string() }),
   responses: {
     200: {
-      description: "The action started, or it already ran",
+      description:
+        "The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`)",
       schema: z.object({
-        status: z.enum(["started", "already_done"]),
+        status: z.enum(["started", "already_done", "refreshed"]),
         taskId: z.string().optional(),
+        uiSpec: TaskUiSpecSchema.optional(),
       }),
     },
-    403: { description: "Only the task requester may run the action" },
+    403: {
+      description:
+        "Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted",
+    },
     404: { description: "Task or action not found" },
-    409: { description: "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)" },
+    409: {
+      description:
+        "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`)",
+    },
+    422: { description: "The script failed or returned an invalid card; the old card stays" },
+    429: {
+      description: "The script action ran recently; `Retry-After` says when it can run again",
+    },
   },
 });
 
@@ -2235,7 +2247,30 @@ export async function handleTasks(
         runTaskUiActionRoute.respond(res, 200, { status: "already_done" });
         return true;
       case "started":
+      case "refreshed":
         runTaskUiActionRoute.respond(res, 200, result);
+        return true;
+      case "not_allowlisted":
+        jsonError(res, "This action's script is not allowlisted (UI_SPEC_SCRIPT_ACTIONS)", 403);
+        return true;
+      case "script_changed":
+        jsonError(
+          res,
+          "This action's script changed since it was allowlisted; an admin must re-pin it in UI_SPEC_SCRIPT_ACTIONS",
+          403,
+        );
+        return true;
+      case "running":
+        res.setHeader("Retry-After", String(result.retryAfterSec));
+        jsonError(res, "This action is already running", 409);
+        return true;
+      case "rate_limited":
+        res.setHeader("Retry-After", String(result.retryAfterSec));
+        jsonError(res, `This action ran recently; try again in ${result.retryAfterSec}s`, 429);
+        return true;
+      case "script_failed":
+      case "invalid_output":
+        jsonError(res, `Refresh failed: ${result.error}`, 422);
         return true;
     }
   }

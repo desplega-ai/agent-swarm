@@ -1918,6 +1918,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_citation_check_refused",
   // store-progress refused a completion once because its uiSpec was invalid
   "task_ui_spec_check_refused",
+  // A card `script` action ran and failed; the old card stays
+  "task_ui_script_action_failed",
   "channel_message",
   // Service registry events
   "service_registered",

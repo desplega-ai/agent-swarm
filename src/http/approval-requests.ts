@@ -42,7 +42,7 @@ import {
   dispatchApprovalNotifications,
 } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
-import { ensureConfigAdmin, runConfigWriteSideEffects } from "./config";
+import { ensureConfigAdmin, ensureHumanOnlyConfigWrite, runConfigWriteSideEffects } from "./config";
 import { type ApprovalResponder, approvalResponder, responderKey } from "./person-responder";
 import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { bodyTask, route } from "./route-def";
@@ -623,6 +623,10 @@ export async function handleApprovalRequests(
     }
     if ([...configAnswers.values()].some(({ answer }) => answer.action === "set")) {
       if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
+      for (const { question, answer } of configAnswers.values()) {
+        if (answer.action !== "set") continue;
+        if (!(await ensureHumanOnlyConfigWrite(req, res, question.config.key))) return true;
+      }
       // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
       // every user, so check the config write grant here as PUT /api/config would.
       const userId = authUserId(getRequestAuth(req));

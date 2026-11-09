@@ -9,14 +9,28 @@ import {
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import type { TaskUiSpec } from "../utils/task-ui-spec";
+import { runTaskUiScriptAction } from "./script-actions";
 
 export type TaskUiActionResult =
   | { status: "started"; taskId: string }
-  | { status: "already_done" | "disabled" | "unknown_action" | "forbidden" };
+  | { status: "refreshed"; uiSpec: TaskUiSpec }
+  | { status: "running" | "rate_limited"; retryAfterSec: number }
+  | { status: "script_failed" | "invalid_output"; error: string }
+  | {
+      status:
+        | "already_done"
+        | "disabled"
+        | "unknown_action"
+        | "forbidden"
+        | "not_allowlisted"
+        | "script_changed";
+    };
 
 /**
- * Runs the action a spec Button names, once per task and action. The Slack
- * click and the web route both call it. Only the task requester may run it.
+ * Runs the action a spec Button names. The Slack click and the web route both
+ * call it. Only the task requester may run it. A `follow_up` runs once per
+ * task and action; a `script` action can run again after its cooldown.
  */
 export async function runTaskUiAction({
   taskId,
@@ -39,9 +53,21 @@ export async function runTaskUiAction({
     stored?.actions && Object.hasOwn(stored.actions, actionId)
       ? stored.actions[actionId]
       : undefined;
-  if (!task || !action) return { status: "unknown_action" };
+  if (!task || !stored || !action) return { status: "unknown_action" };
 
   if (!actorUserId || actorUserId !== task.requestedByUserId) return { status: "forbidden" };
+
+  if (action.kind === "script") {
+    return await runTaskUiScriptAction({
+      task,
+      actionId,
+      action,
+      stored,
+      surface,
+      actorUserId,
+      slackUserId,
+    });
+  }
 
   const reserved = await reserveTaskUiActionRun({
     taskId,

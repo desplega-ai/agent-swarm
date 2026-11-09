@@ -3531,6 +3531,7 @@
               "task_follow_up_gate_shadow",
               "task_citation_check_refused",
               "task_ui_spec_check_refused",
+              "task_ui_script_action_failed",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -38169,21 +38170,47 @@
                             "actions": {
                               "type": "object",
                               "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "follow_up"
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "follow_up"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt"
                                     ]
                                   },
-                                  "prompt": {
-                                    "type": "string"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "script"
+                                        ]
+                                      },
+                                      "script": {
+                                        "type": "string"
+                                      },
+                                      "args": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "script"
+                                    ]
                                   }
-                                },
-                                "required": [
-                                  "kind",
-                                  "prompt"
                                 ]
                               }
                             },
@@ -39148,7 +39175,7 @@
     "/api/tasks/{id}/ui-actions/{actionId}": {
       "post": {
         "summary": "Run the action a task card Button declares",
-        "description": "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+        "description": "Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.",
         "tags": [
           "Tasks"
         ],
@@ -39177,7 +39204,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The action started, or it already ran",
+            "description": "The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -39187,11 +39214,91 @@
                       "type": "string",
                       "enum": [
                         "started",
-                        "already_done"
+                        "already_done",
+                        "refreshed"
                       ]
                     },
                     "taskId": {
                       "type": "string"
+                    },
+                    "uiSpec": {
+                      "type": "object",
+                      "properties": {
+                        "spec": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "elements": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "state": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "elements"
+                          ]
+                        },
+                        "actions": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "follow_up"
+                                    ]
+                                  },
+                                  "prompt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "prompt"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "script"
+                                    ]
+                                  },
+                                  "script": {
+                                    "type": "string"
+                                  },
+                                  "args": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "script"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "fallbackText": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "spec",
+                        "fallbackText"
+                      ]
                     }
                   },
                   "required": [
@@ -39202,7 +39309,7 @@
             }
           },
           "403": {
-            "description": "Only the task requester may run the action",
+            "description": "Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted",
             "content": {
               "application/json": {
                 "schema": {
@@ -39222,7 +39329,27 @@
             }
           },
           "409": {
-            "description": "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)",
+            "description": "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The script failed or returned an invalid card; the old card stays",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The script action ran recently; `Retry-After` says when it can run again",
             "content": {
               "application/json": {
                 "schema": {
@@ -57551,21 +57678,47 @@
                                 "actions": {
                                   "type": "object",
                                   "additionalProperties": {
-                                    "type": "object",
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string",
-                                        "enum": [
-                                          "follow_up"
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "follow_up"
+                                            ]
+                                          },
+                                          "prompt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "prompt"
                                         ]
                                       },
-                                      "prompt": {
-                                        "type": "string"
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "script"
+                                            ]
+                                          },
+                                          "script": {
+                                            "type": "string"
+                                          },
+                                          "args": {
+                                            "type": "object",
+                                            "additionalProperties": {}
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "script"
+                                        ]
                                       }
-                                    },
-                                    "required": [
-                                      "kind",
-                                      "prompt"
                                     ]
                                   }
                                 },
@@ -57705,21 +57858,47 @@
                                   "actions": {
                                     "type": "object",
                                     "additionalProperties": {
-                                      "type": "object",
-                                      "properties": {
-                                        "kind": {
-                                          "type": "string",
-                                          "enum": [
-                                            "follow_up"
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "follow_up"
+                                              ]
+                                            },
+                                            "prompt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "prompt"
                                           ]
                                         },
-                                        "prompt": {
-                                          "type": "string"
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "script"
+                                              ]
+                                            },
+                                            "script": {
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "object",
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "script"
+                                          ]
                                         }
-                                      },
-                                      "required": [
-                                        "kind",
-                                        "prompt"
                                       ]
                                     }
                                   },

@@ -15704,6 +15704,13 @@ export interface paths {
                                         /** @enum {string} */
                                         kind: "follow_up";
                                         prompt: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "script";
+                                        script: string;
+                                        args?: {
+                                            [key: string]: unknown;
+                                        };
                                     };
                                 };
                                 fallbackText: string;
@@ -16252,7 +16259,7 @@ export interface paths {
         put?: never;
         /**
          * Run the action a task card Button declares
-         * @description Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.
+         * @description Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.
          */
         post: {
             parameters: {
@@ -16266,7 +16273,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The action started, or it already ran */
+                /** @description The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`) */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -16274,12 +16281,38 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** @enum {string} */
-                            status: "started" | "already_done";
+                            status: "started" | "already_done" | "refreshed";
                             taskId?: string;
+                            uiSpec?: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "script";
+                                        script: string;
+                                        args?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                };
+                                fallbackText: string;
+                            };
                         };
                     };
                 };
-                /** @description Only the task requester may run the action */
+                /** @description Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -16297,8 +16330,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED) */
+                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`) */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The script failed or returned an invalid card; the old card stays */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The script action ran recently; `Retry-After` says when it can run again */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -22542,6 +22593,13 @@ export interface paths {
                                             /** @enum {string} */
                                             kind: "follow_up";
                                             prompt: string;
+                                        } | {
+                                            /** @enum {string} */
+                                            kind: "script";
+                                            script: string;
+                                            args?: {
+                                                [key: string]: unknown;
+                                            };
                                         };
                                     };
                                     fallbackText: string;
@@ -22577,6 +22635,13 @@ export interface paths {
                                             /** @enum {string} */
                                             kind: "follow_up";
                                             prompt: string;
+                                        } | {
+                                            /** @enum {string} */
+                                            kind: "script";
+                                            script: string;
+                                            args?: {
+                                                [key: string]: unknown;
+                                            };
                                         };
                                     };
                                     fallbackText: string;
@@ -31278,7 +31343,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
