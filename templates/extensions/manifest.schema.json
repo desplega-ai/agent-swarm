@@ -165,6 +165,19 @@
     "author": {
       "type": "string",
       "minLength": 1
+    },
+    "toolSources": {
+      "description": "Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `\"mcp\"` for swarm MCP tools, `\"native\"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `[\"mcp\"]`.",
+      "readOnly": true,
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "mcp",
+          "native"
+        ]
+      }
     }
   },
   "required": [

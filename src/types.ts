@@ -3771,6 +3771,14 @@ export const ExtensionManifestSchema = z
       .strict(),
     homepage: z.string().url().optional(),
     author: z.string().min(1).optional(),
+    toolSources: z
+      .array(z.enum(["mcp", "native"]))
+      .min(1)
+      .readonly()
+      .optional()
+      .describe(
+        'Which tool calls reach this extension\'s `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`.',
+      ),
   })
   .strict()
   .superRefine((manifest, ctx) => {
