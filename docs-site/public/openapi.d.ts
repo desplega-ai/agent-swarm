@@ -29482,6 +29482,10 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
+                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            events?: string[];
+                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            eventHeader?: string;
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -29674,6 +29678,10 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
+                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            events?: string[];
+                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            eventHeader?: string;
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -30492,6 +30500,21 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            skipped: true;
+                            /** @enum {string} */
+                            reason: "event-not-allowed";
+                            event: string | null;
+                        };
+                    };
+                };
                 /** @description Webhook processed */
                 201: {
                     headers: {
@@ -32280,6 +32303,10 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
+                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                events?: string[];
+                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                eventHeader?: string;
             } | {
                 /** @enum {string} */
                 type: "schedule";
@@ -32530,6 +32557,10 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
+                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                events?: string[];
+                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                eventHeader?: string;
             } | {
                 /** @enum {string} */
                 type: "schedule";
