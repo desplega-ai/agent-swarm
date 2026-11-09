@@ -71,6 +71,31 @@ describe("markdownToSlack", () => {
   test("collapses excessive blank lines", () => {
     expect(markdownToSlack("a\n\n\n\nb")).toBe("a\n\nb");
   });
+
+  test.each([
+    "\n\n",
+    "\n \t\n",
+    "\r\n\r\n",
+  ])("does not pair stray backticks across paragraph boundaries (%j)", (separator) => {
+    const text = `\`${separator}# Heading${separator}Use \`**code**\` and **bold**`;
+    expect(markdownToSlack(text)).toBe(
+      `\`${separator}*Heading*${separator}Use \`**code**\` and *bold*`,
+    );
+  });
+
+  test("does not start inline code at an escaped backtick", () => {
+    expect(markdownToSlack("\\`**bold**\\` and `**code**`")).toBe("\\`*bold*\\` and `**code**`");
+  });
+
+  test("does not pair partial or unmatched backtick runs", () => {
+    expect(markdownToSlack("``**bold**` and **outside**")).toBe("``*bold*` and *outside*");
+    expect(markdownToSlack("`**bold**`` and **outside**")).toBe("`*bold*`` and *outside*");
+  });
+
+  test("preserves inline code after an escaped backslash and before an escaped backtick", () => {
+    expect(markdownToSlack("\\\\`**code**` and **bold**")).toBe("\\\\`**code**` and *bold*");
+    expect(markdownToSlack("`**code**\\` and **bold**")).toBe("`**code**\\` and *bold*");
+  });
 });
 
 describe("getTaskLink", () => {

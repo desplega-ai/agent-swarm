@@ -49,10 +49,15 @@ export function markdownToSlack(text: string): string {
   let codeMarker = "\uE002";
   while (text.includes(codeMarker)) codeMarker += "\uE002";
   // Hide code from every formatting rule, including blank-line normalization.
-  const protectedText = text.replace(/```[\s\S]*?(?:```|$)|(`+)(?!`)[\s\S]*?\1(?!`)/g, (match) => {
-    code.push(match);
-    return `${codeMarker}${code.length - 1}\uE003`;
-  });
+  const protectedText = text.replace(
+    /\\[\s\S]|```[\s\S]*?(?:```|$)|(?<!`)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?(?<!`)\1(?!`)/g,
+    (match) => {
+      // Consume escapes outside code; inline runs must match within one paragraph.
+      if (match.startsWith("\\")) return match;
+      code.push(match);
+      return `${codeMarker}${code.length - 1}\uE003`;
+    },
+  );
   return (
     protectedText
       // Images: keep alt text and expose the URL plainly.
