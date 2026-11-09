@@ -274,7 +274,7 @@ describe("runtime pools HTTP", () => {
       "builtin-docker",
     ]);
   });
-  test("rejects kind mismatches, k8s, invalid bounds, missing placements and missing images", async () => {
+  test("rejects kind mismatches, remote k8s, invalid bounds, missing placements and missing images", async () => {
     for (const input of [
       { ...poolInput, kind: "e2b" },
       { ...poolInput, kind: "k8s" },
@@ -288,7 +288,27 @@ describe("runtime pools HTTP", () => {
     }
     const k8s = await dispatch("/api/runtime-controllers", "POST", { name: "k8s", kind: "k8s" });
     expect(k8s.status).toBe(400);
-    expect(k8s.data.error).toBe("k8s provider not implemented");
+    expect(k8s.data.error).toBe("Kubernetes controllers require builtin placement");
+  });
+  test("creates a builtin Kubernetes controller and its pool through HTTP", async () => {
+    const created = await dispatch("/api/runtime-controllers", "POST", {
+      name: "k8s-builtin",
+      kind: "k8s",
+      placement: "builtin",
+      config: { K8S_API_URL: "https://cluster.test", K8S_NAMESPACE: "workers" },
+      secretConfig: { K8S_TOKEN: crypto.randomUUID() },
+    });
+    expect(created.status).toBe(200);
+    expect(created.data.controller.secretConfigKeys).toEqual(["K8S_TOKEN"]);
+    expect(created.data.controller.secretConfig).toBeUndefined();
+    const pool = await dispatch("/api/runtime-pools", "POST", {
+      ...poolInput,
+      name: "k8s-pool",
+      kind: "k8s",
+      placements: [created.data.controller.id],
+    });
+    expect(pool.status).toBe(200);
+    expect(pool.data.pool.kind).toBe("k8s");
   });
   test("pool writes permit operators and users only; leads may only bind", async () => {
     expect((await dispatch("/api/runtime-pools", "POST", poolInput, "worker")).status).toBe(403);

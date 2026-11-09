@@ -84,8 +84,9 @@ function parseInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S>
     throw new RuntimePoolError(result.error.issues.map((issue) => issue.message).join(". "));
   return result.data;
 }
-function supportedKind(kind: string): void {
-  if (kind === "k8s") throw new RuntimePoolError("k8s provider not implemented");
+function validateControllerPlacement(controller: { kind: string; placement: string }): void {
+  if (controller.kind === "k8s" && controller.placement !== "builtin")
+    throw new RuntimePoolError("Kubernetes controllers require builtin placement");
 }
 
 export async function listRuntimeControllers(): Promise<RuntimeController[]> {
@@ -119,6 +120,7 @@ export async function getRuntimeControllerTarget(
   for (const [key, value] of Object.entries(secrets))
     registerVolatileSecret(value, `runtime-controller:${controller.id}:${key}`);
   return {
+    KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,
     DOCKER_HOST: env.DOCKER_HOST,
     DOCKER_NETWORK: env.DOCKER_NETWORK,
     DOCKER_EXTRA_HOSTS: env.DOCKER_EXTRA_HOSTS,
@@ -200,7 +202,7 @@ export async function createRuntimeController(
   id: string = crypto.randomUUID(),
 ): Promise<RuntimeController> {
   const data = parseInput(RuntimeControllerCreateSchema, input);
-  supportedKind(data.kind);
+  validateControllerPlacement(data);
   return await getDbClient().transaction(async (tx) => {
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? OR id = ?", [data.name, id])
@@ -247,7 +249,7 @@ export async function updateRuntimeController(
     );
     if (!row) throw new RuntimePoolError("Controller not found", 404);
     const data = { ...rowToController(row), ...patch };
-    supportedKind(data.kind);
+    validateControllerPlacement(data);
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? AND id != ?", [data.name, id])
     )
@@ -332,7 +334,6 @@ export async function getRuntimePool(id: string): Promise<RuntimePool | null> {
   return row ? rowToPool(row) : null;
 }
 async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Promise<void> {
-  supportedKind(data.kind);
   if (data.cache && !(await createRuntimeProvider(data.kind)).traits.persistentCache) {
     throw new RuntimePoolError(`${data.kind} does not support persistent pool caches`);
   }

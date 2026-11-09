@@ -288,10 +288,10 @@ describe("runtime pools persistence", () => {
       "Pool kind must equal controller kind",
     );
     await expect(createRuntimePool({ ...input, kind: "k8s" })).rejects.toThrow(
-      "k8s provider not implemented",
+      "Pool kind must equal controller kind",
     );
     await expect(createRuntimeController({ name: "k8s", kind: "k8s" })).rejects.toThrow(
-      "k8s provider not implemented",
+      "Kubernetes controllers require builtin placement",
     );
     const pool = await createRuntimePool({ ...input, maxRuntimes: 3, minRuntimes: 2 });
     await expect(updateRuntimePool(pool.id, { maxRuntimes: 1 })).rejects.toMatchObject({
@@ -311,6 +311,27 @@ describe("runtime pools persistence", () => {
       env: { MODE: "test" },
     });
     expect(await getRuntimePool(pool.id)).toEqual(updated);
+  });
+  test("creates builtin Kubernetes controllers and pools", async () => {
+    const controller = await createRuntimeController({
+      name: "kubernetes",
+      kind: "k8s",
+      placement: "builtin",
+      config: { K8S_API_URL: "https://cluster.test", K8S_NAMESPACE: "workers" },
+      secretConfig: { K8S_TOKEN: crypto.randomUUID() },
+    });
+    expect(controller.secretConfigKeys).toEqual(["K8S_TOKEN"]);
+    expect(JSON.stringify(controller)).not.toContain('"K8S_TOKEN":');
+    const pool = await createRuntimePool({
+      name: "kubernetes",
+      kind: "k8s",
+      placements: [controller.id],
+      image: "worker:test",
+    });
+    expect(pool.kind).toBe("k8s");
+    await expect(updateRuntimeController(controller.id, { placement: "remote" })).rejects.toThrow(
+      "Kubernetes controllers require builtin placement",
+    );
   });
   test("encrypts secrets, merges and removes keys, and restores scrubbing after a restart", async () => {
     const secret = crypto.randomUUID() + crypto.randomUUID();

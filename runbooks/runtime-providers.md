@@ -47,7 +47,7 @@ Commands carry an ID, operation, and payload. Results carry the same ID and succ
 Provision commands use `RUNTIME_PROVISION_TIMEOUT_SEC`, with a default of 300 seconds.
 Other commands have a 60-second timeout. A timeout fails only that command and preserves the socket.
 The remote protocol includes renewal, pause, and resume for E2B lease management.
-The CLI accepts static, Docker, E2B, and boxd providers. It rejects the reserved `k8s` kind.
+The remote controller CLI accepts static, Docker, E2B, and boxd providers. Kubernetes requires a built-in controller.
 The API pings every 15 seconds and checks token validity.
 The CLI client also pings every 15 seconds. It drops a socket that receives no frame (message, ping, or pong) for 45 seconds and reconnects, so a network cut is detected within 60 seconds.
 A new authenticated session replaces the previous session for that controller.
@@ -84,8 +84,9 @@ They do not increment provision failures, apply backoff, or change the pool circ
 | `docker` | `DockerRuntimeProvider` | Creates and starts worker containers through a local Unix socket. |
 | `e2b` | `E2BRuntimeProvider` | Creates worker sandboxes and starts `/docker-entrypoint.sh` as a tracked background process. |
 | `boxd` | `BoxdRuntimeProvider` | Creates isolated boxd microVMs and runs the worker image in each machine's Docker daemon. |
+| `k8s` | `KubernetesRuntimeProvider` | Creates worker pods through a built-in controller using the Kubernetes API. |
 
-The schema reserves another kind for a future adapter. The factory rejects that kind until the adapter exists.
+Kubernetes controllers require `placement: "builtin"`. Remote Kubernetes controllers remain unsupported.
 
 ## Supervisor
 
@@ -186,6 +187,110 @@ These labels override user labels. Docker uses container labels, E2B uses sandbo
 Listing requires both the runtime label and the matching owner label. Runtimes without an owner label remain excluded.
 Two swarms on one Docker host, E2B team, or boxd org must use different owner IDs.
 Termination and status use explicit handles. Controllers must obtain those handles from their own records or owner-filtered lists.
+
+## k8s
+
+The built-in Kubernetes provider calls the cluster API directly. It needs no `kubectl` binary or Kubernetes SDK.
+Create a controller with `kind: "k8s"` and `placement: "builtin"`.
+Configure these keys on the controller:
+
+| Key | Purpose |
+| --- | --- |
+| `K8S_API_URL` | Kubernetes API origin. Requires HTTPS, except for loopback HTTP during local tests. |
+| `K8S_NAMESPACE` | Existing namespace for worker pods. Defaults to `default`. |
+| `K8S_TOKEN` | Bearer token. Store it in encrypted `secretConfig`. |
+| `K8S_TOKEN_FILE` | Alternative token file, read for each request to support token rotation. |
+| `K8S_CA_CERT` | Optional PEM certificate authority for the cluster. |
+| `K8S_CA_FILE` | Alternative certificate authority file. TLS verification always remains enabled. |
+| `K8S_SERVICE_ACCOUNT` | Optional service account for worker pods. Workers receive no Kubernetes API token. |
+| `K8S_IMAGE_PULL_SECRETS` | Optional comma-separated names of registry Secrets in the worker namespace. |
+
+These are controller settings, not deployment environment variables.
+When the API runs inside Kubernetes, omit `K8S_API_URL` and token settings.
+The adapter uses `https://kubernetes.default.svc` and the mounted service account token and CA.
+Set `K8S_NAMESPACE` explicitly when workers must use a namespace other than `default`.
+The API service account needs `get`, `list`, `create`, and `delete` permissions on pods in that namespace.
+Use a dedicated namespace to limit the controller's authority.
+This configuration supports an API deployed inside a managed cluster such as GKE.
+An API outside the cluster must configure its HTTPS endpoint, token, and certificate authority explicitly.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: swarm-pool-controller
+  namespace: swarm-workers
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: swarm-pool-controller
+  namespace: swarm-workers
+subjects:
+  - kind: ServiceAccount
+    name: swarm-api
+    namespace: agent-swarm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: swarm-pool-controller
+```
+
+Each runtime uses one pod with `restartPolicy: Never`.
+The supervisor manages replacement and teardown. Pod restarts cannot bypass runtime credentials or task recovery.
+Pool CPU and memory become resource requests and limits. `ttlSec` sets `activeDeadlineSeconds` when configured.
+The pod uses the worker image's default entrypoint and receives the supervisor's worker environment.
+Set controller `WORKER_API_URL` to an API address reachable from worker pods.
+Persistent caches and pause/resume remain unsupported.
+
+The adapter stamps the four ownership labels and filters lists by owner and runtime ID.
+Handles include the pod namespace and UID. Deletion uses a UID precondition to preserve a replacement with the same name.
+Missing pods and UID conflicts permit repeated teardown.
+Kubernetes response bodies remain excluded from errors because validation responses can contain worker credentials.
+
+### CLI verification
+
+For an API inside Kubernetes, create the namespace and RoleBinding above, then create a controller without cluster credentials:
+
+```bash
+CONTROLLER=$(curl -fsS "$API/api/runtime-controllers" -X POST \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"k8s-test","kind":"k8s","placement":"builtin","config":{"K8S_NAMESPACE":"swarm-workers","WORKER_API_URL":"<worker-reachable-api-url>"}}' \
+  | jq -r .controller.id)
+```
+
+For an API outside Kubernetes, configure explicit credentials instead:
+
+Use an existing test namespace and a service account with the Role above.
+Keep the token in a protected file. The API stores it encrypted.
+
+```bash
+kubectl create namespace swarm-workers
+kubectl -n swarm-workers create serviceaccount swarm-pool-controller
+kubectl -n swarm-workers create role swarm-pool-controller --verb=get,list,create,delete --resource=pods
+kubectl -n swarm-workers create rolebinding swarm-pool-controller \
+  --role=swarm-pool-controller --serviceaccount=swarm-workers:swarm-pool-controller
+umask 077
+kubectl -n swarm-workers create token swarm-pool-controller --duration=1h > /tmp/k8s-pool-token
+jq -n --rawfile token /tmp/k8s-pool-token --rawfile ca <cluster-ca.pem> \
+  --arg url <https://cluster-api:6443> \
+  '{name:"k8s-test",kind:"k8s",placement:"builtin",config:{K8S_API_URL:$url,K8S_NAMESPACE:"swarm-workers",K8S_CA_CERT:$ca,WORKER_API_URL:"<worker-reachable-api-url>"},secretConfig:{K8S_TOKEN:($token|rtrimstr("\n"))}}' \
+  > /tmp/k8s-pool-controller.json
+CONTROLLER=$(curl -fsS "$API/api/runtime-controllers" -X POST \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  --data-binary @/tmp/k8s-pool-controller.json | jq -r .controller.id)
+rm /tmp/k8s-pool-token /tmp/k8s-pool-controller.json
+```
+
+Create a pool with that controller ID using the operator guide's pool and agent commands.
+Use `kind: "k8s"`, enable both runtime flags, and configure worker credentials before assigning a test task.
+Inspect pods with `kubectl -n swarm-workers get pods -l swarm.runtime-id`.
+Disable the pool after the task. Wait for its pods to disappear before deleting the pool and controller.
+Delete the test namespace after the test.
 
 ## static
 

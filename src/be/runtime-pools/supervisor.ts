@@ -245,7 +245,12 @@ export async function provisionRuntime(
     delete env.TEMPLATE_ID;
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
-    const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
+    const ttlSec =
+      pool.kind === "e2b"
+        ? poolLeaseTtl(pool, controller)
+        : pool.kind === "k8s"
+          ? (pool.ttlSec ?? undefined)
+          : undefined;
     const currentPoolCache = await getPoolCache(pool.id);
     const currentCache =
       currentPoolCache?.controllerId === pool.placements[0] ? currentPoolCache : null;
