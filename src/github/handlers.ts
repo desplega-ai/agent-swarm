@@ -198,6 +198,44 @@ async function resolveGitHubSender(
   return undefined;
 }
 
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/**
+ * Whether a sender may open a lead task through content that any account able
+ * to read the repo can post (mentions, comments, reviews). Accepted: a linked
+ * swarm user, this bot, a login listed in GITHUB_ALLOWED_SENDERS
+ * (comma-separated), or the content's author when GitHub reports them as an
+ * owner, org member or collaborator. Assignment, label and review-request
+ * events already need write or triage access on GitHub, so they skip this.
+ */
+function isTrustedGitHubSender(
+  login: string,
+  requestedByUserId: string | undefined,
+  content: { user: { login: string }; author_association?: string },
+): boolean {
+  if (requestedByUserId || isBotAssignee(login)) return true;
+  const normalized = login.toLowerCase();
+  const allowed = (process.env.GITHUB_ALLOWED_SENDERS ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.includes(normalized)) return true;
+  // author_association describes the content's author, so it vouches only when the sender wrote it.
+  return (
+    content.user.login.toLowerCase() === normalized &&
+    TRUSTED_AUTHOR_ASSOCIATIONS.has(content.author_association ?? "")
+  );
+}
+
+const UNTRUSTED_SENDER_REASON =
+  "sender is not a linked user, an allowed sender, or a repo owner, member or collaborator";
+
+function logUntrustedSender(eventType: string, login: string, repo: string, number: number) {
+  console.log(
+    `[GitHub] Skipped ${eventType} by ${login} on ${repo}#${number}: ${UNTRUSTED_SENDER_REASON}`,
+  );
+}
+
 /**
  * Handle pull_request events (opened, edited)
  */
@@ -538,6 +576,11 @@ export async function handlePullRequest(
     return { created: false };
   }
 
+  if (!isTrustedGitHubSender(sender.login, requestedByUserId, pr)) {
+    logUntrustedSender(`pull_request.${action}`, sender.login, repository.full_name, pr.number);
+    return { created: false };
+  }
+
   // Deduplicate
   const eventKey = `pr:${repository.full_name}:${pr.number}:${action}`;
   if (isDuplicate(eventKey)) {
@@ -799,6 +842,11 @@ export async function handleIssue(
     return { created: false };
   }
 
+  if (!isTrustedGitHubSender(sender.login, requestedByUserId, issue)) {
+    logUntrustedSender(`issues.${action}`, sender.login, repository.full_name, issue.number);
+    return { created: false };
+  }
+
   // Deduplicate
   const eventKey = `issue:${repository.full_name}:${issue.number}:${action}`;
   if (isDuplicate(eventKey)) {
@@ -894,6 +942,10 @@ export async function handleComment(
   // Check for @agent-swarm mention in comment
   if (!detectMention(comment.body)) {
     return skip("no bot mention");
+  }
+
+  if (!isTrustedGitHubSender(sender.login, requestedByUserId, comment)) {
+    return skip(UNTRUSTED_SENDER_REASON);
   }
 
   // Deduplicate
@@ -1314,6 +1366,11 @@ export async function handlePullRequestReview(
   // Only handle submitted reviews (the most important action)
   // Edited reviews are less common and dismissed is handled by the state
   if (action !== "submitted") {
+    return { created: false };
+  }
+
+  if (!isTrustedGitHubSender(sender.login, requestedByUserId, review)) {
+    logUntrustedSender("pull_request_review", sender.login, repository.full_name, pr.number);
     return { created: false };
   }
 

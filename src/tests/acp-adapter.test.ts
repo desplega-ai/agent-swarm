@@ -121,6 +121,32 @@ describe("ACPAdapter", () => {
     );
   });
 
+  test.each([
+    "gemini",
+    "Gemini",
+    " gemini ",
+    "GEMINI",
+  ])("normalizes ACP target %j before selecting a preset", (target) => {
+    const config = baseConfig({ env: { ACP_TARGET: target } });
+    const profile = resolveAcpTarget(config);
+    expect(profile.target).toBe("gemini");
+    expect(profile.command(config)).toEqual(["gemini", "--acp"]);
+  });
+
+  test.each(["", " \t "])("defaults blank ACP target %j to custom", (target) => {
+    const config = baseConfig({
+      env: { ACP_TARGET: target, ACP_TARGET_COMMAND: "custom-acp --stdio" },
+    });
+    const profile = resolveAcpTarget(config);
+    expect(profile.target).toBe("custom");
+    expect(profile.command(config)).toEqual(["custom-acp", "--stdio"]);
+  });
+
+  test.each(["nope", " NOPE "])("rejects unknown ACP target %j", (target) => {
+    const config = baseConfig({ env: { ACP_TARGET: target } });
+    expect(() => resolveAcpTarget(config)).toThrow('Unsupported ACP target "nope"');
+  });
+
   test.each<{ name: string; usage?: Usage | null }>([
     { name: "absent", usage: undefined },
     { name: "null", usage: null },

@@ -13,6 +13,7 @@ export interface PullRequestEvent extends GitHubWebhookEvent {
     body: string | null;
     html_url: string;
     user: { login: string };
+    author_association?: string;
     head: { ref: string; sha: string };
     base: { ref: string };
     merged: boolean;
@@ -30,6 +31,7 @@ export interface IssueEvent extends GitHubWebhookEvent {
     body: string | null;
     html_url: string;
     user: { login: string };
+    author_association?: string;
   };
   label?: { id: number; name: string; color: string }; // Added for labeled/unlabeled events
 }
@@ -41,6 +43,7 @@ export interface CommentEvent extends GitHubWebhookEvent {
     body: string;
     html_url: string;
     user: { login: string };
+    author_association?: string;
   };
   issue?: { number: number; title: string; html_url: string };
   pull_request?: { number: number; title: string; html_url: string };
@@ -55,6 +58,7 @@ export interface PullRequestReviewEvent extends GitHubWebhookEvent {
     state: "approved" | "changes_requested" | "commented" | "dismissed";
     html_url: string;
     user: { login: string };
+    author_association?: string;
     submitted_at: string;
     commit_id?: string;
   };

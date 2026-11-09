@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
-import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { attachDemotionEvidence } from "../be/memory/demotion-evidence";
+import { rowToCandidate, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import type { RatingEvent } from "../be/memory/raters/types";
 
@@ -268,5 +269,38 @@ describe("applyRating", () => {
     expect(row!.signal).toBe(0.7);
     expect(row!.weight).toBe(0.4);
     expect(row!.reasoning).toBe("because reasons");
+  });
+
+  test("attachDemotionEvidence sums explicit-self and LLM mass for net-negative rows only", async () => {
+    const wrong = await makeMemory("wrong");
+    const liked = await makeMemory("liked");
+    await applyRating(
+      [
+        { memoryId: wrong.id, signal: -1, weight: 1, source: "explicit-self" },
+        { memoryId: wrong.id, signal: -0.5, weight: 0.8, source: "llm" },
+        { memoryId: wrong.id, signal: 0.5, weight: 0.8, source: "llm" },
+        { memoryId: wrong.id, signal: -1, weight: 0.25, source: "implicit-citation" },
+        { memoryId: liked.id, signal: 1, weight: 1, source: "llm" },
+      ],
+      { taskId },
+    );
+    const load = async (id: string) =>
+      rowToCandidate(
+        (await getDbClient().get<Parameters<typeof rowToCandidate>[0]>(
+          "SELECT * FROM agent_memory WHERE id = ?",
+          [id],
+        ))!,
+        0.9,
+      );
+    const [w, l] = await attachDemotionEvidence([await load(wrong.id), await load(liked.id)]);
+    expect(w!.demotionEvidence).toEqual({
+      selfAlpha: 0,
+      selfBeta: 1,
+      llmAlpha: 0.4,
+      llmBeta: 0.4,
+      llmCount: 2,
+    });
+    // alpha > beta: never demotable, so never looked up.
+    expect(l!.demotionEvidence).toBeUndefined();
   });
 });
