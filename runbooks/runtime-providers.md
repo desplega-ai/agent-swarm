@@ -407,6 +407,26 @@ Deferred errors are scrubbed in the job's `last_error` and API logs. Controller
 target, placement, and credential changes are blocked while caches or releases
 remain; controller deletion waits for its pending releases to finish.
 
+### Persistent workspace
+
+Pools accept `workspace: { sizeGb? }` or `null` (the default). Adapters that set
+`RuntimeProviderTraits.persistentWorkspace` mount `ProvisionRequest.workspace.key`
+at `WORKSPACE_MOUNT_PATH` (`/workspace/personal`); `validatePool` rejects every other
+kind. The key is `swarm-ws-<agentId>-<slot>`, with no pool id or generation, so it
+survives a rebind or re-enable. The supervisor allocates `runtime_instances.workspace_slot`
+(lowest free per agent) inside the provision transaction; a partial unique index on
+`(agent_id, workspace_slot)` for non-offline rows fences concurrent allocation.
+Because `terminateRuntime` marks a row offline even when infrastructure terminate
+failed, each adapter also refuses a volume a live container still mounts.
+
+Unlike the cache, the workspace fails closed and is never released. The adapter
+must echo `meta.workspaceKey` on the handle. A missing echo (an old remote
+controller drops the unknown `workspace` field) terminates the runtime and counts
+a provision failure with an upgrade message. Docker creates the volume with
+`swarm.owner`, `swarm.agent-id` and `swarm.workspace=true` labels, refuses foreign
+labels, and keeps the workspace mount when the cache mount fallback retries.
+No code path deletes a workspace; operators remove volumes by hand.
+
 ## e2b
 
 `E2B_API_KEY` is required. `E2B_API_BASE` selects a custom endpoint.

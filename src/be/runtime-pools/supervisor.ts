@@ -4,7 +4,7 @@ import {
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
 import { RuntimeHandleSchema } from "../../runtime-providers/controller-protocol";
-import { RUNTIME_LABELS } from "../../runtime-providers/types";
+import { RUNTIME_LABELS, workspaceVolumeKey } from "../../runtime-providers/types";
 import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { createWorkerTaskFollowUp } from "../../tasks/worker-follow-up";
 import {
@@ -26,6 +26,7 @@ import {
   listRuntimeInstancesForAgent,
   listRuntimeInstancesForPool,
   markRuntimeTerminated,
+  nextFreeWorkspaceSlot,
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
 import { mintRuntimeToken } from "../users";
@@ -215,14 +216,17 @@ export async function provisionRuntime(
         ? await resolveE2bImage(pool.id, signal)
         : (pool.resolvedImage ?? pool.image!);
     if (signal?.aborted || image === null) return false;
+    let workspaceSlot: number | null = null;
     const token = await getDbClient().transaction(async () => {
       const credential = await mintRuntimeToken(agent.id, runtimeId);
+      if (pool.workspace) workspaceSlot = await nextFreeWorkspaceSlot(agent.id);
       await insertProvisioningRuntime({
         id: runtimeId,
         agentId: agent.id,
         poolId: pool.id,
         controllerId: pool.placements[0]!,
         reportedSlots: pool.slotsPerRuntime,
+        workspaceSlot,
       });
       await getDbClient().run(
         `UPDATE runtime_instances SET provision_attempts =
@@ -267,6 +271,13 @@ export async function provisionRuntime(
       currentCache && controller.traits.persistentCache
         ? { key: currentCache.key, mountPath: currentCache.mountPath }
         : undefined;
+    const workspace =
+      pool.workspace && workspaceSlot !== null
+        ? {
+            key: workspaceVolumeKey(agent.id, workspaceSlot),
+            ...(pool.workspace.sizeGb ? { sizeGb: pool.workspace.sizeGb } : {}),
+          }
+        : undefined;
     signal?.throwIfAborted();
     const handle = await controller.provision({
       runtimeId,
@@ -278,6 +289,7 @@ export async function provisionRuntime(
       env,
       resources: pool.resources ?? undefined,
       ...(cache ? { cache } : {}),
+      ...(workspace ? { workspace } : {}),
       labels: {
         [RUNTIME_LABELS.runtimeId]: runtimeId,
         [RUNTIME_LABELS.poolId]: pool.id,
@@ -289,6 +301,16 @@ export async function provisionRuntime(
       await controller.terminate(handle, "Supervisor stopped during provision");
       await markRuntimeTerminated(runtimeId, "Supervisor stopped during provision");
       return false;
+    }
+    // Fail closed: an old remote controller drops the field and would start an ephemeral runtime.
+    if (workspace && handle.meta?.workspaceKey !== workspace.key) {
+      const reason = `Persistent workspace: controller did not mount ${workspace.key}; upgrade the controller`;
+      try {
+        await controller.terminate(handle, reason);
+      } catch (terminateError) {
+        reportSupervisorError(terminateError);
+      }
+      throw new Error(reason);
     }
     const cacheWarning = currentCache
       ? !controller.traits.persistentCache
@@ -323,6 +345,8 @@ export async function provisionRuntime(
     );
     return true;
   } catch (error) {
+    // Another reconciler took this workspace slot first: skip the agent this tick, no failure.
+    if (String(error).includes("runtime_instances.workspace_slot")) return false;
     // Stop new requests before asynchronous failure cleanup commits.
     onFailure?.();
     if (signal?.aborted) {

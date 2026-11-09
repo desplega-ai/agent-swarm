@@ -246,6 +246,17 @@ test("hello sets online and all controller commands make round trips through the
   expect(JSON.stringify(logSpy.mock.calls)).not.toContain(token);
 });
 
+test("the workspace field and trait survive the remote round trip", async () => {
+  fake.traits.persistentWorkspace = true;
+  await connect();
+  const commands = await getControllerCommands(controllerId);
+  expect(commands.traits.persistentWorkspace).toBe(true);
+  const req = request(await ensureRuntimeOwnerId());
+  req.workspace = { key: `swarm-ws-${req.agentId.toLowerCase()}-0`, sizeGb: 20 };
+  await commands.provision(req);
+  expect(fake.requests[0]?.workspace).toEqual(req.workspace);
+});
+
 test("a timed-out remote cache release cannot delete a re-enabled cache", async () => {
   fake.traits.persistentCache = true;
   await connect();

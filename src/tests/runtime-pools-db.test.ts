@@ -148,6 +148,54 @@ describe("runtime pools persistence", () => {
     expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
   });
 
+  test("workspace pools are accepted on Docker, rejected elsewhere, and kept on update", async () => {
+    for (const kind of ["static", "e2b", "boxd", "k8s"] as const) {
+      const controller = await createRuntimeController({
+        name: `${kind}-ws-validation`,
+        kind,
+        ...(kind === "k8s" ? { placement: "builtin" as const } : {}),
+      });
+      await expect(
+        createRuntimePool({
+          name: `unsupported-workspace-${kind}`,
+          kind,
+          placements: [controller.id],
+          image: "worker:test",
+          workspace: {},
+        }),
+      ).rejects.toThrow(`${kind} does not support persistent workspaces`);
+    }
+    const docker = await createRuntimeController({ name: "docker-ws-validation", kind: "docker" });
+    await expect(
+      createRuntimePool({
+        name: "bad-size",
+        kind: "docker",
+        placements: [docker.id],
+        image: "worker:test",
+        workspace: { sizeGb: 0 },
+      }),
+    ).rejects.toThrow();
+    const plain = await createRuntimePool({
+      name: "plain",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+    });
+    expect(plain.workspace).toBeNull();
+    const pool = await createRuntimePool({
+      name: "workspace",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+      workspace: { sizeGb: 40 },
+    });
+    expect(pool.workspace).toEqual({ sizeGb: 40 });
+    expect((await updateRuntimePool(pool.id, { minRuntimes: 1 })).workspace).toEqual({
+      sizeGb: 40,
+    });
+    expect((await updateRuntimePool(pool.id, { workspace: null })).workspace).toBeNull();
+  });
+
   test("cache mount validation accepts isolated cache subdirectories", async () => {
     const controller = await createRuntimeController({ name: "safe-cache-paths", kind: "docker" });
     for (const [index, mountPath] of [

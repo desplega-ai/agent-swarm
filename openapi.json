@@ -6621,6 +6621,21 @@
             ],
             "additionalProperties": false
           },
+          "workspace": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "sizeGb": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              }
+            },
+            "default": null,
+            "additionalProperties": false
+          },
           "ttlSec": {
             "type": [
               "integer",
@@ -6768,6 +6783,12 @@
           "taskId": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "workspaceSlot": {
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -12269,6 +12290,12 @@
                           "taskId": {
                             "type": [
                               "string",
+                              "null"
+                            ]
+                          },
+                          "workspaceSlot": {
+                            "type": [
+                              "integer",
                               "null"
                             ]
                           },
@@ -73604,6 +73631,21 @@
                     ],
                     "additionalProperties": false
                   },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
+                    "default": null,
+                    "additionalProperties": false
+                  },
                   "ttlSec": {
                     "type": [
                       "integer",
@@ -73900,6 +73942,20 @@
                     "required": [
                       "mountPath"
                     ],
+                    "additionalProperties": false
+                  },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
                     "additionalProperties": false
                   },
                   "ttlSec": {

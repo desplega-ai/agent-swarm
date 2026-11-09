@@ -658,6 +658,18 @@ fi
 echo "=============================="
 
 # ---- Auto-clone registered repos ----
+# BEGIN prepare_clone_target
+# A clone killed mid-way on a persistent workspace leaves a non-empty dir with no
+# .git, and `git clone` into it fails on every boot. Move it aside (never delete:
+# it may hold someone's work) so the clone can run.
+prepare_clone_target() {
+    local dir="$1"
+    if [ -d "$dir" ] && [ ! -e "$dir/.git" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+        local aside="${dir}.incomplete-$(date +%s)"
+        mv "$dir" "$aside" && echo "  Moved incomplete clone ${dir} to ${aside}"
+    fi
+}
+# END prepare_clone_target
 echo ""
 echo "=== Repo Auto-Clone ==="
 if [ -n "$AGENT_ID" ]; then
@@ -706,6 +718,7 @@ if [ -n "$AGENT_ID" ]; then
                         git fetch origin '$REPO_BRANCH' --prune && \
                         git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
+                    prepare_clone_target "$REPO_DIR"
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     # gh only speaks GitHub: it cannot parse Azure Repos URLs (…/_git/…)
                     # or Bitbucket URLs, and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the

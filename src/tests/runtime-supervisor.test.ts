@@ -59,8 +59,11 @@ class FakeRuntimeProvider implements RuntimeProvider {
     ephemeralDisk: true,
     supportsPause: false,
     persistentCache: true,
+    persistentWorkspace: true,
   };
   requests: ProvisionRequest[] = [];
+  /** false simulates an old remote controller that drops the workspace field. */
+  echoWorkspace = true;
   targets: RuntimeTargetConfig[] = [];
   terminated: string[] = [];
   owners: string[] = [];
@@ -85,6 +88,7 @@ class FakeRuntimeProvider implements RuntimeProvider {
       kind: "docker",
       externalId: crypto.randomUUID(),
       ...(this.cacheWarning ? { meta: { cacheWarning: this.cacheWarning } } : {}),
+      ...(req.workspace && this.echoWorkspace ? { meta: { workspaceKey: req.workspace.key } } : {}),
     };
     this.runtimes.set(handle.externalId, { handle, owner: req.ownerId, status: "running" });
     return handle;
@@ -209,6 +213,51 @@ test("cache identity is stable across provisions of one pool and scoped away fro
   expect(second).toEqual(first);
   expect(third.key).toStartWith(`swarm-cache-${other.pool.id}-`);
   expect(third.key).not.toBe(first.key);
+});
+
+test("workspace slots take the lowest free integer per agent and free on offline", async () => {
+  const { pool, agent } = await setup({ workspace: { sizeGb: 30 } });
+  const controller = await getControllerCommands(controllerId);
+  const owner = await ensureRuntimeOwnerId();
+  for (let i = 0; i < 2; i++) await provisionRuntime(pool, agent, controller, owner);
+  const prefix = `swarm-ws-${agent.id.toLowerCase()}`;
+  expect(fake.requests.map((req) => req.workspace)).toEqual([
+    { key: `${prefix}-0`, sizeGb: 30 },
+    { key: `${prefix}-1`, sizeGb: 30 },
+  ]);
+  const first = (await listRuntimeInstancesForPool(pool.id)).find((r) => r.workspaceSlot === 0)!;
+  await markRuntimeTerminated(first.id, "exited");
+  await provisionRuntime(pool, agent, controller, owner);
+  expect(fake.requests[2]?.workspace?.key).toBe(`${prefix}-0`);
+  expect((await getRuntimePool(pool.id))?.workspace).toEqual({ sizeGb: 30 });
+});
+
+test("a pool without a workspace sends no workspace and stores no slot", async () => {
+  const { pool, runtime } = await wake();
+  expect(fake.requests[0]).not.toHaveProperty("workspace");
+  expect(runtime.workspaceSlot).toBeNull();
+  expect(pool.workspace).toBeNull();
+});
+
+test("a controller that does not echo the workspace key is terminated and counted as a failure", async () => {
+  fake.echoWorkspace = false;
+  const { pool, agent } = await setup({ workspace: {} });
+  await provisionRuntime(
+    pool,
+    agent,
+    await getControllerCommands(controllerId),
+    await ensureRuntimeOwnerId(),
+  );
+  const [runtime] = await listRuntimeInstancesForPool(pool.id);
+  expect(runtime?.status).toBe("offline");
+  expect(runtime?.provisionError).toContain("controller did not mount");
+  expect(fake.terminated).toHaveLength(1);
+  expect(fake.runtimes.size).toBe(0);
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 1,
+    lastError: expect.stringContaining("Persistent workspace: controller did not mount"),
+  });
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
 });
 
 test("an older controller boots without cache and surfaces a warning without failing the provision", async () => {

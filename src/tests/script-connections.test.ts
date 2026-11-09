@@ -708,6 +708,8 @@ describe("script connections", () => {
       // 318 updates agent_tasks.status, which this fixture's id-only
       // agent_tasks lacks.
       markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
+      // 321 alters runtime_pools and runtime_instances, which this fixture lacks.
+      markMigrationApplied(database, "321_runtime_pool_workspace.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
