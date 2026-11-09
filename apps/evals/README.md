@@ -220,6 +220,22 @@ The effective effort of each config is snapshotted in `eval_runs.efforts_json` w
 
 The Runs and Configs pages have an Effort filter, the matrix and config tables show a chip beside the model, and Analytics filters by effort and has a By Effort rollup. Runs at different efforts of one model stay in one model row; the row lists its efforts.
 
+### API extension under test (`--api-extension`)
+
+Opt-in, default off, CLI only (the path is a local directory). `run --api-extension <dir>` installs one extension bundle into every attempt's sandbox API after the API is healthy and before the workers boot, then enables it. The directory holds `manifest.json` plus the hooks file it names, or an `install-payload.json` (`{manifest, files, config?}`) used as is. The option is stored on the run (`eval_runs.api_extension_json`), so `resume` repeats it, and the installed bundle's sha256 lands in the attempt's `sandboxJson.apiExtension`.
+
+- `--api-extension-config '{"mode":"enforce"}'` merges over the bundle's own config.
+- `--api-config-from-env A,B` copies those env vars into the sandbox API as global `swarm_config` rows of the same name (secret-shaped names are stored as secrets, `exportToEnv: false`, so they never reach a worker's env). Use it for the credential an extension's `ctx.swarm.systemOne_decide` call reads. The `cloudflare` provider (model `clef`) reads the global rows `CLOUDFLARE_API_TOKEN` (or `CLOUDFLARE_API_KEY`) and `CLOUDFLARE_ACCOUNT_ID` from the API's config table, not from its env, so pass `--api-config-from-env CLOUDFLARE_API_KEY,CLOUDFLARE_ACCOUNT_ID`.
+- Setting the option also sets `EXTENSION_ALLOW_INLINE_INSTALL=true` on the API sandbox only.
+- Each attempt stores `extension-runs.json` (every recorded hook run: event, action, `tool <name>`, agent) and `extension-coverage.json` (gated vs all tool calls from the session logs of every task that ran, per tool). `pre.tool.call` fires for swarm MCP calls; a harness's native `bash`/`read`/`write` calls show as ungated.
+
+`extensions/tool-call-probe/` is a pass-through `pre.tool.call` bundle for measuring that coverage:
+
+```bash
+bun src/cli.ts run --scenarios delegation-probe --configs pi-deepseek-flash \
+  --attempts 1 --api-extension extensions/tool-call-probe
+```
+
 ### Seeding (`scenario.seed`)
 
 Seeding runs before the first task is created, in this order:
