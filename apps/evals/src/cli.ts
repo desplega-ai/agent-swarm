@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { DEFAULT_CONFIG_IDS } from "../configs/index.ts";
 import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
@@ -24,6 +25,8 @@ import {
   planRunEfforts,
 } from "./runner/run-efforts.ts";
 import { DEFAULT_PASS_THRESHOLD } from "./scoring.ts";
+import { loadApiExtension, resolveApiConfigFromEnv } from "./swarm/api-extension.ts";
+import type { ApiExtensionPlan } from "./types.ts";
 
 /**
  * Graceful Ctrl-C: stop starting new attempts, tear down live sandboxes, and
@@ -83,6 +86,13 @@ Options:
   --attempts <n>         attempts per scenario × config cell (default: the preset's, else 1)
   --max-metered-usd <n>  hard cap on the run's metered spend (default: the preset's, else none).
                          Past it the runner starts nothing new and cancels the rest.
+  --api-extension <path> opt-in: install this extension bundle (a directory with manifest.json
+                         or install-payload.json) into each attempt's sandbox API before the
+                         workers boot, and record its hook runs + tool-call coverage as
+                         extension-*.json artifacts (default: none)
+  --api-extension-config <json>  extension config merged over the bundle's, e.g. '{"mode":"enforce"}'
+  --api-config-from-env <A,B>    env vars copied into the sandbox API as global config rows
+                         (never to workers), e.g. the decision-model credential the extension reads
   --concurrency <n>      parallel attempts, one sandbox stack each (default 2)
   --max-retries <n>      retries per errored attempt (default 1)
   --judge-model <id>     OpenRouter judge model override
@@ -113,6 +123,32 @@ function parseEffortFlags(flags: string[]): EffortOverrides {
   return parseEffortOverrides(raw);
 }
 
+/** The opt-in api extension plan, checked now (bundle readable, env set) so a bad one costs no sandbox. */
+async function planApiExtension(values: {
+  "api-extension"?: string;
+  "api-extension-config"?: string;
+  "api-config-from-env"?: string;
+}): Promise<ApiExtensionPlan | undefined> {
+  if (!values["api-extension"]) {
+    if (values["api-extension-config"] || values["api-config-from-env"]) {
+      throw new Error("--api-extension-config and --api-config-from-env need --api-extension");
+    }
+    return undefined;
+  }
+  const plan: ApiExtensionPlan = {
+    path: resolve(values["api-extension"]),
+    ...(values["api-extension-config"]
+      ? { config: JSON.parse(values["api-extension-config"]) }
+      : {}),
+    ...(values["api-config-from-env"]
+      ? { configFromEnv: parseCsv(values["api-config-from-env"], []) }
+      : {}),
+  };
+  await loadApiExtension(plan);
+  resolveApiConfigFromEnv(plan);
+  return plan;
+}
+
 async function cmdRun(argv: string[]): Promise<void> {
   const { values } = parseArgs({
     args: argv,
@@ -122,6 +158,9 @@ async function cmdRun(argv: string[]): Promise<void> {
       configs: { type: "string" },
       preset: { type: "string", multiple: true },
       effort: { type: "string", multiple: true },
+      "api-extension": { type: "string" },
+      "api-extension-config": { type: "string" },
+      "api-config-from-env": { type: "string" },
       help: { type: "boolean" },
       attempts: { type: "string" },
       "max-metered-usd": { type: "string" },
@@ -166,6 +205,7 @@ async function cmdRun(argv: string[]): Promise<void> {
     throw new Error(`--max-metered-usd must be a positive number, got "${maxMeteredUsd}"`);
   }
 
+  const apiExtension = await planApiExtension(values);
   await assertRunConfigsResolve(registry, scenarioIds, configIds);
   const efforts = planRunEfforts({
     registry,
@@ -186,6 +226,7 @@ async function cmdRun(argv: string[]): Promise<void> {
     judgeModel: values["judge-model"],
     efforts,
     maxMeteredUsd,
+    ...(apiExtension ? { apiExtension } : {}),
   });
   await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
   console.log(
