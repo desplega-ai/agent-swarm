@@ -12657,10 +12657,12 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     //
     // The engine (src/workflows/engine.ts) writes workflow_runs.created_by and
     // context.swarm.requestedByUserId from the same options.requestedByUserId,
-    // and a resume rehydrates the requester from run.createdBy. So every row
-    // whose context names this user also has created_by = this user, and the
-    // indexed created_by column can narrow both JSON passes to that user's
-    // runs instead of parsing the JSON of every row (153 s on 493k prod rows).
+    // and a resume rehydrates the requester from run.createdBy. Migration 318
+    // backfilled created_by from the context requester for runs older than
+    // that engine change. So every row whose context names this user also has
+    // created_by = this user, and the indexed created_by column can narrow
+    // both JSON passes to that user's runs instead of parsing the JSON of
+    // every row (153 s on 493k prod rows).
     // This has to run before the generic column rewrite below, which would
     // otherwise move created_by to the replacement (or NULL) and hide the rows.
     // json_valid + json_extract stay as the secondary filter.
@@ -12713,8 +12715,8 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       );
     }
 
-    // Each discovered column is indexed (migration 318), so these are
-    // index lookups rather than table scans.
+    // Migration 318 indexes every discovered column (the user-delete-perf test
+    // pins the plans), so these are index lookups rather than table scans.
     for (const reference of references) {
       const table = quoteSqlIdentifier(reference.tableName);
       const column = quoteSqlIdentifier(reference.columnName);

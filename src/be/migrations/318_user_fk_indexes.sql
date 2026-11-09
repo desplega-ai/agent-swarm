@@ -1,4 +1,5 @@
--- Index every column that references users(id) and had no leading index.
+-- Index every column that references users(id) and had no leading index, and
+-- backfill workflow_runs.created_by for runs that predate it.
 --
 -- Incident 2026-11-09: merging two users froze the API for 278 s on an 85 GB
 -- production database. deleteUser rewrites every nullable user FK column
@@ -8,12 +9,33 @@
 -- took 41 s, workflow_runs (493k) 27 s, script_runs (378k) 15 s, and the final
 -- DELETE 10 s. Every statement is synchronous bun:sqlite on the event loop.
 --
+-- deleteUser also rewrites context.swarm.requestedByUserId inside the
+-- workflow_runs JSON. It now narrows that pass with created_by = ?, which
+-- relies on the engine (src/workflows/engine.ts) writing created_by and the
+-- context requester from the same value. The engine has done that since
+-- PR #1191 (2026-08-19); the context requester exists since PR #621, so older
+-- runs carry a requester with created_by NULL. Backfill them once so the
+-- invariant holds for existing rows. Existing attribution wins, the LIKE
+-- prefilter spares rows without the key the JSON parse, and the users
+-- subselect keeps the FK valid (foreign_keys is OFF while migrations run).
+-- This runs before the index creation so the UPDATE does not maintain the
+-- new created_by index row by row.
+UPDATE workflow_runs
+SET created_by = json_extract(context, '$.swarm.requestedByUserId')
+WHERE created_by IS NULL
+  AND context LIKE '%"requestedByUserId"%'
+  AND json_valid(context)
+  AND json_extract(context, '$.swarm.requestedByUserId') IN (SELECT id FROM users);
+
 -- Partial indexes (WHERE col IS NOT NULL) serve "col = ?" lookups and the FK
 -- check equally, and cost nothing for rows with no user attribution. The list
 -- is generated from pragma_foreign_key_list on a fresh database plus the two
 -- scheduled_tasks audit columns whose FKs migration 103 dropped. Columns that
 -- already had a leading index (agent_tasks, pages, scripts, skills, workflows
 -- created_by, agent_tasks.requestedByUserId, the userId columns) are skipped.
+-- session_shares.userId is the exception: its only index (session_shares_user,
+-- migration 230) is partial on revokedAt IS NULL, which neither the rewrite
+-- nor the FK check can use, so it gets a plain partial index here.
 
 CREATE INDEX IF NOT EXISTS idx_agent_memory_created_by ON agent_memory(created_by) WHERE created_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_memory_updated_by ON agent_memory(updated_by) WHERE updated_by IS NOT NULL;
@@ -98,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_services_updated_by ON services(updated_by) WHERE
 CREATE INDEX IF NOT EXISTS idx_session_shares_created_by ON session_shares(created_by) WHERE created_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_session_shares_revokedBy ON session_shares(revokedBy) WHERE revokedBy IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_session_shares_updated_by ON session_shares(updated_by) WHERE updated_by IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_session_shares_userId ON session_shares(userId) WHERE userId IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_skill_files_created_by ON skill_files(created_by) WHERE created_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_skill_files_updated_by ON skill_files(updated_by) WHERE updated_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_skills_updated_by ON skills(updated_by) WHERE updated_by IS NOT NULL;
