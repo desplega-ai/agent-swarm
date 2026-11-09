@@ -318,6 +318,12 @@ export async function markRuntimeTerminated(id: string, reason: string): Promise
 }
 
 /**
+ * A workspace runtime can register before the supervisor checks its mount. It
+ * gets no work until the supervisor stores the verified handle.
+ */
+const WORKSPACE_CONFIRMED_SQL = "(workspace_slot IS NULL OR external_handle IS NOT NULL)";
+
+/**
  * Refresh a live runtime instance's liveness from the worker's ping cadence.
  *
  * Matches only a row that is already live and owned by the caller, so worker
@@ -330,7 +336,8 @@ export async function touchRuntimeInstance(id: string, agentId: string): Promise
     `UPDATE runtime_instances
      SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND ${WORKSPACE_CONFIRMED_SQL}`,
     [id, agentId, runtimeLivenessCutoff()],
   );
   return result.changes > 0;
@@ -394,7 +401,8 @@ export async function isRuntimeInstanceLive(
   if (!id) return false;
   const row = await getDbClient().get<{ c: number }>(
     `SELECT COUNT(*) c FROM runtime_instances
-     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND ${WORKSPACE_CONFIRMED_SQL}`,
     [id, agentId, runtimeLivenessCutoff()],
   );
   return (row?.c ?? 0) > 0;

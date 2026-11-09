@@ -421,8 +421,13 @@ failed, each adapter also refuses a volume a live container still mounts.
 
 Unlike the cache, the workspace fails closed and is never released. The adapter
 must echo `meta.workspaceKey` on the handle. A missing echo (an old remote
-controller drops the unknown `workspace` field) terminates the runtime and counts
-a provision failure with an upgrade message. Docker creates the volume with
+controller drops the unknown `workspace` field) terminates the runtime, retires its
+row and revokes its token even if the worker already registered, and counts a
+provision failure with an upgrade message. Until the supervisor stores the verified
+handle, `touchRuntimeInstance` refuses a row with a `workspace_slot`, so an early
+registration gets no work. `list()` must report `meta.workspaceKey` from the real
+mount (Docker reads `Mounts`, never a label): reconnect adoption of a lost provision
+retires the row when the key is missing, and orphan reconciliation terminates it. Docker creates the volume with
 `swarm.owner`, `swarm.agent-id` and `swarm.workspace=true` labels, refuses foreign
 labels, and keeps the workspace mount when the cache mount fallback retries.
 No code path deletes a workspace; operators remove volumes by hand.

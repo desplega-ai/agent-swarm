@@ -162,7 +162,9 @@ with one runtime per agent.
 **Fail closed.** Unlike the cache, a runtime never starts without its workspace.
 A volume error, a volume another container still uses, or a controller that does
 not confirm the mount fails the provision and counts toward the pool's failure
-backoff. Upgrade remote controllers before enabling workspaces.
+backoff. A runtime gets no work until its mount is confirmed, and a runtime that
+a reconnecting controller cannot show mounting its workspace is terminated.
+Upgrade remote controllers before enabling workspaces.
 
 **Retention.** The swarm never deletes a workspace. Terminating a runtime,
 disabling the setting, deleting the pool, changing its placement or image, and

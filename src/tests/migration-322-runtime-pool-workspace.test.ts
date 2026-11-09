@@ -26,7 +26,7 @@ async function applyUpTo(db: Database, last: number): Promise<void> {
   }
 }
 
-test("migration 321 adds nullable workspace columns to a fresh database", () => {
+test("migration 322 adds nullable workspace columns to a fresh database", () => {
   const db = new Database(":memory:");
   try {
     runMigrations(db);
@@ -41,10 +41,10 @@ test("migration 321 adds nullable workspace columns to a fresh database", () => 
   }
 });
 
-test("migration 321 keeps existing rows ephemeral and fences one live runtime per slot", async () => {
+test("migration 322 keeps existing rows ephemeral and fences one live runtime per slot", async () => {
   const db = new Database(":memory:");
   try {
-    await applyUpTo(db, 320);
+    await applyUpTo(db, 321);
     db.run(
       "INSERT INTO runtime_pools (id, name, kind, placements, image, env, lifecycle) VALUES ('pool', 'pool', 'docker', '[\"c\"]', 'worker:test', '{}', 'idle')",
     );
