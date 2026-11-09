@@ -170,7 +170,7 @@ describe("parseToolUses — Codex raw_log ThreadEvents", () => {
   });
 
   describe("started + completed events of one call count once", () => {
-    const ev = (type: string, id: string, extra: object = {}, o: Partial<SessionLogRow> = {}) =>
+    const ev = (type: string, id: string, extra: Record<string, unknown> = {}, o: Partial<SessionLogRow> = {}) =>
       row(
         JSON.stringify({
           type,
