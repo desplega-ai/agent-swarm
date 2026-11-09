@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import { createRun, getRun } from "../db/queries.ts";
+import { parseToolUses } from "../judge/session-log-parse.ts";
 import {
   installApiExtension,
   loadApiExtension,
@@ -160,6 +161,26 @@ describe("toolCoverage", () => {
     expect(cov.byTool["send-task"]).toEqual({ all: 1, gated: 1 });
     expect(cov.byTool.bash).toEqual({ all: 2, gated: 0 });
     expect(cov.gatedActions).toEqual({ continue: 1, block: 1 });
+  });
+
+  test("one codex call logged as started then completed is 100% covered, not 50%", () => {
+    const line = (type: string) => ({
+      id: crypto.randomUUID(),
+      taskId: "t",
+      sessionId: "s",
+      iteration: 0,
+      cli: "codex",
+      lineNumber: 0,
+      createdAt: "t",
+      content: JSON.stringify({
+        type,
+        item: { type: "mcp_tool_call", id: "item_0", server: "x", tool: "send-task" },
+      }),
+    });
+    const names = parseToolUses([line("item.started"), line("item.completed")]).map(
+      (t) => t.toolName,
+    );
+    expect(toolCoverage([run("tool send-task")], names).coverage).toBe(1);
   });
 
   test("coverage ignores hook runs for calls the logs never show", () => {

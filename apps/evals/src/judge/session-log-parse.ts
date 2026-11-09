@@ -83,7 +83,7 @@ export function parseToolUses(logRows: SessionLogRow[]): ToolUse[] {
     const taskId = row.taskId || undefined;
 
     try {
-      collectFromLine(parsed, taskId, uses, byCallId);
+      collectFromLine(parsed, taskId, `${row.taskId}|${row.sessionId}`, uses, byCallId);
     } catch {
       // Any unexpected shape inside a recognized envelope — skip this row.
     }
@@ -94,6 +94,8 @@ export function parseToolUses(logRows: SessionLogRow[]): ToolUse[] {
 function collectFromLine(
   parsed: Json,
   taskId: string | undefined,
+  /** task + session: Codex item ids (`item_0`, ...) restart per thread, so they are unique only within it. */
+  scope: string,
   uses: ToolUse[],
   byCallId: Map<string, number>,
 ): void {
@@ -137,18 +139,29 @@ function collectFromLine(
     if (!item) return;
     const tool = codexToolFromItem(item);
     if (!tool) return;
+    // One call surfaces as item.started then item.completed with the same item id:
+    // keep ONE ToolUse per call. byCallId holds only OPEN codex calls, so a completed
+    // row upgrades its start in place and closes it; the same id again is a new call.
+    // shortcut: an item with no id cannot be paired, so it counts per row; upgrade if codex emits id-less tool items.
+    const key = typeof item.id === "string" ? `codex:${scope}:${item.id}` : undefined;
+    const openIdx = key !== undefined ? byCallId.get(key) : undefined;
     if (type === "item.started") {
-      uses.push({ taskId, toolName: tool.toolName, input: tool.input });
+      if (openIdx !== undefined) return;
+      const idx = uses.push({ taskId, toolName: tool.toolName, input: tool.input }) - 1;
+      if (key !== undefined) byCallId.set(key, idx);
     } else {
       // item.completed — record the terminal state, carrying its error signal.
       const result = resultText(item.result);
-      uses.push({
+      const done: ToolUse = {
         taskId,
         toolName: tool.toolName,
         input: tool.input,
         isError: tool.isError,
         ...(result !== undefined ? { result } : {}),
-      });
+      };
+      if (openIdx !== undefined) uses[openIdx] = done;
+      else uses.push(done);
+      if (key !== undefined) byCallId.delete(key);
     }
     return;
   }

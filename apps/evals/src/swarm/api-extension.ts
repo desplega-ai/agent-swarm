@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { isSafeBundlePath } from "../../../../src/extensions/bundle-path.ts";
 import type { ApiExtensionPlan } from "../types.ts";
 
 /** What `POST /api/extensions/install` takes for an inline bundle. */
@@ -38,6 +39,30 @@ export interface ApiExtensionRun {
 }
 
 /**
+ * Read one file the bundle names. The bundle is code under test from another actor, so
+ * a `..` path, an absolute path, or a symlink anywhere on the path must never reach a
+ * host file (the evals env holds provider credentials). The resolved path has to equal
+ * the lexical one under the real bundle root, which rejects every symlink, even one
+ * that points back inside. Returns null when the file does not exist.
+ * shortcut: a hardlink to a host file is not detected, fine while bundles come from git checkouts.
+ */
+async function readBundleFile(root: string, rel: unknown): Promise<string | null> {
+  if (typeof rel !== "string" || !isSafeBundlePath(rel)) {
+    throw new Error(`api extension: unsafe bundle path ${JSON.stringify(rel)}`);
+  }
+  const file = join(await realpath(root), ...rel.split("/"));
+  let real: string;
+  try {
+    real = await realpath(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  if (real !== file) throw new Error(`api extension: ${rel} is a symlink or leaves the bundle`);
+  return readFile(real, "utf8");
+}
+
+/**
  * Read a bundle: a directory with `install-payload.json` (used as is), a directory
  * with `manifest.json` (files = the hooks file + script files the manifest names), or
  * a payload JSON file. `plan.config` is merged over the payload's own config.
@@ -47,21 +72,33 @@ export interface ApiExtensionRun {
 export async function loadApiExtension(plan: ApiExtensionPlan): Promise<LoadedApiExtension> {
   const path = resolve(plan.path);
   const isDir = (await stat(path)).isDirectory();
-  const readJson = async (file: string) => JSON.parse(await readFile(file, "utf8"));
+  const readBundleJson = async (rel: string) => {
+    const text = await readBundleFile(path, rel);
+    return text === null ? null : JSON.parse(text);
+  };
   let payload: ApiExtensionPayload;
+  const prebuilt = isDir ? await readBundleJson("install-payload.json") : null;
   if (!isDir) {
-    payload = await readJson(path);
-  } else if (await readFile(join(path, "install-payload.json"), "utf8").catch(() => null)) {
-    payload = await readJson(join(path, "install-payload.json"));
+    // The operator named this file itself, so it is trusted as given.
+    payload = JSON.parse(await readFile(path, "utf8"));
+  } else if (prebuilt) {
+    payload = prebuilt;
   } else {
-    const manifest = await readJson(join(path, "manifest.json"));
+    const manifest = await readBundleJson("manifest.json");
+    if (!manifest) throw new Error(`api extension at ${plan.path}: no manifest.json`);
     const assets = manifest.assets ?? {};
-    const rels: string[] = [
+    const rels: unknown[] = [
       assets.hooks,
-      ...(Array.isArray(assets.scripts) ? assets.scripts.map((s: { file: string }) => s.file) : []),
+      ...(Array.isArray(assets.scripts)
+        ? assets.scripts.map((s: { file?: unknown }) => s?.file)
+        : []),
     ];
     const files: Record<string, string> = {};
-    for (const rel of rels) files[rel] = await readFile(join(path, rel), "utf8");
+    for (const rel of rels) {
+      const body = await readBundleFile(path, rel);
+      if (body === null) throw new Error(`api extension: ${rel} not found in the bundle`);
+      files[rel as string] = body;
+    }
     payload = { manifest, files };
   }
   if (!payload.manifest?.name || !payload.files || typeof payload.files !== "object") {

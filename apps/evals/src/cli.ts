@@ -135,11 +135,18 @@ async function planApiExtension(values: {
     }
     return undefined;
   }
+  const config = values["api-extension-config"]
+    ? (JSON.parse(values["api-extension-config"]) as unknown)
+    : undefined;
+  if (
+    config !== undefined &&
+    (config === null || typeof config !== "object" || Array.isArray(config))
+  ) {
+    throw new Error("--api-extension-config must be a JSON object");
+  }
   const plan: ApiExtensionPlan = {
     path: resolve(values["api-extension"]),
-    ...(values["api-extension-config"]
-      ? { config: JSON.parse(values["api-extension-config"]) }
-      : {}),
+    ...(config ? { config: config as Record<string, unknown> } : {}),
     ...(values["api-config-from-env"]
       ? { configFromEnv: parseCsv(values["api-config-from-env"], []) }
       : {}),
