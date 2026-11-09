@@ -5,6 +5,7 @@ import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
+import { attachDemotionEvidence } from "../be/memory/demotion-evidence";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
@@ -939,9 +940,11 @@ export async function handleMemory(
         keyPrefix,
         isLead: false,
       });
-      const expanded = excludeReviewTaskCompletions
-        ? await dropReviewTaskCompletions(graphExpanded)
-        : graphExpanded;
+      const expanded = await attachDemotionEvidence(
+        excludeReviewTaskCompletions
+          ? await dropReviewTaskCompletions(graphExpanded)
+          : graphExpanded,
+      );
       const resultLimit = Math.min(limit, 20);
       // Prompt recall injects only rows above the relevance gate, so the gate
       // must pick the slots, not trim them afterwards: eligible rows fill the
@@ -1063,7 +1066,9 @@ export async function handleMemory(
         if (pathNeedle) {
           candidates = candidates.filter((c) => matchesPath(c.sourcePath));
         }
-        const ranked = rerank(candidates, { limit: candidates.length });
+        const ranked = rerank(await attachDemotionEvidence(candidates), {
+          limit: candidates.length,
+        });
         const page = ranked.slice(offset, offset + pageLimit);
 
         listMemory.respond(res, 200, {

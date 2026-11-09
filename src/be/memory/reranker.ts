@@ -9,7 +9,7 @@ import {
   SUPERSEDED_DECISION_WEIGHT,
 } from "./constants";
 import { isKeyUnderRoot, tierSource } from "./key-paths";
-import type { MemoryCandidate, RerankOptions } from "./types";
+import type { DemotionEvidence, MemoryCandidate, RerankOptions } from "./types";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MS_PER_HOUR = 1000 * 60 * 60;
@@ -79,23 +79,45 @@ export function pathWeight(key: string | null | undefined, tags: readonly string
  *
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §5
  *
- * At Beta(1,1) (default prior) returns 1.0 exactly — strict no-op vs.
- * pre-rater behaviour. Proven memories climb up to 2.0. Floored at the value
- * of MEMORY_DEMOTION_FLOOR (default 1.0 = no demotion) — the default preserves
- * brainstorm intent (memories are demoted toward the floor but never deleted
- * on the reranker path) and is configurable per deployment.
+ * At Beta(1,1) (default prior) returns 1.0 exactly. Proven memories climb up
+ * to 2.0. A net-negative posterior drops below 1.0, down to
+ * MEMORY_DEMOTION_FLOOR (default 0.5), only when `evidence` passes
+ * `hasDemotionEvidence`. Otherwise it stays at 1.0: the pooled alpha/beta is
+ * mostly "surfaced but not used here" votes (implicit-citation misses, LLM
+ * off-topic scores), which say nothing about whether the memory is wrong.
+ * MEMORY_DEMOTION_FLOOR=1.0 turns demotion off. Memories are never deleted on
+ * the reranker path.
  */
 function readDemotionFloor(): number {
   const raw = process.env.MEMORY_DEMOTION_FLOOR;
-  const n = raw == null || raw === "" ? 1.0 : Number(raw);
-  return Number.isFinite(n) ? n : 1.0;
+  const n = raw == null || raw === "" ? DEFAULT_DEMOTION_FLOOR : Number(raw);
+  return Number.isFinite(n) ? n : DEFAULT_DEMOTION_FLOOR;
 }
 
-export function usefulness(alpha: number, beta: number): number {
+export const DEFAULT_DEMOTION_FLOOR = 0.5;
+/** LLM-only demotion needs at least this many LLM ratings on the memory. */
+export const DEMOTION_MIN_LLM_RATINGS = 10;
+/** ...and an LLM-only Beta(1,1) posterior mean below this (net-negative about 3:1). */
+export const DEMOTION_MAX_LLM_MEAN = 0.25;
+
+/**
+ * Explicit-self decides when the agent's own ratings lean one way: net-negative
+ * demotes, net-positive vetoes. With no explicit-self verdict, the LLM rater
+ * demotes only with enough ratings and a clearly negative mean.
+ */
+export function hasDemotionEvidence(evidence: DemotionEvidence | undefined): boolean {
+  if (!evidence) return false;
+  if (evidence.selfBeta !== evidence.selfAlpha) return evidence.selfBeta > evidence.selfAlpha;
+  const llmMean = (1 + evidence.llmAlpha) / (2 + evidence.llmAlpha + evidence.llmBeta);
+  return evidence.llmCount >= DEMOTION_MIN_LLM_RATINGS && llmMean < DEMOTION_MAX_LLM_MEAN;
+}
+
+export function usefulness(alpha: number, beta: number, evidence?: DemotionEvidence): number {
   const denom = alpha + beta;
   if (denom <= 0) return 1.0;
-  const mean = alpha / denom;
-  return Math.max(readDemotionFloor(), Math.min(2.0, 2 * mean));
+  const score = Math.min(2.0, (2 * alpha) / denom);
+  const demote = score < 1.0 && hasDemotionEvidence(evidence);
+  return Math.max(readDemotionFloor(), demote ? score : Math.max(1.0, score));
 }
 
 /**
@@ -112,7 +134,7 @@ export function computeScore(candidate: MemoryCandidate, now: Date): number {
     accessBoost(candidate.accessedAt, candidate.accessCount, now) *
     sourceQuality(candidate.source, candidate.key) *
     pathWeight(candidate.key, candidate.tags) *
-    usefulness(candidate.alpha, candidate.beta)
+    usefulness(candidate.alpha, candidate.beta, candidate.demotionEvidence)
   );
 }
 
