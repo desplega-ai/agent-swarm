@@ -348,6 +348,17 @@ export async function getScript(args: ScriptIdentity): Promise<ScriptRecord | nu
   return row ? rowToScript(row) : null;
 }
 
+/** contentHash of each named global script, in one query. Missing names are absent from the map. */
+export async function getGlobalScriptContentHashes(names: string[]): Promise<Map<string, string>> {
+  if (names.length === 0) return new Map();
+  const rows = await getDbClient().query<{ name: string; contentHash: string }>(
+    `SELECT name, contentHash FROM scripts
+    WHERE scope = 'global' AND scopeId IS NULL AND name IN (${names.map(() => "?").join(", ")})`,
+    names,
+  );
+  return new Map(rows.map((row) => [row.name, row.contentHash]));
+}
+
 export async function getScriptById(id: string): Promise<ScriptRecord | null> {
   const row = await getDbClient().get<ScriptRow>("SELECT * FROM scripts WHERE id = ?", [id]);
   return row ? rowToScript(row) : null;

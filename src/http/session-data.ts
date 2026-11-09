@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  createSessionCost,
   createSessionLogs,
   getActivePricingRow,
   getAllSessionCosts,
@@ -13,17 +12,23 @@ import {
   getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getTaskById,
+  insertSessionCost,
   refreshActiveSessionOnActivity,
+  SessionCostConflictError,
 } from "../be/db";
+import { isScriptRunToken } from "../be/users";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost } from "../types";
 import {
   PricingProviderSchema,
+  ProviderNameSchema,
   SessionCostModelBreakdownSchema,
   SessionCostSchema,
   SessionLogSchema,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { bodyTask, route } from "./route-def";
 import { canReadSession, SESSION_READ_DENIED } from "./session-access";
 import { recomputeSessionCost } from "./session-cost-recompute";
@@ -47,6 +52,8 @@ const SessionCostSummaryTotalsSchema = z.object({
   excludedCostUsd: z.number(),
   excludedTaskCount: z.number().int(),
   subscriptionCostUsd: z.number(),
+  credentialUnattributedCostUsd: z.number(),
+  credentialUnattributedSessions: z.number().int(),
 });
 
 /** Mirrors `SessionCostDailyRow` in src/be/db.ts. */
@@ -57,6 +64,8 @@ const SessionCostDailyRowSchema = z.object({
   outputTokens: z.number().int(),
   sessions: z.number().int(),
   subscriptionCostUsd: z.number(),
+  credentialUnattributedCostUsd: z.number(),
+  credentialUnattributedSessions: z.number().int(),
 });
 
 /** Mirrors `SessionCostByAgentRow` in src/be/db.ts. */
@@ -182,6 +191,13 @@ const createSessionCostRoute = route({
     id: z.string().uuid().optional(),
     sessionId: z.string().min(1),
     agentId: z.string().min(1),
+    credentialKeyType: z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]{0,79}$/)
+      .nullable()
+      .optional(),
+    credentialKeySuffix: z.string().min(1).max(10).nullable().optional(),
+    harness: ProviderNameSchema.nullable().optional(),
     totalCostUsd: z.number(),
     // The adapter's totalCostUsd is the provider's bill (e.g. OpenRouter's
     // `usage.cost`), so it wins over the pricing table.
@@ -191,7 +207,7 @@ const createSessionCostRoute = route({
     // token counts must be rejected at the wire instead of pricing below $0.
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
-    cacheReadTokens: z.number().int().nonnegative().optional(),
+    cacheReadTokens: z.number().int().nonnegative().nullable().optional(),
     // Migration 063: nullable — adapters that can't honestly report cache writes
     // (e.g. Codex SDK) prefer null over a faked 0.
     cacheWriteTokens: z.number().int().nonnegative().nullable().optional(),
@@ -234,6 +250,8 @@ const createSessionCostRoute = route({
       schema: z.object({ success: z.literal(true), cost: SessionCostSchema }),
     },
     400: { description: "Validation error" },
+    403: { description: "Untrusted session attribution" },
+    409: { description: "Session identity conflict" },
   },
 });
 
@@ -370,6 +388,30 @@ export async function handleSessionData(
     const parsed = await createSessionCostRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    const auth = getRequestAuth(req);
+    const trustedWorker =
+      !auth?.page &&
+      (auth?.kind === "operator" ||
+        (auth?.kind === "agent" &&
+          (auth.tokenKind === "runtime" ||
+            (auth.tokenKind === "agent" && !(await isScriptRunToken(auth.tokenId)))) &&
+          auth.agentId === parsed.body.agentId));
+    const hasAttribution =
+      parsed.body.credentialKeyType != null ||
+      parsed.body.credentialKeySuffix != null ||
+      parsed.body.harness != null;
+    if (hasAttribution && !trustedWorker) {
+      jsonError(res, "Session attribution requires a worker or operator credential.", 403);
+      return true;
+    }
+    if (auth?.kind === "agent" && auth.agentId !== parsed.body.agentId) {
+      jsonError(res, "Session cost agent does not match the authenticated agent.", 403);
+      return true;
+    }
+    if ((parsed.body.credentialKeyType != null) !== (parsed.body.credentialKeySuffix != null)) {
+      jsonError(res, "Session credential type and suffix must be supplied together.", 400);
+      return true;
+    }
     try {
       const inputTokens = parsed.body.inputTokens ?? 0;
       const cachedInputTokens = parsed.body.cacheReadTokens ?? 0;
@@ -393,10 +435,10 @@ export async function handleSessionData(
         : outputTokens;
       const rowCacheReadTokens = bodyModels
         ? bodyModels.reduce((sum, m) => sum + m.cacheReadTokens, 0)
-        : cachedInputTokens;
+        : (parsed.body.cacheReadTokens ?? null);
       const rowCacheWriteTokens = bodyModels
         ? bodyModels.reduce((sum, m) => sum + m.cacheWriteTokens, 0)
-        : (parsed.body.cacheWriteTokens ?? 0);
+        : (parsed.body.cacheWriteTokens ?? null);
 
       // Keep the adapter's report even when the pricing-table branch replaces
       // totalCostUsd with the server's canonical recomputation. Harnesses that
@@ -425,7 +467,10 @@ export async function handleSessionData(
       );
       const { totalCostUsd, costSource } = recomputed;
 
-      const cost = await createSessionCost({
+      const { cost, created } = await insertSessionCost({
+        credentialKeyType: parsed.body.credentialKeyType,
+        credentialKeySuffix: parsed.body.credentialKeySuffix,
+        harness: parsed.body.harness,
         id: parsed.body.id,
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
@@ -448,26 +493,32 @@ export async function handleSessionData(
         cacheWrite1hTokens: parsed.body.cacheWrite1hTokens,
         modelBreakdown: recomputed.modelBreakdown,
       });
-      recordSessionCost({
-        totalCostUsd,
-        harnessCostUsd: harnessCostUsd ?? undefined,
-        harness: parsed.body.provider ?? "unknown",
-        model,
-        costSource,
-        isError: parsed.body.isError ?? false,
-        tokens: {
-          input: rowInputTokens,
-          output: rowOutputTokens,
-          cacheRead: rowCacheReadTokens,
-          cacheWrite: rowCacheWriteTokens,
-          reasoning: parsed.body.reasoningOutputTokens ?? 0,
-          thinking: parsed.body.thinkingTokens ?? 0,
-        },
-      });
-      incrementServerSessionsProcessed();
+      if (created) {
+        recordSessionCost({
+          totalCostUsd,
+          harnessCostUsd: harnessCostUsd ?? undefined,
+          harness: parsed.body.provider ?? "unknown",
+          model,
+          costSource,
+          isError: parsed.body.isError ?? false,
+          tokens: {
+            input: rowInputTokens,
+            output: rowOutputTokens,
+            cacheRead: rowCacheReadTokens ?? 0,
+            cacheWrite: rowCacheWriteTokens ?? 0,
+            reasoning: parsed.body.reasoningOutputTokens ?? 0,
+            thinking: parsed.body.thinkingTokens ?? 0,
+          },
+        });
+        incrementServerSessionsProcessed();
+      }
       createSessionCostRoute.respond(res, 201, { success: true, cost });
     } catch (error) {
-      console.error("[HTTP] Failed to create session cost:", error);
+      if (error instanceof SessionCostConflictError) {
+        jsonError(res, error.message, 409);
+        return true;
+      }
+      console.error("[HTTP] Failed to create session cost:", scrubSecrets(String(error)));
       jsonError(res, "Failed to store session cost", 500);
     }
     return true;

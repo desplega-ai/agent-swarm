@@ -10,6 +10,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 // Migration 192 adds the Comb pin item type `agent-fs-path` to user_favorites.
+// Migration 301 adds the `key` item type (a starred Sessions group).
 
 const TEST_DB_PATH = "./test-favorites-agent-fs-path.sqlite";
 const MIGRATIONS_DIR = join(import.meta.dir, "../be/migrations");
@@ -217,6 +218,129 @@ describe("migration 192 (existing DB)", () => {
       ).toThrow(/CHECK constraint failed/);
 
       // The user FK still cascades.
+      db.run("DELETE FROM users WHERE id = 'user-1'");
+      expect(db.query("SELECT id FROM user_favorites WHERE userId = 'user-1'").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("favorites: key item type (fresh DB)", () => {
+  const KEY_DB_PATH = "./test-favorites-key.sqlite";
+
+  beforeAll(async () => {
+    await removeDb(KEY_DB_PATH);
+    initDb(KEY_DB_PATH);
+  });
+
+  afterAll(async () => {
+    closeDb();
+    await removeDb(KEY_DB_PATH);
+  });
+
+  test("PUT stars a group key in normalized form, GET lists it, favorite=false unstars", async () => {
+    const put = await call("PUT", "/api/favorites", {
+      itemType: "key",
+      itemId: " Shared/Competitor-Research",
+      favorite: true,
+    });
+    expect(put).toMatchObject({
+      statusCode: 200,
+      body: {
+        favorite: true,
+        itemType: "key",
+        itemId: "shared/competitor-research/",
+        row: { itemType: "key", itemId: "shared/competitor-research/" },
+      },
+    });
+
+    const list = await call("GET", "/api/favorites?itemType=key");
+    expect(list.statusCode).toBe(200);
+    expect(list.body.favoriteIds).toEqual(["shared/competitor-research/"]);
+    expect((await call("GET", "/api/favorites?itemType=page")).body.favoriteIds).toEqual([]);
+
+    // The raw (non-normalized) id unstars the same row.
+    await call("PUT", "/api/favorites", {
+      itemType: "key",
+      itemId: "shared/competitor-research",
+      favorite: false,
+    });
+    expect((await call("GET", "/api/favorites?itemType=key")).body.favoriteIds).toEqual([]);
+  });
+
+  test("an invalid group key is rejected with 400 and nothing is stored", async () => {
+    for (const itemId of ["/shared/x/", "elsewhere/x/", "shared/../x/", "personal/"]) {
+      const put = await call("PUT", "/api/favorites", { itemType: "key", itemId, favorite: true });
+      expect(put.statusCode).toBe(400);
+    }
+    expect((await call("GET", "/api/favorites?itemType=key")).body.favoriteIds).toEqual([]);
+  });
+});
+
+describe("migration 301 (existing DB)", () => {
+  test("keeps every favorite row and the indexes, and accepts the key type", async () => {
+    const db = new Database(":memory:");
+    try {
+      runMigrations(db);
+
+      // Roll back to the pre-283 shape: re-run 192 on the empty table.
+      db.exec(await Bun.file(join(MIGRATIONS_DIR, "192_favorites_agent_fs_path.sql")).text());
+      db.run("DELETE FROM _migrations WHERE version = 301");
+      expect(() =>
+        db.run(
+          "INSERT INTO user_favorites (favoriteScope, itemType, itemId) VALUES ('operator', 'key', 'shared/x/')",
+        ),
+      ).toThrow(/CHECK constraint failed/);
+
+      db.run("INSERT INTO users (id, name) VALUES ('user-1', 'Star User')");
+      const insert = db.prepare(
+        `INSERT INTO user_favorites
+           (id, favoriteScope, userId, itemType, itemId, createdAt, lastUpdatedAt, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let n = 0;
+      for (const itemType of ["page", "workflow", "schedule", "agent-fs-path"]) {
+        n++;
+        insert.run(
+          `fav-${n}`,
+          n % 2 ? "user:user-1" : "operator",
+          n % 2 ? "user-1" : null,
+          itemType,
+          `${itemType}-${n}`,
+          `2026-10-0${n}T00:00:00.000Z`,
+          `2026-10-1${n}T00:00:00.000Z`,
+          "op:abc",
+          null,
+        );
+      }
+      const before = db.query("SELECT * FROM user_favorites ORDER BY id").all();
+      expect(before).toHaveLength(4);
+
+      runMigrations(db);
+
+      expect(db.query("SELECT version FROM _migrations WHERE version = 301").get()).not.toBeNull();
+      expect(db.query("SELECT * FROM user_favorites ORDER BY id").all()).toEqual(before);
+      const indexes = db
+        .query<{ name: string }, []>("PRAGMA index_list(user_favorites)")
+        .all()
+        .map((index) => index.name);
+      expect(indexes).toEqual(
+        expect.arrayContaining([
+          "idx_user_favorites_scope_type",
+          "idx_user_favorites_user_type",
+          "idx_user_favorites_item",
+        ]),
+      );
+
+      db.run(
+        "INSERT INTO user_favorites (favoriteScope, itemType, itemId) VALUES ('operator', 'key', 'shared/x/')",
+      );
+      expect(() =>
+        db.run(
+          "INSERT INTO user_favorites (favoriteScope, itemType, itemId) VALUES ('operator', 'key', 'shared/x/')",
+        ),
+      ).toThrow(/UNIQUE constraint failed/);
       db.run("DELETE FROM users WHERE id = 'user-1'");
       expect(db.query("SELECT id FROM user_favorites WHERE userId = 'user-1'").all()).toEqual([]);
     } finally {

@@ -1,3 +1,4 @@
+import { getGitHubGraphqlUrl, githubApiUrl } from "../utils/github-host";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getInstallationToken, isReactionsEnabled } from "./app";
 
@@ -54,7 +55,7 @@ async function postRestReaction(
   if (!token) return false;
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/${target}/reactions`, {
+    const response = await fetch(githubApiUrl(`/repos/${repo}/${target}/reactions`), {
       method: "POST",
       headers: {
         Accept: "application/vnd.github+json",
@@ -157,7 +158,7 @@ export async function addGraphQLReaction(
   if (!token) return false;
 
   try {
-    const response = await fetch("https://api.github.com/graphql", {
+    const response = await fetch(getGitHubGraphqlUrl(), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -224,19 +225,16 @@ export async function postComment(
   }
 
   try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
-          "X-GitHub-Api-Version": "2022-11-28",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ body }),
+    const response = await fetch(githubApiUrl(`/repos/${repo}/issues/${issueNumber}/comments`), {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({ body }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();

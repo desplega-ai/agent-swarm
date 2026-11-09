@@ -115,10 +115,13 @@ import {
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { useVersionedAppReferences } from "@/hooks/use-versioned-app-references";
 import { useVersionedValue } from "@/hooks/use-versioned-value";
+import { getConfig } from "@/lib/config";
 import {
   type ActionHandlerMap,
   createSwarmActionHandlers,
@@ -126,12 +129,21 @@ import {
   swarmCatalog,
   swarmComponents,
 } from "@/lib/json-render";
+import { AppScopeProvider } from "@/lib/json-render/app-scope";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
   DEFINING_APP_PARAM,
   OUTCOME_PARAM,
 } from "@/lib/json-render/assemble";
+import {
+  haltChain,
+  installChainHaltGuard,
+  isChainHalt,
+  withChainOnError,
+  withChainOnErrorHandlers,
+} from "@/lib/json-render/chain-halt";
+import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { getThemePreset } from "@/lib/themes";
@@ -197,6 +209,19 @@ interface RuntimeCtx {
   navigate: NavigateFunction;
   /** Raw `?mode=` value — the only search param `app.navigate` carries over. */
   modeParam: string | null;
+  /** The dashboard's picked identity: the requester of a task an action creates. */
+  userId: string | null;
+}
+
+/** `params.session` of an `app.action` step (`SessionThread` sets it). */
+function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
+  if (typeof value !== "object" || value === null) return false;
+  const { key, scope } = value as { key?: unknown; scope?: unknown };
+  return (
+    typeof key === "string" &&
+    key !== "" &&
+    (scope === undefined || scope === "user" || scope === "shared")
+  );
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -618,13 +643,14 @@ export function AppSurface({
   // namespaced ids, `/refs/<definingAppId>` data refs) so `<Renderer>` and the
   // component catalog stay stock. Memoized so the `Renderer` keeps hitting its
   // own spec-identity memo across the 5s poll re-renders.
-  const assembled = useMemo(
-    () =>
-      assemblePageSpec(app, activePageName, resolvedApps, {
-        pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
-      }),
-    [app, activePageName, resolvedApps, pendingAppIds],
-  );
+  const assembled = useMemo(() => {
+    const result = assemblePageSpec(app, activePageName, resolvedApps, {
+      pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
+    });
+    // Each binding's `onError` moves into its params, so a failed step still
+    // halts its chain (see `withChainOnError`).
+    return result.spec ? { ...result, spec: withChainOnError(result.spec) } : result;
+  }, [app, activePageName, resolvedApps, pendingAppIds]);
   const activeSpec = assembled.spec;
   // `layout: "sidebar"`: the page's `headerActions` subtree, rendered as a
   // second root (same elements, same state) in the shell's sticky header.
@@ -754,6 +780,7 @@ export function AppSurface({
   // `handlers` prop on mount, so the handlers themselves must be identity
   // stable and read everything fresh through this ref.
   const modeParam = searchParams.get("mode");
+  const { userId } = useCurrentUser();
   const ctxRef = useRef<RuntimeCtx>({
     app,
     refetchModel,
@@ -763,6 +790,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   });
   ctxRef.current = {
     app,
@@ -773,6 +801,7 @@ export function AppSurface({
     poll: pollRef.current,
     navigate,
     modeParam,
+    userId,
   };
 
   // ── Task-watcher lifecycle + re-adoption ─────────────────────────────────
@@ -929,9 +958,16 @@ export function AppSurface({
   const handlersRef = useRef<ActionHandlerMap | null>(null);
 
   const compiled = useMemo(() => {
+    // A failed chain step shows as an error toast and halts its chain; the
+    // page banner is left to failures raised outside a chain (task watchers,
+    // Undo).
+    const reportStepFailure = (message: string) => {
+      toast.error(message);
+    };
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
       onError: (message) => setActionError(message),
+      onFailure: reportStepFailure,
     });
     const toastActions = createToastActionHandler({
       getHandlers: () => handlersRef.current,
@@ -963,15 +999,21 @@ export function AppSurface({
           const ctx = ctxRef.current;
           const targetAppId = definingAppOf(params, ctx.app.id);
           // A caller that must know whether the write landed (Table bulk
-          // actions) names a state path; this handler swallows its own errors.
+          // actions) names a state path: it reads the outcome there, since a
+          // halted chain only says that some step failed.
           const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
           const outcomePath =
             typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          let createdRowId: string | undefined;
           try {
             if (params.op === "create") {
-              setLastResponse(
-                await api.createAppRow(targetAppId, params.model, params.values ?? {}),
+              const created = await api.createAppRow(
+                targetAppId,
+                params.model,
+                params.values ?? {},
               );
+              setLastResponse(created);
+              createdRowId = created.row.id;
               // The Form injects its own id, so a successful create resets the
               // fields the user just submitted. Inside an element instance
               // that id is already `instances/<key>/<origId>`.
@@ -991,15 +1033,27 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
-            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
+            // A create also reports the new row's id: a Form publishes it to
+            // the rest of its chain as `$chain.createdRowId`.
+            if (outcomePath) {
+              ctx.store.set(
+                outcomePath,
+                createdRowId === undefined
+                  ? { status: "ok" }
+                  : { status: "ok", rowId: createdRowId },
+              );
+            }
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
             // A mutate dispatched from a Form carries its formId — scope the
             // failure to that form (`/forms/<id>/$error`, rendered inline
-            // under the fields) instead of the page-level banner.
-            if (params.formId) ctx.store.set(`/forms/${params.formId}/$error`, message);
-            else setActionError(message);
+            // under the fields) instead of a toast. Either way the chain halts.
+            if (params.formId) {
+              ctx.store.set(`/forms/${params.formId}/$error`, message);
+              haltChain(message, () => {});
+            }
+            haltChain(message, reportStepFailure);
           }
         },
         "app.refresh": async (params) => {
@@ -1055,16 +1109,40 @@ export function AppSurface({
               "app.action parentTaskId must resolve to a task id; a $chain binding only resolves inside a component that publishes chain scope";
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
-            return;
+            haltChain(message, reportStepFailure);
+          }
+          // Same rule for a session: a key that did not resolve (a `$chain`
+          // sentinel, a dropped `$chain` key, an empty `$state` read) would
+          // create a task outside the session the next page reads.
+          const session: unknown = (params as Record<string, unknown>).session;
+          if (session !== undefined && !isThreadSession(session)) {
+            const message =
+              "app.action session.key must resolve to a session key; with no row id yet, put the create step before this one";
+            ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
           }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
+            const followUp: unknown = (params as Record<string, unknown>).followUp;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
               params?.input,
               parentTaskId,
+              {
+                // `followUp: false` (SessionThread sets it) skips the Lead review;
+                // any session step defaults to it, one task per message.
+                followUp:
+                  typeof followUp === "boolean"
+                    ? followUp
+                    : isThreadSession(session)
+                      ? false
+                      : undefined,
+                // A SessionThread's session; the server builds the context key.
+                session: isThreadSession(session) ? session : undefined,
+                requestedByUserId: ctx.userId ?? undefined,
+              },
             );
             setLastResponse(response);
 
@@ -1098,29 +1176,35 @@ export function AppSurface({
               result: response.result,
             } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
+            haltChain(message, reportStepFailure);
           } catch (e) {
+            if (isChainHalt(e)) throw e;
             const message = e instanceof Error ? e.message : String(e);
             ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
             report({ status: "error", error: message });
-            setActionError(message);
+            haltChain(message, reportStepFailure);
           }
         },
       },
     });
     return {
       registry,
-      handlers: handlers(
-        () => () => {
-          /* no-op SetState — handlers write through `store` / React state. */
-        },
-        () => ({}),
+      // A step's `onError` runs here and still halts its chain (`withChainOnError`).
+      handlers: withChainOnErrorHandlers(
+        handlers(
+          () => () => {
+            /* no-op SetState — handlers write through `store` / React state. */
+          },
+          () => ({}),
+        ),
+        { set: (path, value) => ctxRef.current.store.set(path, value) },
       ),
     };
   }, []);
   useEffect(() => {
     handlersRef.current = compiled.handlers;
   }, [compiled]);
+  useEffect(() => installChainHaltGuard(), []);
 
   let renderedSpec: React.ReactNode;
   if (!activePage) {
@@ -1151,6 +1235,23 @@ export function AppSurface({
   } else {
     try {
       renderedSpec = <Renderer spec={activeSpec as never} registry={compiled.registry} />;
+      // A `presentation: "split"` Drawer portals into a detail region beside
+      // the canvas; pages without one keep the canvas exactly as before.
+      const elements = (activeSpec as { elements?: Record<string, unknown> } | null)?.elements;
+      if (pageHasSplitDrawer(elements)) {
+        const rootId = (activeSpec as { root?: string }).root;
+        const rootProps = (elements?.[rootId ?? ""] as { props?: { fill?: unknown } } | undefined)
+          ?.props;
+        renderedSpec = (
+          <SplitDetailRegion
+            storageKey={deriveStorageKey(getConfig().apiUrl, `apps:${app.id}:split`)}
+            fill={rootProps?.fill === true}
+            scrollRef={scrollRef}
+          >
+            {renderedSpec}
+          </SplitDetailRegion>
+        );
+      }
     } catch (e) {
       renderedSpec = (
         <AlertCallout tone="error" icon={AlertCircle} title="Failed to render app page">
@@ -1212,11 +1313,13 @@ export function AppSurface({
           {actionError}
         </AlertCallout>
       )}
-      <StateProvider store={store}>
-        <VisibilityProvider>
-          <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
-        </VisibilityProvider>
-      </StateProvider>
+      <AppScopeProvider value={app.id}>
+        <StateProvider store={store}>
+          <VisibilityProvider>
+            <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </AppScopeProvider>
     </JsonRenderThemeProvider>
   );
 
@@ -1225,36 +1328,38 @@ export function AppSurface({
   const shellSurface =
     shellItems && activePage ? (
       <JsonRenderThemeProvider value={appThemeAttr ?? null}>
-        <StateProvider store={store}>
-          <VisibilityProvider>
-            <ActionProvider handlers={compiled.handlers}>
-              <AppShell
-                items={shellItems}
-                activePage={activePageName}
-                onNavigate={(href) => navigate(href)}
-                // The dashboard header names the app in the default view only.
-                appName={mode === "default" ? undefined : app.name}
-                title={activePage.title ?? activePageName}
-                description={activePage.description}
-                crumbs={pageCrumbs}
-                actions={
-                  headerSpec ? (
-                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
-                  ) : null
-                }
-                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
-                scrollRef={scrollRef}
-              >
-                {actionError && (
-                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
-                    {actionError}
-                  </AlertCallout>
-                )}
-                {renderedSpec}
-              </AppShell>
-            </ActionProvider>
-          </VisibilityProvider>
-        </StateProvider>
+        <AppScopeProvider value={app.id}>
+          <StateProvider store={store}>
+            <VisibilityProvider>
+              <ActionProvider handlers={compiled.handlers}>
+                <AppShell
+                  items={shellItems}
+                  activePage={activePageName}
+                  onNavigate={(href) => navigate(href)}
+                  // The dashboard header names the app in the default view only.
+                  appName={mode === "default" ? undefined : app.name}
+                  title={activePage.title ?? activePageName}
+                  description={activePage.description}
+                  crumbs={pageCrumbs}
+                  actions={
+                    headerSpec ? (
+                      <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                    ) : null
+                  }
+                  surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                  scrollRef={scrollRef}
+                >
+                  {actionError && (
+                    <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                      {actionError}
+                    </AlertCallout>
+                  )}
+                  {renderedSpec}
+                </AppShell>
+              </ActionProvider>
+            </VisibilityProvider>
+          </StateProvider>
+        </AppScopeProvider>
       </JsonRenderThemeProvider>
     ) : null;
 

@@ -32,6 +32,8 @@
  *   task:agent:{agentId}                          (KV-only: per-agent scratchpad)
  *   task:page:{pageId}                            (KV-only: per-page state, proxy-enforced)
  *   task:ui:{kind}:{ref}:{sessionNonce}           (UI-built by the contextual session panel; no server parser)
+ *   task:app:{appId}:{sessionKey}:user:{userId}   (server-built for an app action sent by a
+ *                                                  json-render SessionThread; no server parser)
  *
  * Rules:
  *   - Fixed prefix tokens (`task`, family, sub-family, kind) are always lowercase.
@@ -313,6 +315,28 @@ export function agentContextKey(input: { agentId: string }): string {
 export function pageContextKey(input: { pageId: string }): string {
   const pageId = assertSafePart(input.pageId, "pageId");
   return ["task", "page", pageId].join(SEPARATOR);
+}
+
+/** An app-chosen session key (`SessionThread.sessionKey`): a plain token. */
+export const APP_SESSION_KEY_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * The context key of a json-render `SessionThread` session: one per app,
+ * session key and person. Built server-side from the app the action runs on,
+ * so a page can never write into another app's (or person's) sessions.
+ * Throws on a key that is not a plain token.
+ */
+export function appSessionContextKey(input: {
+  appId: string;
+  sessionKey: string;
+  userId: string;
+}): string {
+  if (!APP_SESSION_KEY_PATTERN.test(input.sessionKey)) {
+    throw new Error("sessionKey must match ^[A-Za-z0-9_-]{1,128}$");
+  }
+  const appId = assertSafePart(input.appId, "appId");
+  const userId = assertSafePart(input.userId, "userId");
+  return ["task", "app", appId, input.sessionKey, "user", userId].join(SEPARATOR);
 }
 
 /**

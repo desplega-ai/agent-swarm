@@ -10,9 +10,14 @@ import {
 } from "./connection-state";
 import { installSlackEgressScrub } from "./egress-scrub";
 import { installSlackExternalChannelGuard } from "./external-channel-egress";
-import { recoverSlackInboundAfterRestart, slackInboundOutcomeMiddleware } from "./inbound-dispatch";
+import { SwarmHttpReceiver } from "./http-receiver";
+import {
+  ignoreSelfAsIgnored,
+  recoverSlackInboundAfterRestart,
+  slackInboundOutcomeMiddleware,
+} from "./inbound-dispatch";
 import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "./lifecycle-lock";
-import { installSocketAckRecovery } from "./socket-ack";
+import { createBoltInboundDrain, installSocketAckRecovery } from "./socket-ack";
 import { fenceSocketModeClient, type SlackSocketFence } from "./socket-fence";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
@@ -26,8 +31,10 @@ import {
 
 let app: App | null = null;
 let receiver: SocketModeReceiver | null = null;
+// SLACK_MODE=http: the receiver behind POST /api/integrations/slack/events.
+let httpReceiver: SwarmHttpReceiver | null = null;
 let initialized = false;
-let inboundDrain: ReturnType<typeof installSocketAckRecovery> | null = null;
+let inboundDrain: ReturnType<typeof createBoltInboundDrain> | null = null;
 // Retires the current client at teardown, so a reconnect it still has in
 // flight cannot open a socket next to the replacement.
 let socketFence: SlackSocketFence | null = null;
@@ -42,8 +49,12 @@ const DEFAULT_START_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 3
 let startRetryDelaysMs = DEFAULT_START_RETRY_DELAYS_MS;
 let startRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let startRetryAttempt = 0;
-/** Bolt's deferred init (its own auth.test) succeeded for the current app. */
-let boltInitialized = false;
+/**
+ * The app whose deferred Bolt init (its own auth.test) succeeded. Keyed by
+ * instance, not a flag: a start that a reload overtook can finish init on the
+ * detached app, and must not mark the reload's new app as initialized.
+ */
+let boltInitializedApp: App | null = null;
 
 const SOCKET_EVENT_STATES: Record<string, SlackConnectionState> = {
   connecting: "connecting",
@@ -297,6 +308,11 @@ export function getSlackApp(): App | null {
   return app;
 }
 
+/** The HTTP receiver of the running app, or null (Socket Mode, stopped, or not started yet). */
+export function getSlackHttpReceiver(): SwarmHttpReceiver | null {
+  return httpReceiver;
+}
+
 export async function initSlackApp(): Promise<App | null> {
   // Prevent double initialization
   if (initialized) {
@@ -323,24 +339,16 @@ export async function initSlackApp(): Promise<App | null> {
     return null;
   }
 
-  // Phase 1 establishes the transport contract only. Never fall back to a
-  // socket when HTTP was explicitly selected; the receiver lands in Phase 3.
-  if (config.mode === "http") {
-    console.error(
-      "[Slack] HTTP mode is configured but unavailable until the HTTP receiver is installed",
-    );
-    return null;
-  }
-
   const botToken = process.env.SLACK_BOT_TOKEN as string;
-  const appToken = process.env.SLACK_APP_TOKEN as string;
 
-  const socketModeBlockReason = getSlackSocketModeBlockReason(process.env);
-  if (socketModeBlockReason) {
-    console.error(
-      `[Slack] SOCKET MODE BLOCKED: ${socketModeBlockReason}. Set ${SLACK_DEV_SOCKET_MODE_OPT_IN}=true to opt in explicitly.`,
-    );
-    return null;
+  if (config.mode === "socket") {
+    const socketModeBlockReason = getSlackSocketModeBlockReason(process.env);
+    if (socketModeBlockReason) {
+      console.error(
+        `[Slack] SOCKET MODE BLOCKED: ${socketModeBlockReason}. Set ${SLACK_DEV_SOCKET_MODE_OPT_IN}=true to opt in explicitly.`,
+      );
+      return null;
+    }
   }
 
   // Every client Bolt builds from here on scrubs outbound text and refuses
@@ -352,44 +360,69 @@ export async function initSlackApp(): Promise<App | null> {
   const slackApiUrl = process.env.SLACK_API_URL;
   const clientOptions = slackApiUrl ? { slackApiUrl } : undefined;
   const logLevel = getNodeEnv() === "development" ? LogLevel.DEBUG : LogLevel.INFO;
-  // Build the receiver ourselves so its SocketModeClient lifecycle events can
-  // feed /status. Bolt would otherwise forward clientOptions via installerOptions.
-  receiver = new SocketModeReceiver({
-    appToken,
-    logLevel,
-    installerOptions: clientOptions ? { clientOptions } : {},
-  });
-  trackConnectionState(receiver);
-  socketFence = fenceSocketModeClient(receiver.client);
-  app = new App({
-    token: botToken,
-    receiver,
-    socketMode: true,
-    logLevel,
-    // Bolt's auth.test runs in startSlackApp(), where a failure is retried
-    // instead of being cached as a rejected promise for the app's lifetime.
-    deferInitialization: true,
-    ...(clientOptions ? { clientOptions } : {}),
-  });
+  if (config.mode === "http") {
+    // HTTP ingress only: no SocketModeReceiver, no SLACK_APP_TOKEN read, no
+    // watchdog or fence. The route hands events to the receiver, which stores
+    // them as receipts for the same durable drain Socket Mode uses.
+    httpReceiver = new SwarmHttpReceiver(() => void inboundDrain?.wake());
+    app = new App({
+      token: botToken,
+      receiver: httpReceiver,
+      logLevel,
+      // Bolt's own ignoreSelf runs before our outcome middleware and ends a
+      // bot-authored event without dispatching it, which the durable drain
+      // reads as a failure. It is re-added below, after the outcome middleware.
+      ignoreSelf: false,
+      deferInitialization: true,
+      ...(clientOptions ? { clientOptions } : {}),
+    });
+    inboundDrain = createBoltInboundDrain(app);
+  } else {
+    const appToken = process.env.SLACK_APP_TOKEN as string;
+    // Build the receiver ourselves so its SocketModeClient lifecycle events can
+    // feed /status. Bolt would otherwise forward clientOptions via installerOptions.
+    receiver = new SocketModeReceiver({
+      appToken,
+      logLevel,
+      installerOptions: clientOptions ? { clientOptions } : {},
+    });
+    trackConnectionState(receiver);
+    socketFence = fenceSocketModeClient(receiver.client);
+    app = new App({
+      token: botToken,
+      receiver,
+      socketMode: true,
+      logLevel,
+      // Bolt's auth.test runs in startSlackApp(), where a failure is retried
+      // instead of being cached as a rejected promise for the app's lifetime.
+      deferInitialization: true,
+      ...(clientOptions ? { clientOptions } : {}),
+    });
 
-  // Events whose Socket Mode ack failed are stored as receipts; the drain hands
-  // them back to Bolt, so a crash or a failing listener leaves recoverable work.
-  inboundDrain = installSocketAckRecovery(receiver.client, app);
+    // Events whose Socket Mode ack failed are stored as receipts; the drain hands
+    // them back to Bolt, so a crash or a failing listener leaves recoverable work.
+    inboundDrain = installSocketAckRecovery(receiver.client, app);
+  }
 
   // This swarm's installation. Installed last, the gate runs before the ack
   // recovery wrapper and Bolt: a delivery for any other installation sharing
   // this Slack app is never acked, stored or dispatched, so Slack redelivers it.
-  const authClient = app.client;
+  // Every await below can let a reload detach this app and build a new one.
+  // Finish wiring the app this call built, never whatever `app` points at then.
+  const created = app;
+  const authClient = created.client;
   const enterpriseInstall = isSlackEnterpriseInstall();
   setSlackWorkspaceIdentitySource(() => resolveSlackIdentity(authClient, enterpriseInstall));
-  installSocketWorkspaceGate(receiver.client);
+  // HTTP mode gates in the route instead, before the ack.
+  if (receiver) installSocketWorkspaceGate(receiver.client);
 
   // Failed validation must remain retryable without requiring stopSlackApp().
   initialized = true;
 
   // First global middleware: every handler below runs inside it, so each
   // delivery resolves to an explicit processed/ignored/failed/uncertain outcome.
-  app.use(slackInboundOutcomeMiddleware());
+  created.use(slackInboundOutcomeMiddleware(config.mode === "http" ? "http" : "socket"));
+  if (config.mode === "http") created.use(ignoreSelfAsIgnored);
 
   // Register handlers
   const { registerMessageHandler } = await import("./handlers");
@@ -397,24 +430,24 @@ export async function initSlackApp(): Promise<App | null> {
   const { registerActionHandlers } = await import("./actions");
   const { registerWorkObjectHandlers } = await import("./work-objects");
 
-  registerMessageHandler(app);
-  registerCommandHandler(app);
-  registerActionHandlers(app);
-  registerWorkObjectHandlers(app);
+  registerMessageHandler(created);
+  registerCommandHandler(created);
+  registerActionHandlers(created);
+  registerWorkObjectHandlers(created);
 
   // Register assistant thread handler (safe even if "Agents & AI Apps" isn't enabled)
   const { createAssistant } = await import("./assistant");
-  app.assistant(createAssistant());
+  created.assistant(createAssistant());
 
   // Report-only scan for external (Slack Connect) channels the bot is already in.
   const { isBlockExternalEnabled, scanExternalChannelsOnBoot } = await import("./external-channel");
   if (isBlockExternalEnabled()) {
-    scanExternalChannelsOnBoot(app.client).catch((error) => {
+    scanExternalChannelsOnBoot(created.client).catch((error) => {
       console.error("[Slack] External channel boot scan failed:", error);
     });
   }
 
-  return app;
+  return created;
 }
 
 export async function startSlackApp(): Promise<boolean> {
@@ -435,13 +468,14 @@ export async function startSlackApp(): Promise<boolean> {
       const delay = scheduleStartRetry();
       setSlackConnectionState("disconnected");
       console.error(
-        `[Slack] Socket Mode not started: this swarm's workspace is unknown. Retrying in ${seconds(delay)}s`,
+        `[Slack] ${httpReceiver ? "HTTP receiver" : "Socket Mode"} not started: this swarm's workspace is unknown. Retrying in ${seconds(delay)}s`,
       );
       return false;
     }
     startRetryAttempt = 0;
     // Arm before app.start(): a start that throws is retried by the watchdog.
-    startSocketWatchdog();
+    // HTTP mode has no socket to watch.
+    if (!httpReceiver) startSocketWatchdog();
     // Establish the durable cutoff before Socket Mode can deliver new asks.
     const { isSlackRenderV2Enabled } = await import("./render-v2");
     if (isSlackRenderV2Enabled()) await ensureSlackRenderV2Activation();
@@ -449,10 +483,23 @@ export async function startSlackApp(): Promise<boolean> {
     // pending ones are processed once the app can dispatch them.
     await recoverSlackInboundAfterRestart();
     if (generation !== lifecycleGeneration) return false;
+    // After recovery: a live delivery must not be swept up as interrupted.
+    httpReceiver?.markReady();
     await current.start();
     // Abandoned while it waited: the app was already detached and retired.
     if (generation !== lifecycleGeneration) return false;
-    console.log("[Slack] Bot connected via Socket Mode");
+    if (httpReceiver) {
+      // auth.test passed in verifySlackIdentity(): the receiver can take deliveries.
+      setSlackConnectionState("connected");
+      console.log("[Slack] Bot ready via HTTP receiver");
+    } else {
+      console.log("[Slack] Bot connected via Socket Mode");
+    }
+    // Thread replies buffered before the last restart flush as usual, in either mode.
+    const { restoreBufferedSlackMessages } = await import("./thread-buffer");
+    await restoreBufferedSlackMessages().catch((error) => {
+      console.error("[Slack] Failed to restore buffered thread messages:", error);
+    });
     void inboundDrain?.wake();
     await emitBuiltInIntegrationConnectedOnce("slack");
     // Abandoned or stopped while telemetry was pending: a watcher started now
@@ -470,7 +517,7 @@ export async function startSlackApp(): Promise<boolean> {
 /** Resolve this swarm's identity, then Bolt's own authorization. False on any failure. */
 async function verifySlackIdentity(current: App): Promise<boolean> {
   if (!(await getSlackWorkspaceIdentity())) return false;
-  if (boltInitialized) return true;
+  if (boltInitializedApp === current) return true;
   try {
     await current.init();
   } catch (error) {
@@ -478,7 +525,7 @@ async function verifySlackIdentity(current: App): Promise<boolean> {
     console.error(`[Slack] Bolt initialization failed: ${message}`);
     return false;
   }
-  boltInitialized = true;
+  boltInitializedApp = current;
   return true;
 }
 
@@ -580,13 +627,14 @@ function detachSlackApp(): App | null {
   lifecycleGeneration += 1;
   clearStartRetry();
   startRetryAttempt = 0;
-  boltInitialized = false;
+  boltInitializedApp = null;
   stopTaskWatcher();
   inboundDrain?.stop();
   inboundDrain = null;
   const detached = app;
   app = null;
   receiver = null;
+  httpReceiver = null;
   setSlackWorkspaceIdentitySource(null);
   lastSocketActivityAt = null;
   setSlackConnectionState("disconnected");

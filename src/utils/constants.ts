@@ -112,30 +112,44 @@ export function getAgentFsLiveUrl(): string {
 export type AgentFsLinkTarget = "dashboard" | "live";
 
 /**
- * The operator's `AGENT_FS_LINK_TARGET` choice (trimmed, lowercased). Null when
- * unset, blank, or invalid: every surface then keeps its automatic behavior.
+ * Where people-facing file links point. An explicit `AGENT_FS_LINK_TARGET`
+ * (trimmed, lowercased) wins. Unset, blank, or invalid: `dashboard` when an
+ * `APP_URL` / `DASHBOARD_URL` is configured (not the hosted fallback) and
+ * Comb is not explicitly off (`COMB_ENABLED=false`), else `live`.
  */
-export function readAgentFsLinkTarget(): AgentFsLinkTarget | null {
+export function readAgentFsLinkTarget(): AgentFsLinkTarget {
   const raw = process.env.AGENT_FS_LINK_TARGET?.trim().toLowerCase();
-  return raw === "dashboard" || raw === "live" ? raw : null;
+  if (raw === "dashboard" || raw === "live") return raw;
+  return getConfiguredAppUrls().length > 0 && !isCombExplicitlyOff() ? "dashboard" : "live";
 }
 
 /**
  * The base URL (no trailing slash) that a people-facing file link starts with,
  * per {@link readAgentFsLinkTarget}. `dashboard` uses `APP_URL` when one is
- * configured (and, for attachments, Comb is on), else the live app. Null when
- * no target is set: the caller keeps its current code path.
+ * configured and Comb is on, else the live app.
  *
- * The prompt surface skips the Comb check: workers do not get `COMB_ENABLED`,
- * and an explicit `dashboard` is the operator's choice.
+ * The prompt surface checks only an explicit `COMB_ENABLED=false`: a worker
+ * sees `COMB_ENABLED` only from a swarm_config row (RELOADABLE_ENV_KEYS in
+ * runner.ts) and may lack the API's agent-fs settings, so `isCombEnabled()`
+ * does not hold there.
  */
-export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string | null {
-  const target = readAgentFsLinkTarget();
-  if (target === null) return null;
-  if (target === "dashboard" && getConfiguredAppUrls().length > 0) {
-    if (surface === "prompt" || isCombEnabled()) return getAppUrl();
+export function resolveAgentFsLinkBase(surface: "prompt" | "attachment"): string {
+  if (readAgentFsLinkTarget() === "dashboard" && getConfiguredAppUrls().length > 0) {
+    if (surface === "prompt" ? !isCombExplicitlyOff() : isCombEnabled()) return getAppUrl();
   }
   return getAgentFsLiveUrl();
+}
+
+/**
+ * The query string for a file link that starts with `base`. A live-app link
+ * gets `?apiUrl=<AGENT_FS_PUBLIC_URL>` when that URL is set, so a browser with
+ * no agent-fs key knows which agent-fs to sign in to (the agent-fs invite link
+ * convention). Empty for a dashboard link or with no public agent-fs URL.
+ */
+export function agentFsFileLinkQuery(base: string): string {
+  if (base !== getAgentFsLiveUrl()) return "";
+  const publicUrl = process.env.AGENT_FS_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  return publicUrl ? `?apiUrl=${encodeURIComponent(publicUrl)}` : "";
 }
 
 /**
@@ -199,93 +213,12 @@ export function agentFsFileRoute(opts: AgentFsFileRef): string | null {
  * when that route is null; callers fall back to the raw `agent-fs:<path>`
  * display instead.
  *
- * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
+ * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>[?apiUrl=<AGENT_FS_PUBLIC_URL>]
  */
 export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
   const route = agentFsFileRoute(opts);
-  return route ? `${getAgentFsLiveUrl()}/file/~/${route}` : null;
-}
-
-/** RFC 1918 private and 169.254/16 link-local IPv4 space, by its first two octets. */
-function isPrivateIpv4(a: number, b: number): boolean {
-  return (
-    a === 10 ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 169 && b === 254)
-  );
-}
-
-/**
- * The eight 16-bit groups of an IPv6 literal (no brackets), or null when it is
- * malformed. `new URL` already normalizes a host to compressed hex, so a
- * dotted IPv4 tail never reaches here; one is rejected rather than parsed.
- */
-function parseIpv6(addr: string): number[] | null {
-  if (addr.includes(".")) return null;
-  const halves = addr.split("::");
-  if (halves.length > 2) return null;
-  const toGroups = (part: string): number[] | null => {
-    if (!part) return [];
-    const groups = part
-      .split(":")
-      .map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : Number.NaN));
-    return groups.some(Number.isNaN) ? null : groups;
-  };
-  const head = toGroups(halves[0] ?? "");
-  const tail = toGroups(halves[1] ?? "");
-  if (!head || !tail) return null;
-  if (halves.length === 1) return head.length === 8 ? head : null;
-  const missing = 8 - head.length - tail.length;
-  return missing < 1 ? null : [...head, ...new Array<number>(missing).fill(0), ...tail];
-}
-
-/**
- * Whether a browser can plausibly open this URL. False for the addresses only
- * the swarm's own network resolves: a single-label host (a docker or compose
- * service such as `agent-fs`), `*.internal` (Railway, Fly, GCP),
- * `*.svc` / `*.cluster.local` (Kubernetes), and private, link-local or
- * unique-local IPs, including IPv4-mapped IPv6 (`::ffff:10.0.0.5`), `::` and
- * multicast `ff00::/8`. Loopback counts as reachable: a localhost URL means the
- * API and agent-fs share a host, which only works for a browser on that same
- * machine (the local dev setup), and a remote operator can set `COMB_ENABLED`.
- * An unparseable value is not reachable.
- */
-export function isBrowserReachableUrl(value: string): boolean {
-  let host: string;
-  try {
-    host = new URL(value).hostname.toLowerCase().replace(/\.$/, "");
-  } catch {
-    return false;
-  }
-  if (!host) return false;
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
-  if (host.startsWith("[")) {
-    const parsed = parseIpv6(host.slice(1, -1));
-    if (!parsed) return false;
-    const g = (i: number) => parsed[i] ?? 0;
-    // Loopback is reachable (the local dev setup).
-    if (parsed.slice(0, 7).every((x) => x === 0) && g(7) === 1) return true;
-    // `::` and multicast `ff00::/8` are not addresses a browser can open.
-    if (parsed.every((x) => x === 0) || (g(0) & 0xff00) === 0xff00) return false;
-    // Unique-local `fc00::/7` and link-local `fe80::/10`.
-    if ((g(0) & 0xfe00) === 0xfc00 || (g(0) & 0xffc0) === 0xfe80) return false;
-    // IPv4-mapped `::ffff:a.b.c.d`: judge the embedded IPv4 address.
-    if (parsed.slice(0, 5).every((x) => x === 0) && g(5) === 0xffff) {
-      const a = g(6) >> 8;
-      if (a === 0) return false;
-      return a === 127 || !isPrivateIpv4(a, g(6) & 0xff);
-    }
-    return true;
-  }
-  const octets = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (octets) {
-    const [a, b] = [Number(octets[1]), Number(octets[2])];
-    if (a === 0) return false;
-    return a === 127 || !isPrivateIpv4(a, b);
-  }
-  if (!host.includes(".")) return false;
-  return !(host.endsWith(".internal") || host.endsWith(".svc") || host.endsWith(".cluster.local"));
+  const live = getAgentFsLiveUrl();
+  return route ? `${live}/file/~/${route}${agentFsFileLinkQuery(live)}` : null;
 }
 
 export interface CombState {
@@ -297,38 +230,40 @@ export interface CombState {
 }
 
 /**
- * Comb (the agent-fs review space in the dashboard). An explicit
- * `COMB_ENABLED` wins both ways, but still needs `AGENT_FS_API_URL`. Unset, it
- * is on only when a browser can reach agent-fs: `AGENT_FS_PUBLIC_URL` is set,
- * `AGENT_FS_PROXY` is on and the public API URL is {@link isBrowserReachableUrl}
- * (the browser goes through the API), or, with no proxy, `AGENT_FS_API_URL` is
- * itself reachable. Otherwise the browser would land on a private host.
+ * Comb (the agent-fs review space in the dashboard). It always needs
+ * `AGENT_FS_API_URL`, and an explicit `COMB_ENABLED=false` turns it off. An
+ * explicit `COMB_ENABLED=true` turns it on. Unset, it is on only when the
+ * browser has an agent-fs address: `AGENT_FS_PUBLIC_URL`, or the API's
+ * `/agentfs` proxy (`AGENT_FS_PROXY`, on by default with `AGENT_FS_API_URL`).
  * Reads `process.env` per call, so a config reload applies without a restart.
  */
 export function getCombState(): CombState {
   const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
-  const raw = process.env.COMB_ENABLED;
-  // The two parses agree only when the value is a recognized flag literal.
-  const explicit = parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
-  if (explicit && !isEnvFlagEnabled("COMB_ENABLED", false)) {
+  const explicit = isCombFlagExplicit();
+  if (isCombExplicitlyOff()) {
     return { enabled: false, explicit, reason: "COMB_ENABLED is false." };
   }
   if (!apiUrl) return { enabled: false, explicit, reason: "AGENT_FS_API_URL is not set." };
-  if (explicit) return { enabled: true, explicit, reason: null };
-  if (process.env.AGENT_FS_PUBLIC_URL?.trim()) return { enabled: true, explicit, reason: null };
-  // With the proxy on, the browser goes to `<public API URL>/agentfs`, so that
-  // is the address to check, not `AGENT_FS_API_URL`.
-  const proxy = isAgentFsProxyEnabled();
-  const browserUrl = proxy ? getPublicMcpBaseUrl() : apiUrl;
-  return isBrowserReachableUrl(browserUrl)
-    ? { enabled: true, explicit, reason: null }
-    : {
-        enabled: false,
-        explicit,
-        reason: proxy
-          ? `AGENT_FS_PROXY is on, but the API address ${browserUrl} is not reachable from a browser. Set PUBLIC_MCP_BASE_URL to the public API URL, or set COMB_ENABLED=true to force Files on.`
-          : `AGENT_FS_API_URL (${apiUrl}) is not reachable from a browser. Set AGENT_FS_PUBLIC_URL or AGENT_FS_PROXY=true, or set COMB_ENABLED=true to force Files on.`,
-      };
+  if (!explicit && !process.env.AGENT_FS_PUBLIC_URL?.trim() && !isAgentFsProxyEnabled()) {
+    return {
+      enabled: false,
+      explicit,
+      reason:
+        "AGENT_FS_PROXY is false and AGENT_FS_PUBLIC_URL is not set, so a browser has no agent-fs address.",
+    };
+  }
+  return { enabled: true, explicit, reason: null };
+}
+
+/** `COMB_ENABLED` holds a recognized flag literal (the two parses agree only then). */
+function isCombFlagExplicit(): boolean {
+  const raw = process.env.COMB_ENABLED;
+  return parseEnvFlag(raw, true) === parseEnvFlag(raw, false);
+}
+
+/** `COMB_ENABLED` is an explicit false. Also readable on a worker, unlike {@link isCombEnabled}. */
+export function isCombExplicitlyOff(): boolean {
+  return isCombFlagExplicit() && !isEnvFlagEnabled("COMB_ENABLED", false);
 }
 
 /**
@@ -342,22 +277,9 @@ export function isCombEnabled(): boolean {
 /**
  * `AGENT_FS_PROXY`: the API serves agent-fs at `/agentfs/*` (plus the public
  * `/share/*` and `/site/*` pages), and Comb uses `<public API URL>/agentfs`.
- * Read per request, so a config upsert applies without a restart. Off by default.
+ * Read per request, so a config upsert applies without a restart.
+ * Defaults on when `AGENT_FS_API_URL` is nonblank. An explicit flag wins.
  */
 export function isAgentFsProxyEnabled(): boolean {
-  return isEnvFlagEnabled("AGENT_FS_PROXY", false);
-}
-
-/**
- * The dashboard (Comb) URL for an agent-fs file, same id and encoding rules as
- * {@link buildAgentFsLiveUrl}. Null unless Comb is on AND an explicit
- * `APP_URL` / `DASHBOARD_URL` is set: the hosted default dashboard cannot open
- * a self-hosted swarm's files.
- *
- * Shape:  ${appUrl}/file/~/<orgId>/<driveId>/<normalized-path>
- */
-export function buildCombFileUrl(opts: AgentFsFileRef): string | null {
-  if (!isCombEnabled() || getConfiguredAppUrls().length === 0) return null;
-  const route = agentFsFileRoute(opts);
-  return route ? `${getAppUrl()}/file/~/${route}` : null;
+  return isEnvFlagEnabled("AGENT_FS_PROXY", Boolean(process.env.AGENT_FS_API_URL?.trim()));
 }

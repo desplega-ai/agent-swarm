@@ -15,6 +15,7 @@ import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code
 import { JsonTree } from "@/components/shared/json-tree";
 import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
 import { ShowMore } from "@/components/shared/show-more";
+import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -50,14 +51,25 @@ export function TaskOutcome({
   if (reason) return <OutcomeFrame label={reason.label} text={reason.text} tone={reason.tone} />;
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     const json = parseJsonOutput(task.output);
-    if (json) return <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />;
-    const prose = (
-      <OutcomeProse
-        text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
-        hideCopy={hideCopy}
-      />
+    const uiSpec = task.uiSpec ? <TaskUiSpecView task={task} /> : null;
+    if (json) {
+      return (
+        <>
+          <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />
+          {uiSpec}
+        </>
+      );
+    }
+    return (
+      <>
+        <OutcomeProse
+          text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
+          hideCopy={hideCopy}
+          clamp={clamp}
+        />
+        {uiSpec}
+      </>
     );
-    return clamp ? <ShowMore>{prose}</ShowMore> : prose;
   }
   // The chain-of-thought above already covers active states — only fall
   // through to the cached summaryLines as a final fallback when nothing
@@ -82,16 +94,29 @@ const STREAMDOWN_COMPONENTS = { inlineCode: InlineIdentifierCode, "swarm-link": 
  * Successful output — renders inline as plain prose, no border. Hover surfaces
  * a single Copy action top-right so the chrome is invisible until needed.
  */
-function OutcomeProse({ text, hideCopy }: { text: string; hideCopy: boolean }) {
+function OutcomeProse({
+  text,
+  hideCopy,
+  clamp,
+}: {
+  text: string;
+  hideCopy: boolean;
+  clamp: boolean;
+}) {
   const trimmed = text.trim();
   const rehypePlugins = useSwarmLinkPlugins();
+  const prose = (
+    <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
+      <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
+        {normalizeNewlines(trimmed)}
+      </Streamdown>
+    </div>
+  );
+  // The clamp wraps only the text: the absolutely positioned Copy button is
+  // taller than one line, and inside `ShowMore` it would count as overflow.
   return (
     <OutcomeCopyShell copyText={trimmed} hideCopy={hideCopy}>
-      <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
-        <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
-          {normalizeNewlines(trimmed)}
-        </Streamdown>
-      </div>
+      {clamp ? <ShowMore>{prose}</ShowMore> : prose}
     </OutcomeCopyShell>
   );
 }

@@ -416,7 +416,7 @@ These are the key variables for Docker Compose deployment. For the complete refe
 | `GITHUB_EMAIL` | Git commit email |
 | `GITHUB_NAME` | Git commit name |
 | `SWARM_URL` | Base domain for service discovery (default: `localhost`) |
-| `SLACK_MODE` | Slack transport: `socket` (default) or `http`; HTTP remains unavailable until its receiver is installed |
+| `SLACK_MODE` | Slack transport: `socket` (default) or `http`; `http` serves signed Slack requests at `POST /api/integrations/slack/events` |
 | `SLACK_BOT_TOKEN` | Enable Slack integration; also needs `SLACK_APP_TOKEN` in socket mode or `SLACK_SIGNING_SECRET` in HTTP mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack (default: `false`) |
 
@@ -564,16 +564,16 @@ docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```bash
 docker build -f Dockerfile.worker -t agent-swarm-worker .
 
-# Override the pinned Claude Code version (default: 2.1.318)
+# Override the pinned Claude Code version (default: 2.1.319)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.318`
+- `CLAUDE_CODE_VERSION=2.1.319`
 - `PI_CODING_AGENT_VERSION=1.5.0`
 - `CODEX_VERSION=0.167.0`
-- `OPENCODE_VERSION=2.2.5` (installs `@opencode/cli` and `@opencode/sdk`)
+- `OPENCODE_VERSION=2.2.6` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -661,4 +661,3 @@ sudo bun deploy/update.ts
 - [Task Lifecycle](/docs/concepts/task-lifecycle) — Graceful shutdown and task resume behavior
 - [Worker Recovery](/docs/guides/worker-recovery-decision) — What happens to running work when a worker stops
 - [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) — A guide for leaders at companies under 100 people on where AI judgment and agent platforms belong in the work.
-- [How to choose a self-hosted AI agent platform for a team](https://www.agent-swarm.dev/blog/omnia/choose-self-hosted-agent-platform-for-teams) — A dated, sourced rule for a team buying a self-hosted agent platform: how six products differ on shared context and worker isolation.

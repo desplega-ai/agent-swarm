@@ -6,10 +6,29 @@ import type { EnvPresence } from "./integrations-status";
 // an explicit TRANSCRIPTION_API_KEY wins; else a pinned TRANSCRIPTION_PROVIDER
 // uses only its own key; else the first provider key the swarm already has.
 
+// Defaults mirror `PROVIDERS` in src/utils/transcription.ts.
 export const TRANSCRIPTION_PROVIDERS = [
-  { id: "elevenlabs", label: "ElevenLabs", keyEnv: "ELEVENLABS_API_KEY" },
-  { id: "openai", label: "OpenAI", keyEnv: "OPENAI_API_KEY" },
-  { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY" },
+  {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    keyEnv: "ELEVENLABS_API_KEY",
+    defaultModel: "scribe_v2",
+    defaultBaseUrl: "https://api.elevenlabs.io/v1",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    keyEnv: "OPENAI_API_KEY",
+    defaultModel: "whisper-1",
+    defaultBaseUrl: "https://api.openai.com/v1",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    keyEnv: "GROQ_API_KEY",
+    defaultModel: "whisper-large-v3-turbo",
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
+  },
 ] as const;
 
 export const TRANSCRIPTION_API_KEY = "TRANSCRIPTION_API_KEY";

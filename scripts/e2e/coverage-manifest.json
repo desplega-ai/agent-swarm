@@ -218,6 +218,14 @@
       "description": "Agent profile versions and coaching, agent tools over MCP, preferences",
       "scenarios": ["core-agent-profile", "core-agent-tools", "core-preferences"]
     },
+    "agentfs-personal-keys": {
+      "description": "User identity, personal key creation, pending membership and unsupported agent-fs servers",
+      "scenarios": ["platformb-fs-keys"]
+    },
+    "agentfs-continue": {
+      "description": "Continue with your swarm: origin allowlist, org match, a named key in the redirect fragment only, pending membership and unsupported agent-fs servers",
+      "scenarios": ["platformb-fs-continue"]
+    },
     "agentfs-proxy": {
       "description": "Pass-through proxy to agent-fs with header allowlists, registration gate and rate limit, public share and site pages",
       "scenarios": ["platformb-agentfs-proxy"]
@@ -264,7 +272,7 @@
     },
     "credential-pool": {
       "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
-      "scenarios": ["platform-keys", "platform-pool-keys", "platform-codex-accounts"]
+      "scenarios": ["platform-keys", "key-window-usage", "platform-pool-keys", "platform-codex-accounts"]
     },
     "extension-lead-gating": {
       "description": "Install by catalog name, enable and disable by lead tool, hook blocks and unblocks, run log, version list, owner delete",
@@ -277,6 +285,10 @@
     "external-tools": {
       "description": "swarm_x, WhatsApp send and reply, AgentMail inbox registration with ownership, the Codex device login against a loopback stand-in",
       "scenarios": ["platform-external-tools", "platform-codex-device-login"]
+    },
+    "file-import": {
+      "description": "A mounted package imports at boot, a late agent registration resolves its pending assignment, a re-import updates the same row, and a broken second source leaves the API healthy.",
+      "scenarios": ["platform-file-import"]
     },
     "first-run-onboarding": {
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
@@ -321,6 +333,10 @@
     "model-catalog-and-pricing": {
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
       "scenarios": ["platformb-models"]
+    },
+    "model-groups": {
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
+      "scenarios": ["platformb-model-groups"]
     },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
@@ -396,18 +412,27 @@
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
-      "scenarios": ["core-sessions"]
+      "scenarios": ["core-sessions", "core-use-case-group"]
     },
     "skills-lifecycle": {
       "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",
       "scenarios": ["knowledge-skills"]
     },
     "slack-agent-tools": {
-      "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread",
-      "scenarios": ["platformb-slack-tools"]
+      "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
+      "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+    },
+    "slack-chat-sdk-http": {
+      "description": "Chat SDK Slack adapter in webhook mode with the built-in Slack off, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands as channel posts, signed block_actions accepted without a task, and forged, stale, unsigned and replayed requests",
+      "scenarios": [
+        "slack-chat-sdk-mention",
+        "slack-chat-sdk-command",
+        "slack-chat-sdk-interactivity",
+        "slack-chat-sdk-signature"
+      ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, pre-task-create block",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -416,6 +441,7 @@
         "slack-reaction-override",
         "slack-relay-restart",
         "slack-task-output-citations",
+        "slack-task-output-ui-spec",
         "slack-pre-task-create-block"
       ]
     },
@@ -435,6 +461,16 @@
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child"
+      ]
+    },
+    "slack-http-native": {
+      "description": "Built-in Slack in SLACK_MODE=http, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands acked inside 3s with an ephemeral reply, a signed Cancel click that cancels the task and updates its card, forged, stale, future, unsigned, foreign-workspace and replayed requests, and a retry after an API restart that creates no second task",
+      "scenarios": [
+        "slack-http-mention",
+        "slack-http-command",
+        "slack-http-interactivity",
+        "slack-http-signature-retry",
+        "slack-http-restart-redelivery"
       ]
     },
     "slack-skipped-tasks": {
@@ -460,6 +496,10 @@
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
+    },
+    "task-ui-actions": {
+      "description": "Complete a task with a card Button that declares a follow_up action, then click it twice over HTTP: started, then already_done. A script action pinned in UI_SPEC_SCRIPT_ACTIONS (written by a user token, refused for the operator key) refreshes the card, then hits the cooldown",
+      "scenarios": ["task-ui-actions", "task-ui-script-actions"]
     },
     "task-steering": {
       "description": "Steer outcomes per harness, worker callbacks, accept-steer, promotion of undelivered steering",
@@ -517,6 +557,10 @@
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
+    },
+    "post-onboarding-checklist": {
+      "description": "Checklist defaults, member ownership, admin status changes and custom completion",
+      "scenarios": ["platform-checklist"]
     }
   }
 }

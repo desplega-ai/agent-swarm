@@ -31,6 +31,7 @@ import {
   orgNameFromDomain,
   storedOrgName,
 } from "@/lib/company-profile";
+import { useCan, useGrantsState } from "@/lib/use-can";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
 import {
@@ -77,7 +78,8 @@ function PerkCheck({
 /**
  * The org name is required: while `SWARM_ORG_NAME` is unset, admins get this
  * popup on every dashboard route and cannot dismiss it (no Later, X, Esc or
- * outside click). Members never see it. The name and website are pre-filled
+ * outside click). Members, and any role without `config.write.any` (the save
+ * would fail), never see it. The name and website are pre-filled
  * from a company domain (the website, else the admin's work email domain)
  * for the admin to confirm. Two opt-in perks (a featured logo, a Slack
  * Connect channel) share one contact email, sent to Desplega only with a box
@@ -106,6 +108,9 @@ export function OrganizationNameDialog() {
   const [mountedAt] = useState(Date.now);
   const sendEvent = useUiTelemetry();
   const shownReported = useRef(false);
+  // Saving writes `SWARM_ORG_NAME`. Wait for whoami, so a role without the verb never sees it.
+  const grantsPending = useGrantsState().pending;
+  const canWriteConfig = useCan("config.write.any") && !grantsPending;
 
   const status = useStatusContext().data;
   // Only an explicit false establishes that the server has no name. Older
@@ -125,6 +130,7 @@ export function OrganizationNameDialog() {
   const open =
     !saved &&
     isAdminLike(user) &&
+    canWriteConfig &&
     !pendingConnection &&
     !onboardingOwnsName &&
     identityState !== "needs-pick" &&

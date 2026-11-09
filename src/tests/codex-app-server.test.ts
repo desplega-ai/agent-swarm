@@ -44,6 +44,22 @@ async function waitForProcessGone(pid: number): Promise<boolean> {
 }
 
 describe("CodexAppServer", () => {
+  test.each(["CODEX_PATH_OVERRIDE", "CODEX_BINARY"])(
+    "launches the executable selected by %s in the resolved environment",
+    async (variable) => {
+      const server = new CodexAppServer({ env: fixtureEnv({ [variable]: FIXTURE }) });
+      try {
+        expect(await server.request("echo", { override: variable })).toEqual({
+          params: { override: variable },
+          initialized: true,
+        });
+      } finally {
+        await server.close();
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
   test(
     "initializes before requests without config in process arguments",
     async () => {
@@ -265,3 +281,19 @@ describe("CodexAppServer", () => {
     );
   }
 });
+
+test(
+  "a quota request timeout releases pending work and leaves the client usable",
+  async () => {
+    const server = new CodexAppServer({ codexPath: FIXTURE, env: fixtureEnv() });
+    try {
+      await expect(server.request("hang", {}, { timeoutMs: 25 })).rejects.toThrow(
+        "timed out after 25ms",
+      );
+      expect(await server.request("fast")).toBe("fast");
+    } finally {
+      await server.close();
+    }
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);

@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, createTaskExtended, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "../jira/outbound";
 import { workflowEventBus } from "../workflows/event-bus";
 
@@ -134,6 +135,37 @@ describe("Jira Outbound Sync", () => {
     const [, init] = mockJiraFetch.mock.calls[0] as [string, RequestInit];
     const parsed = JSON.parse(init.body as string) as { body: string };
     expect(parsed.body).toBe("✅ Swarm task completed.");
+  });
+
+  test("task.completed appends the card text when the task has a stored uiSpec", async () => {
+    process.env.UI_SPEC_ENABLED = "true";
+    try {
+      const task = await createTaskExtended("Jira card", { source: "mcp" });
+      await upsertTaskUiSpec(task.id, {
+        spec: { root: "c", elements: {} },
+        fallbackText: "*Weekly deploys*\nDeploys: 1,284",
+      });
+      await createTrackerSync({
+        provider: "jira",
+        entityType: "task",
+        swarmId: task.id,
+        externalId: "10020",
+        externalIdentifier: "KAN-20",
+        syncDirection: "bidirectional",
+      });
+
+      workflowEventBus.emit("task.completed", { taskId: task.id, output: "All done!" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // createTaskExtended also posts a task.created comment, so read the last call.
+      const [, init] = mockJiraFetch.mock.calls.at(-1) as [string, RequestInit];
+      const parsed = JSON.parse(init.body as string) as { body: string };
+      expect(parsed.body).toBe(
+        "✅ Swarm task completed.\n\nAll done!\n\n*Weekly deploys*\nDeploys: 1,284",
+      );
+    } finally {
+      delete process.env.UI_SPEC_ENABLED;
+    }
   });
 
   test("task.failed renders cross emoji + reason; falls back when reason missing", async () => {

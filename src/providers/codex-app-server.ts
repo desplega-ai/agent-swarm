@@ -1,5 +1,6 @@
 import pkg from "../../package.json";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { resolveCodexCommand } from "./runtime-dependencies";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const CLOSE_GRACE_MS = 250;
@@ -98,7 +99,7 @@ export class CodexAppServer {
     }
     this.onStderr = options.onStderr;
 
-    const codexPath = options.codexPath ?? resolveCodexPath(options.env.PATH);
+    const codexPath = options.codexPath ?? resolveCodexCommand(options.env);
     const command = [
       codexPath,
       ...configOverrideArgs(options.configOverrides),
@@ -136,9 +137,9 @@ export class CodexAppServer {
     void this.ready.catch(() => {});
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, options?: { timeoutMs: number }): Promise<T> {
     await this.ready;
-    return this.requestRaw<T>(method, params);
+    return this.requestRaw<T>(method, params, options?.timeoutMs);
   }
 
   get version(): string | undefined {
@@ -184,7 +185,11 @@ export class CodexAppServer {
     this.write({ method: "initialized" });
   }
 
-  private requestRaw<T>(method: string, params?: unknown): Promise<T> {
+  private requestRaw<T>(
+    method: string,
+    params?: unknown,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<T> {
     if (this.terminalError) return Promise.reject(this.terminalError);
     if (this.closePromise) return Promise.reject(new Error("Codex app-server closed"));
 
@@ -192,8 +197,8 @@ export class CodexAppServer {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server ${method} timed out after ${this.requestTimeoutMs}ms`));
-      }, this.requestTimeoutMs);
+        reject(new Error(`Codex app-server ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       this.pending.set(id, {
         method,
         resolve: resolve as (value: unknown) => void,
@@ -406,16 +411,6 @@ async function readLines(
     }
   } finally {
     reader.releaseLock();
-  }
-}
-
-function resolveCodexPath(path: string | undefined): string {
-  const fromPath = Bun.which("codex", { PATH: path ?? process.env.PATH });
-  if (fromPath) return fromPath;
-  try {
-    return Bun.resolveSync("@openai/codex/bin/codex.js", import.meta.dir);
-  } catch {
-    return "codex";
   }
 }
 

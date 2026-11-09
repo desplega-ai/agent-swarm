@@ -23,7 +23,11 @@ export default async function waitForTask(args: any, ctx: any) {
     const t: any = await ctx.swarm.task_get({ taskId });
     const d = t?.data ?? t ?? {};
     last = { status: d.status ?? null, output: d.output ?? null };
-    if (["completed", "failed", "cancelled", "skipped"].includes(String(last.status))) {
+    // A workflow step whose supersede cut got a retry moves from failed to
+    // superseded with no resume to follow; it is as settled as the failure was.
+    const cutWithRetry =
+      last.status === "superseded" && d.failureReason === "superseded_workflow_task";
+    if (cutWithRetry || ["completed", "failed", "cancelled", "skipped"].includes(String(last.status))) {
       return { done: true, ...last };
     }
     await new Promise((r) => setTimeout(r, 2000));

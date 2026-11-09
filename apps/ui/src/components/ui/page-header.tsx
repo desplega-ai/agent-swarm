@@ -1,6 +1,23 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { ShowMore } from "@/components/shared/show-more";
 import { cn } from "@/lib/utils";
+
+/**
+ * Every page description clamps to 2 lines on
+ * a phone and 3 from `md` up, with "Show more". A long description no longer
+ * pushes a page's tabs or content to mid-screen.
+ */
+function Description({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <ShowMore
+      maxHeight="calc(1.25rem * var(--clamp-lines))"
+      className={cn("min-w-0 [--clamp-lines:2] md:[--clamp-lines:3]", className)}
+    >
+      <p className="text-sm leading-5 text-muted-foreground">{children}</p>
+    </ShowMore>
+  );
+}
 
 // PageHeader — description + action row that opens every route page in ui.
 //
@@ -35,15 +52,11 @@ export function PageHeader({ title, description, action, icon: Icon, className }
     // String title (hidden) — render whatever remains, or nothing at all.
     if (!description && !action) return null;
     if (!action) {
-      return <p className={cn("text-sm text-muted-foreground", className)}>{description}</p>;
+      return <Description className={className}>{description}</Description>;
     }
     return (
       <div className={cn("flex items-center justify-between gap-3", className)}>
-        {description ? (
-          <p className="text-sm text-muted-foreground min-w-0">{description}</p>
-        ) : (
-          <div />
-        )}
+        {description ? <Description>{description}</Description> : <div />}
         <div className="flex items-center gap-2 shrink-0">{action}</div>
       </div>
     );
@@ -57,7 +70,7 @@ export function PageHeader({ title, description, action, icon: Icon, className }
     return (
       <div className={cn("space-y-2", className)}>
         {titleNode}
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <Description>{description}</Description>
       </div>
     );
   }
@@ -78,7 +91,7 @@ export function PageHeader({ title, description, action, icon: Icon, className }
         {titleNode}
         <div className="flex items-center gap-2 shrink-0">{action}</div>
       </div>
-      <p className="text-sm text-muted-foreground">{description}</p>
+      <Description>{description}</Description>
     </div>
   );
 }

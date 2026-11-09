@@ -252,7 +252,7 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        "group relative flex gap-3 px-4 py-2 hover:bg-muted/20",
+        "group relative flex gap-3 px-4 py-2 hover:bg-muted/20 max-sm:gap-0",
         onOpenThread && "md:cursor-default cursor-pointer",
       )}
       onClick={
@@ -263,7 +263,7 @@ function MessageBubble({
           : undefined
       }
     >
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground mt-0.5">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground mt-0.5 max-sm:hidden">
         {initials}
       </div>
       <div className="min-w-0 flex-1 overflow-hidden">
@@ -274,7 +274,7 @@ function MessageBubble({
           </span>
 
           {/* Action buttons — visible on hover */}
-          <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100 [@media(hover:none)]:[&_button]:size-8">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -339,7 +339,7 @@ function MessageBubble({
             {message.content}
           </pre>
         ) : (
-          <div className="mt-0.5 text-sm text-foreground/90 prose-chat overflow-hidden break-words">
+          <div className="mt-0.5 text-sm text-foreground/90 prose-chat overflow-x-auto break-words [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
             <Streamdown>{message.content}</Streamdown>
           </div>
         )}
@@ -566,13 +566,13 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3 overflow-hidden">
       <div className="flex items-center gap-3 shrink-0">
-        <h1 className="text-xl font-semibold">Chat</h1>
+        <h1 className="text-xl font-semibold max-md:hidden">Chat</h1>
 
         {/* Mobile channel selector */}
         {channels && channels.length > 0 && (
           <div className="md:hidden flex-1">
             <Select value={activeChannelId ?? ""} onValueChange={(v) => setActiveChannelId(v)}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full min-w-0 [&>span]:truncate">
                 <SelectValue placeholder="Select channel" />
               </SelectTrigger>
               <SelectContent>
@@ -609,7 +609,7 @@ export default function ChatPage() {
           {activeChannel ? (
             <>
               {/* Channel header */}
-              <div className="flex items-center gap-2 border-b border-border px-4 py-2 shrink-0">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2 shrink-0 max-md:hidden">
                 <Hash className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <span className="text-sm font-semibold truncate">{activeChannel.name}</span>
                 {activeChannel.description && (

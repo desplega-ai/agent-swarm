@@ -28,6 +28,8 @@ export const ChatSdkStatusSchema = z.object({
       enabled: z.boolean(),
       /** `incomplete`: present in `CHAT_SDK_ADAPTERS` with a missing field or an unresolvable `$config`; `error` names it. */
       health: z.enum(["ok", "error", "disabled", "incomplete"]),
+      /** `configured && enabled && health === "ok"`: the one rule the dashboard cards and the onboarding signal share. */
+      connected: z.boolean(),
       error: z.string().optional(),
       webhookUrl: z.string(),
       mode: z.string().optional(),
@@ -90,6 +92,20 @@ function readRawAdapters(): Partial<Record<ChatSdkAdapterName, Record<string, un
   }
 }
 
+/**
+ * Adapters that are configured, turned on and healthy, with the same rule as
+ * `getChatSdkStatus`. Reads local state only (no Discord guild lookup), so it
+ * is safe on a hot path or inside a transaction.
+ */
+export function healthyChatSdkAdapters(): ChatSdkAdapterName[] {
+  const raw = readRawAdapters();
+  const health = getChatSdkHealth();
+  return CHAT_SDK_ADAPTER_NAMES.filter(
+    (name) =>
+      raw[name] !== undefined && isAdapterEntryEnabled(raw[name]) && health[name]?.status === "ok",
+  );
+}
+
 export function chatSdkWebhookUrl(name: ChatSdkAdapterName): string {
   return `${getPublicMcpBaseUrl()}/api/integrations/chat/${name}/webhook`;
 }
@@ -149,6 +165,7 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
       configured,
       enabled,
       health,
+      connected: configured && enabled && health === "ok",
       ...(error ? { error: statusError(error) } : {}),
       webhookUrl: chatSdkWebhookUrl(name),
       ...(mode ? { mode } : {}),

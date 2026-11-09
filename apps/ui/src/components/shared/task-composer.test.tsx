@@ -106,17 +106,20 @@ mock.module("@/components/steering/steer-composer", () => ({
     sendLabel,
     placeholder,
     routeDetail,
+    source,
   }: {
     extraActions?: React.ReactNode;
     sendLabel?: string;
     placeholder?: string;
     routeDetail?: string;
+    source?: string;
   }) => (
     <div
       data-testid="steer-composer"
       data-send-label={sendLabel}
       data-placeholder={placeholder}
       data-route-detail={routeDetail}
+      data-source={source}
     >
       {extraActions}
     </div>
@@ -950,5 +953,77 @@ describe("composer audio recording", () => {
     );
     expect(clips.map((clip) => clip.name.split(".").pop())).toEqual(["webm", "m4a", "ogg"]);
     expect(partitionAttachmentFiles(clips)).toEqual({ valid: clips, error: null });
+  });
+});
+
+describe("TaskComposer with a caller follow-up (an app page)", () => {
+  test("a follow-up goes to the caller, not POST /api/tasks, and clears the draft", async () => {
+    const sent: Array<[string, string | undefined]> = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async (text, parentTaskId) => {
+          sent.push([text, parentTaskId]);
+        }}
+      />,
+    );
+    await type(container, "next step");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => sent.length > 0);
+    await act(async () => {});
+    expect(sent).toEqual([["next step", "done-1"]]);
+    expect(createdTasks).toEqual([]);
+    expect(textOf(container)).toBe("");
+    await unmount();
+  });
+
+  test("a rejected caller follow-up keeps the draft and shows its message", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        onFollowUp={async () => {
+          throw new Error("Conversation not found");
+        }}
+      />,
+    );
+    await type(container, "hello");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => container.textContent?.includes("Conversation not found") ?? false);
+    expect(container.textContent).toContain("Conversation not found");
+    expect(textOf(container)).toBe("hello");
+    await unmount();
+  });
+
+  test("the caller's text-only send offers no attachments, mic or extra actions", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={null}
+        canSteer={false}
+        onFollowUp={async () => {}}
+        renderActions={() => <button type="button" aria-label="Add test file" />}
+      />,
+    );
+    expect(container.querySelector('button[aria-label="Attach files"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Add test file"]')).toBeNull();
+    expect(container.querySelector('button[aria-label^="Record audio"]')).toBeNull();
+    await unmount();
+  });
+
+  test("steerSource reaches the steer composer; omitted, it stays unset", async () => {
+    const withSource = await mount(
+      <TaskComposer targetTask={runningLeadTask} canSteer steerSource="app-page" />,
+    );
+    const steer = withSource.container.querySelector('[data-testid="steer-composer"]');
+    expect((steer as HTMLElement).dataset.source).toBe("app-page");
+    await withSource.unmount();
+    const without = await mount(<TaskComposer targetTask={runningLeadTask} canSteer />);
+    const plain = without.container.querySelector('[data-testid="steer-composer"]');
+    expect((plain as HTMLElement).dataset.source).toBeUndefined();
+    await without.unmount();
   });
 });

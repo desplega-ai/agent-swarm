@@ -6,9 +6,8 @@
  * The benchmark is a trade: telemetry unlocks the two basic rows, and company
  * context (website, team size, use case) re-bases them on a peer group
  * (`level: "full"`), which also offers a monthly report. With telemetry off,
- * the card says what telemetry unlocks, but only while the telemetry banner
- * is not on screen: for non-admins, and for admins who dismissed the banner
- * on an earlier visit. The card's own X hides it for good.
+ * the card says what telemetry unlocks. It lives on Usage, so it never sits
+ * next to the Home telemetry banner. The card's own X hides it for good.
  *
  * The perk is the bell's Slack Connect invite in a compact form: submitting or
  * dismissing it here resolves the same inbox row. It also shows alone once a
@@ -32,7 +31,6 @@ import { Input } from "@/components/ui/input";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
-import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { SLACK_CONNECT_INVITE_KEY, useSlackConnectInvite } from "@/hooks/use-slack-connect-invite";
 import {
   fleetCardMode,
@@ -41,11 +39,6 @@ import {
   formatFleetMedian,
   formatFleetValue,
 } from "@/lib/fleet-benchmark";
-import {
-  readTelemetryBannerDismissedAt,
-  showTelemetryBanner,
-  TELEMETRY_BANNER_CARD_KEY,
-} from "@/lib/telemetry-banner";
 import { isAdminLike } from "@/lib/user-role";
 import { FleetReportForm, FleetUnlockFlow } from "./fleet-benchmark-forms";
 import { HomeCard, HomeCardDivider, HomeCardNote } from "./home-card";
@@ -75,18 +68,8 @@ export function FleetBenchmarkCard() {
   const inbox = useInboxState({ userId: currentUser.userId, itemType: "notification" });
   const track = useUiTelemetry();
   const { config } = useConfig();
-  // Read once: a banner dismissed on this page view does not swap in the off state.
-  const [bannerDismissedAt] = useState(() =>
-    readTelemetryBannerDismissedAt(deriveStorageKey(config.apiUrl, TELEMETRY_BANNER_CARD_KEY)),
-  );
   const isAdmin = isAdminLike(currentUser.user);
   const telemetryOff = status?.telemetry?.enabled === false;
-  // The telemetry banner sits right above and asks the same thing: never both.
-  const bannerAsks = showTelemetryBanner({
-    telemetryEnabled: false,
-    isAdmin,
-    dismissedAt: bannerDismissedAt,
-  });
 
   const invite = inbox.data?.find((row) => row.itemId === SLACK_CONNECT_INVITE_KEY);
   const inviteOpen =
@@ -108,7 +91,7 @@ export function FleetBenchmarkCard() {
     benchmarkDismissed: benchmarkCard.dismissed,
     inviteOpen,
     workflowRunsCompleted: status?.instance?.workflow_runs_completed ?? 0,
-    offStateAllowed: telemetryOff && !bannerAsks,
+    offStateAllowed: telemetryOff,
   });
 
   const shown = mode === "benchmark" || mode === "progress";

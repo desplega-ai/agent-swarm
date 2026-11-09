@@ -1,5 +1,6 @@
 // What a link in task or session content previews in the side panel: one
-// agent-fs file or one swarm Page. Folders, other dashboard routes, GitHub and
+// agent-fs file or one swarm Page (a task opens there from a card's Open
+// toast, never from a link). Folders, other dashboard routes, GitHub and
 // share links keep their normal behavior.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
@@ -19,7 +20,9 @@ export type LinkPreviewTarget =
    * `id` is the page id or slug, as the link names it. `query` is the link's
    * query minus the params the page route owns (`pageFrameQuery`), or "".
    */
-  | { kind: "page"; id: string; query: string; href: string };
+  | { kind: "page"; id: string; query: string; href: string }
+  /** A task, opened by a card's Open toast. No link parses to it. */
+  | { kind: "task"; taskId: string };
 
 /** A drive path from a Comb route (`/file/~/<org>/<drive>/<names>`) that `comb/links` built. */
 function driveFileFromRoute(route: string): DrivePath | null {
@@ -65,6 +68,7 @@ export function linkPreviewOpenHref(
   opts: { connected?: boolean; pageId?: string | null } = {},
 ): string {
   if (target.kind === "file") return opts.connected ? target.route : target.href;
+  if (target.kind === "task") return `/tasks/${encodeURIComponent(target.taskId)}`;
   return `/pages/${encodeURIComponent(opts.pageId ?? target.id)}${target.query}`;
 }
 

@@ -2,7 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteSwarmConfig, getAgentById, getSwarmConfigLookupById } from "@/be/db";
 import { AGENT_MAX_TASKS_CONFIG_KEY, resetAgentMaxTasksMirror } from "@/be/multi-runtime";
-import { internalConfigKeyError, isInternalConfigKey } from "@/be/swarm-config-guard";
+import {
+  humanOnlyConfigKeyError,
+  internalConfigKeyError,
+  isHumanOnlyConfigKey,
+  isInternalConfigKey,
+} from "@/be/swarm-config-guard";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -56,6 +61,12 @@ export const registerDeleteConfigTool = (server: McpServer) => {
             data: { yourAgentId: requestInfo.agentId },
           });
         }
+        if (isHumanOnlyConfigKey(existing.key)) {
+          return toolErr(humanOnlyConfigKeyError(existing.key), {
+            data: { yourAgentId: requestInfo.agentId },
+          });
+        }
+
         if (isInternalConfigKey(existing.key)) {
           return toolErr(internalConfigKeyError(existing.key).message, {
             data: { yourAgentId: requestInfo.agentId },

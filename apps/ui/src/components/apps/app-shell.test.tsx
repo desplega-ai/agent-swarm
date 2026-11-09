@@ -12,6 +12,11 @@ for (const file of new Bun.Glob("**/*.{ts,tsx}").scanSync(SRC)) {
   mock.module(specifier, async () => await import(join(SRC, file)));
 }
 
+// The SessionThread case needs a server new enough for sessions; nothing else here gates.
+mock.module("@/api/hooks/use-feature-gate", () => ({
+  useFeatureGate: () => ({ supported: true, requiredVersion: "0.0.0", currentVersion: "9.9.9" }),
+}));
+
 GlobalRegistrator.register();
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const realFetch = globalThis.fetch;
@@ -22,6 +27,7 @@ const { MemoryRouter } = await import("react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("@/components/ui/tooltip");
 const { ConfigContext } = await import("@/hooks/use-config");
+const { CurrentUserProvider } = await import("@/contexts/current-user-context");
 const { AppSurface } = await import("./app-surface");
 
 const config = { apiUrl: "http://swarm.test", apiKey: "test" };
@@ -67,11 +73,13 @@ async function mountApp(
     root.render(
       <QueryClientProvider client={new QueryClient()}>
         <ConfigContext.Provider value={configValue}>
-          <MemoryRouter>
-            <TooltipProvider>
-              <AppSurface app={app as never} mode={mode} pageName={pageName} />
-            </TooltipProvider>
-          </MemoryRouter>
+          <CurrentUserProvider>
+            <MemoryRouter>
+              <TooltipProvider>
+                <AppSurface app={app as never} mode={mode} pageName={pageName} />
+              </TooltipProvider>
+            </MemoryRouter>
+          </CurrentUserProvider>
         </ConfigContext.Provider>
       </QueryClientProvider>,
     ),
@@ -160,4 +168,24 @@ test("a page left out of the sidebar keeps the crumbs back to the default page",
     "Overview",
   );
   expect(host.querySelector('[data-testid="app-shell-sidebar"] [aria-current="page"]')).toBeNull();
+});
+
+test("layout: sidebar gives page components the app scope (a SessionThread can chat)", async () => {
+  const definition = {
+    layout: "sidebar",
+    defaultPage: "chat",
+    pages: {
+      chat: {
+        title: "Chat",
+        root: "thread",
+        elements: { thread: { type: "SessionThread", props: { id: "chat", sessionKey: "main" } } },
+      },
+      other: { title: "Other", root: "t", elements: { t: { type: "Text", props: { text: "x" } } } },
+    },
+  };
+  const host = await mountApp(definition);
+  expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+  const thread = host.querySelector('[data-testid="json-render-session-thread"]');
+  expect(thread).not.toBeNull();
+  expect(thread?.textContent).not.toContain("This chat only works on an app page.");
 });

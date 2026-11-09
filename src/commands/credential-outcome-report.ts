@@ -1,5 +1,9 @@
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { modelFamilyOf } from "../utils/model-rate-limit-windows";
+import type {
+  ProviderAccountTelemetry,
+  RateLimitReplacement,
+} from "../utils/provider-account-telemetry";
 import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome";
 import { reportSeatMismatchOutcome } from "./seat-mismatch-report";
 
@@ -58,8 +62,10 @@ export async function reportKeyRateLimitWindows(
   keyIndex: number,
   windows: RateLimitWindowTelemetry,
   logKeySuffix = true,
+  account?: ProviderAccountTelemetry,
+  replace?: RateLimitReplacement[],
 ): Promise<void> {
-  if (Object.keys(windows).length === 0) return;
+  if (Object.keys(windows).length === 0 && !account && !replace?.length) return;
   const response = await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
     method: "POST",
     headers: {
@@ -71,6 +77,8 @@ export async function reportKeyRateLimitWindows(
       keySuffix,
       keyIndex,
       windows,
+      account,
+      replace,
     }),
   });
   if (!response.ok) {
@@ -168,15 +176,17 @@ export async function reportCredentialOutcomeThenFinish(
       outcome,
       new Date().toISOString(),
     );
-    if (finalWindows) {
+    if (finalWindows || result.providerAccount || result.rateLimitReplacements?.length) {
       const report = reportKeyRateLimitWindows(
         apiUrl,
         apiKey,
         credentialInfo.keyType,
         credentialInfo.keySuffix,
         credentialInfo.keyIndex,
-        finalWindows,
+        finalWindows ?? {},
         outcome.kind !== "model",
+        result.providerAccount,
+        result.rateLimitReplacements,
       ).catch((err) => {
         console.warn(
           `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,

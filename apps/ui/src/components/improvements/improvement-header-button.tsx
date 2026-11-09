@@ -4,6 +4,7 @@ import { useImprovements } from "@/api/hooks/use-improvements";
 import type { Improvement } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCan } from "@/lib/use-can";
 import { ImprovementApprovalList, isActionableImprovement } from "./improvement-approval-list";
 import { ImprovementDialog } from "./improvement-dialog";
@@ -25,26 +26,31 @@ export function ImprovementHeaderButton() {
   return (
     <>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="relative size-8"
-            aria-label={
-              waiting.length > 0
-                ? `Improvements, ${waiting.length} waiting for approval`
-                : "Improvements"
-            }
-          >
-            <Lightbulb className="size-4" />
-            {waiting.length > 0 ? (
-              <span
-                className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-status-warning"
-                aria-hidden="true"
-              />
-            ) : null}
-          </Button>
-        </PopoverTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative size-8"
+                aria-label={
+                  waiting.length > 0
+                    ? `Improvements, ${waiting.length} waiting for approval`
+                    : "Improvements"
+                }
+              >
+                <Lightbulb className="size-4" />
+                {waiting.length > 0 ? (
+                  <span
+                    className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-status-warning"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Improvements</TooltipContent>
+        </Tooltip>
         <PopoverContent
           align="end"
           aria-label="Improvements"

@@ -6,6 +6,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-11-09
+
+### Added
+- Tasks: first-class json-render UI specs on task output through `store-progress` `uiSpec`, rendered in Slack outcome cards, the session view and Chat SDK channels; gated by `UI_SPEC_ENABLED` and `UI_SPEC_ACTIONS_ENABLED` (#2876).
+- Providers: reasoning text is captured for claude, codex and pi (#2869), and `session_logs` stores per-line reasoning counts (#2893).
+- Usage: current provider limits and observed window usage (#2870); subscription cards with quota meters on the Usage page (#2890).
+- Apps: an `app.action` step can start a SessionThread session (#2889); the PageFrame component plus three app-component fixes (#2884).
+- Runtime pools: opt-in Docker isolation keys `DOCKER_RUNTIME`, `DOCKER_HARDENED` and `DOCKER_PIDS_LIMIT` for provisioned workers (#2881).
+
+### Changed
+- Docker: bumped amp and qwen (#2874), and amp again (#2886).
+- Docs: weekly release notes for the week of 2026-11-09 (#2899); heartbeat spec synced (#2878); env var and MCP tool references cover `uiSpec` and the UI spec flags.
+
+### Fixed
+- Usage: pre-307 sessions are attributed to their task credential (#2898).
+- Extensions: `sql-admin-only` allows `db-query` when the source task id has no task row (#2897).
+- Workflows: a superseded step task is marked superseded once its retry is queued, and `defer-task` `wakeOn` counts it as failed (#2892).
+- Slack: human thread replies no longer depend on worker routing requirements (#2628); a reload during the boot Slack start no longer returns 500 (#2873).
+- UI: task cards show in the link preview split screen (#2887); chart axis labels stay apart and Home rows stay readable on phones (#2871).
+- Heartbeat: TLC memory and auto workers are bounded (#2875).
+- CI: gitleaks fetches ride out GitHub release 504s (#2885); Slack Visuals Publish validation accepts fork PRs (#2877).
+- Tests: the Slack approval test environment is isolated (#2895); inherited System One test defaults are cleared (#2872).
+
+## [2.9.0] - 2026-11-08
+
+### Added
+- GitHub: GitHub Enterprise Server support through `GITHUB_URL` and `GITHUB_API_URL`; dashboard links follow the configured host (#2808).
+- Slack: `SLACK_MODE=http` is served by a native signed receiver (#2857); agents can post json-render cards to Slack and Chat SDK channels (#2844); approval cards are marked resolved in place (#2840).
+- Import: opt-in boot-time file import of workflows, skills, scripts and agent instructions via `SWARM_IMPORT_SOURCES[_FILE]` (#2805).
+- Seed: per-kind opt-out flags `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED` and `SEED_SCHEDULES_ENABLED` (#2800).
+- UI: in-app files, Work/Connect/Build navigation, use-case groups and Home (#2734); answer a session's approval request in place (#2851); mobile and desktop layout fixes from the UI audit (#2863).
+- Apps: catalog batch with approval, agent-fs files, split drawer, dialog and charts (#2810); the SessionThread component and app-page steering source (#2760).
+- Extensions: a `sql-admin-only` template that gates `db-query` by the task creator's role (#2824).
+- Dreaming: skill routes are batched per target skill and skill caps rise to 6/2 (#2856).
+
+### Changed
+- agent-fs pins bumped to 0.18.23 (#2862).
+- Docker: bumped claude-code, opencode, amp, copilot and qwen (#2831), and amp again (#2842).
+- Worker: provider binary checks moved from the shell entrypoint to Bun (#2823).
+- Performance: the boot re-scrub sweep is selective and load-paced with a forward-only mode (#2811); `db-query` reuses worker children instead of spawning one per query (#2813).
+- Docs: prompts steer small chat tables and charts to a json-render card (#2860); extension authoring is internal first (#2848); decision provider guidance for ping and the workflow skill (#2843, #2841); team collaboration secrets claim corrected (#2829); AI operations governance guide leads answer-first (#2830); heartbeat spec synced (#2832); seed skill patches (#2828).
+
+### Fixed
+- Slack: buffered thread replies persist across API restarts (#2861) and fold into the pending Lead task (#2849); block dedupe matches word boundaries by code point (#2859); inbound messages are identified in retry logs (#2855); approval cards show dashboard responder names (#2847); the tree stall threshold is validated (#2817).
+- Worker: provider dependencies are validated at task start (#2858).
+- Savings: savings are available before today's first rollup (#2867).
+- UI: session approvals show before live activity (#2864); Files reading width matches agent-fs (#2854); agent files show with the reply and my message time sits at the bubble edge (#2852).
+- Config fallbacks: invalid values fall back to defaults for heartbeat stall thresholds and resume-generation limit (#2838, #2837), the multi-runtime stale threshold (#2821), the task eligibility scan cap (#2836) and the heartbeat pool scan batch size (#2807).
+- Keyed write retries survive a slow first attempt (#2820); `get-swarm` marks wakeable pool agents as on demand (#2815).
+- Evals: three grader false negatives fixed in docs-suggestion, implement-review and fanout-research (#2865).
+- Tests: Chat SDK Slack adapter e2e through slack-mock HTTP delivery (#2853); savings test clocks pinned (#2814, #2822); the Toaster unmounts before happy-dom unregisters (#2839).
+
+## [2.8.3] - 2026-11-07
+
+### Added
+- Savings: a fleet savings page at `/usage/savings` (#2779); scripts are priced and show their saving on script pages (#2776); a schedule's saving shows in the rail, header and list (#2777); workflow savings get a daily rollup, a Saved (30d) list column (#2772) and totals with components (#2780).
+- Scripts: a stdlib `retry(fn, opts)` helper, method-aware `ctx.stdlib.fetch` retries, and `ctx.swarm` bridge retries on 429 and transient 5xx (#2790).
+- Slack: threads with several people name every participant, with a trust level; external and unknown people are untrusted (#2767).
+- Tasks: link a task to a registered repo from the Create task dialog (#2804).
+
+### Changed
+- Worker image: context-mode is removed from the image and the Claude, Codex and opencode adapters; `CONTEXT_MODE_DISABLED` and `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` are now ignored (#2812).
+- Docker: bumped codex, amp, grok, kiro, qwen, copilot and the Anthropic SDK (#2788), and amp again (#2818).
+- Docs: small-company playbooks lead with what Agent Swarm does (#2786); task lifecycle grace timer wording (#2787); seed skill patches for swarm-scripts and work-on-task (#2785).
+
+### Fixed
+- Slack: author lines cannot be forged, and every requester lookup carries `userTeam` (#2771).
+- Savings: the fleet savings summary and job lists load in a few statements (#2809).
+- opencode: installed MCP servers use the local command-array stdio shape (#2793); OpenRouter gateway model ids have a catalog entry (#2784).
+- Scrubber: a structural rule match inside a vendor secret redacts the whole secret (#2783); the gitleaks `true|false|null` allowlist is anchored as a whole (#2796).
+- Dreaming: triage docs are sent once, partial cost is labelled, and skill routes carry forward (#2792).
+- Docker: context-mode was pinned to a Node 22 compatible release before its removal (#2789, #2806).
+- Tests: config cleanup settles and the star toast is awaited (#2782).
+
 ## [2.8.2] - 2026-11-06
 
 ### Added

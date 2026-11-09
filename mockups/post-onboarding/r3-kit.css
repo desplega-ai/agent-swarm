@@ -1,0 +1,78 @@
+/* ============================================================
+   Post-onboarding UI spike, round 3: additions to the round-2 kit.
+
+   Load order: tokens.css, r2-kit.css, then this file. Nothing here
+   copies r2 rules; it only adds the inset shell, the scrollbar
+   gutter, the underline tab strip, the page title row and a few
+   icons. Throwaway reference material: nothing ships.
+   ============================================================ */
+
+/* ---------- shell canvas behind the inset panels ---------- */
+:root { --shell: oklch(0.955 0.003 286); --panel-r: 12px; --gap: 8px; }
+html.dark, [data-theme="dark"] { --shell: oklch(0.105 0.004 286); }
+
+/* ---------- scrollbars: the app's 8px bar, gutter always kept ----------
+   Same size as apps/ui globals.css (8px), with two fixes: the track is
+   transparent, so it does not paint a background-colored strip over the
+   sidebar (visible in dark mode), and the thumb uses the muted text color
+   at 40%, because the border color is close to invisible on the sidebar. */
+html, .side-body, .body, .pbody, .scroll { scrollbar-gutter: stable; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--color-muted-foreground) 40%, transparent); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted-foreground); }
+/* Touch screens overlay the bar on the content, so the gutter is zero. */
+.phone *::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ---------- sidebar: rows keep one width with or without a bar ---------- */
+/* Left padding 8px, right padding 0: the 8px gutter is the right inset. */
+.side-body { padding: 4px 0 12px 8px; }
+.side-foot { padding: 8px; }
+.side.rail .side-body { padding: 4px 0; scrollbar-width: none; }
+.side.rail .side-head { justify-content: center; padding: 0; }
+.side.rail .side-foot { padding: 4px 0 8px; }
+.side.rail .ni { margin-left: auto; margin-right: auto; }
+.ni .ic { flex: none; }
+
+/* ---------- inset shell (shadcn Sidebar variant="floating" + inset main) ---------- */
+.app.inset { background: var(--shell); padding: var(--gap); column-gap: var(--gap); border-radius: calc(var(--panel-r) + var(--gap)); }
+.app.inset > .side { width: 248px; border: 1px solid var(--color-border); border-radius: var(--panel-r); overflow: hidden; }
+.app.inset > .side.rail { width: 50px; }
+.app.inset > .main { background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--panel-r); box-shadow: var(--shadow-xs); overflow: hidden; }
+/* the main panel scrolls; the 8px gutter is part of its right inset */
+.app .body { overflow: auto; padding: 8px 16px 24px 24px; }
+
+/* ---------- page title row: title, then the page's tools ---------- */
+.ph { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 8px 0 8px; }
+.ph h1 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.ph .sp { flex: 1; }
+.ph .field { width: 264px; }
+.ph .btn { height: 32px; }
+.phone .ph { flex-wrap: wrap; margin: 0 0 12px; }
+.phone .ph .field { width: 100%; height: 44px; font-size: 16px; }
+.phone .ph h1 { font-size: 18px; }
+
+/* ---------- underline tab strip (the app's SectionTabs look) ---------- */
+.utabs { display: flex; align-items: stretch; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--color-border); overflow-x: auto; scrollbar-width: none; scrollbar-gutter: auto; }
+.utabs [role="tab"] { min-height: 44px; flex: none; display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: 14px; font-weight: 500; color: var(--color-muted-foreground); white-space: nowrap; transition: color 150ms var(--ease-snappy), border-color 150ms var(--ease-snappy); }
+.utabs [role="tab"]:hover { color: var(--color-foreground); }
+.utabs [role="tab"][aria-selected="true"] { color: var(--color-foreground); border-bottom-color: var(--color-foreground); }
+.utabs [role="tab"] .n { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; color: var(--color-muted-foreground); }
+.utabs .adv { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 4px 0 12px; font-size: 13px; color: var(--color-muted-foreground); white-space: nowrap; }
+.utabs .adv .ic { width: 12px; height: 12px; }
+.utabs .adv:hover { color: var(--color-foreground); }
+.phone .utabs { margin: 0 -14px 12px; padding: 0 6px; }
+@media (prefers-reduced-motion: reduce) { .utabs [role="tab"] { transition: none; } }
+
+/* ---------- flyout extras ---------- */
+.fly .fi .ext { margin-left: auto; width: 12px; height: 12px; }
+
+/* ---------- extra lucide icons ---------- */
+.i-cog { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+.i-puzzle { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z'/%3E%3C/svg%3E"); }
+.i-layers { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/svg%3E"); }
+.i-bug { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m8 2 1.88 1.88'/%3E%3Cpath d='M14.12 3.88 16 2'/%3E%3Cpath d='M9 7.13v-1a3.003 3.003 0 1 1 6 0v1'/%3E%3Cpath d='M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6'/%3E%3Cpath d='M12 20v-9'/%3E%3Cpath d='M6.53 9C4.6 8.8 3 7.1 3 5'/%3E%3Cpath d='M6 13H2'/%3E%3Cpath d='M3 21c0-2.1 1.7-3.9 3.8-4'/%3E%3Cpath d='M20.97 5c0 2.1-1.6 3.8-3.5 4'/%3E%3Cpath d='M22 13h-4'/%3E%3Cpath d='M17.2 17c2.1.1 3.8 1.9 3.8 4'/%3E%3C/svg%3E"); }
+.i-flask { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2'/%3E%3Cpath d='M6.453 15h11.094'/%3E%3Cpath d='M8.5 2h7'/%3E%3C/svg%3E"); }
+
+/* small spinner and status dot sizes used by list rows */
+.st.sm { width: 14px; height: 14px; }

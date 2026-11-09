@@ -228,6 +228,99 @@ describe("chat-reply", () => {
       allow_sending_without_reply: true,
     });
   });
+  test("a card-only reply posts the card to the task's thread", async () => {
+    const task = await createTaskExtended("a chat task with a card", {
+      agentId: worker.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:991003"),
+    });
+    const card = {
+      root: "card",
+      elements: { card: { type: "Card", props: { title: "Weekly deploys" }, children: [] } },
+    };
+    const result = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { card },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    const sends = harness.mock.calls.filter(
+      (call) =>
+        /^send(Rich)?Message$/.test(call.method) &&
+        String((call.body as { chat_id?: unknown }).chat_id) === "991003",
+    );
+    expect(sends).toHaveLength(1);
+    expect(JSON.stringify(sends[0]?.body)).toContain("Weekly deploys");
+  });
+});
+
+describe("cards bound for Slack through the Chat SDK tools", () => {
+  // 20 categories x 12 series with a 51-character axis label: valid for the
+  // spec, but Slack's adapter draws it as a code block cut at 3,000 characters.
+  const chartCard = (xLabelLength: number) => ({
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Load" }, children: ["c"] },
+      c: {
+        type: "Chart",
+        props: {
+          title: "Requests",
+          chart: {
+            type: "bar",
+            xLabel: "x".repeat(xLabelLength),
+            categories: Array.from({ length: 20 }, (_, i) => `cat ${i}`),
+            series: Array.from({ length: 12 }, (_, s) => ({
+              name: `s${s}`,
+              values: Array.from({ length: 20 }, (_, i) => i + s),
+            })),
+          },
+        },
+        children: [],
+      },
+    },
+  });
+  const slackThread = "slack:C0B3CARDS:1700000000.000100";
+
+  const entryPoints = [
+    [
+      "chat-post",
+      async () => ({
+        headers: { "x-agent-id": lead.id },
+        args: { adapter: "slack", threadId: slackThread },
+      }),
+    ],
+    [
+      "chat-reply",
+      async () => {
+        const task = await createTaskExtended("a slack chat task with a card", {
+          agentId: worker.id,
+          source: "chat",
+          contextKey: chatSdkContextKey(slackThread),
+        });
+        return { headers: { "x-agent-id": worker.id, "x-source-task-id": task.id }, args: {} };
+      },
+    ],
+  ] as const;
+
+  test.each(
+    entryPoints,
+  )("%s refuses a chart Slack cannot draw natively, before any send", async (tool, target) => {
+    const { headers, args } = await target();
+    const refused = await callTool(tool, headers, {
+      ...args,
+      text: "never sent",
+      card: chartCard(51),
+    });
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toStartWith("Invalid card spec.");
+    expect(refused.structuredContent.message).toContain("Chart: Slack cannot render it natively");
+
+    // Control: a 50-character label passes validation and reaches the
+    // adapter, which is not running in this test.
+    const accepted = await callTool(tool, headers, { ...args, card: chartCard(50) });
+    expect(accepted.structuredContent.message).not.toContain("Invalid card spec.");
+    expect(accepted.structuredContent.message).toContain("'slack' is not running");
+  });
 });
 
 describe("register-chat-channel", () => {
@@ -316,6 +409,60 @@ describe("chat tool permissions", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.threadId).toBe("telegram:991010");
     expect(sendsTo("991010")).toHaveLength(1);
+  });
+
+  const card = {
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "Deploy report" }, children: ["fields"] },
+      fields: { type: "Fields", props: {}, children: ["status"] },
+      status: { type: "Field", props: { label: "Status", value: "green" }, children: [] },
+    },
+  };
+
+  test("chat-post sends a card after the text, as its own message", async () => {
+    const result = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991011", text: "Deploy done.", card },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    const sends = sendsTo("991011");
+    expect(sends).toHaveLength(2);
+    expect(JSON.stringify(sends[0]?.body)).toContain("Deploy done.");
+    expect(JSON.stringify(sends[1]?.body)).toContain("Deploy report");
+    expect(JSON.stringify(sends[1]?.body)).toContain("green");
+  });
+
+  test("chat-post sends a card alone, and refuses an invalid one before sending", async () => {
+    const alone = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991012", card },
+    );
+    expect(alone.structuredContent.success).toBe(true);
+    expect(sendsTo("991012")).toHaveLength(1);
+
+    const invalid = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      {
+        adapter: "telegram",
+        threadId: "telegram:991013",
+        text: "never sent",
+        card: { root: "card", elements: { card: { type: "Chart", props: {}, children: [] } } },
+      },
+    );
+    expect(invalid.structuredContent.success).toBe(false);
+    expect(invalid.structuredContent.message).toContain("Invalid card spec.");
+    expect(sendsTo("991013")).toHaveLength(0);
+
+    const empty = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991013" },
+    );
+    expect(empty.structuredContent.message).toBe("Provide text or a card.");
   });
 
   test("chat-open-dm is refused for a worker and allowed for the lead", async () => {

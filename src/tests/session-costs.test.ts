@@ -28,7 +28,6 @@ import {
   UNATTRIBUTED_USER_ID,
 } from "../be/db";
 import type { SessionCost } from "../types";
-import { estimateClaudePlan } from "../utils/subscription-plans";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-costs.sqlite";
@@ -255,8 +254,8 @@ describe("Session Costs API", () => {
       expect(cost.isError).toBe(false);
       expect(cost.inputTokens).toBe(0);
       expect(cost.outputTokens).toBe(0);
-      expect(cost.cacheReadTokens).toBe(0);
-      expect(cost.cacheWriteTokens).toBe(0);
+      expect(cost.cacheReadTokens).toBeNull();
+      expect(cost.cacheWriteTokens).toBeNull();
 
       // Retrieve by agentId
       const costs = await getSessionCostsByAgentId(testAgent.id);
@@ -1297,6 +1296,14 @@ describe("Session Costs API", () => {
         [keyTask, 1],
       ] as const) {
         await createSessionCost({
+          credentialKeyType:
+            task.id === claudeTask.id
+              ? "CLAUDE_CODE_OAUTH_TOKEN"
+              : task.id === codexTask.id
+                ? "CODEX_OAUTH"
+                : "OPENROUTER_API_KEY",
+          credentialKeySuffix:
+            task.id === claudeTask.id ? "cl4ud" : task.id === codexTask.id ? "c0dex" : "0rkey",
           sessionId: `credential-${task.id}`,
           taskId: task.id,
           agentId: agent.id,
@@ -1320,7 +1327,7 @@ describe("Session Costs API", () => {
       });
       expect(byKey.get("c0dex")).toMatchObject({
         subscription: true,
-        plan: "chatgpt_pro",
+        plan: null,
         planSource: "detected",
         costUsd: 2,
       });
@@ -1341,19 +1348,11 @@ describe("Session Costs API", () => {
       await setApiKeyPlan("CODEX_OAUTH", "pr3c3", null);
       expect(await planOf()).toEqual({ plan: null, planSource: null });
       await recordKeyUsage("CODEX_OAUTH", "pr3c3", 0, task.id, "global", null, "chatgpt_pro");
-      expect(await planOf()).toEqual({ plan: "chatgpt_pro", planSource: "detected" });
+      expect(await planOf()).toEqual({ plan: null, planSource: "detected" });
       expect(await setApiKeyPlan("CODEX_OAUTH", "n0key", "chatgpt_pro")).toBe(false);
     });
 
-    test("estimateClaudePlan picks the nearest tier from weekly spend over utilization", () => {
-      expect(estimateClaudePlan(0.5, 1000)).toBe("claude_max_20x");
-      expect(estimateClaudePlan(0.5, 250)).toBe("claude_max_5x");
-      expect(estimateClaudePlan(0.5, 50)).toBe("claude_pro");
-      expect(estimateClaudePlan(0.2, 1000)).toBeNull();
-      expect(estimateClaudePlan(0.9, 0)).toBeNull();
-    });
-
-    test("a Claude window report estimates the plan, below a manual pick", async () => {
+    test("a Claude window report does not create an unsupported estimate", async () => {
       const agent = await createAgent({ name: "Estimate Agent", isLead: false, status: "idle" });
       const task = await createTaskExtended("Weekly Claude usage");
       await recordKeyUsage("CLAUDE_CODE_OAUTH_TOKEN", "3stim", 0, task.id);
@@ -1384,7 +1383,7 @@ describe("Session Costs API", () => {
       await report(0.1);
       expect(await planOf()).toEqual({ plan: null, planSource: null });
       await report(0.5);
-      expect(await planOf()).toEqual({ plan: "claude_max_5x", planSource: "estimated" });
+      expect(await planOf()).toEqual({ plan: null, planSource: null });
       await setApiKeyPlan("CLAUDE_CODE_OAUTH_TOKEN", "3stim", "claude_team_premium");
       await report(0.125);
       await report(0.5);

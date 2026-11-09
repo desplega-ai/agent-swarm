@@ -316,6 +316,17 @@ describe("/api/kv REST — auth on writes", () => {
     expect(res.status).toBe(200);
   });
 
+  test("only a lead agent can write a use case namespace (usecase:*)", async () => {
+    // The Lead posts run summaries to the thread stored there; a worker must not set it.
+    const path = `/api/kv/_/${encodeURIComponent("usecase:shared/http-uc/")}/thread`;
+    const body = JSON.stringify({ value: { channelId: "C-EVIL", threadTs: "1.2" } });
+    expect((await authedFetch(path, { method: "PUT", body, agentId })).status).toBe(403);
+    expect((await authedFetch(path, { method: "PUT", body })).status).toBe(403);
+    expect((await authedFetch(path, { method: "PUT", body, agentId: leadAgentId })).status).toBe(
+      200,
+    );
+  });
+
   test("any agent can READ another agent's namespace", async () => {
     const ns = `task:agent:${otherAgentId}`;
     // Seed via lead

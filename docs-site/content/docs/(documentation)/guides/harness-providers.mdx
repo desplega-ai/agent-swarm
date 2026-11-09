@@ -22,6 +22,37 @@ For an operator-facing comparison of the install choices, see the [Provider Capa
 
 ---
 
+## Native Codex quota telemetry
+
+Each native Codex session reads account limits once after thread startup, with a five-second timeout.
+Quota failures do not fail the task. Account notifications also apply between turns.
+The worker reports snapshots through the existing key telemetry endpoint when it knows the executing credential.
+Pi sessions do not collect Codex quota.
+
+Windows use `codex:<limitId>:<primary|secondary>` keys, utilization fractions, and epoch-second resets.
+Notifications use receipt timestamps. The initial read uses request time so concurrent notifications retain priority.
+Primary and secondary identify protocol slots. Their durations come from the provider.
+Explicit null windows remove only their reported slots. Sparse omissions preserve prior data.
+Sparse window metadata retains known duration, reset, label, and model scope.
+A recovery event without a new reset leaves the old reset expired.
+Each slot retains a separate removal timestamp in `limits[limitId].windowRemovedAt`.
+Delayed reports can fill missing facts, but cannot replace newer facts or restore removed slots.
+The initial read also fills facts omitted by concurrent notifications.
+Claude reports retain partial-update semantics and supported overage details.
+
+Account telemetry stores availability and bounded metadata by limit ID, including raw plans, credits, spend controls, and reasons.
+`fieldObservedAt` records actual fact ages at account, limit, and window levels.
+Account and limit `observedAt` values summarize events. They do not establish the age of retained facts.
+Availability, credits, plans, and spend retain their timestamps when an event changes only windows.
+Legacy facts without field timestamps use their containing record's timestamp.
+Missing metadata means unavailable data. Account identifiers, payment metadata, and raw responses are excluded.
+Spend-control strings retain provider units without an assumed currency. Monthly reset telemetry does not use routing cooldown ceilings.
+Unknown-duration display resets allow up to 400 days. Known durations allow their duration plus one day, with a seven-day minimum.
+The HTTP boundary bounds observations more than one minute into the future to server receipt time.
+These Codex snapshots do not change credential admission or assign subscription plans.
+Collection remains best-effort. Forced subprocess termination can lose telemetry before its final result reaches the parent.
+The worker's asynchronous report can also fail before delivery.
+
 ## Codex model availability
 
 The direct Codex picker includes `gpt-6-sol` and `gpt-6-luna`, verified against the
@@ -477,13 +508,26 @@ The primary enforcement point is the MCP `store-progress` tool: a non-conforming
 | Provider | Transport | Notes |
 |----------|-----------|-------|
 | `claude` | `CLAUDE_CODE_EFFORT_LEVEL` env var | `off` on a legacy budget_tokens-capable model sets `MAX_THINKING_TOKENS=0` instead (the effort env is omitted). No CLI flag is used — `--effort` is buggy in `-p` mode. **Precedence**: if an operator's `additionalArgs` includes `--effort`, the CLI flag wins over `CLAUDE_CODE_EFFORT_LEVEL` (Claude CLI's own precedence) — the existing "`additionalArgs` is an escape hatch" behavior, not special-cased here. |
-| `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level — higher effort costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
+| `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level (it does not apply to OpenAI models). Higher effort costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry); the visible trace is the reasoning summary described below. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; pi's native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), or `effort` for `max`. `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
 | `amp` | `reasoningEffort` on the per-task plugin agent (`off` maps to `none`) | Amp's CLI has no effort flag (`--effort` is rejected). Effort applies only to a pinned `provider/model` (for example `openai/gpt-5-nano`), judged by the catalog like pi and opencode; a mode (`low`..`ultra`) names no model in advance, so it takes none. |
 | `fx` | ACP `set_config_option` `effort` | Only on the `vercel/` (AI Gateway) route, and only when fx advertises an `effort` option for the model. fx has no reasoning controls for custom connections, so `openrouter/` and bare OpenAI ids take none. |
 
 Each adapter reports the level it actually applied via `ProviderResult.appliedReasoningEffort` (`null` when `applyReasoningEffort()` returned a capability-rejected noop). The runner forwards that into `agents.cred_status.latestModel.reasoningEffort`, which the dashboard surfaces in the agent runtime editor, the harness credential-status tooltip, and the agents-list Model column (a compact `[|||]`-style badge — more bars mean higher effort).
+
+#### Reasoning text
+
+Providers return reasoning summaries, not raw reasoning. Each harness writes what it gets into the session log, and the task page shows it as a collapsible thinking row.
+
+| Harness | Reasoning text |
+|---|---|
+| `claude` | Summaries requested. The flag settings carry `showThinkingSummaries: true` (read by interactive claude-bridge sessions), and print and SDK sessions get `--thinking-display summarized` on Claude Code 2.1.112 or newer. A caller `--settings` with `showThinkingSummaries: false` switches the flag to `omitted`. Summaries are not billed separately. |
+| `codex` | Summaries requested: `turn/start` sends `summary: "detailed"`. Reasoning items carry them in `summary`. |
+| `pi` | Kept. pi-ai already asks for thinking; the synthesized assistant row now keeps thinking blocks (`{type:"thinking"}`) ahead of the text, and thinking-only turns get a row too. |
+| `opencode` | Kept. `session.reasoning.ended` carries the full text. |
+| `acp`, `cursor`, `dsh`, `amp` | Stored as the harness emits it; no request knob. |
+| `claude-managed`, `devin` | None. The managed-agents thinking event carries no text, and Devin exposes no reasoning. |
 
 See [`thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md) for the full cross-harness normalization derivation.
 
@@ -494,7 +538,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1793966450-gc1122d`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1794196844-g44d37b`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -823,6 +867,7 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 | Template `system.agent.scripts_only_mode` | Code-mode instructions | `scriptsOnly` |
 | Template `system.agent.outputs` or `...outputs.no_agent_fs` | `## Outputs` | MCP + `pages` capability; agent-fs variant when `AGENT_FS_API_URL` is set on a local environment |
 | Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
+| Template `system.agent.lead.channel_thread` | `## Use-case channel thread` | Lead only, not scripts-only, Slack prompt tools enabled (same gate as `## Slack`) or the `chat-sdk` capability |
 | Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
 | Template `system.agent.tools_skills` (skills + MCP server lines interpolated) | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
 | `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider claude/codex/opencode/pi, content differs from the generated default. Claude excludes both `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` from its memory load via `claudeMdExcludes`, so this is its only copy; the hook still writes `~/.claude/CLAUDE.md` as the file the agent edits |
@@ -834,7 +879,9 @@ Per-task context is appended to the **task prompt** (the first user turn), after
 |---|---|---|
 | Template `system.agent.scripts_only_mode.slack` | `## Slack (scripts-only)` | Worker, scripts-only, Slack-originated task |
 | Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
+| `task.use_case` | `## Use case` | Lead only. The task `key` is a use-case group key (not a namespace root, a `task:`/resource leaf, or a source key such as `shared/slack/...`), the same rule `create-schedule` and `create-page` use to inherit it |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
+| `task.checklist.nudge` | `## Setup suggestion` | Lead only. The poll trigger carries `checklistNudge`: a human-sourced task (`ui`, `slack`, `chat`, `comb`) with a known requester who has an open, never-nudged checklist item. Sent once per item |
 | cwd warning | `Note: The task requested working directory ...` | Task `dir` does not exist |
 
 The shared `system.agent.communication` template sets reply defaults for every session composite:
@@ -1137,13 +1184,30 @@ Pick the model that matches your runtime; if your provider has no native skill m
 
 The swarm syncs skill files into each provider's skill dir at container boot and during per-task refreshes (copies `SKILL.md` into `~/.claude/skills/`, `~/.pi/agent/skills/`, `~/.codex/skills/`, `~/.opencode/skills/`, and `~/.agents/skills/`). Add an entry for your provider there.
 
-### Step 10 — Worker bootstrap (Docker entrypoint)
+### Step 10 — Worker bootstrap and runtime dependencies
 
-Edit [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh):
+Provider executable/SDK checks live in
+[`src/providers/runtime-dependencies.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/runtime-dependencies.ts).
+The runner calls it before every provider session with the task's resolved
+configuration, including after a live harness switch. A worker may join with a
+missing dependency; the affected task fails with the provider, dependency and
+installation guidance, and its active session is removed. Install the dependency
+or fix its override before retrying the task.
 
-1. Credential validation branch — mirror the pattern used for pi (L7–12), codex (L13–71), or claude (L72–79).
-2. Binary reachability check — add a block similar to the `CODEX_BINARY` / `CLAUDE_BINARY` checks (L87–108).
-3. Skill sync — extend the skill-copy block (L764–803) with your provider's skill directory.
+Add the provider's CLI/SDK check there, or an explicit branch when it needs no
+external dependency. Use the same command resolver as the adapter. Checks honor
+configured executable paths and the spawn working directory; ACP uses its target
+resolver. Codex app-server resolves relative overrides from the worker directory. Codex supports `CODEX_PATH_OVERRIDE`, then legacy `CODEX_BINARY`, PATH
+and the local npm package. OpenCode resolves `OPENCODE_SDK_PATH`, global npm
+roots, then the local SDK package; no OpenCode CLI is required. Cloud and bundled
+in-process providers need no CLI check, except Cursor's explicit ripgrep override.
+The validator is compiled into the worker and never runs a CLI version command.
+
+Wire the worker bootstrap:
+
+1. Credential validation — extend the provider branches in [`docker-entrypoint.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/docker-entrypoint.sh).
+2. Dependency validation — add the runtime check and regression tests for boot-selected and live-switched harnesses.
+3. Skill sync — extend the shell's skill-copy block with your provider's skill directory.
 4. If your provider has a CLI binary, install it in [`Dockerfile.worker`](https://github.com/desplega-ai/agent-swarm/blob/main/Dockerfile.worker).
 
 ### Step 11 — Login CLI (only if OAuth)
@@ -1348,6 +1412,7 @@ Manual verification:
 | Setup CLI (optional, e.g. claude-managed) | `src/commands/<foo>-setup.ts` |
 | CLI wiring | `src/cli.tsx` (`COMMAND_HELP`, command routing) |
 | Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
+| Runtime dependencies | `src/providers/runtime-dependencies.ts`, `src/commands/runner.ts` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
 | Models / pricing | `src/providers/<foo>-models.ts`, `src/be/seed-pricing.ts`, `src/be/pricing-normalize.ts` |
@@ -1431,3 +1496,18 @@ The Anthropic Beta SDK has a few non-obvious surface differences from the conven
 - [`CLAUDE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/CLAUDE.md) — project-wide rules, especially "Architecture invariants" (DB boundary) and "Secret scrubbing".
 - [`src/providers/types.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/types.ts) — canonical interface definitions.
 - [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) — the most feature-complete reference (OAuth + skills resolver + hooks + model resolver).
+
+## Subscription identity and session costs
+
+Claude Max and Ultra retain the IDs `claude_max_5x` and `claude_max_20x`.
+Manual ChatGPT Pro 100 and Pro 200 retain `chatgpt_pro_5x` and `chatgpt_pro`.
+Pro 500 uses `chatgpt_pro_500`.
+Raw Codex identities `pro`, `prolite`, and `promax` do not establish a price tier.
+The worker preserves the claim in `detectedPlanRaw`, independently of manual assignments.
+Native account telemetry also preserves raw provider identities.
+Manual assignments remain authoritative.
+New Claude estimates based on old capacity ratios are disabled.
+Existing estimates remain stored as uncertain, and savings reports omit their prices.
+This change preserves model routing and the existing Fable policy.
+Workers capture immutable session credentials and harness identity before execution, including Pi sessions that use Codex OAuth.
+Legacy reports and historical rows remain explicitly unattributed.

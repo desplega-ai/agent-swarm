@@ -12,6 +12,10 @@ import {
   parseModelLimitMessage,
   windowForModelFamily,
 } from "../utils/model-rate-limit-windows";
+import type {
+  ProviderAccountTelemetry,
+  RateLimitReplacement,
+} from "../utils/provider-account-telemetry";
 
 export type RateLimitOutcome =
   | { kind: "none" }
@@ -50,6 +54,8 @@ export type RateLimitOutcome =
     };
 
 interface ClassifiableResult {
+  providerAccount?: ProviderAccountTelemetry;
+  rateLimitReplacements?: RateLimitReplacement[];
   rateLimitResetAt?: string;
   rateLimitWindows?: RateLimitWindowTelemetry;
   modelRateLimit?: { window: string; model: ModelFamily; resetAt: string; observedAt?: string };

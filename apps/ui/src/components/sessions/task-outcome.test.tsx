@@ -17,9 +17,10 @@ mock.module("@/components/shared/markdown-link-chip", () => ({
   useSwarmLinkPlugins: () => [],
 }));
 mock.module("@/components/shared/show-more", () => ({
-  ShowMore: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  ShowMore: ({ children }: { children?: ReactNode }) => <section>{children}</section>,
 }));
 mock.module("@/components/shared/json-tree", () => ({ JsonTree: () => null }));
+mock.module("@/components/shared/task-ui-spec-view", () => ({ TaskUiSpecView: () => null }));
 mock.module("@/components/ui/button", () => ({
   Button: ({ children }: { children?: ReactNode }) => <button type="button">{children}</button>,
 }));
@@ -80,5 +81,15 @@ describe("TaskOutcome", () => {
     );
     expect(html).toContain("Failure");
     expect(html).toContain("text-status-error-strong");
+  });
+
+  test("a clamped output keeps the Copy button out of the measured ShowMore box", () => {
+    const html = renderToStaticMarkup(
+      <TaskOutcome task={task({ status: "completed", output: "One line." })} clamp />,
+    );
+    const clamped = html.slice(html.indexOf("<section>"), html.indexOf("</section>"));
+    expect(clamped).toContain("One line.");
+    expect(clamped).not.toContain("<button");
+    expect(html).toContain("<button");
   });
 });

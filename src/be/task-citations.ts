@@ -1,6 +1,7 @@
 import * as z from "zod";
 import type { TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
+import { getGitHubLinkConfig } from "../utils/github-host";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { citationHttpUrl, type TaskCitation } from "../utils/task-citations";
 import { getDbClient } from "./db";
@@ -25,25 +26,27 @@ type CitationInput = z.infer<typeof CitationInputSchema>;
 
 /** Canonical github.com URL for `owner/repo#N`, `owner/repo@sha`, or a pull/issues/commit URL. */
 export function githubCitationUrl(ref: string): string | null {
+  const { host, webUrl } = getGitHubLinkConfig();
+  const hostRe = host.replace(/[.]/g, "\\.");
   const repo = "([\\w.-]+)\\/([\\w.-]+)";
   const short = ref.trim().match(new RegExp(`^${repo}(?:#(\\d+)|@([0-9a-f]{7,40}))$`, "i"));
   if (short) {
     return short[3]
-      ? `https://github.com/${short[1]}/${short[2]}/issues/${short[3]}`
-      : `https://github.com/${short[1]}/${short[2]}/commit/${short[4]!.toLowerCase()}`;
+      ? `${webUrl}/${short[1]}/${short[2]}/issues/${short[3]}`
+      : `${webUrl}/${short[1]}/${short[2]}/commit/${short[4]!.toLowerCase()}`;
   }
   const full = ref
     .trim()
     .match(
       new RegExp(
-        `^https?:\\/\\/(?:www\\.)?github\\.com\\/${repo}\\/(?:(pull|issues)\\/(\\d+)|commit\\/([0-9a-f]{7,40}))(?:[/?#].*)?$`,
+        `^https?:\\/\\/(?:www\\.)?${hostRe}\\/${repo}\\/(?:(pull|issues)\\/(\\d+)|commit\\/([0-9a-f]{7,40}))(?:[/?#].*)?$`,
         "i",
       ),
     );
   if (!full) return null;
   return full[3]
-    ? `https://github.com/${full[1]}/${full[2]}/${full[3].toLowerCase()}/${full[4]}`
-    : `https://github.com/${full[1]}/${full[2]}/commit/${full[5]!.toLowerCase()}`;
+    ? `${webUrl}/${full[1]}/${full[2]}/${full[3].toLowerCase()}/${full[4]}`
+    : `${webUrl}/${full[1]}/${full[2]}/commit/${full[5]!.toLowerCase()}`;
 }
 
 export function buildCitationUrl(citation: CitationInput): string | null {

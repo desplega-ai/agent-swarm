@@ -1,0 +1,183 @@
+{
+  "uiSpec": {
+    "spec": {
+      "root": "c",
+      "elements": {
+        "c": {
+          "type": "Card",
+          "props": {
+            "title": "Incident INC-482 resolved",
+            "subtitle": "API latency, 41 minutes"
+          },
+          "children": ["s", "d", "f", "p", "a"]
+        },
+        "s": {
+          "type": "Section",
+          "props": {},
+          "children": ["t"]
+        },
+        "t": {
+          "type": "Text",
+          "props": {
+            "content": "A slow query on the sessions table raised p95 latency. A new index fixed it."
+          },
+          "children": []
+        },
+        "d": {
+          "type": "Divider",
+          "props": {},
+          "children": []
+        },
+        "f": {
+          "type": "Fields",
+          "props": {},
+          "children": ["f1", "f2", "f3"]
+        },
+        "f1": {
+          "type": "Field",
+          "props": {
+            "label": "Started",
+            "value": "14:02 UTC"
+          },
+          "children": []
+        },
+        "f2": {
+          "type": "Field",
+          "props": {
+            "label": "Resolved",
+            "value": "14:43 UTC"
+          },
+          "children": []
+        },
+        "f3": {
+          "type": "Field",
+          "props": {
+            "label": "Peak p95",
+            "value": "2.4 s"
+          },
+          "children": []
+        },
+        "p": {
+          "type": "Chart",
+          "props": {
+            "title": "Errors by endpoint",
+            "chart": {
+              "type": "pie",
+              "segments": [
+                {
+                  "label": "/sessions",
+                  "value": 61
+                },
+                {
+                  "label": "/tasks",
+                  "value": 27
+                },
+                {
+                  "label": "/agents",
+                  "value": 12
+                }
+              ]
+            }
+          },
+          "children": []
+        },
+        "a": {
+          "type": "Actions",
+          "props": {},
+          "children": ["l"]
+        },
+        "l": {
+          "type": "LinkButton",
+          "props": {
+            "label": "Open postmortem",
+            "url": "https://example.com/inc-482"
+          },
+          "children": []
+        }
+      }
+    }
+  },
+  "specBlocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Incident INC-482 resolved",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "API latency, 41 minutes"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "A slow query on the sessions table raised p95 latency. A new index fixed it."
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Started*\n14:02 UTC"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Resolved*\n14:43 UTC"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Peak p95*\n2.4 s"
+        }
+      ]
+    },
+    {
+      "type": "data_visualization",
+      "title": "Errors by endpoint",
+      "chart": {
+        "type": "pie",
+        "segments": [
+          {
+            "label": "/sessions",
+            "value": 61
+          },
+          {
+            "label": "/tasks",
+            "value": 27
+          },
+          {
+            "label": "/agents",
+            "value": 12
+          }
+        ]
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open postmortem",
+            "emoji": true
+          },
+          "action_id": "link-https://example.com/inc-482",
+          "url": "https://example.com/inc-482"
+        }
+      ]
+    }
+  ],
+  "fallbackText": "*Incident INC-482 resolved*\nAPI latency, 41 minutes\nA slow query on the sessions table raised p95 latency. A new index fixed it.\n---\nStarted: 14:02 UTC\nResolved: 14:43 UTC\nPeak p95: 2.4 s\nErrors by endpoint\nLabel     | Value\n----------|------\n/sessions | 61\n/tasks    | 27\n/agents   | 12"
+}

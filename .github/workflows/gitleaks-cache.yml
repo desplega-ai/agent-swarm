@@ -1,0 +1,45 @@
+name: Gitleaks Cache
+
+# Each merge queue entry runs on its own gh-readonly-queue ref, and a ref can
+# only restore caches saved on itself or on the default branch. This workflow
+# saves the Merge Gate Secret Scan cache entry on main, so queue entries and
+# new PRs restore the gitleaks tarball instead of fetching it from GitHub
+# releases, which sometimes answer 504 for a minute or more.
+on:
+  # Warm the new key as soon as a gitleaks.sh change lands.
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/gitleaks.sh
+      - scripts/gitleaks-selftest.sh
+      - .github/workflows/gitleaks-cache.yml
+  # GitHub evicts an entry nobody reads for 7 days.
+  schedule:
+    - cron: "29 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: Warm gitleaks cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Keep the action, path and key identical to the secret-scan job in
+      # merge-gate.yml: a different one is a different cache entry.
+      - name: Cache gitleaks
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/agent-swarm/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('scripts/gitleaks.sh') }}
+
+      # Downloads and SHA-256-checks the tarball, then proves the binary scans.
+      # The cache saves only when this job succeeds.
+      - name: Self-test the scanner
+        run: bash scripts/gitleaks-selftest.sh

@@ -44,7 +44,7 @@ Run `SELECT name FROM pragma_table_info('<table>')` before you guess a column.
 
 - `agent_tasks`: no cost column and no `metadata` column. Cost is `session_costs.totalCostUsd`, joined on `taskId`. Assignee `agentId`, creator `creatorAgentId`, model `model`, `resolvedModel`, `modelSource`. `parentTaskId` is the only SQL child finder, because `key` is unique per task.
 - `scripts`: the owner is `createdByAgentId`; there is no `agentId`. `isScratch = 1` marks inline `script-run` bodies (`scratch-*` names), and they outnumber named scripts many times over. Add `isScratch = 0` to catalog audits. To find a script's callers, group by `isScratch` instead of dropping scratch rows: inline runs are often the negative tests.
-- `script_runs`: `scriptName`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`.
+- `script_runs`: `scriptName`, `sourceTaskId`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no `scriptId` (the name column is `scriptName`) and no `taskId` (the task column is `sourceTaskId`). There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`. Filter on `scriptName` plus a narrow `startedAt` window; a `GROUP BY agentId` over a wide window can run past the MCP budget.
 - `session_costs`: `taskId`, `agentId`, `totalCostUsd`, `model`, the token columns, `createdAt`.
 
 ## Operator config knobs
@@ -56,6 +56,7 @@ effect on the next request, no restart) and surfaced on the dashboard's
 | Env var | Default | Controls |
 |---|---|---|
 | `DB_QUERY_BOUNDED_ENABLED` | `true` | Master kill switch for the bounded child-process path. `false` restores the pre-fix synchronous, unbounded path and logs a one-time startup-class warning. |
+| `DB_QUERY_WORKER_POOL_ENABLED` | `true` | Reuse long-lived child processes for bounded queries. `false` spawns a fresh child per query. |
 | `DB_QUERY_HTTP_BUDGET_MS` | `10000` | Wall-clock budget for `/api/db-query` before its child process is killed. |
 | `DB_QUERY_HTTP_MAX_ROWS` | `1000` | Row cap for `/api/db-query`, regardless of how many rows the query matched. |
 | `DB_QUERY_MCP_BUDGET_MS` | `5000` | Wall-clock budget for the MCP `db-query` tool. |

@@ -9,6 +9,7 @@ import type {
   TaskContextResponse,
   TaskWithLogs,
 } from "@/api/types";
+import { useGitHubWebUrl } from "@/app/status-context";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentLink } from "@/components/shared/agent-link";
 import { BitbucketMark } from "@/components/shared/bitbucket-mark";
@@ -30,6 +31,7 @@ import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
+import { githubOrigin } from "@/lib/swarm-links";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatSmartTime, parseUTCDate } from "@/lib/utils";
@@ -113,7 +115,7 @@ function summarizeCosts(costs: SessionCost[] | undefined): CostStats | null {
     harnessCost: hasHarnessCosts ? sum((c) => c.harnessCostUsd ?? 0) : null,
     inputTokens: sum((c) => c.inputTokens),
     outputTokens: sum((c) => c.outputTokens),
-    cacheReadTokens: sum((c) => c.cacheReadTokens),
+    cacheReadTokens: sum((c) => c.cacheReadTokens ?? 0),
     cacheWriteTokens: sum((c) => c.cacheWriteTokens ?? 0),
     durationMs: sum((c) => c.durationMs),
     turns: sum((c) => c.numTurns ?? 0),
@@ -368,18 +370,19 @@ function ContextBar({ percent, label }: { percent: number; label: string }) {
  * self-hosted GitLab's host). Without a URL only GitHub has a known host;
  * GitLab and Bitbucket can be self-hosted, so their repo stays plain text.
  */
-function repoUrl(task: TaskWithLogs): string | null {
+function repoUrl(task: TaskWithLogs, githubWebUrl: string): string | null {
   if (!task.vcsRepo) return null;
   const at = task.vcsUrl?.indexOf(`/${task.vcsRepo}`) ?? -1;
   if (task.vcsUrl && at > 0) return task.vcsUrl.slice(0, at + task.vcsRepo.length + 1);
-  return task.vcsProvider === "github" ? `https://github.com/${task.vcsRepo}` : null;
+  return task.vcsProvider === "github" ? `${githubOrigin(githubWebUrl)}/${task.vcsRepo}` : null;
 }
 
 function SourceControlSection({ task }: { task: TaskWithLogs }) {
+  const githubWebUrl = useGitHubWebUrl();
   if (!(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor)) {
     return null;
   }
-  const repoHref = repoUrl(task);
+  const repoHref = repoUrl(task, githubWebUrl);
   return (
     <RailSection title="Source control">
       <div className="space-y-1.5 py-1">
@@ -750,7 +753,7 @@ export function TaskDetailsRail({
           {task.credentialKeySuffix ? (
             <RailRow label="API key" mono>
               <Link
-                to="/settings/api-keys"
+                to="/integrations/ai"
                 className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
               >
                 {API_KEY_LABELS[task.credentialKeyType ?? ""] ?? task.credentialKeyType ?? "Key"} …

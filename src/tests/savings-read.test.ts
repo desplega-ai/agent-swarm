@@ -365,3 +365,44 @@ describe("savings read for schedules", () => {
     });
   });
 });
+
+describe("savings completeness across midnight", () => {
+  const path = "./test-savings-read-midnight.sqlite";
+  const now = Date.parse("2026-11-08T00:05:00.000Z");
+
+  beforeAll(async () => {
+    await removeDbFiles(path);
+    initDb(path);
+    await resetSavingsRollupForTests();
+    const agent = await createAgent({ name: "midnight-agent", isLead: false, status: "idle" });
+    const workflow = await createWorkflow({ name: "midnight-workflow", definition: DEFINITION });
+    await workflowRuns(workflow.id, "2026-11-07", RUNS_PER_DAY);
+    await scriptRuns(agent.id, "midnight-script", "2026-11-07", RUNS_PER_DAY);
+    await runSavingsRollupTick(inProcessSql, { now: now - 10 * 60_000 });
+  });
+
+  afterAll(async () => {
+    await resetSavingsRollupForTests();
+    closeDb();
+    await removeDbFiles(path);
+  });
+
+  test.each([
+    ["workflow", readWorkflowSavings],
+    ["script", readScriptSavings],
+  ] as const)("%s rows stay complete before today's first tick", async (_kind, read) => {
+    const result = await read({ days: 7, tier: "smart", now });
+    expect(result.complete).toBe(true);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.runs).toBe(RUNS_PER_DAY);
+  });
+
+  test("today's marker cannot replace a missing closed-day marker", async () => {
+    await runSavingsRollupTick(inProcessSql, { now });
+    await getDbClient().run("DELETE FROM automation_savings_days WHERE day='2026-11-06'");
+    for (const read of [readWorkflowSavings, readScriptSavings]) {
+      const result = await read({ days: 7, tier: "smart", now });
+      expect(result.complete).toBe(false);
+    }
+  });
+});

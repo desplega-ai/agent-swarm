@@ -33,13 +33,16 @@ import {
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
 import { getTaskCitations } from "../be/task-citations";
+import { getTaskUiSpec } from "../be/task-ui-spec";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
+import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
 import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
   finalizeSlackMessageReaction,
@@ -313,7 +316,8 @@ async function clearAssistantStatus(
 }
 
 function slackTreeStallMinutes(): number {
-  return Number(process.env.SLACK_TREE_STALL_MIN) || 15;
+  const minutes = Number(process.env.SLACK_TREE_STALL_MIN);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
 }
 
 function isStalledMember(task: AgentTask, now: Date): boolean {
@@ -1199,6 +1203,59 @@ function attachmentCaption(attachments: TaskAttachment[]): string | undefined {
   return `📎 <${destination}|${label}>`;
 }
 
+/** The task's own card: its Slack blocks and the text that stands in for them. */
+type OutcomeUiSpec = { blocks: unknown[]; fallbackText: string };
+
+/**
+ * The card of the task that this outcome card renders, never a parent's or a
+ * child's. `null` when `UI_SPEC_ENABLED` is off or the task has no spec.
+ * `blocks` is empty when the stored spec no longer converts.
+ */
+async function outcomeUiSpec(task: AgentTask): Promise<OutcomeUiSpec | null> {
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return null;
+  const stored = await getTaskUiSpec(task.id);
+  if (!stored) return null;
+  return { blocks: taskUiSpecSlackBlocks(stored, task.id), fallbackText: stored.fallbackText };
+}
+
+/** Slack verdicts on the blocks of a message, as opposed to its text or address. */
+const UI_SPEC_BLOCK_REJECTION_CODES = new Set([
+  "invalid_blocks",
+  "invalid_blocks_format",
+  "msg_blocks_too_long",
+]);
+
+/**
+ * Sends a call with the card blocks, and when Slack refuses those blocks,
+ * once more without them, with the card's fallback text under the answer.
+ * `send(false)` is the only call when there are no card blocks to send.
+ */
+async function withUiSpecBlockFallback<T>(
+  uiSpec: OutcomeUiSpec | null,
+  taskId: string,
+  send: (withCard: boolean) => Promise<T>,
+): Promise<T> {
+  if (!uiSpec?.blocks.length) return await send(false);
+  try {
+    return await send(true);
+  } catch (error) {
+    const code = slackErrorCode(error);
+    if (!code || !UI_SPEC_BLOCK_REJECTION_CODES.has(code)) throw error;
+    console.warn(`[Slack] ${code} for the card of task ${taskId}; retrying with its fallback text`);
+    return await send(false);
+  }
+}
+
+/** The answer, with the card's fallback text under it when the card blocks are not sent. */
+function withUiSpecFallbackText(
+  presentation: string,
+  uiSpec: OutcomeUiSpec | null,
+  withCard: boolean,
+): string {
+  if (!uiSpec || withCard || !uiSpec.fallbackText) return presentation;
+  return `${presentation}\n\n${uiSpec.fallbackText}`;
+}
+
 /**
  * Secondary metadata for an outcome card, as captions (`context` blocks)
  * under the answer: cited sources, general sources, then the primary
@@ -1356,6 +1413,11 @@ export async function streamOutcomeCard(
     ...(await outcomeCaptionBlocks(task, content)),
     ...(await outcomeFooter(task, tasks, duration)),
   ];
+  // The task's own card goes first in the blocks, under the answer. The
+  // streamed text stays the answer alone.
+  const uiSpec = await outcomeUiSpec(task);
+  const blocksFor = (withCard: boolean) =>
+    withCard && uiSpec ? [...uiSpec.blocks, ...captions] : captions;
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
@@ -1425,12 +1487,15 @@ export async function streamOutcomeCard(
           `[Slack] chat.startStream failed for task ${task.id}; falling back to chat.postMessage:`,
           error,
         );
-        started = await callSlackWithRetry(app.client, "chat.postMessage", {
-          channel: task.slackChannelId,
-          thread_ts: task.slackThreadTs,
-          text: presentation,
-          blocks: [{ type: "markdown", text: presentation }, ...captions],
-          ...persona,
+        started = await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+          const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+          return callSlackWithRetry(app.client, "chat.postMessage", {
+            channel: task.slackChannelId,
+            thread_ts: task.slackThreadTs,
+            text,
+            blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
+            ...persona,
+          });
         });
         deliveredViaFallback = true;
       }
@@ -1446,11 +1511,17 @@ export async function streamOutcomeCard(
   }
   if (!deliveredViaFallback) {
     try {
-      await callSlackWithRetry(app.client, "chat.stopStream", {
-        channel: task.slackChannelId,
-        ts: outcome.ts,
-        blocks: captions,
-      });
+      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) =>
+        callSlackWithRetry(app.client, "chat.stopStream", {
+          channel: task.slackChannelId,
+          ts: outcome.ts,
+          // chat.stopStream appends markdown_text to the streamed answer.
+          ...(uiSpec?.fallbackText && !withCard
+            ? { markdown_text: `\n\n${uiSpec.fallbackText}` }
+            : {}),
+          blocks: blocksFor(withCard),
+        }),
+      );
     } catch (error) {
       // A process may have stopped the stream before it persisted the final
       // permalink. The message is then a plain message and chat.update below
@@ -1462,11 +1533,14 @@ export async function streamOutcomeCard(
       // slackReplySent snapshot may have since changed. The stream is closed
       // now, so chat.update is allowed: overwrite the text and the caption
       // blocks with the freshly computed presentation.
-      await callSlackWithRetry(app.client, "chat.update", {
-        channel: task.slackChannelId,
-        ts: outcome.ts,
-        text: presentation,
-        blocks: [{ type: "markdown", text: presentation }, ...captions],
+      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+        const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+        return callSlackWithRetry(app.client, "chat.update", {
+          channel: task.slackChannelId,
+          ts: outcome.ts,
+          text,
+          blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
+        });
       });
     }
   }
@@ -1495,15 +1569,69 @@ export async function streamOutcomeCard(
   });
 }
 
+/**
+ * Re-renders a settled outcome message after a script action replaced the
+ * task's card. The settled-outcome skip in the thread render never edits it,
+ * so this is its own path. Returns whether Slack was called.
+ */
+export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app) return false;
+  const task = await getTaskById(taskId);
+  if (!task?.slackChannelId || !task.slackThreadTs) return false;
+  const card = await getSlackOutcomeMessage(task.id);
+  if (!card?.ts || !card.finalizedAt || !isSettledSlackMessage(card)) return false;
+
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
+  const content = await outcomeContent(task, task.slackReplySent);
+  const presentation = await outcomePresentation(task, content);
+  if (!presentation) return false;
+  const captions = [
+    ...(await outcomeCaptionBlocks(task, content)),
+    ...(await outcomeFooter(task, tasks, duration)),
+  ];
+  const uiSpec = await outcomeUiSpec(task);
+  await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+    const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+    const cardBlocks = withCard && uiSpec ? uiSpec.blocks : [];
+    return callSlackWithRetry(app.client, "chat.update", {
+      channel: task.slackChannelId,
+      ts: card.ts,
+      text,
+      blocks: [{ type: "markdown", text }, ...cardBlocks, ...captions],
+    });
+  });
+  return true;
+}
+
+function onTaskUiSpecUpdated(data: unknown): void {
+  const taskId = (data as { taskId?: unknown } | null)?.taskId;
+  if (typeof taskId !== "string") return;
+  refreshSlackOutcomeCard(taskId).catch((error) =>
+    console.error(`[Slack] Failed to refresh the card of task ${taskId}:`, error),
+  );
+}
+
 /** Render the latest wait or final result into the chain's original card. */
 async function resolvedDeferralContent(
   wake: AgentTask,
-): Promise<{ text: string; blocks?: unknown[] }> {
+): Promise<{ uiSpec: OutcomeUiSpec | null; build: (withCard: boolean) => DeferralContent }> {
   const content = await outcomeContent(wake, wake.slackReplySent);
   const presentation = await outcomePresentation(wake, content);
   const captions = await outcomeCaptionBlocks(wake, content);
-  return { text: presentation, blocks: [{ type: "markdown", text: presentation }, ...captions] };
+  const uiSpec = await outcomeUiSpec(wake);
+  return {
+    uiSpec,
+    build: (withCard) => {
+      const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+      const card = withCard && uiSpec ? uiSpec.blocks : [];
+      return { text, blocks: [{ type: "markdown", text }, ...card, ...captions] };
+    },
+  };
 }
+
+type DeferralContent = { text: string; blocks: unknown[] };
 
 /** A continuation uses the first retained, usable deferral card in its chain. */
 async function isAnsweredByDeferralCard(
@@ -1608,11 +1736,13 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
       const wake = await getTaskById(wakeTaskId);
       if (!wake) continue;
       const content = await resolvedDeferralContent(wake);
-      await callSlackWithRetry(app.client, "chat.update", {
-        channel: card.channelId,
-        ts: card.ts,
-        ...content,
-      });
+      await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
+        callSlackWithRetry(app.client, "chat.update", {
+          channel: card.channelId,
+          ts: card.ts,
+          ...content.build(withCard),
+        }),
+      );
       if (isDeferredTask(wake)) {
         await updateSlackMessageRecord(card.id, {});
       } else {
@@ -1970,12 +2100,14 @@ function onSlackRenderTaskEvent(data: unknown): void {
 export function startSlackRenderV2Events(): void {
   if (renderEventsSubscribed) return;
   for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.on(event, onSlackRenderTaskEvent);
+  workflowEventBus.on(TASK_UI_SPEC_UPDATED_EVENT, onTaskUiSpecUpdated);
   renderEventsSubscribed = true;
 }
 
 export function stopSlackRenderV2Events(): void {
   if (!renderEventsSubscribed) return;
   for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.off(event, onSlackRenderTaskEvent);
+  workflowEventBus.off(TASK_UI_SPEC_UPDATED_EVENT, onTaskUiSpecUpdated);
   renderEventsSubscribed = false;
   if (dirtyFlushTimer) clearTimeout(dirtyFlushTimer);
   dirtyFlushTimer = null;

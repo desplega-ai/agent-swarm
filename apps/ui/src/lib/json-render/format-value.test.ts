@@ -53,3 +53,21 @@ describe("formatValue — other kinds are unaffected", () => {
     expect(formatValue(undefined, value)).toBe(JSON.stringify(value));
   });
 });
+
+describe("formatValue — currency and percent kinds", () => {
+  test("currency formats a number in the column currency, default USD", () => {
+    expect(formatValue("currency", 1234.5)).toMatch(/\$\s?1,234\.50|1.234,50/);
+    expect(formatValue("currency", "1234.5", "EUR")).toMatch(/€|EUR/);
+  });
+
+  test("percent reads ratios", () => {
+    expect(formatValue("percent", 0.42)).toMatch(/42\s?%/);
+    expect(formatValue("percent", "0.425")).toMatch(/42[.,]5\s?%/);
+  });
+
+  test("non-numeric values show as is", () => {
+    expect(formatValue("currency", "n/a")).toBe("n/a");
+    expect(formatValue("percent", "")).toBe("");
+    expect(formatValue("currency", null)).toBe("");
+  });
+});

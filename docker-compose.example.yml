@@ -118,7 +118,7 @@ services:
       "
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.18.22
+    image: ghcr.io/desplega-ai/agent-fs:0.18.23
     platform: linux/amd64
     pull_policy: always
     depends_on:
@@ -202,6 +202,9 @@ services:
 
     environment:
       - API_KEY=${API_KEY}
+      # GitHub Enterprise Server: set the same GITHUB_URL on the API and every agent.
+      - GITHUB_URL=${GITHUB_URL:-}
+      - GITHUB_API_URL=${GITHUB_API_URL:-}
       - RBAC_ENABLED=${RBAC_ENABLED:-true}
       - AGENT_FS_API_URL=http://agent-fs:7433
       - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
@@ -328,6 +331,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -335,6 +339,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -385,6 +390,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -392,6 +398,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -442,6 +449,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -449,6 +457,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -499,6 +508,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -506,6 +516,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -556,6 +567,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -563,6 +575,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -613,6 +626,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -620,6 +634,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -670,6 +685,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -677,6 +693,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -731,6 +748,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -738,6 +756,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -788,6 +807,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -795,6 +815,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -845,6 +866,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -852,6 +874,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -902,6 +925,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -909,6 +933,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
@@ -959,6 +984,7 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
+      - APP_URL=${APP_URL:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -966,6 +992,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      - GITHUB_URL=${GITHUB_URL:-}
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:

@@ -63,7 +63,7 @@ describe("buffered follow-up task description", () => {
   test("carries each buffered message once, outside <thread_context>", async () => {
     const channelId = "C700";
     const threadTs = "7000.0001";
-    bufferThreadMessage(
+    await bufferThreadMessage(
       channelId,
       threadTs,
       "please also fix the retry\nand add a test for it",

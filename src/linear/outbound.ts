@@ -1,5 +1,6 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { ensureToken } from "../oauth/ensure-token";
+import { withUiSpecFallback } from "../ui-spec/fallback";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";
@@ -137,7 +138,10 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
   if (shouldSkipForLoopPrevention(sync)) return;
 
   const sessionId = taskSessionMap.get(taskId);
-  const body = output?.trim() ? formatLinearOutcomeBody(output, taskId) : "Task completed.";
+  // The card text joins the prose before formatLinearOutcomeBody, so the body cap still holds.
+  const body = output?.trim()
+    ? formatLinearOutcomeBody(await withUiSpecFallback(taskId, output), taskId)
+    : await withUiSpecFallback(taskId, "Task completed.");
 
   // One comment only. A `response` activity ends the AgentSession and Linear renders it as a
   // comment on the issue, so it carries the output itself. The plain comment below runs only

@@ -50,6 +50,8 @@ import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import {
   type ClaudeFlagSettings,
   claudeFlagSettings,
+  claudeThinkingDisplayArgs,
+  MIN_CLAUDE_THINKING_DISPLAY_VERSION,
   mergeClaudeSettingsArgs,
 } from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
@@ -186,19 +188,27 @@ export function resolveClaudeQueueSteeringOverride(
   return undefined;
 }
 
-function supportsClaudeQueueSteering(versionOutput: string | undefined): boolean {
+/** True when `claude --version` output reports at least `minimum`; unknown output is false. */
+export function claudeVersionAtLeast(
+  versionOutput: string | undefined,
+  minimum: readonly number[],
+): boolean {
   const match =
     versionOutput?.match(/claude(?: code)? version:\s*(\d+)\.(\d+)\.(\d+)/i) ??
     versionOutput?.match(/(\d+)\.(\d+)\.(\d+)\s*\(Claude Code\)/i);
   if (!match) return false;
 
   const detected = match.slice(1, 4).map(Number);
-  for (let index = 0; index < MIN_CLAUDE_QUEUE_STEERING_VERSION.length; index++) {
+  for (let index = 0; index < minimum.length; index++) {
     const actual = detected[index] ?? 0;
-    const minimum = MIN_CLAUDE_QUEUE_STEERING_VERSION[index] ?? 0;
-    if (actual !== minimum) return actual > minimum;
+    const floor = minimum[index] ?? 0;
+    if (actual !== floor) return actual > floor;
   }
   return true;
+}
+
+function supportsClaudeQueueSteering(versionOutput: string | undefined): boolean {
+  return claudeVersionAtLeast(versionOutput, MIN_CLAUDE_QUEUE_STEERING_VERSION);
 }
 
 function claudeUserMessage(text: string): string {
@@ -1527,6 +1537,19 @@ export class ClaudeAdapter implements ProviderAdapter {
       queueSteeringOverride ??
       (transport === "sdk" ||
         (!isInteractiveTmuxClaude && supportsClaudeQueueSteering(harnessVersion)));
+    // Print and SDK sessions ignore the showThinkingSummaries setting, so ask
+    // for summaries with the flag. Skipped for bridge/tmux wrappers (they are
+    // interactive and read the setting) and for CLIs too old or unknown to
+    // accept it, which would refuse to start on an unknown option.
+    if (
+      !isInteractiveTmuxClaude &&
+      claudeVersionAtLeast(harnessVersion, MIN_CLAUDE_THINKING_DISPLAY_VERSION)
+    ) {
+      sessionConfig.additionalArgs = [
+        ...additionalArgs,
+        ...claudeThinkingDisplayArgs(flagSettings, [...prefixArgs, ...additionalArgs]),
+      ];
+    }
     if (!queueSteeringSupported && queueSteeringOverride === undefined) {
       console.warn(
         `\x1b[33m[claude]\x1b[0m Queued steering requires Claude Code >= ${MIN_CLAUDE_QUEUE_STEERING_VERSION.join(".")}; detected ${harnessVersion ?? "an unknown version"}. Steering messages will be promoted to follow-up tasks.`,

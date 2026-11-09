@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AgentFsError } from "../../lib/agent-fs/client";
 import type { AgentFsCredential } from "../../lib/agent-fs/credential-store";
-import { type ConnectFlowDeps, connectWithKey, createAndConnect } from "./connect-flow";
+import { autoConnect, type ConnectFlowDeps, connectWithKey } from "./connect-flow";
 
 const KEY = "af_test_0123456789abcdef";
 const me = {
@@ -15,7 +15,8 @@ const me = {
 /** Fakes that succeed. `ls` answers each call from `lsResults` in order ("ok" or a status). */
 function fakeDeps(overrides: Partial<ConnectFlowDeps> = {}, lsResults: Array<"ok" | number> = []) {
   const calls = {
-    register: 0,
+    fsMe: 0,
+    mint: [] as string[],
     getMe: 0,
     ls: 0,
     invite: [] as string[],
@@ -23,9 +24,27 @@ function fakeDeps(overrides: Partial<ConnectFlowDeps> = {}, lsResults: Array<"ok
   };
   const connected: AgentFsCredential[] = [];
   const deps: ConnectFlowDeps = {
-    register: async () => {
-      calls.register++;
-      return { apiKey: KEY };
+    fsMe: async () => {
+      calls.fsMe++;
+      return {
+        status: "ready",
+        agentFsUserId: "fs-user-1",
+        email: "human@example.com",
+        displayName: "Human",
+        orgId: "org-1",
+        driveId: "drive-1",
+      };
+    },
+    mintKey: async (label) => {
+      calls.mint.push(label);
+      return {
+        apiKey: KEY,
+        keyId: "key-1",
+        label,
+        agentFsUserId: "fs-user-1",
+        orgId: "org-1",
+        driveId: "drive-1",
+      };
     },
     getMe: async () => {
       calls.getMe++;
@@ -75,7 +94,7 @@ describe("connect flow", () => {
 
     const { deps, calls, connected } = fakeDeps({}, [500]);
     const outcome = await connectWithKey(deps, KEY);
-    expect(outcome).toEqual({ kind: "failed", message: "ls failed: 500", newKey: undefined });
+    expect(outcome).toEqual({ kind: "failed", message: "ls failed: 500" });
     expect(calls.invite).toEqual([]);
     expect(connected).toHaveLength(0);
   });
@@ -92,7 +111,6 @@ describe("connect flow", () => {
     expect(await connectWithKey(deps, KEY)).toEqual({
       kind: "failed",
       message: "Ask a swarm admin to invite human@example.com to the drive.",
-      newKey: undefined,
     });
     expect(connected).toHaveLength(0);
   });
@@ -114,43 +132,113 @@ describe("connect flow", () => {
     expect(await connectWithKey(deps, KEY)).toEqual({
       kind: "failed",
       message: "agent-fs does not accept this key.",
-      newKey: undefined,
     });
     expect(connected).toHaveLength(0);
   });
+});
 
-  test("a 409 register switches to the paste flow", async () => {
-    const { deps, calls, connected } = fakeDeps({
-      register: async () => {
-        throw new AgentFsError(409, "CONFLICT", "Email already registered");
-      },
-    });
-    expect(await createAndConnect(deps, "human@example.com")).toEqual({ kind: "email-taken" });
-    expect(calls.getMe).toBe(0);
-    expect(connected).toHaveLength(0);
-  });
+/** A swarm API error as `FsApiError` throws it. */
+function apiError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { status });
+}
 
-  test("a new registration that cannot finish hands the key back", async () => {
-    const { deps, connected } = fakeDeps(
-      {
-        invite: async () => {
-          throw new Error("500");
-        },
-      },
-      [403],
-    );
-    expect(await createAndConnect(deps, "human@example.com")).toEqual({
-      kind: "failed",
-      message: "Ask a swarm admin to invite human@example.com to the drive.",
-      newKey: KEY,
-    });
-    expect(connected).toHaveLength(0);
-  });
+const LABEL = "Swarm dashboard · Chrome on macOS · 2026-11-04";
 
-  test("a new registration connects", async () => {
+describe("autoConnect", () => {
+  test("mints a named key and saves the swarm identity, never agent-fs /auth/me", async () => {
     const { deps, calls, connected } = fakeDeps();
-    expect(await createAndConnect(deps, "human@example.com")).toEqual({ kind: "connected" });
-    expect(calls.register).toBe(1);
+    expect(await autoConnect(deps, LABEL)).toEqual({ kind: "connected" });
+    expect(calls.mint).toEqual([LABEL]);
+    expect(calls.getMe).toBe(0);
+    expect(calls.ls).toBe(0);
     expect(connected).toHaveLength(1);
+    expect(connected[0]).toMatchObject({
+      apiKey: KEY,
+      userId: "fs-user-1",
+      email: "human@example.com",
+      displayName: "Human",
+      label: LABEL,
+      keyId: "key-1",
+    });
+  });
+
+  test("a pending account shows the server reason and mints nothing", async () => {
+    const { deps, calls, connected } = fakeDeps({
+      fsMe: async () => ({ status: "pending", email: "h@x.test", reason: "Registration closed" }),
+    });
+    expect(await autoConnect(deps, LABEL)).toEqual({
+      kind: "pending",
+      reason: "Registration closed",
+    });
+    expect(calls.mint).toEqual([]);
+    expect(connected).toHaveLength(0);
+  });
+
+  test("a 409 from the mint is pending, with the prefix dropped", async () => {
+    const { deps, connected } = fakeDeps({
+      mintKey: async () => {
+        throw apiError(409, "agent-fs account pending: The agent-fs org invite is pending");
+      },
+    });
+    expect(await autoConnect(deps, LABEL)).toEqual({
+      kind: "pending",
+      reason: "The agent-fs org invite is pending",
+    });
+    expect(connected).toHaveLength(0);
+  });
+
+  test("a 501 (agent-fs too old) falls back to the paste form", async () => {
+    const { deps, connected } = fakeDeps({
+      mintKey: async () => {
+        throw apiError(501, "agent_fs_too_old");
+      },
+    });
+    expect(await autoConnect(deps, LABEL)).toEqual({ kind: "unsupported" });
+    expect(connected).toHaveLength(0);
+  });
+
+  test("a 403 (no fs.join.own) explains the missing access and mints nothing", async () => {
+    const message = "Your role cannot open files on this swarm. Ask a swarm admin for access.";
+    const denied = fakeDeps({
+      fsMe: async () => {
+        throw apiError(403, "missing permission 'fs.join.own'");
+      },
+    });
+    expect(await autoConnect(denied.deps, LABEL)).toEqual({ kind: "failed", message });
+    expect(denied.calls.mint).toEqual([]);
+    const mintDenied = fakeDeps({
+      mintKey: async () => {
+        throw apiError(403, "missing permission 'fs.join.own'");
+      },
+    });
+    expect(await autoConnect(mintDenied.deps, LABEL)).toEqual({ kind: "failed", message });
+    expect(mintDenied.connected).toHaveLength(0);
+  });
+
+  test("other failures keep the message", async () => {
+    const offline = fakeDeps({
+      fsMe: async () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    expect(await autoConnect(offline.deps, LABEL)).toEqual({
+      kind: "failed",
+      message: "Failed to fetch",
+    });
+    const limited = fakeDeps({
+      mintKey: async () => {
+        throw apiError(429, "Limit of five keys per minute reached");
+      },
+    });
+    expect(await autoConnect(limited.deps, LABEL)).toEqual({
+      kind: "failed",
+      message: "Limit of five keys per minute reached",
+    });
+    const off = fakeDeps({ fsMe: async () => ({ status: "off", reason: "not configured" }) });
+    expect(await autoConnect(off.deps, LABEL)).toEqual({
+      kind: "failed",
+      message: "not configured",
+    });
+    expect(off.calls.mint).toEqual([]);
   });
 });

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect hub A · Post-onboarding mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./tokens.css">
+<style>
+.hubh { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; }
+.hubh p { margin: 0; font-size: 13px; color: var(--color-muted-foreground); }
+.tabrow { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.phone .tabs { display: flex; width: 100%; }
+.phone .tabs button { flex: 1; justify-content: center; padding: 0 6px; }
+.adv { font-size: 12px; color: var(--color-muted-foreground); display: inline-flex; align-items: center; gap: 4px; }
+.adv a { color: var(--color-primary); }
+</style>
+</head>
+<body>
+<header class="chrome">
+  <span class="badge">Post-onboarding · step-16</span>
+  <h1>Connect hub <span>· A · three tabs, Advanced as a link</span></h1>
+  <span class="sp"></span>
+  <a class="back" href="./index.html">All variants</a>
+  <button class="theme-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"></button>
+</header>
+<main class="page">
+  <div class="lede">
+    <div><b>Idea</b>/integrations with three tabs: Channels, Tools, AI providers. One card per provider with status and the action in the card. Tools carries Script connections and MCP servers as collapsible sub-sections. Secrets and Servers hide behind one Advanced link.</div>
+    <div><b>Trade-off</b>Each tab is short and maps 1:1 to a checklist deep link (?tab=channels). But a user who does not know whether Gmail is a "tool" or a "channel" must click around, and nothing shows the whole picture at once.</div>
+  </div>
+  <p class="narrow-note">Desktop states are hidden on narrow screens. Widen the window to see them.</p>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>Tools tab</em> (default) · click a tab to switch</h2>
+    <div class="desk"><div class="app tall">
+      <nav class="sb" aria-label="Main navigation, mockup 1"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav" href="#home" title="Home"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><a class="nav on" href="#connect" title="Connect" aria-current="page"><span class="ic i-plug" aria-hidden="true"></span><span class="lab">Connect</span></a></div><details class="grp"><summary class="grp-l"><span class="ic i-chevron-right" aria-hidden="true"></span>Build<span class="cnt">8</span></summary><a class="nav" href="#agents" title="Agents"><span class="ic i-bot" aria-hidden="true"></span><span class="lab">Agents</span></a><a class="nav" href="#schedules" title="Schedules"><span class="ic i-clock" aria-hidden="true"></span><span class="lab">Schedules</span></a><a class="nav" href="#workflows" title="Workflows"><span class="ic i-workflow" aria-hidden="true"></span><span class="lab">Workflows</span></a><a class="nav" href="#scripts" title="Scripts"><span class="ic i-file-code" aria-hidden="true"></span><span class="lab">Scripts</span></a><a class="nav" href="#skills" title="Skills"><span class="ic i-book-open" aria-hidden="true"></span><span class="lab">Skills</span></a><a class="nav" href="#templates" title="Templates"><span class="ic i-file-text" aria-hidden="true"></span><span class="lab">Templates</span></a><a class="nav" href="#memory" title="Memory"><span class="ic i-database" aria-hidden="true"></span><span class="lab">Memory</span></a><a class="nav" href="#tasks" title="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span><span class="lab">Tasks</span></a></details></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Connect</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content">
+        <div class="hubh"><p>Connect the swarm to chat, work tools and AI providers. 6 connected.</p></div>
+        <div class="tabrow">
+          <div class="tabs" role="tablist" aria-label="Connect sections" data-tabs>
+            <button type="button" role="tab" aria-selected="false" aria-controls="pa-ch"><span class="ic i-message-circle" aria-hidden="true"></span>Channels <span class="n">1/3</span></button>
+            <button type="button" role="tab" aria-selected="true" aria-controls="pa-tools"><span class="ic i-wrench" aria-hidden="true"></span>Tools <span class="n">4</span></button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="pa-ai"><span class="ic i-key" aria-hidden="true"></span>AI providers <span class="n">3</span></button>
+          </div>
+          <span class="sp"></span>
+          <span class="adv">Advanced: <a href="#secrets">Secrets</a> · <a href="#servers">Servers</a></span>
+        </div>
+        <div id="pa-ch" role="tabpanel" hidden><div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">S</span><div><div class="nm">Slack</div><div class="ds">The swarm bot answers in channels and threads.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag">Socket mode</span><span class="tag">3 channels</span></div>
+    <div class="pf"><span class="muted">#market-intel · #eng · #ops</span><span class="sp"></span><a class="btn xs" href="#slack">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">T</span><div><div class="nm">Telegram</div><div class="ds">Talk to the Lead from a Telegram bot.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Bot token from @BotFather" aria-label="Telegram bot token"><button class="btn primary" type="button">Connect</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">D</span><div><div class="nm">Discord</div><div class="ds">Mention the bot in a server channel.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">Needs an application ID and a bot token</span><span class="sp"></span><a class="btn xs" href="#discord">Set up</a></div>
+  </article>
+</div>
+<div class="u-mt16 secth"><h3>More channels</h3></div>
+<div class="more"><a class="mchip" href="#teams"><span class="pv sm">T</span>Microsoft Teams<span class="tag">Beta</span></a><a class="mchip" href="#kapso"><span class="pv sm">K</span>Kapso (WhatsApp)</a></div>
+</div>
+        <div id="pa-tools" role="tabpanel"><div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">G</span><div><div class="nm">GitHub</div><div class="ds">Repos, PRs and issues for coding agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag">GitHub App</span></div>
+    <div class="pf"><a class="link" href="#sc-github">2 script connections</a><span class="sp"></span><a class="btn xs" href="#github">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">L</span><div><div class="nm">Linear</div><div class="ds">Issues in, status updates out.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag ok">OAuth authorized</span></div>
+    <div class="pf"><a class="link" href="#sc-linear">1 script connection</a><span class="sp"></span><a class="btn xs" href="#linear">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">M</span><div><div class="nm">Gmail</div><div class="ds">Read and send mail as a connected account.</div></div></div>
+    <div class="chips"><span class="tag ok">OAuth authorized</span></div>
+    <div class="pf"><a class="link" href="#sc-gmail">1 script connection</a><span class="sp"></span><a class="btn xs" href="#gmail">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">J</span><div><div class="nm">Jira</div><div class="ds">Sync tickets with your Jira site.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">OAuth, about 2 minutes</span><span class="sp"></span><a class="btn xs primary" href="#jira">Connect</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">G</span><div><div class="nm">GitLab</div><div class="ds">Merge requests and pipelines.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">Personal or group token</span><span class="sp"></span><a class="btn xs primary" href="#gitlab">Connect</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">Microsoft 365</div><div class="ds">Outlook mail and calendar.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">OAuth app required</span><span class="sp"></span><a class="btn xs primary" href="#ms365">Connect</a></div>
+  </article>
+</div>
+<div class="u-mt16 secth"><h3>More tools</h3><span class="m">Bitbucket, CRM, observability, search</span></div>
+<div class="more">
+  <a class="mchip" href="#agentfs"><span class="pv sm">A</span>agent-fs<span class="st done"></span></a>
+  <a class="mchip" href="#bitbucket"><span class="pv sm">B</span>Bitbucket</a>
+  <a class="mchip" href="#attio"><span class="pv sm">A</span>Attio</a>
+  <a class="mchip" href="#sentry"><span class="pv sm">S</span>Sentry</a>
+  <a class="mchip" href="#agentmail"><span class="pv sm">A</span>AgentMail</a>
+  <a class="mchip" href="#composio"><span class="pv sm">C</span>Composio</a>
+  <a class="mchip" href="#serply"><span class="pv sm">S</span>Serply</a>
+  <a class="mchip" href="#gsc"><span class="pv sm">G</span>Search Console</a>
+  <a class="mchip" href="#bu"><span class="pv sm">B</span>Business Use</a>
+</div>
+<details class="sub" open>
+  <summary class="sub-h"><span class="ic i-chevron-right" aria-hidden="true"></span><span class="ic i-link muted" aria-hidden="true"></span>Script connections <span class="m">4 · credentials your scripts call through the broker</span><span class="sp"></span><span class="btn xs"><span class="ic i-plus" aria-hidden="true"></span>New</span></summary>
+  <div class="sub-b">
+    <div class="lrow hd"><span>Name</span><span class="hp-hide">Provider</span><span class="hp-hide">Auth</span><span>Status</span><span></span></div>
+    <div class="lrow"><span class="mono data">github-acme</span><span class="hp-hide">GitHub</span><span class="hp-hide muted">OAuth app · org</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">github-readonly</span><span class="hp-hide">GitHub</span><span class="hp-hide muted">Token</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">gmail-taras</span><span class="hp-hide">Gmail</span><span class="hp-hide muted">OAuth · user</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">pricing-scraper</span><span class="hp-hide">Custom HTTP</span><span class="hp-hide muted">API key</span><span><span class="tag warn">Expires in 3d</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+  </div>
+</details>
+<details class="sub">
+  <summary class="sub-h"><span class="ic i-chevron-right" aria-hidden="true"></span><span class="ic i-server muted" aria-hidden="true"></span>MCP servers <span class="m">2 · extra tools for every agent</span><span class="sp"></span><span class="btn xs"><span class="ic i-plus" aria-hidden="true"></span>Add server</span></summary>
+  <div class="sub-b">
+    <div class="lrow"><span class="mono data">context7</span><span class="hp-hide">HTTP</span><span class="hp-hide muted">12 tools</span><span><span class="tag ok">Connected</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">notion</span><span class="hp-hide">HTTP</span><span class="hp-hide muted">OAuth</span><span><span class="tag pend">Needs sign-in</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+  </div>
+</details>
+</div>
+        <div id="pa-ai" role="tabpanel" hidden><div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">A</span><div><div class="nm">Anthropic</div><div class="ds">Claude models for claude and pi agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Healthy</span><span class="tag">2 keys</span><span class="tag info">Verified by 3 of 3 agents</span></div>
+    <div class="keys">
+      <div class="key"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span>team-max</span><span class="mono">sk-ant-…a91f</span><span class="sp"></span><span class="muted">Max 20x</span></div>
+      <div class="key"><span class="st-warn st"></span><span>taras-backup</span><span class="mono">sk-ant-…77c2</span><span class="sp"></span><span class="tag warn">Rate limited 12m</span></div>
+    </div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Add another key" aria-label="Anthropic API key"><button class="btn" type="button">Add</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">OpenRouter</div><div class="ds">One key for many model vendors.</div></div></div>
+    <div class="chips"><span class="tag ok">Healthy</span><span class="tag">1 key</span></div>
+    <div class="keys"><div class="key"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span>default</span><span class="mono">sk-or-…3e0b</span><span class="sp"></span><span class="muted">$41.20 this week</span></div></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Add another key" aria-label="OpenRouter API key"><button class="btn" type="button">Add</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">C</span><div><div class="nm">Codex (ChatGPT sign-in)</div><div class="ds">Use a ChatGPT plan for codex agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Signed in</span><span class="tag">Pro plan</span></div>
+    <div class="pf"><span class="muted">taras@… · refreshed 1h ago</span><span class="sp"></span><a class="btn xs" href="#codex">Manage</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">OpenAI</div><div class="ds">GPT models and embeddings.</div></div></div>
+    <div class="chips"><span class="tag">No key</span></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="sk-..." aria-label="OpenAI API key"><button class="btn primary" type="button">Add key</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">B</span><div><div class="nm">AWS Bedrock</div><div class="ds">Claude through your AWS account.</div></div></div>
+    <div class="chips"><span class="tag">Not set up</span></div>
+    <div class="pf"><span class="muted">Region and access keys</span><span class="sp"></span><a class="btn xs" href="#bedrock">Set up</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">M</span><div><div class="nm">Claude Managed Agents</div><div class="ds">Run agents in Anthropic's cloud sandbox.</div></div></div>
+    <div class="chips"><span class="tag">Not set up</span></div>
+    <div class="pf"><span class="muted">Needs a public API address</span><span class="sp"></span><a class="btn xs" href="#managed">Set up</a></div>
+  </article>
+</div>
+</div>
+      </div></div>
+    </div></div>
+  </section>
+
+  <section class="state desk-only">
+    <h2>Desktop · <em>AI providers tab</em> · add a key and see health in one card</h2>
+    <div class="desk"><div class="app short">
+      <nav class="sb" aria-label="Main navigation, mockup 2"><div class="brand"><span class="logo"><span class="ic i-hexagon" aria-hidden="true"></span></span><span>Acme swarm</span><span class="ic i-panel-left" aria-hidden="true"></span></div><div class="scroll"><div class="grp"><div class="grp-l">Work</div><a class="nav" href="#home" title="Home"><span class="ic i-home" aria-hidden="true"></span><span class="lab">Home</span><span class="bdg">1</span></a><a class="nav" href="#sessions" title="Sessions"><span class="ic i-message-square" aria-hidden="true"></span><span class="lab">Sessions</span></a><a class="nav" href="#files" title="Files"><span class="ic i-folder-open" aria-hidden="true"></span><span class="lab">Files</span></a><a class="nav" href="#apps" title="Apps"><span class="ic i-layout-grid" aria-hidden="true"></span><span class="lab">Apps</span></a><a class="nav" href="#pages" title="Pages"><span class="ic i-globe" aria-hidden="true"></span><span class="lab">Pages</span></a></div><div class="grp"><div class="grp-l">Connect</div><a class="nav on" href="#connect" title="Connect" aria-current="page"><span class="ic i-plug" aria-hidden="true"></span><span class="lab">Connect</span></a></div><details class="grp"><summary class="grp-l"><span class="ic i-chevron-right" aria-hidden="true"></span>Build<span class="cnt">8</span></summary><a class="nav" href="#agents" title="Agents"><span class="ic i-bot" aria-hidden="true"></span><span class="lab">Agents</span></a><a class="nav" href="#schedules" title="Schedules"><span class="ic i-clock" aria-hidden="true"></span><span class="lab">Schedules</span></a><a class="nav" href="#workflows" title="Workflows"><span class="ic i-workflow" aria-hidden="true"></span><span class="lab">Workflows</span></a><a class="nav" href="#scripts" title="Scripts"><span class="ic i-file-code" aria-hidden="true"></span><span class="lab">Scripts</span></a><a class="nav" href="#skills" title="Skills"><span class="ic i-book-open" aria-hidden="true"></span><span class="lab">Skills</span></a><a class="nav" href="#templates" title="Templates"><span class="ic i-file-text" aria-hidden="true"></span><span class="lab">Templates</span></a><a class="nav" href="#memory" title="Memory"><span class="ic i-database" aria-hidden="true"></span><span class="lab">Memory</span></a><a class="nav" href="#tasks" title="Tasks"><span class="ic i-list-todo" aria-hidden="true"></span><span class="lab">Tasks</span></a></details></div><div class="foot"><a class="nav" href="#settings" title="Settings"><span class="ic i-settings" aria-hidden="true"></span><span class="lab">Settings</span></a><a class="nav" href="#usage" title="Usage"><span class="ic i-chart" aria-hidden="true"></span><span class="lab">Usage</span></a></div></nav>
+      <div class="main"><div class="top"><span class="crumb"><b>Connect</b></span><span class="sp"></span><span class="kbd"><span class="ic i-search" aria-hidden="true"></span>Search or jump to<span class="k">⌘K</span></span><span class="avatar">TY</span></div><div class="content">
+        <div class="tabrow">
+          <div class="tabs">
+            <button type="button"><span class="ic i-message-circle" aria-hidden="true"></span>Channels <span class="n">1/3</span></button>
+            <button type="button"><span class="ic i-wrench" aria-hidden="true"></span>Tools <span class="n">4</span></button>
+            <button type="button" class="sel"><span class="ic i-key" aria-hidden="true"></span>AI providers <span class="n">3</span></button>
+          </div>
+          <span class="sp"></span>
+          <span class="adv">Advanced: <a href="#secrets">Secrets</a> · <a href="#servers">Servers</a></span>
+        </div>
+        <div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">A</span><div><div class="nm">Anthropic</div><div class="ds">Claude models for claude and pi agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Healthy</span><span class="tag">2 keys</span><span class="tag info">Verified by 3 of 3 agents</span></div>
+    <div class="keys">
+      <div class="key"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span>team-max</span><span class="mono">sk-ant-…a91f</span><span class="sp"></span><span class="muted">Max 20x</span></div>
+      <div class="key"><span class="st-warn st"></span><span>taras-backup</span><span class="mono">sk-ant-…77c2</span><span class="sp"></span><span class="tag warn">Rate limited 12m</span></div>
+    </div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Add another key" aria-label="Anthropic API key"><button class="btn" type="button">Add</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">OpenRouter</div><div class="ds">One key for many model vendors.</div></div></div>
+    <div class="chips"><span class="tag ok">Healthy</span><span class="tag">1 key</span></div>
+    <div class="keys"><div class="key"><span class="st done"><span class="ic i-check" aria-hidden="true"></span></span><span>default</span><span class="mono">sk-or-…3e0b</span><span class="sp"></span><span class="muted">$41.20 this week</span></div></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Add another key" aria-label="OpenRouter API key"><button class="btn" type="button">Add</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">C</span><div><div class="nm">Codex (ChatGPT sign-in)</div><div class="ds">Use a ChatGPT plan for codex agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Signed in</span><span class="tag">Pro plan</span></div>
+    <div class="pf"><span class="muted">taras@… · refreshed 1h ago</span><span class="sp"></span><a class="btn xs" href="#codex">Manage</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">OpenAI</div><div class="ds">GPT models and embeddings.</div></div></div>
+    <div class="chips"><span class="tag">No key</span></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="sk-..." aria-label="OpenAI API key"><button class="btn primary" type="button">Add key</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">B</span><div><div class="nm">AWS Bedrock</div><div class="ds">Claude through your AWS account.</div></div></div>
+    <div class="chips"><span class="tag">Not set up</span></div>
+    <div class="pf"><span class="muted">Region and access keys</span><span class="sp"></span><a class="btn xs" href="#bedrock">Set up</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">M</span><div><div class="nm">Claude Managed Agents</div><div class="ds">Run agents in Anthropic's cloud sandbox.</div></div></div>
+    <div class="chips"><span class="tag">Not set up</span></div>
+    <div class="pf"><span class="muted">Needs a public API address</span><span class="sp"></span><a class="btn xs" href="#managed">Set up</a></div>
+  </article>
+</div>
+
+      </div></div>
+    </div></div>
+  </section>
+
+  <section class="state">
+    <h2>Phone · <em>Channels tab</em> (checklist deep link) and <em>Tools tab</em></h2>
+    <div class="phones">
+      <div class="phone-col"><h3>?tab=channels</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Connect</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody">
+            <div class="tabrow"><div class="tabs"><button type="button" class="sel">Channels</button><button type="button">Tools</button><button type="button">AI</button></div></div>
+            <div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">S</span><div><div class="nm">Slack</div><div class="ds">The swarm bot answers in channels and threads.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag">Socket mode</span><span class="tag">3 channels</span></div>
+    <div class="pf"><span class="muted">#market-intel · #eng · #ops</span><span class="sp"></span><a class="btn xs" href="#slack">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">T</span><div><div class="nm">Telegram</div><div class="ds">Talk to the Lead from a Telegram bot.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="addrow"><input class="inp" type="password" autocomplete="new-password" placeholder="Bot token from @BotFather" aria-label="Telegram bot token"><button class="btn primary" type="button">Connect</button></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">D</span><div><div class="nm">Discord</div><div class="ds">Mention the bot in a server channel.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">Needs an application ID and a bot token</span><span class="sp"></span><a class="btn xs" href="#discord">Set up</a></div>
+  </article>
+</div>
+<div class="u-mt16 secth"><h3>More channels</h3></div>
+<div class="more"><a class="mchip" href="#teams"><span class="pv sm">T</span>Microsoft Teams<span class="tag">Beta</span></a><a class="mchip" href="#kapso"><span class="pv sm">K</span>Kapso (WhatsApp)</a></div>
+
+            <p class="u-mt18 adv">Advanced: <a href="#secrets">Secrets</a> · <a href="#servers">Servers</a></p>
+          </div>
+        </div>
+      </div>
+      <div class="phone-col"><h3>?tab=tools</h3>
+        <div class="phone"><div class="psb"><span>9:41</span><span class="dots"><i></i><i></i></span></div><div class="ptop"><button class="btn ghost sq" type="button" aria-label="Open menu"><span class="ic i-menu" aria-hidden="true"></span></button><span class="crumb"><b>Connect</b></span><span class="sp"></span><span class="avatar">TY</span></div>
+          <div class="pbody">
+            <div class="tabrow"><div class="tabs"><button type="button">Channels</button><button type="button" class="sel">Tools</button><button type="button">AI</button></div></div>
+            <div class="pgrid">
+  <article class="card pcard">
+    <div class="ph"><span class="pv">G</span><div><div class="nm">GitHub</div><div class="ds">Repos, PRs and issues for coding agents.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag">GitHub App</span></div>
+    <div class="pf"><a class="link" href="#sc-github">2 script connections</a><span class="sp"></span><a class="btn xs" href="#github">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">L</span><div><div class="nm">Linear</div><div class="ds">Issues in, status updates out.</div></div></div>
+    <div class="chips"><span class="tag ok">Connected</span><span class="tag ok">OAuth authorized</span></div>
+    <div class="pf"><a class="link" href="#sc-linear">1 script connection</a><span class="sp"></span><a class="btn xs" href="#linear">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">M</span><div><div class="nm">Gmail</div><div class="ds">Read and send mail as a connected account.</div></div></div>
+    <div class="chips"><span class="tag ok">OAuth authorized</span></div>
+    <div class="pf"><a class="link" href="#sc-gmail">1 script connection</a><span class="sp"></span><a class="btn xs" href="#gmail">Configure</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">J</span><div><div class="nm">Jira</div><div class="ds">Sync tickets with your Jira site.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">OAuth, about 2 minutes</span><span class="sp"></span><a class="btn xs primary" href="#jira">Connect</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">G</span><div><div class="nm">GitLab</div><div class="ds">Merge requests and pipelines.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">Personal or group token</span><span class="sp"></span><a class="btn xs primary" href="#gitlab">Connect</a></div>
+  </article>
+  <article class="card pcard">
+    <div class="ph"><span class="pv">O</span><div><div class="nm">Microsoft 365</div><div class="ds">Outlook mail and calendar.</div></div></div>
+    <div class="chips"><span class="tag">Not connected</span></div>
+    <div class="pf"><span class="muted">OAuth app required</span><span class="sp"></span><a class="btn xs primary" href="#ms365">Connect</a></div>
+  </article>
+</div>
+<div class="u-mt16 secth"><h3>More tools</h3><span class="m">Bitbucket, CRM, observability, search</span></div>
+<div class="more">
+  <a class="mchip" href="#agentfs"><span class="pv sm">A</span>agent-fs<span class="st done"></span></a>
+  <a class="mchip" href="#bitbucket"><span class="pv sm">B</span>Bitbucket</a>
+  <a class="mchip" href="#attio"><span class="pv sm">A</span>Attio</a>
+  <a class="mchip" href="#sentry"><span class="pv sm">S</span>Sentry</a>
+  <a class="mchip" href="#agentmail"><span class="pv sm">A</span>AgentMail</a>
+  <a class="mchip" href="#composio"><span class="pv sm">C</span>Composio</a>
+  <a class="mchip" href="#serply"><span class="pv sm">S</span>Serply</a>
+  <a class="mchip" href="#gsc"><span class="pv sm">G</span>Search Console</a>
+  <a class="mchip" href="#bu"><span class="pv sm">B</span>Business Use</a>
+</div>
+<details class="sub" open>
+  <summary class="sub-h"><span class="ic i-chevron-right" aria-hidden="true"></span><span class="ic i-link muted" aria-hidden="true"></span>Script connections <span class="m">4 · credentials your scripts call through the broker</span><span class="sp"></span><span class="btn xs"><span class="ic i-plus" aria-hidden="true"></span>New</span></summary>
+  <div class="sub-b">
+    <div class="lrow hd"><span>Name</span><span class="hp-hide">Provider</span><span class="hp-hide">Auth</span><span>Status</span><span></span></div>
+    <div class="lrow"><span class="mono data">github-acme</span><span class="hp-hide">GitHub</span><span class="hp-hide muted">OAuth app · org</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">github-readonly</span><span class="hp-hide">GitHub</span><span class="hp-hide muted">Token</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">gmail-taras</span><span class="hp-hide">Gmail</span><span class="hp-hide muted">OAuth · user</span><span><span class="tag ok">Healthy</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">pricing-scraper</span><span class="hp-hide">Custom HTTP</span><span class="hp-hide muted">API key</span><span><span class="tag warn">Expires in 3d</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+  </div>
+</details>
+<details class="sub">
+  <summary class="sub-h"><span class="ic i-chevron-right" aria-hidden="true"></span><span class="ic i-server muted" aria-hidden="true"></span>MCP servers <span class="m">2 · extra tools for every agent</span><span class="sp"></span><span class="btn xs"><span class="ic i-plus" aria-hidden="true"></span>Add server</span></summary>
+  <div class="sub-b">
+    <div class="lrow"><span class="mono data">context7</span><span class="hp-hide">HTTP</span><span class="hp-hide muted">12 tools</span><span><span class="tag ok">Connected</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+    <div class="lrow"><span class="mono data">notion</span><span class="hp-hide">HTTP</span><span class="hp-hide muted">OAuth</span><span><span class="tag pend">Needs sign-in</span></span><span class="hp-hide"><span class="ic i-more muted" aria-hidden="true"></span></span></div>
+  </div>
+</details>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById("theme");
+  var q = new URLSearchParams(location.search).get("theme"), t = "light";
+  try { t = q || localStorage.getItem("swarmMock") || "light"; } catch (e) { t = q || "light"; }
+  function set(v) {
+    t = v; root.classList.toggle("dark", v === "dark"); root.setAttribute("data-theme", v);
+    btn.innerHTML = '<span class="ic i-' + (v === "dark" ? "sun" : "moon") + '" aria-hidden="true"></span>';
+    try { localStorage.setItem("swarmMock", v); } catch (e) { /* file:// without storage */ }
+  }
+  set(t);
+  btn.addEventListener("click", function () { set(t === "dark" ? "light" : "dark"); });
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    list.querySelectorAll("[role=tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        list.querySelectorAll("[role=tab]").forEach(function (o) {
+          var on = o === tab; o.setAttribute("aria-selected", String(on));
+          document.getElementById(o.getAttribute("aria-controls")).hidden = !on;
+        });
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -374,6 +374,7 @@ Stores the progress of a specific task. Can also mark task as completed, failed,
 | `failureReason` | `string` | No | - | The reason for failure (used when failing), or the one-line reason for a skip (required with status 'skipped'). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `citations` | `array` | No | - | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity. |
+| `uiSpec` | `object` | No | - | A json-render spec for the chat catalog. Root must be a Card. |
 | `learning` | `unknown` | No | - | A lesson to keep. Add one only when it would change how the next agent works: a gotcha, a dead end, a pattern that worked. Line 1 of text is the title. Line 2 is the rule, as "When X, do Y"; evidence goes after it, since recall shows only the first 300 characters. Not a learning: a status or pass/fail line, a restatement of this call's progress or output, text already in a skill, a claim you did not verify. Text under 80 characters, or contained in this call's progress or output, is rejected. Stored as a swarm memory at /learnings/<workstream>/<slug>, tagged "learning" and tied to this task. Expires after 30 days. At most ~500 tokens and 5 kebab tags. workstream defaults to the task's repo name, else "general". Send it on or before the completing call: a call on a finished task stores nothing. A failed learning write is reported in the result and never blocks the progress update. |
 | `persistMemory` | `boolean` | No | - | Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true. |
 | `chainedTaskId` | `uuid` | No | - | With status 'completed' only: the id of a live child task you created (send-task with parentTaskId set to this task) that carries this result forward. The engine then creates no lead follow-up for this completion and logs the handoff on this task. The child must exist, have this task as parentTaskId, be created by you, and be pending, offered, reviewing, in_progress or paused. If any check fails, the normal follow-up is created and names the reason; the completion itself never fails. Ignored for every other status: a failure always wakes the lead. |
@@ -1123,7 +1124,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/schedule:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/schedule:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key, so the planning session, the schedule and its runs share one key. |
 | `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
 | `targetType` | `agent-task \| workflow \| script` | No | "agent-task" | Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; use 'script' + scriptName/scriptArgs when it only runs a catalog script; use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script. |
@@ -1158,7 +1159,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
-| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
+| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling, except a workflow step superseded by its queued retry, which counts as failed. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output. |
 | `output` | `string` | No | - | Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
@@ -1985,7 +1986,7 @@ Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are u
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/page:<id>/ resource key. |
+| `key` | `unknown` | No | - | Logical namespace. Defaults to the calling task's group key when it has one, else shared/page:<id>/. An explicit use-case group key also files the calling task's session into that group while the session still has its default key. |
 | `title` | `string` | Yes | - | Human-readable title shown in listings. |
 | `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
 | `body` | `string` | Yes | - | Full page body (HTML document, SVG image, or JSON-render spec, per contentType). |
@@ -2154,14 +2155,15 @@ Capability: `slack` (enabled by default)
 
 **Reply to Slack thread**
 
-Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for. For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
-| `message` | `string` | Yes | - | The message to send to the Slack thread. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message to send to the Slack thread. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 
 ### slack-read
 
@@ -2182,13 +2184,14 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 
 **Post message to Slack channel**
 
-Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.
+Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). For a structured result (key figures, a table, charts, links), send a `card` instead of hand-built `blocks`. Requires lead privileges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. A user ID (U…/W…) posts in the bot's DM with that user. |
-| `message` | `string` | Yes | - | The message content to post. |
-| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+| `message` | `string` | No | - | The message content to post. Required unless card is given; with a card it renders above it. |
+| `blocks` | `array` | No | - | Optional raw Block Kit blocks. When omitted, a mrkdwn section is generated. Prefer card. |
+| `card` | `unknown` | No | - | - |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -2461,25 +2464,27 @@ Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` 
 
 **Reply in the chat thread of this task**
 
-Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it.
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user, a short progress note on long work, or to send files (attachments). Markdown is supported; long text is split into several messages. When the final output of a task is posted, the files attached to that task go with it. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | `string` | Yes | - | Markdown text to post to the thread. |
+| `text` | `string` | No | - | Markdown text to post to the thread. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-post
 
 **Post to a chat thread or channel**
 
-Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
 | `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
 | `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
-| `text` | `string` | Yes | - | Markdown text to post. |
+| `text` | `string` | No | - | Markdown text to post. Required unless card is given. |
+| `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
 
 ### chat-open-dm

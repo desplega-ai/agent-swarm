@@ -250,6 +250,8 @@ import tddPlanningConfig from "../../../templates/skills/tdd-planning/config.jso
 import tddPlanningContent from "../../../templates/skills/tdd-planning/content.md" with {
   type: "text",
 };
+import uiSpecConfig from "../../../templates/skills/ui-spec/config.json" with { type: "text" };
+import uiSpecContent from "../../../templates/skills/ui-spec/content.md" with { type: "text" };
 import vImplementingConfig from "../../../templates/skills/v-implementing/config.json" with {
   type: "text",
 };
@@ -390,6 +392,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: tackleGhCommentsConfig, body: tackleGhCommentsContent },
   { config: tasteMinimalistSkillConfig, body: tasteMinimalistSkillContent },
   { config: tddPlanningConfig, body: tddPlanningContent },
+  { config: uiSpecConfig, body: uiSpecContent },
   { config: vImplementingConfig, body: vImplementingContent },
   { config: vPlanningConfig, body: vPlanningContent },
   { config: verifyingConfig, body: verifyingContent },

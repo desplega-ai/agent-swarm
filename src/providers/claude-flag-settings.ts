@@ -38,6 +38,7 @@ export const LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN = "context-mode@context-mode";
 export type ClaudeFlagSettings = Record<string, unknown> & {
   claudeMdExcludes: string[];
   enabledPlugins?: Record<string, boolean>;
+  showThinkingSummaries?: boolean;
 };
 
 /**
@@ -47,12 +48,44 @@ export type ClaudeFlagSettings = Record<string, unknown> & {
  * otherwise keep its hooks running: the SessionStart block and tool tips
  * point at `ctx_*` tools the session does not have, and the PreToolUse hook
  * denies WebFetch. Disabling a plugin that is not installed is a no-op.
+ *
+ * Asks for thinking summaries. The API default is `display: "omitted"`, which
+ * returns thinking blocks with empty text, so we kept almost no reasoning.
+ * Summaries are not billed: the charge is the full thinking tokens either way.
+ * Claude Code reads this setting only in interactive sessions (claude-bridge);
+ * print and SDK sessions need `--thinking-display`, see claudeThinkingDisplayArgs.
  */
 export function claudeFlagSettings(): ClaudeFlagSettings {
   return {
     claudeMdExcludes: [WORKSPACE_CLAUDE_MD_EXCLUDE, userClaudeMdExclude()],
     enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
+    showThinkingSummaries: true,
   };
+}
+
+/** First Claude Code release verified to accept `--thinking-display` (2.1.80 does not). */
+export const MIN_CLAUDE_THINKING_DISPLAY_VERSION = [2, 1, 112] as const;
+
+const THINKING_DISPLAY_FLAG = "--thinking-display";
+
+/**
+ * `--thinking-display` for print and SDK sessions, which ignore the
+ * `showThinkingSummaries` setting. The merged setting picks the value, so a
+ * caller `--settings` with `showThinkingSummaries: false` still turns summaries
+ * off. Returns nothing when the caller args already pass the flag.
+ */
+export function claudeThinkingDisplayArgs(
+  settings: ClaudeFlagSettings,
+  callerArgs: readonly string[],
+): string[] {
+  const callerSetsFlag = callerArgs.some(
+    (arg) => arg === THINKING_DISPLAY_FLAG || arg.startsWith(`${THINKING_DISPLAY_FLAG}=`),
+  );
+  if (callerSetsFlag) return [];
+  return [
+    THINKING_DISPLAY_FLAG,
+    settings.showThinkingSummaries === false ? "omitted" : "summarized",
+  ];
 }
 
 const SETTINGS_FLAG = "--settings";
@@ -152,7 +185,12 @@ export function mergeClaudeSettingsArgs(
 
   const own = claudeFlagSettings();
   for (const entry of own.claudeMdExcludes) excludes.add(entry);
-  const settings: ClaudeFlagSettings = { ...merged, claudeMdExcludes: [...excludes] };
+  // Own defaults first, so a caller value (such as showThinkingSummaries: false) wins.
+  const settings: ClaudeFlagSettings = {
+    showThinkingSummaries: own.showThinkingSummaries,
+    ...merged,
+    claudeMdExcludes: [...excludes],
+  };
   if (own.enabledPlugins) {
     const callerPlugins = isPlainObject(merged.enabledPlugins) ? merged.enabledPlugins : {};
     settings.enabledPlugins = { ...callerPlugins, ...own.enabledPlugins } as Record<

@@ -25,6 +25,7 @@ import { registerChatHandlers } from "./handlers";
 import { createScrubbingLogger, errorMessage } from "./logger";
 import { startChatRelayWatcher, stopChatRelayWatcher } from "./relay";
 import { SqliteChatState } from "./state";
+import { TelegramBotApiError } from "./telegram-api";
 import { getChatSdkTestHooks } from "./test-hooks";
 import { flushAllChatBuffers } from "./thread-buffer";
 import { stopAllTypingKeepalives } from "./typing";
@@ -132,10 +133,15 @@ async function startAdapter(
     }
     watchSocketConnection(adapter, logger);
     if (name === "telegram") {
-      // The `/` menu in Telegram clients. The commands work without it.
+      // The `/` menu in Telegram clients. The commands work without it. In
+      // webhook mode this is the first call that checks the token, so a 401
+      // marks the adapter failed instead of connected.
       try {
         await registerTelegramCommands(config);
       } catch (error) {
+        if (error instanceof TelegramBotApiError && error.status === 401) {
+          throw new Error(`Telegram rejected the bot token: ${errorMessage(error)}`);
+        }
         logger.warn(`Could not register the Telegram commands: ${errorMessage(error)}`);
       }
     }

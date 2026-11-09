@@ -55,7 +55,6 @@ import type {
   BetaManagedAgentsSession as Session,
   BetaManagedAgentsSessionEvent as SessionEvent,
 } from "@anthropic-ai/sdk/resources/beta/sessions";
-
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import { checkToolLoop } from "../hooks/tool-loop-detection";
 import {
@@ -65,6 +64,7 @@ import {
   getContextWindowSize,
 } from "../utils/context-window";
 import { selectCredential } from "../utils/credentials";
+import { isGitHubEnterprise } from "../utils/github-host";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import { getRuntimeFeePerHour } from "./claude-managed-pricing";
@@ -164,6 +164,10 @@ export function composeManagedUserMessage(
  * field expects. Pass-through if already a URL.
  */
 export function normalizeRepoUrl(vcsRepo: string): string {
+  // Anthropic's managed GitHub resource only knows github.com.
+  if (isGitHubEnterprise()) {
+    throw new Error("claude-managed does not support GitHub Enterprise Server (GITHUB_URL is set)");
+  }
   if (vcsRepo.startsWith("http://") || vcsRepo.startsWith("https://")) {
     return vcsRepo;
   }

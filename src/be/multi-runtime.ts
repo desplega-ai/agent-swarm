@@ -184,9 +184,16 @@ function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
  * pings every poll iteration (~2s), so this is a wide margin that will not
  * expire a healthy idle worker; it matches the "worker clearly dead" window
  * the stalled-task classifier already uses.
+ *
+ * This reads the raw env var, so it also covers paths the operator config
+ * guard never sees (`RUNTIME_STALE_THRESHOLD_MIN=-1` in docker-compose or the
+ * shell): a non-finite, zero or negative value would put the liveness cutoff
+ * in the future and expire every healthy instance, so those fall back to the
+ * default (#2802).
  */
 export function runtimeStaleThresholdMinutes(): number {
-  return Number(process.env.RUNTIME_STALE_THRESHOLD_MIN) || 5;
+  const minutes = Number(process.env.RUNTIME_STALE_THRESHOLD_MIN);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
 }
 
 function runtimeLivenessCutoff(): string {

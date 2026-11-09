@@ -606,7 +606,8 @@ async function bridgeFetch(
       const delay = backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
       // An abort means the run is ending: settle now, never wait and retry.
       const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
-      if (aborted || !repeatSafe || attempt > BRIDGE_MAX_RETRIES || !fits(delay)) throw error;
+      if (aborted || !repeatSafe || attempt > BRIDGE_MAX_RETRIES || (readOnly && !fits(delay)))
+        throw error;
       previous = { error };
       await sleep(delay, signal);
       if (signal?.aborted) throw error;
@@ -618,7 +619,7 @@ async function bridgeFetch(
       (res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined) ??
       backoffMs(attempt, BRIDGE_MIN_DELAY_MS, BRIDGE_MAX_DELAY_MS);
     // A Retry-After past the budget: hand the 429 back rather than wait.
-    if (!fits(delay)) return res;
+    if ((readOnly || res.status === 429) && !fits(delay)) return res;
     await res.body?.cancel().catch(() => {});
     previous = { response: res };
     await sleep(delay, signal);

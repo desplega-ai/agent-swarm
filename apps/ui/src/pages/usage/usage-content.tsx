@@ -8,8 +8,10 @@ import {
   useUsageSummary,
 } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
+import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusLine } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
 import { DailySpendChart } from "./daily-spend-chart";
@@ -61,6 +64,7 @@ function getStartDateISO(range: DateRange): string | undefined {
 }
 
 export function UsageContent() {
+  const isMobile = useIsMobile();
   const { searchParams, setParam } = useUrlSearchState();
   const dateRange = coerceDateRange(readStringParam(searchParams, "range", "30d"));
   const agentFilter = readStringParam(searchParams, "agent", "all");
@@ -336,13 +340,49 @@ export function UsageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent className="px-5">
-              <DataGrid
-                rowData={attributionData}
-                columnDefs={attributionColumns}
-                domLayout="autoHeight"
-                columnSizing="flex"
-                pagination={false}
-              />
+              {isMobile ? (
+                // Phones stack each person: name, then the four
+                // numbers in a 2x2 grid, so all four stay side by side instead of clipping.
+                <MobileList
+                  label="Attribution by person"
+                  emptyMessage="No attributed work"
+                  className="flex-none overflow-hidden"
+                >
+                  {attributionData.map((row) => (
+                    <MobileListRow
+                      key={row.userId}
+                      title={row.name}
+                      titleLines={1}
+                      extras={
+                        <dl className="grid w-full grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                          <PersonFact label="Initiated" value={row.problemsInitiated} />
+                          <PersonFact
+                            label="Shipped"
+                            value={
+                              row.problemsInitiated
+                                ? `${row.problemsShipped} (${((row.problemsShipped / row.problemsInitiated) * 100).toFixed(0)}%)`
+                                : row.problemsShipped
+                            }
+                          />
+                          <PersonFact
+                            label="Reach"
+                            value={`${row.agentsReached} agents · ${row.reposReached} repos · ${row.surfacesReached} surfaces`}
+                          />
+                          <PersonFact label="First-pass yield" value="not yet computed" muted />
+                        </dl>
+                      }
+                    />
+                  ))}
+                </MobileList>
+              ) : (
+                <DataGrid
+                  rowData={attributionData}
+                  columnDefs={attributionColumns}
+                  domLayout="autoHeight"
+                  columnSizing="flex"
+                  pagination={false}
+                />
+              )}
             </CardContent>
           </Card>
         ) : null}
@@ -351,9 +391,22 @@ export function UsageContent() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pb-6">
+    <div className="space-y-4 pb-6 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+      {/* The fleet benchmark (and its Slack Connect perk) moved here from Home. */}
+      <FleetBenchmarkCard />
       {toolbar}
       {body}
+    </div>
+  );
+}
+
+function PersonFact({ label, value, muted }: { label: string; value: ReactNode; muted?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className={cn("font-mono tabular-nums", muted && "font-sans text-muted-foreground")}>
+        {value}
+      </dd>
     </div>
   );
 }

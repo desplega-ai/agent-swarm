@@ -47,6 +47,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "agent.context.read.any",
   "memory.learning.inject",
   "memory.write.consolidated",
+  "checklist.write.agent",
   "channel.delete",
   "integration.kapso.manage",
   "integration.chat.manage",
@@ -90,6 +91,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
 const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "mcp-server.stdio.write",
+  "models.groups.write",
   "memory.read.any",
   "extension.write",
   "task.requester.assign",
@@ -141,6 +143,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "mcp-oauth.authorize.any",
   "task.create.own",
   "favorite.write.own",
+  "checklist.write.own",
   "fs.join.own",
   "script.search",
   "improvement.submit",

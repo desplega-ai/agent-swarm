@@ -16,6 +16,7 @@ let statusLoaded = true;
 let inbox: InboxItemState[] = [];
 let workflowRunsCompleted = 0;
 let telemetryEnabled = true;
+let cardDismissed = false;
 let role: string | undefined = "admin";
 let tracked: Array<{ event: string; properties: unknown }> = [];
 let inviteCalls: string[] = [];
@@ -26,7 +27,6 @@ const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
 // The root runner maps "@/" to the API's src/, so point the aliases at the real files.
 const fleetLib = await import("../../lib/fleet-benchmark");
 mock.module("@/lib/fleet-benchmark", () => fleetLib);
-mock.module("@/lib/telemetry-banner", () => require("../../lib/telemetry-banner"));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/hooks/use-dismissible-card-key", () =>
@@ -76,7 +76,7 @@ mock.module("@/hooks/use-config", () => ({
   useConfig: () => ({ config: { apiUrl } }),
 }));
 mock.module("@/hooks/use-dismissible-card", () => ({
-  useDismissibleCard: () => ({ dismissed: false, dismiss: () => {}, restore: () => {} }),
+  useDismissibleCard: () => ({ dismissed: cardDismissed, dismiss: () => {}, restore: () => {} }),
 }));
 mock.module("@/components/shared/fade-in", () => ({ FadeIn: Box }));
 mock.module("@/components/shared/animated-reveal", () => ({
@@ -127,6 +127,7 @@ beforeEach(() => {
   statusLoaded = true;
   inbox = [];
   workflowRunsCompleted = 0;
+  cardDismissed = false;
   telemetryEnabled = true;
   role = "admin";
   tracked = [];
@@ -265,13 +266,20 @@ test("under 10 finished tasks: progress line", async () => {
   await view.cleanup();
 });
 
-test("telemetry off with the banner up: nothing, unless a workflow completed, then the perk alone", async () => {
+test("telemetry off: what it unlocks, Turn on uses via benchmark", async () => {
   benchmark = OFF;
   telemetryEnabled = false;
-  const hidden = await render();
-  expect(hidden.text()).toBe("");
-  await hidden.cleanup();
+  const view = await render();
+  expect(view.text()).toContain("Turn on anonymized telemetry to see where your swarm stands");
+  await view.click("Turn on telemetry");
+  expect(enabled).toEqual(["benchmark"]);
+  await view.cleanup();
+});
 
+test("dismissed benchmark with telemetry off: the perk alone once a workflow completed", async () => {
+  benchmark = OFF;
+  telemetryEnabled = false;
+  cardDismissed = true;
   workflowRunsCompleted = 1;
   const perk = await render();
   expect(perk.text()).not.toContain("similar swarms");
@@ -279,17 +287,6 @@ test("telemetry off with the banner up: nothing, unless a workflow completed, th
   await perk.click("No thanks");
   expect(inviteCalls).toEqual(["dismiss"]);
   await perk.cleanup();
-});
-
-test("telemetry off after the banner was dismissed: what it unlocks, Turn on uses via benchmark", async () => {
-  benchmark = OFF;
-  telemetryEnabled = false;
-  localStorage.setItem("swarm:v1:https://fleet.example:dashboard-telemetry-off", "2026-10-01");
-  const view = await render();
-  expect(view.text()).toContain("Turn on anonymized telemetry to see where your swarm stands");
-  await view.click("Turn on telemetry");
-  expect(enabled).toEqual(["benchmark"]);
-  await view.cleanup();
 });
 
 test("telemetry off for a non-admin: what it unlocks, no button", async () => {

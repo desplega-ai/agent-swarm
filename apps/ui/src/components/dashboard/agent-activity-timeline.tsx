@@ -1,4 +1,5 @@
 import {
+  Activity,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -15,6 +16,7 @@ import { api } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus, AgentWithTasks } from "@/api/types";
+import { HomeWidget, HomeWidgetCount } from "@/components/home/home-widget";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -233,10 +235,25 @@ function formatAxisLabel(ms: number, windowMs: number): string {
   }).format(date);
 }
 
-/** Tick spacing for a zoom window: smallest interval giving ≤ ~8 ticks/view. */
-function tickIntervalMs(windowMs: number): number {
+/**
+ * Width an axis label needs, from a sample of its format: ~6.5px per 10px
+ * glyph plus the tick's left padding and a gap. Locale-aware, since "09:00 PM"
+ * is wider than "21:00".
+ */
+function axisLabelPx(windowMs: number): number {
+  return Math.ceil(formatAxisLabel(Date.UTC(2026, 11, 28, 23, 58, 58), windowMs).length * 6.5) + 16;
+}
+
+/** Room the "now" pill takes right of the now-line, in px. */
+const NOW_PILL_PX = 34;
+
+/**
+ * Tick spacing for a zoom window: the smallest interval giving ≤ ~8 ticks per
+ * view whose labels still sit `minLabelPx` apart (phones get fewer ticks).
+ */
+function tickIntervalMs(windowMs: number, pxPerMs: number, minLabelPx: number): number {
   const targetTicks = 8;
-  const rough = windowMs / targetTicks;
+  const rough = Math.max(windowMs / targetTicks, minLabelPx / pxPerMs);
   const intervals = [
     5 * 1000,
     15 * 1000,
@@ -580,7 +597,12 @@ function TimelineIconButton({
   );
 }
 
-export function AgentActivityTimeline() {
+export function AgentActivityTimeline({
+  viewToggle,
+}: {
+  /** Home's Density / Detail switch, first in the header actions. */
+  viewToggle?: ReactNode;
+} = {}) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const labelWidth = isMobile ? LABEL_WIDTH_MOBILE : LABEL_WIDTH;
@@ -738,7 +760,8 @@ export function AgentActivityTimeline() {
   // buffer). `scrollBucket` advances every half viewport, so scrolling only
   // re-renders labels when a new region comes into range.
   const [scrollBucket, setScrollBucket] = useState(0);
-  const intervalMs = tickIntervalMs(windowMs);
+  const labelPx = axisLabelPx(windowMs);
+  const intervalMs = tickIntervalMs(windowMs, pxPerMs, labelPx);
   const intervalPx = intervalMs * pxPerMs;
   // Shared by axis-label AND bar virtualization: the scrolled-to region plus
   // one viewport of buffer each side.
@@ -926,8 +949,12 @@ export function AgentActivityTimeline() {
       laneLabelsRef.current.style.transform = `translateY(${-node.scrollTop}px)`;
     }
     // Track which region is in view for axis/bar virtualization. Same-value
-    // sets bail out of re-rendering, so this is cheap per scroll frame.
-    setScrollBucket(Math.floor(node.scrollLeft / Math.max(1, node.clientWidth / 2)));
+    // sets bail out of re-rendering, so this is cheap per scroll frame. The
+    // bucket unit must match `viewportWidth` (floored at MIN_VIEWPORT_WIDTH):
+    // on a phone, half the real clientWidth put the rendered region far right
+    // of the scroll position, and the axis labels and bars in view vanished.
+    const viewport = Math.max(MIN_VIEWPORT_WIDTH, node.clientWidth);
+    setScrollBucket(Math.floor(node.scrollLeft / (viewport / 2)));
     // Our own write echoing back — not user input.
     if (
       lastProgrammaticLeftRef.current !== null &&
@@ -1008,7 +1035,8 @@ export function AgentActivityTimeline() {
   // `isLoading` no longer implies "nothing to draw".
   if (!liveTasksQ.data && (agentsQ.isLoading || liveTasksQ.isLoading)) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border bg-card">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     );
@@ -1016,7 +1044,8 @@ export function AgentActivityTimeline() {
 
   if (visibleTasks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border bg-card">
+      <div className="relative flex h-full items-center justify-center rounded-xl border bg-card shadow-sm">
+        {viewToggle ? <div className="absolute right-3 top-2">{viewToggle}</div> : null}
         <EmptyState
           icon={Clock}
           title="No task activity yet"
@@ -1027,86 +1056,98 @@ export function AgentActivityTimeline() {
     );
   }
 
-  return (
-    <section className="flex h-full flex-col overflow-hidden rounded-lg border bg-card">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
-        {/* Phones get an abbreviated title — at 320px the full one truncates to
-            "Swarm a…", which reads worse than a short honest label. */}
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">
-            {isMobile ? "Activity" : "Swarm activity timeline"}
-          </h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {visibleTasks.length.toLocaleString()} tasks ·{" "}
-            {isMobile
-              ? formatWindowLabel(windowMs)
-              : `visible window ${formatWindowLabel(windowMs)}`}
-          </p>
-        </div>
-        {/* Controls stay on a single row: below `sm` the live toggle collapses
-            to its icon so all five buttons fit next to the title. */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            type="button"
-            variant={live ? "secondary" : "outline"}
-            size="sm"
-            onClick={live ? () => setLive(false) : backToLive}
-            className="h-8 w-8 px-0 sm:w-auto sm:px-3"
-            title={live ? "Pause live updates" : "Follow live activity"}
-            aria-label={live ? "Pause live updates" : "Back to live"}
-          >
-            {live ? (
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-active opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-status-active" />
-              </span>
-            ) : (
-              <Radio className="h-3.5 w-3.5" />
-            )}
-            <span className="hidden sm:inline">{live ? "Live" : "Back to live"}</span>
-          </Button>
-          <TimelineIconButton
-            label={nextPresetIn ? `Zoom in (${nextPresetIn.label} window)` : "Zoom in"}
-            onClick={() => nextPresetIn && zoomToWindow(nextPresetIn.ms)}
-            disabled={!nextPresetIn}
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </TimelineIconButton>
-          <TimelineIconButton
-            label={nextPresetOut ? `Zoom out (${nextPresetOut.label} window)` : "Zoom out"}
-            onClick={() => nextPresetOut && zoomToWindow(nextPresetOut.ms)}
-            disabled={!nextPresetOut}
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </TimelineIconButton>
-          <TimelineIconButton
-            label={`Reset zoom to ${ZOOM_LEVELS[DEFAULT_ZOOM_INDEX].label}`}
-            onClick={() => zoomToWindow(DEFAULT_WINDOW_MS)}
-            disabled={Math.abs(windowMs - DEFAULT_WINDOW_MS) < DEFAULT_WINDOW_MS * 0.01}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </TimelineIconButton>
-          <TimelineIconButton
-            label={
-              isLoadingHistory
-                ? "Loading older activity…"
-                : hasMoreHistory
-                  ? "Load older activity"
-                  : "No older activity"
-            }
-            onClick={() => void loadOlder()}
-            disabled={isLoadingHistory || !hasMoreHistory}
-          >
-            {isLoadingHistory ? (
-              <Spinner className="size-3.5" />
-            ) : (
-              <History className="h-3.5 w-3.5" />
-            )}
-          </TimelineIconButton>
-        </div>
-      </div>
+  const liveButton = (
+    <Button
+      type="button"
+      variant={live ? "secondary" : "outline"}
+      size="sm"
+      onClick={live ? () => setLive(false) : backToLive}
+      className="h-8 w-8 px-0 sm:w-auto sm:px-3"
+      title={live ? "Pause live updates" : "Follow live activity"}
+      aria-label={live ? "Pause live updates" : "Back to live"}
+    >
+      {live ? (
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-active opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-status-active" />
+        </span>
+      ) : (
+        <Radio className="h-3.5 w-3.5" />
+      )}
+      <span className="hidden sm:inline">{live ? "Live" : "Back to live"}</span>
+    </Button>
+  );
 
-      <div className="flex min-h-0 flex-1">
+  // Zoom, reset and history: in the header on desktop, in a row under it on
+  // phones, where the toggle and four more buttons overrun a 375px header.
+  const zoomControls = (
+    <>
+      <TimelineIconButton
+        label={nextPresetIn ? `Zoom in (${nextPresetIn.label} window)` : "Zoom in"}
+        onClick={() => nextPresetIn && zoomToWindow(nextPresetIn.ms)}
+        disabled={!nextPresetIn}
+      >
+        <ZoomIn className="h-3.5 w-3.5" />
+      </TimelineIconButton>
+      <TimelineIconButton
+        label={nextPresetOut ? `Zoom out (${nextPresetOut.label} window)` : "Zoom out"}
+        onClick={() => nextPresetOut && zoomToWindow(nextPresetOut.ms)}
+        disabled={!nextPresetOut}
+      >
+        <ZoomOut className="h-3.5 w-3.5" />
+      </TimelineIconButton>
+      <TimelineIconButton
+        label={`Reset zoom to ${ZOOM_LEVELS[DEFAULT_ZOOM_INDEX].label}`}
+        onClick={() => zoomToWindow(DEFAULT_WINDOW_MS)}
+        disabled={Math.abs(windowMs - DEFAULT_WINDOW_MS) < DEFAULT_WINDOW_MS * 0.01}
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+      </TimelineIconButton>
+      <TimelineIconButton
+        label={
+          isLoadingHistory
+            ? "Loading older activity…"
+            : hasMoreHistory
+              ? "Load older activity"
+              : "No older activity"
+        }
+        onClick={() => void loadOlder()}
+        disabled={isLoadingHistory || !hasMoreHistory}
+      >
+        {isLoadingHistory ? <Spinner className="size-3.5" /> : <History className="h-3.5 w-3.5" />}
+      </TimelineIconButton>
+    </>
+  );
+
+  return (
+    <HomeWidget
+      className="h-full"
+      bodyClassName="flex min-h-0 flex-1 flex-col"
+      // Phones get an abbreviated title: at 320px the full one truncates.
+      title={isMobile ? "Activity" : "Swarm activity"}
+      icon={<Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+      // Phones keep the title: the five controls leave no room for the count.
+      meta={
+        isMobile ? null : (
+          <HomeWidgetCount>
+            {visibleTasks.length.toLocaleString()} tasks · {formatWindowLabel(windowMs)}
+          </HomeWidgetCount>
+        )
+      }
+      action={
+        <div className="flex shrink-0 items-center gap-1.5">
+          {viewToggle}
+          {liveButton}
+          {isMobile ? null : zoomControls}
+        </div>
+      }
+    >
+      {isMobile ? (
+        <div className="flex shrink-0 items-center justify-end gap-1.5 border-b border-border-subtle px-3 py-1.5">
+          {zoomControls}
+        </div>
+      ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1">
         <div
           className="shrink-0 overflow-hidden border-r bg-muted/35"
           style={{ width: labelWidth, paddingTop: HEADER_HEIGHT }}
@@ -1159,13 +1200,17 @@ export function AgentActivityTimeline() {
             <div className="sticky top-0 z-20 h-10 border-b bg-card/95 backdrop-blur">
               {ticks.map((tick) => {
                 const x = (tick - timelineStartMs) * pxPerMs;
+                const nowX = (nowMs - timelineStartMs) * pxPerMs;
+                // A label that would run under the "now" pill keeps its line only.
+                const underNow = x > nowX - labelPx && x < nowX + NOW_PILL_PX;
                 return (
                   <div
                     key={tick}
-                    className="absolute top-0 h-full border-l border-border/80 pl-2 pt-2 text-[10px] text-muted-foreground"
+                    data-axis-label={underNow ? undefined : ""}
+                    className="absolute top-0 h-full whitespace-nowrap border-l border-border/80 pl-2 pt-2 text-[10px] text-muted-foreground"
                     style={{ left: x }}
                   >
-                    {formatAxisLabel(tick, windowMs)}
+                    {underNow ? null : formatAxisLabel(tick, windowMs)}
                   </div>
                 );
               })}
@@ -1176,7 +1221,10 @@ export function AgentActivityTimeline() {
                 className="absolute top-0 h-full border-l border-primary"
                 style={{ left: (nowMs - timelineStartMs) * pxPerMs }}
               >
-                <div className="ml-1 mt-1 w-fit rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
+                <div
+                  data-axis-now
+                  className="ml-1 mt-1 w-fit rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground"
+                >
                   now
                 </div>
               </div>
@@ -1361,6 +1409,6 @@ export function AgentActivityTimeline() {
           </div>
         </div>
       </div>
-    </section>
+    </HomeWidget>
   );
 }

@@ -693,10 +693,20 @@ describe("script connections", () => {
       markMigrationApplied(database, "283_workflow_run_definitions.sql");
       // 284 alters model_profiles (made by the skipped 220) and agent_tasks.
       markMigrationApplied(database, "284_model_profile_fallbacks.sql");
+      // 301 rebuilds user_favorites, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "301_favorites_key_type.sql");
       // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
       markMigrationApplied(database, "293_savings_component_links.sql");
-      // 300 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
-      markMigrationApplied(database, "300_audit_agent_columns.sql");
+      // These migrations alter api_key_status and session_costs, which this fixture lacks.
+      markMigrationApplied(database, "306_provider_account_telemetry.sql");
+      markMigrationApplied(database, "307_session_cost_credential_attribution.sql");
+      // This one alters session_logs, which this fixture lacks.
+      markMigrationApplied(database, "310_session_logs_reasoning.sql");
+      // 314 references model_profiles (made by the skipped 220) and alters
+      // scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "314_model_groups.sql");
+      // 315 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
+      markMigrationApplied(database, "315_audit_agent_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -131,5 +131,6 @@ describe("Copy for your agent", () => {
     expect(written[0]).toContain("1. In Telegram, open BotFather (https://t.me/BotFather)");
     expect(written[0]).toContain("8. The bot answers /help, /status, /cancel and /reset.");
     expect(written[0]).toContain("Webhook URL of this swarm");
+    expect(written[0]).toContain("in the Agent Swarm dashboard under Connect › Channels");
   });
 });

@@ -334,8 +334,20 @@ describe("extension steering boundary", () => {
       },
     } as unknown as NonNullable<ReturnType<typeof slackApp.getSlackApp>>);
     try {
-      bufferThreadMessage("C_STEER_POLICY", "1000.0001", "Drop this", "U_BLOCKED", "1000.0002");
-      bufferThreadMessage("C_STEER_POLICY", "1000.0001", "Keep this", "U_ALLOWED", "1000.0003");
+      await bufferThreadMessage(
+        "C_STEER_POLICY",
+        "1000.0001",
+        "Drop this",
+        "U_BLOCKED",
+        "1000.0002",
+      );
+      await bufferThreadMessage(
+        "C_STEER_POLICY",
+        "1000.0001",
+        "Keep this",
+        "U_ALLOWED",
+        "1000.0003",
+      );
       await instantFlush("C_STEER_POLICY:1000.0001");
       expect((await getSteeringMessagesForTask(task.id)).map((row) => row.body)).toEqual([
         "Keep this",

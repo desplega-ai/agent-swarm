@@ -24,6 +24,7 @@ memory_rating
 memory_retrieval
 model_catalog          # system-written models.dev projection (173)
 model_catalog_meta     # single-row fetch state (173)
+model_group_members    # ordered child rows; audit columns live on model_groups (308)
 oauth_apps
 oauth_authorizations   # attribution via connectedByUserId (117)
 oauth_pending          # ephemeral PKCE state, 10-min GC (117)
@@ -74,3 +75,5 @@ workflow_run_definitions # immutable content-addressed run definition snapshots;
 automation_savings_daily # system-written savings rollup buckets, no user attribution (289)
 automation_savings_days  # system-written rollup day markers, no user attribution (289)
 automation_savings_links # system-written savings rollup links between jobs, no user attribution (290)
+import_items             # importer ownership map, system-written at boot (294)
+import_pending_assignments # importer-written assignments awaiting agent registration (294)

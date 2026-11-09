@@ -121,6 +121,14 @@ export const PERMISSIONS = {
       "Opt in to read every user's tasks and sessions (the dashboard's All users scope). Read-only: writes and steering still need the principal's own access.",
     namespace: "task",
   },
+  "checklist.write.own": {
+    description: "Edit checklist items the caller owns.",
+    namespace: "checklist",
+  },
+  "checklist.write.agent": {
+    description: "Change a user's checklist items as an agent. Only the Lead.",
+    namespace: "checklist",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",
@@ -256,6 +264,11 @@ export const PERMISSIONS = {
       "Create, update, or delete model profiles (named harness + model + effort). Operator (shared API key) only.",
     namespace: "models",
   },
+  "models.groups.write": {
+    description:
+      "Create, update, reorder, or delete model groups (named, ordered lists of model profiles). Lead, operator, or dashboard user.",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",
@@ -322,7 +335,8 @@ export const PERMISSIONS = {
     namespace: "mcp-oauth",
   },
   "kv.write.any": {
-    description: "Write another agent's task:agent: KV namespace.",
+    description:
+      "Write another agent's task:agent: KV namespace, or a lead-only family (usecase:*).",
     namespace: "kv",
   },
   "comb.presence": {

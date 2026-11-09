@@ -314,3 +314,50 @@ describe("Table column filters, muted values and states", () => {
     );
   });
 });
+
+describe("currency and percent formats", () => {
+  test("Table currency / percent columns, DetailList fields and Metric format validate", async () => {
+    const copy = withProps("table", {
+      columns: [
+        { key: "amount", kind: "currency", currency: "EUR" },
+        { key: "amount", kind: "percent" },
+        { key: "title", popover: { fields: [{ key: "amount", kind: "currency" }] } },
+      ],
+    });
+    const elements = copy.pages.main.elements as Elements;
+    elements.detail!.props.fields = [{ key: "amount", kind: "currency", currency: "USD" }];
+    elements.mRevenue!.props = { ...elements.mRevenue!.props, format: "currency", currency: "EUR" };
+    expect(await issuesFor(copy)).toEqual([]);
+  });
+
+  test('a lowercase currency ("usd") is rejected on every surface', async () => {
+    const copy = withProps("table", {
+      columns: [
+        { key: "amount", kind: "currency", currency: "usd" },
+        {
+          key: "title",
+          popover: { fields: [{ key: "amount", kind: "currency", currency: "eu" }] },
+        },
+      ],
+    });
+    const elements = copy.pages.main.elements as Elements;
+    elements.detail!.props.fields = [{ key: "amount", kind: "currency", currency: "usd" }];
+    elements.mRevenue!.props = { ...elements.mRevenue!.props, format: "currency", currency: "usd" };
+    const paths = (await issuesFor(copy)).map((entry) => entry.path).sort();
+    expect(paths).toEqual(
+      [
+        "pages.main.elements.detail.props.fields.0.currency",
+        "pages.main.elements.mRevenue.props.currency",
+        "pages.main.elements.table.props.columns.0.currency",
+        "pages.main.elements.table.props.columns.1.popover.fields.0.currency",
+      ].sort(),
+    );
+  });
+
+  test("an unknown Metric format is rejected", async () => {
+    const issues = await issuesFor(withProps("mRevenue", { format: "money" }));
+    expect(issues.map((entry) => entry.path)).toEqual([
+      "pages.main.elements.mRevenue.props.format",
+    ]);
+  });
+});

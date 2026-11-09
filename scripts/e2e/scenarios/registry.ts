@@ -19,6 +19,7 @@ const NON_SCENARIO_FILES = new Set([
   "platform-helpers.ts",
   "platformb-helpers.ts",
   "slack-helpers.ts",
+  "slack-http-helpers.ts",
   "workflow-helpers.ts",
   "knowledge-helpers.ts",
   "script-helpers.ts",

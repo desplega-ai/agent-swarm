@@ -137,6 +137,7 @@ value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
 value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
+value:SessionCostConflictError
 value:TASK_LINEAGE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
@@ -484,6 +485,7 @@ value:incrementPageViewCount
 value:initDb
 value:insertActiveSession
 value:insertPricingRow
+value:insertSessionCost
 value:insertTaskAttachment
 value:installMcpServer
 value:installSkill
@@ -540,6 +542,7 @@ value:markSteeringHandled
 value:markSteeringPromoted
 value:markTaskSlackReplySent
 value:markTasksNotified
+value:markWorkflowStepTaskSuperseded
 value:maskSecrets
 value:moveAssetKey
 value:moveTaskChainKeyInTx
@@ -636,6 +639,7 @@ value:updateSlackMessageRecord
 value:updateSwarmRepo
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
+value:updateTaskTags
 value:updateTaskTitle
 value:updateTaskVcs
 value:updateUser
@@ -665,6 +669,7 @@ value:getOrphanedInProgressTasksForAgent
 value:getPausedTasksForAgent
 value:getPendingTaskForAgent
 value:getRecentlyCancelledTasksForAgent
+value:markWorkflowStepTaskSuperseded
 value:overwriteTerminalTaskResultText
 value:pauseTask
 value:recordTaskProviderIfUnset
@@ -677,6 +682,7 @@ value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
+value:updateTaskTags
 value:updateTaskTitle`.split("\n");
 const internal = ["value:configureTaskWriteDependencies"];
 
@@ -685,7 +691,6 @@ const internal = ["value:configureTaskWriteDependencies"];
 const frozenFacadeBodies = `BINARY_SKILL_FILE_PLACEHOLDER
 BUDGETED_IDENTITY_FIELDS
 ELIGIBILITY_SCAN_BATCH_SIZE
-ELIGIBILITY_SCAN_CAP
 GENERATED_PULL_REQUEST_DESCRIPTION
 GENERATED_PULL_REQUEST_INTENT
 GENERATED_PULL_REQUEST_PROVIDER_ID

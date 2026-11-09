@@ -19,6 +19,7 @@ import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar
 import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { AgentSlackIconField } from "@/components/shared/agent-slack-icon-field";
+import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
 import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { MediaIconField } from "@/components/shared/media-icon-field";
@@ -106,12 +107,15 @@ function MarkdownDocumentEditor({
   agent,
   onSave,
   saving,
+  heading,
 }: {
   field: MdField;
   label: string;
   agent: Agent;
   onSave: (field: MdField, value: string) => void;
   saving: boolean;
+  /** Replaces the label, e.g. the phone's document picker, so the picker and Edit share one row. */
+  heading?: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -132,7 +136,7 @@ function MarkdownDocumentEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-muted-foreground">{label}</h3>
+        {heading ?? <h3 className="text-sm font-semibold text-muted-foreground">{label}</h3>}
         {!editing ? (
           <Button size="sm" variant="ghost" onClick={start}>
             <Pencil className="h-3.5 w-3.5 mr-1.5" />
@@ -159,7 +163,7 @@ function MarkdownDocumentEditor({
           autoFocus
         />
       ) : value ? (
-        <pre className="rounded-md border border-border/50 bg-muted/30 p-3 text-xs font-mono leading-relaxed text-foreground/80 overflow-auto max-h-[60vh]">
+        <pre className="rounded-md border border-border/50 bg-muted/30 p-3 text-xs font-mono leading-relaxed text-foreground/80 max-md:whitespace-pre-wrap max-md:break-words md:overflow-auto md:max-h-[60vh]">
           {value}
         </pre>
       ) : (
@@ -341,8 +345,8 @@ export default function AgentDetailPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-3">
-      <div className="shrink-0">
+    <div className="flex flex-col gap-3 md:flex-1 md:min-h-0 md:overflow-hidden">
+      <div className="hidden shrink-0 md:block">
         <button
           type="button"
           onClick={() => navigate("/agents")}
@@ -355,6 +359,15 @@ export default function AgentDetailPage() {
       {/* Name row wraps on a phone: role and status drop under the name
           instead of squeezing it to one word per line. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-ml-2 -mr-1 md:hidden"
+          onClick={() => navigate("/agents")}
+          aria-label="Back to Agents"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
         {editing ? (
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" className="shrink-0" />
@@ -403,28 +416,35 @@ export default function AgentDetailPage() {
               {agent.role}
             </span>
           )}
-          <StatusBadge status={agent.status} size="md" />
+          <AgentStatusBadge agent={agent} size="md" />
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
-        <TabsList className={cn("shrink-0", SCROLLABLE_TABS_LIST)}>
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="credentials">Credentials</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="tasks">{tabLabel("Tasks", tasksLoading, taskTotal)}</TabsTrigger>
-          <TabsTrigger value="skills">
-            {tabLabel("Skills", agentSkillsLoading, agentSkillsList.length)}
-          </TabsTrigger>
-          <TabsTrigger value="mcp-servers">
-            {tabLabel("MCP Servers", agentMcpServersLoading, agentMcpServersList.length)}
-          </TabsTrigger>
-          <TabsTrigger value="usage">
-            {tabLabel("Usage", agentCostsLoading, formatCost(totalCostUsd(agentCosts ?? [])))}
-          </TabsTrigger>
-        </TabsList>
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="flex flex-col md:flex-1 md:min-h-0"
+      >
+        {/* On a phone the header scrolls away and the tabs stay pinned, as on the task page. */}
+        <div className="sticky top-0 z-20 -mx-4 shrink-0 bg-background px-4 py-2 md:static md:mx-0 md:bg-transparent md:p-0">
+          <TabsList className={cn("shrink-0", SCROLLABLE_TABS_LIST)}>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="credentials">Credentials</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="tasks">{tabLabel("Tasks", tasksLoading, taskTotal)}</TabsTrigger>
+            <TabsTrigger value="skills">
+              {tabLabel("Skills", agentSkillsLoading, agentSkillsList.length)}
+            </TabsTrigger>
+            <TabsTrigger value="mcp-servers">
+              {tabLabel("MCP Servers", agentMcpServersLoading, agentMcpServersList.length)}
+            </TabsTrigger>
+            <TabsTrigger value="usage">
+              {tabLabel("Usage", agentCostsLoading, formatCost(totalCostUsd(agentCosts ?? [])))}
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-        <TabsContent value="profile" className="mt-4 overflow-y-auto">
+        <TabsContent value="profile" className="mt-2 md:mt-4 md:overflow-y-auto">
           <DetailPageBody
             main={
               <div className="space-y-4">
@@ -527,20 +547,20 @@ export default function AgentDetailPage() {
           />
         </TabsContent>
 
-        <TabsContent value="credentials" className="mt-4 overflow-y-auto">
+        <TabsContent value="credentials" className="mt-2 md:mt-4 md:overflow-y-auto">
           <CredentialsPanel agent={agent} />
         </TabsContent>
 
         <TabsContent
           value="documents"
-          className="mt-4 flex flex-col flex-1 min-h-0 overflow-hidden"
+          className="mt-2 flex flex-col md:mt-4 md:flex-1 md:min-h-0 md:overflow-hidden"
         >
           <Tabs
             value={activeDocType}
             onValueChange={setActiveDocType}
-            className="flex flex-col flex-1 min-h-0"
+            className="flex flex-col md:flex-1 md:min-h-0"
           >
-            <TabsList className={cn("shrink-0", SCROLLABLE_TABS_LIST, "sm:w-full")}>
+            <TabsList className={cn("shrink-0 max-md:hidden", SCROLLABLE_TABS_LIST, "sm:w-full")}>
               {DOCUMENT_FIELDS.map(({ tab, label, field }) => {
                 const empty = !agent[field];
                 return (
@@ -556,8 +576,23 @@ export default function AgentDetailPage() {
               })}
             </TabsList>
             {DOCUMENT_FIELDS.map(({ tab, label, field }) => (
-              <TabsContent key={tab} value={tab} className="mt-3 overflow-y-auto">
+              <TabsContent key={tab} value={tab} className="mt-1 md:mt-3 md:overflow-y-auto">
                 <MarkdownDocumentEditor
+                  heading={
+                    <Select value={activeDocType} onValueChange={setActiveDocType}>
+                      <SelectTrigger className="h-9 w-48 md:hidden" aria-label="Document">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DOCUMENT_FIELDS.map((d) => (
+                          <SelectItem key={d.tab} value={d.tab}>
+                            {d.label}
+                            {agent[d.field] ? "" : " (empty)"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  }
                   field={field}
                   label={label}
                   agent={agent}
@@ -569,7 +604,10 @@ export default function AgentDetailPage() {
           </Tabs>
         </TabsContent>
 
-        <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
+        <TabsContent
+          value="tasks"
+          className="mt-2 flex flex-col gap-3 md:mt-4 md:flex-1 md:min-h-0"
+        >
           <div className="flex flex-wrap items-center gap-2 shrink-0 sm:gap-3">
             <div className="relative min-w-0 flex-1 basis-48 sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -617,7 +655,6 @@ export default function AgentDetailPage() {
               label="Agent tasks"
               loading={tasksLoading}
               emptyMessage="No tasks for this agent"
-              className="min-h-0 overflow-y-auto"
             >
               {(tasksData?.tasks ?? []).map((task) => (
                 <MobileListRow
@@ -675,7 +712,7 @@ export default function AgentDetailPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="skills" className="mt-4 overflow-y-auto">
+        <TabsContent value="skills" className="mt-2 md:mt-4 md:overflow-y-auto">
           {agentSkillsList.length === 0 ? (
             <EmptyPanel>No skills installed for this agent.</EmptyPanel>
           ) : (
@@ -718,7 +755,7 @@ export default function AgentDetailPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="mcp-servers" className="mt-4 overflow-y-auto">
+        <TabsContent value="mcp-servers" className="mt-2 md:mt-4 md:overflow-y-auto">
           {agentMcpServersList.length === 0 ? (
             <EmptyPanel>No MCP servers installed for this agent.</EmptyPanel>
           ) : (

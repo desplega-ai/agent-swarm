@@ -128,7 +128,7 @@ describe("pre.task.create block in the thread buffer", () => {
       const loaded = await loadBlockingExtension();
       const info = spyOn(console, "info").mockImplementation(() => {});
       try {
-        bufferThreadMessage("C_SKIP_BLOCK", "15000.0001", "chatter", "U1", "15000.0002");
+        await bufferThreadMessage("C_SKIP_BLOCK", "15000.0001", "chatter", "U1", "15000.0002");
         await instantFlush("C_SKIP_BLOCK:15000.0001");
         expect(await getMostRecentTaskInThread("C_SKIP_BLOCK", "15000.0001")).toBeNull();
         expect(calls.map((call) => call.name)).not.toContain("no_entry");
@@ -139,7 +139,7 @@ describe("pre.task.create block in the thread buffer", () => {
 
         calls = [];
         process.env.SLACK_REACTION_SKIPPED = "zipper_mouth_face";
-        bufferThreadMessage("C_SKIP_BLOCK", "15000.0001", "more chatter", "U1", "15000.0003");
+        await bufferThreadMessage("C_SKIP_BLOCK", "15000.0001", "more chatter", "U1", "15000.0003");
         await instantFlush("C_SKIP_BLOCK:15000.0001");
         expect(calls.at(-1)).toEqual({
           method: "add",

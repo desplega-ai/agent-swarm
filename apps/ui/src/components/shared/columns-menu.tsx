@@ -84,12 +84,33 @@ export function ColumnsMenu({
  * Columns the grid hid to fit show unchecked; checking one forces it visible
  * (the grid scrolls horizontally), unchecking hides it.
  */
-export function DataGridColumnsMenu({ state }: { state: DataGridColumnsState }) {
+export function DataGridColumnsMenu({
+  state,
+  compact = false,
+}: {
+  state: DataGridColumnsState;
+  /** An icon-only trigger for a crowded toolbar row. */
+  compact?: boolean;
+}) {
   const pinned = state.entries.filter((entry) => !entry.toggleable);
   const toggleable = state.entries.filter((entry) => entry.toggleable);
+  const label = state.hiddenCount > 0 ? `Columns, ${state.hiddenCount} hidden` : "Columns";
   return (
     <ColumnsMenu
       hiddenCount={state.hiddenCount}
+      trigger={
+        compact ? (
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="size-8 shrink-0"
+            aria-label={label}
+            title={label}
+          >
+            <Settings2 className="size-4" />
+          </Button>
+        ) : undefined
+      }
       groups={[
         pinned.map((entry) => ({
           id: entry.id,

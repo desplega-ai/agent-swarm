@@ -8,6 +8,7 @@ import {
   foldWaits,
   hasHandoffs,
   isDeferral,
+  keepSeenApprovals,
   onlyWaits,
   partSteps,
   type SessionTurns,
@@ -801,6 +802,16 @@ describe("approvalsByPart", () => {
   });
 });
 
+test("keepSeenApprovals keeps an approval that left the pending list", () => {
+  const a1 = { id: "a1", status: "pending" as const, sourceTaskId: "t1", title: "Ship it?" };
+  const a2 = { id: "a2", status: "pending" as const, sourceTaskId: "t2", title: "Publish?" };
+  const seen = keepSeenApprovals([], [a1, a2]);
+  const a3 = { ...a1, id: "a3", title: "Rotate?" };
+  expect(keepSeenApprovals(seen, [a2]).map((a) => a.id)).toEqual(["a1", "a2"]);
+  expect(keepSeenApprovals(seen, [a2, a3]).map((a) => a.id)).toEqual(["a1", "a2", "a3"]);
+  expect(keepSeenApprovals(seen, [a1, a2])).toEqual([a1, a2]);
+});
+
 test("formatSpan rounds to whole minutes like the mockup", () => {
   expect(formatSpan(12_000)).toBe("12s");
   expect(formatSpan(17 * 60_000)).toBe("17m");
@@ -925,5 +936,36 @@ describe("deferrals", () => {
     const json = task({ id: "j", output: '{"status":"pending","pr":12}', ...deferred });
     expect(isDeferral(json)).toBe(false);
     expect(isDeferral(task({ id: "k", output: waiting("Lead", "15:03"), ...deferred }))).toBe(true);
+  });
+});
+
+describe("personText (an app page's messages)", () => {
+  // An app page sends each message as an `api` task whose prompt carries it.
+  const appTask = (id: string, createdAt: string, message: string, parentTaskId?: string) =>
+    task({ id, createdAt, source: "api", task: `prompt\n[msg] ${message}`, parentTaskId });
+  const personText = (t: AgentTask) =>
+    t.source === "api" ? (/^\[msg\] (.*)$/m.exec(t.task)?.[1] ?? null) : null;
+
+  test("without it, api tasks never open a turn", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain);
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(turns[0]?.person).toBeUndefined();
+  });
+
+  test("a task it names opens a turn, the root included", () => {
+    const chain = [appTask("a", at(10), "hi"), appTask("b", at(5), "again", "a")];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.person?.id)).toEqual(["a", "b"]);
+  });
+
+  test("a task it returns null for keeps the source rules", () => {
+    const chain = [
+      appTask("a", at(10), "hi"),
+      task({ id: "w", createdAt: at(8), parentTaskId: "a", agentId: "worker", isLeadTask: false }),
+    ];
+    const { turns } = buildTurns(chain, { personText });
+    expect(turns.map((turn) => turn.id)).toEqual(["a"]);
+    expect(partSteps(turns[0]!.parts[0]!).map((step) => step.tries[0]?.id)).toEqual(["w"]);
   });
 });

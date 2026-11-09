@@ -51,6 +51,7 @@ import {
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
+import { isAgentOnDemand } from "../be/runtime-pools/reachability";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -382,7 +383,21 @@ async function resolveListClaudeTransports(
 /** List/detail rows carry the effective Claude transport so the dashboard can flag SDK agents. */
 const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
   claudeTransport: ClaudeTransportSchema.optional(),
+  /** Offline, but its runtime pool starts a runtime when a task is sent (`isAgentOnDemand`). */
+  onDemand: z.boolean().optional(),
 });
+
+/** The list/detail extras: effective Claude transport and the on-demand flag, when set. */
+async function withListExtras<T extends Agent>(
+  agent: T,
+  claudeTransport: ClaudeTransport | undefined,
+): Promise<T & { claudeTransport?: ClaudeTransport; onDemand?: true }> {
+  return {
+    ...agent,
+    ...(claudeTransport ? { claudeTransport } : {}),
+    ...((await isAgentOnDemand(agent)) ? { onDemand: true as const } : {}),
+  };
+}
 
 /**
  * The agents whose name, role or id contains `q` (case-insensitive), at most
@@ -919,10 +934,9 @@ export async function handleAgentsRest(
       resolveListClaudeTransports(agents),
     ]);
     listAgents.respond(res, 200, {
-      agents: agentsWithCapacity.map((agent) => {
-        const claudeTransport = transports.get(agent.id);
-        return claudeTransport ? { ...agent, claudeTransport } : agent;
-      }),
+      agents: await Promise.all(
+        agentsWithCapacity.map((agent) => withListExtras(agent, transports.get(agent.id))),
+      ),
     });
     return true;
   }
@@ -1649,12 +1663,7 @@ export async function handleAgentsRest(
       agentWithCapacity(agent),
       resolveListClaudeTransports([agent]),
     ]);
-    const claudeTransport = transports.get(agent.id);
-    getAgent.respond(
-      res,
-      200,
-      claudeTransport ? { ...agentWithCap, claudeTransport } : agentWithCap,
-    );
+    getAgent.respond(res, 200, await withListExtras(agentWithCap, transports.get(agent.id)));
     return true;
   }
 

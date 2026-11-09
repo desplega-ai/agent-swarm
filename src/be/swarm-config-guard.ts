@@ -3,6 +3,10 @@ import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemet
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import {
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  validateScriptActionAllowlist,
+} from "../ui-spec/script-allowlist";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import {
   COMPANY_ACQUISITION_SOURCES,
@@ -72,6 +76,10 @@ const RESERVED_KEYS = new Set([
   "CODEX_OAUTH_DEVICE_BASE_URL",
   "DESPLEGA_TELEMETRY_ENDPOINT",
   "CLOUDFLARE_API_BASE_URL",
+  // GitHub host (GHES): the API base receives the PAT, the App JWT and installation
+  // tokens, so only the deployment env may redirect it.
+  "GITHUB_URL",
+  "GITHUB_API_URL",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -109,6 +117,35 @@ export function internalConfigKeyError(key: string): Error {
         ? "/api/ranking"
         : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
+}
+
+/**
+ * Keys only an admin user (a user token or dashboard session) may write or
+ * delete: never an agent, the Lead included, a guest, or the shared operator
+ * key, which every worker holds. The deployment env can still seed them.
+ * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
+ *
+ * shortcut: this stops direct writes, not a determined holder of the
+ * operator key. That key is root: it can create an admin user and mint a
+ * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
+ * nothing from a pin, because a script action runs as the card's own agent,
+ * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * (deployment-env only, or an out-of-band human approval) if workers stop
+ * holding the operator key.
+ */
+const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+
+export function isHumanOnlyConfigKey(key: string): boolean {
+  return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
+}
+
+export function humanOnlyConfigKeyError(key: string): string {
+  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
+}
+
+/** A page session acts for its viewer but runs the page author's code. */
+export function humanOnlyConfigKeyPageError(key: string): string {
+  return `Key '${key}' cannot be changed from a page session. Change it from the dashboard or with a user token.`;
 }
 
 export function isReservedConfigKey(key: string): boolean {
@@ -188,6 +225,14 @@ export const SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS = [
   "openai",
   "cloudflare",
 ] as const;
+
+/**
+ * Extraction hosts `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_EXTRACT_PROVIDER_IDS`
+ * in `src/workflows/executors/system-one-providers.ts`, listed here because that
+ * module's credential readers would pull the LLM stack into every `db.ts` import.
+ * A test keeps the two lists equal.
+ */
+export const SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS = ["cloudflare"] as const;
 
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
@@ -335,6 +380,27 @@ export function validateTaskAutoTitleModel(value: unknown): string | null {
     : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
 }
 
+/**
+ * Docker runtime isolation keys. Empty clears the key. The Docker adapter
+ * applies the same rules (`src/runtime-providers/docker.ts`), so a value
+ * this guard accepts never fails `checkConfig`.
+ */
+export function validateDockerRuntime(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_RUNTIME (must be a string)";
+  const name = value.trim();
+  return !name || /^[A-Za-z0-9._-]+$/.test(name)
+    ? null
+    : "Invalid DOCKER_RUNTIME (use an OCI runtime name: letters, digits, '.', '-', '_')";
+}
+
+export function validateDockerPidsLimit(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_PIDS_LIMIT (must be a string)";
+  const limit = value.trim();
+  return !limit || (/^[1-9]\d*$/.test(limit) && Number.isSafeInteger(Number(limit)))
+    ? null
+    : "Invalid DOCKER_PIDS_LIMIT (must be a positive integer, or empty)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -348,7 +414,10 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
-  ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
+  [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
+  ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
+  DOCKER_RUNTIME: validateDockerRuntime,
+  DOCKER_PIDS_LIMIT: validateDockerPidsLimit,
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   RUNTIME_CONTROLLER_TOKEN_TTL_DAYS: validateControllerTokenTtlDays,
@@ -449,6 +518,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ),
   // Where people-facing file links point. Blank keeps the automatic choice.
   ...enumValidator("AGENT_FS_LINK_TARGET", ["dashboard", "live", ""]),
+  // Dashboard origin(s), comma-separated; the first is the link base.
+  APP_URL: (value) => {
+    const invalid =
+      "Invalid APP_URL (must be comma-separated http(s) URLs with no query string or fragment, e.g. https://app.example.com)";
+    if (typeof value !== "string") return invalid;
+    const entries = value.split(",").map((entry) => entry.trim());
+    if (value.trim() && entries.some((entry) => !entry)) return invalid;
+    return entries.some((entry) => validateHttpBaseUrl(entry, invalid)) ? invalid : null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -456,6 +534,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
+  ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
@@ -473,6 +552,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
   },
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
+  ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
+    ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
+  ]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
@@ -555,6 +637,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_LEAVE_THREAD_DISABLE",
     "RBAC_ENABLED",
     "SEED_AUTOMATIONS_ENABLED",
+    "SEED_SCRIPTS_ENABLED",
+    "SEED_SKILLS_ENABLED",
+    "SEED_WORKFLOWS_ENABLED",
+    "SEED_SCHEDULES_ENABLED",
     "RBAC_AUDIT_DISABLED",
     "EXTENSION_ALLOW_INLINE_INSTALL",
     "BUDGET_ADMISSION_DISABLED",
@@ -565,6 +651,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "IMPROVEMENTS_ENABLED",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_QUERY_WORKER_POOL_ENABLED",
     "CLAUDE_TRUST_PRESEED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
