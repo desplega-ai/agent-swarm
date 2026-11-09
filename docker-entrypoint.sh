@@ -674,12 +674,19 @@ echo "=============================="
 # BEGIN prepare_clone_target
 # A clone killed mid-way on a persistent workspace leaves a non-empty dir with no
 # .git, and `git clone` into it fails on every boot. Move it aside (never delete:
-# it may hold someone's work) so the clone can run.
+# it may hold someone's work) so the clone can run. The repo parent is
+# worker-writable across boots, so refuse a path that resolves through a
+# symlink and move as worker: root never relocates anything a worker could
+# point it at.
 prepare_clone_target() {
     local dir="$1"
+    if [ "$(realpath -m -- "$dir" 2>/dev/null)" != "$dir" ]; then
+        echo "  Warning: not recovering ${dir}: it resolves through a symlink"
+        return 0
+    fi
     if [ -d "$dir" ] && [ ! -e "$dir/.git" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
         local aside="${dir}.incomplete-$(date +%s)"
-        mv "$dir" "$aside" && echo "  Moved incomplete clone ${dir} to ${aside}"
+        gosu worker mv -T -- "$dir" "$aside" && echo "  Moved incomplete clone ${dir} to ${aside}"
     fi
 }
 # END prepare_clone_target
