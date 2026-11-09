@@ -1370,8 +1370,9 @@ async function processBusEvent(eventName: string, payload: unknown): Promise<voi
     }
   }
 
-  // Clean up: if all waits for this event resolved, drop the listener.
-  if (set.size === 0) {
+  // Resuming can replace this set with a new wait for the same event. Only
+  // clean up the set this handler processed, never its replacement.
+  if (set.size === 0 && waitsByEvent.get(eventName) === set) {
     waitsByEvent.delete(eventName);
     const listener = listenersByEvent.get(eventName);
     if (listener) {
