@@ -2252,6 +2252,18 @@
           "author": {
             "type": "string",
             "minLength": 1
+          },
+          "toolSources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mcp",
+                "native"
+              ]
+            },
+            "minItems": 1,
+            "description": "Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `\"mcp\"` for swarm MCP tools, `\"native\"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `[\"mcp\"]`."
           }
         },
         "required": [
@@ -64978,6 +64990,226 @@
           },
           "403": {
             "description": "Only a config admin can turn telemetry on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tool-hooks": {
+      "post": {
+        "summary": "Run extension tool hooks for a harness-native tool call",
+        "description": "A worker shim reports a harness built-in tool call (bash, read, write, edit). `phase: pre` runs `pre.tool.call` with `callOrigin: native` and returns the decision. `phase: post` runs `post.tool.call` observe-only and returns 202 at once. Only extensions whose manifest `toolSources` includes `\"native\"` receive these calls. The server runs the secret scrubber over the body before any handler sees it, so handlers read `[REDACTED:<name>]` in place of a secret. A `modify` whose args still carry that marker is rejected and the call continues unchanged. Shims must also scrub worker-side before sending.",
+        "tags": [
+          "Extensions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "pre"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "post"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "result": {},
+                      "isError": {
+                        "type": "boolean"
+                      },
+                      "durationMs": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool",
+                      "durationMs"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pre-call decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "continue"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "modify"
+                          ]
+                        },
+                        "args": {}
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "block"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "action",
+                        "reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Post-call event accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or missing X-Agent-ID header",
             "content": {
               "application/json": {
                 "schema": {
