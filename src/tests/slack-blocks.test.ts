@@ -72,6 +72,27 @@ describe("markdownToSlack", () => {
     expect(markdownToSlack("a\n\n\n\nb")).toBe("a\n\nb");
   });
 
+  test("keeps literal code placeholders distinct from protected code", () => {
+    const literal = "\uE0020\uE0021\uE0020\uE003 \uE00200\uE0020\uE003";
+    const code = "`**code** \uE0022\uE0020\uE003`";
+    expect(markdownToSlack(`${literal} ${code} **bold**`)).toBe(`${literal} ${code} *bold*`);
+  });
+
+  // A generous budget catches quadratic marker selection; retry for a loaded CI host.
+  test(
+    "converts long marker runs without stalling",
+    () => {
+      const literal = "\uE002".repeat(80_000);
+      const code = "`**code**`";
+      const started = performance.now();
+      const converted = markdownToSlack(`${literal} ${code} **bold**`);
+      const elapsed = performance.now() - started;
+      expect(converted).toBe(`${literal} ${code} *bold*`);
+      expect(elapsed).toBeLessThan(1_000);
+    },
+    { retry: 2 },
+  );
+
   test.each([
     "\n\n",
     "\n \t\n",

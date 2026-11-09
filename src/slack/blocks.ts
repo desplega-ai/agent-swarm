@@ -46,8 +46,13 @@ export function getTaskUrl(taskId: string): string {
  */
 export function markdownToSlack(text: string): string {
   const code: string[] = [];
-  let codeMarker = "\uE002";
-  while (text.includes(codeMarker)) codeMarker += "\uE002";
+  // Leave the closing delimiter unconsumed so adjacent candidates are all seen.
+  const usedMarkers = new Set(
+    Array.from(text.matchAll(/\uE002(\d+)(?=\uE002)/g), (match) => match[1]),
+  );
+  let markerIndex = 0;
+  while (usedMarkers.has(String(markerIndex))) markerIndex++;
+  const codeMarker = `\uE002${markerIndex}\uE002`;
   // Hide code from every formatting rule, including blank-line normalization.
   const protectedText = text.replace(
     /\\[\s\S]|```[\s\S]*?(?:```|$)|(?<!`)(`+)(?!`)(?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?(?<!`)\1(?!`)/g,
