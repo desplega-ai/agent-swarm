@@ -24,6 +24,10 @@ type Pod = {
     creationTimestamp?: string;
     deletionTimestamp?: string;
   };
+  spec?: {
+    containers?: Array<{ volumeMounts?: Array<{ name: string; mountPath: string }> }>;
+    volumes?: Array<{ name: string; persistentVolumeClaim?: { claimName: string } }>;
+  };
   status?: { phase?: string };
 };
 
@@ -114,15 +118,27 @@ async function kubernetesApi<T>(
   }
 }
 
+/** The claim mounted at WORKSPACE_MOUNT_PATH, read from the pod spec, never from a label. */
+function podWorkspaceKey(pod: Pod): string | undefined {
+  const mount = pod.spec?.containers
+    ?.flatMap((container) => container.volumeMounts ?? [])
+    .find((volumeMount) => volumeMount.mountPath === WORKSPACE_MOUNT_PATH);
+  return pod.spec?.volumes?.find((volume) => volume.name === mount?.name)?.persistentVolumeClaim
+    ?.claimName;
+}
+
 function podHandle(pod: Pod): RuntimeHandle {
+  const { workspaceKey: _label, ...labels } = pod.metadata.labels ?? {};
+  const workspaceKey = podWorkspaceKey(pod);
   return {
     kind: "k8s",
     externalId: pod.metadata.name,
     createdAt: pod.metadata.creationTimestamp,
     meta: {
-      ...pod.metadata.labels,
+      ...labels,
       "k8s.namespace": pod.metadata.namespace,
       "k8s.uid": pod.metadata.uid,
+      ...(workspaceKey ? { workspaceKey } : {}),
     },
   };
 }

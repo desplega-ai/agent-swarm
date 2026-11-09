@@ -249,6 +249,26 @@ describe("Kubernetes runtime provider", () => {
     expect(new URL(calls[1]!.url).searchParams.get("continue")).toBe("next+page/=");
   });
 
+  test("list reports the workspace claim from the pod spec, never from a label", async () => {
+    const spec = (claimName: string, mountPath: string) => ({
+      containers: [{ volumeMounts: [{ name: "workspace", mountPath }] }],
+      volumes: [{ name: "workspace", persistentVolumeClaim: { claimName } }],
+    });
+    handler = () =>
+      Response.json({
+        items: [
+          { metadata, spec: spec("swarm-ws-agent-0", "/workspace/personal") },
+          {
+            metadata: { ...metadata, name: "forged", labels: { ...labels, workspaceKey: "x" } },
+            spec: spec("swarm-ws-agent-1", "/elsewhere"),
+          },
+        ],
+        metadata: {},
+      });
+    const rows = await provider.list(target, request.ownerId);
+    expect(rows.map((row) => row.meta?.workspaceKey)).toEqual(["swarm-ws-agent-0", undefined]);
+  });
+
   test("maps pod phases and detects replaced pods", async () => {
     for (const [phase, status] of [
       ["Pending", "starting"],
