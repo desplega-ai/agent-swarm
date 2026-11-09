@@ -12,6 +12,14 @@ The swarm API key MUST be read via `getApiKey()` from `src/utils/api-key.ts` —
 
 System prompt and task prompt text MUST go through the prompt-template registry in `src/prompts/`; do not hardcode new prompt sections with string concatenation in runners, hooks, or providers. Add or update a registered template, then resolve it from the call site.
 
+## Pull request description
+
+Every PR, from anyone, fills [.github/pull_request_template.md](./.github/pull_request_template.md): keep its `**Why:**` and `**Risk:**` lines and its `##` headings.
+`gh pr create --body` and `--fill` skip the template. Write the body to a file and pass `--body-file`.
+Check the file first: `bun scripts/check-pr-body.ts --title "<title>" --body-file <file>`.
+A red **PR Body** check blocks the merge. Editing the description re-runs it; no push needed.
+Section rules and length targets: the "writing a pull request description" block further down.
+
 <important if="you are writing or modifying API-server code that reads or writes the database (src/be, src/http, src/tools, src/apps, src/workflows, src/heartbeat, src/scheduler)">
 
 All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite` imports) is allowed only for the boot-path files listed in `scripts/check-async-db-seam.sh` (CI-enforced).
