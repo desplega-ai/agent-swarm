@@ -6,9 +6,16 @@ import {
   createWorkflow,
   createWorkflowRun,
   getDbClient,
+  getKv,
   initDb,
+  upsertKv,
 } from "../be/db";
+import { getMemoryStore } from "../be/memory";
+import dreamingApply from "../be/seed-scripts/catalog/dreaming-apply";
 import gather from "../be/seed-scripts/catalog/dreaming-gather";
+import { executeReadOnlyQuery } from "../http/db-query-shared";
+import { scrubObject } from "../utils/secret-scrubber";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-dreaming-gather-corrections.sqlite";
 
@@ -306,5 +313,111 @@ describe("dreaming-gather correction queue: bodies and chunks", () => {
     expect(c.items.map((x: any) => x.memoryId)).toEqual([fresh]);
     expect(c.items[0].content).toContain("new doc b");
     expect(c.items[0].content).not.toContain("old doc");
+  });
+});
+
+describe("dreaming-gather correction queue: scrubbed bodies, gather to apply", () => {
+  // The live ctx.swarm: every response passes the egress scrubber, as on the server.
+  const live = {
+    swarm: {
+      db_query: async ({ sql, params = [] }: { sql: string; params?: unknown[] }) =>
+        scrubObject(executeReadOnlyQuery(sql, params)),
+      kv_getOrNull: async ({ namespace, key }: { namespace: string; key: string }) =>
+        scrubObject(await getKv(namespace, key)),
+      kv_set: async ({
+        namespace,
+        key,
+        value,
+      }: {
+        namespace: string;
+        key: string;
+        value: unknown;
+      }) =>
+        scrubObject(await upsertKv({ namespace, key, value, valueType: "json", expiresAt: null })),
+      memory_edit: async ({ memoryId, ...rest }: { memoryId: string; [k: string]: unknown }) =>
+        getMemoryStore().edit({ id: memoryId, ...(rest as any) }),
+    },
+  } as any;
+  const stored = async (id: string) =>
+    (await getDbClient().get<{ content: string }>(`SELECT content FROM agent_memory WHERE id = ?`, [
+      id,
+    ]))!.content;
+
+  test("a scrubbed body is held out, so an auto replace built from it never reaches the memory", async () => {
+    await getDbClient().run(`DELETE FROM memory_rating`);
+    await getDbClient().run(`DELETE FROM agent_memory_version`);
+    await getDbClient().run(`DELETE FROM agent_memory`);
+    const token = randomToken(32);
+    const secretBody = `Deploy runbook. DEPLOY_TOKEN=${token} is read from the vault. Staging lives on port 4000.`;
+    const withSecret = await memory("deploy-runbook", {
+      chunks: [secretBody],
+      createdHoursAgo: 72,
+    });
+    await rating(withSecret, { note: "staging moved to port 5000", hoursAgo: 6 });
+    // Control: a clean body goes through the same pipeline and its edit lands.
+    const clean = await memory("clean-runbook", {
+      chunks: ["Staging lives on port 4000."],
+      createdHoursAgo: 60,
+    });
+    await rating(clean, { note: "staging moved to port 5000", hoursAgo: 5 });
+
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: wf, triggerType: "manual" });
+    const out: any = await gather({ runId }, live);
+    const c = out.swarm.memory.corrections;
+    expect(JSON.stringify(c)).not.toContain(token);
+    // A synthesis that confirms every note and rewrites the body it was shown (tier auto, replace).
+    const actions = c.items.map((item: any, i: number) => ({
+      id: `A${i + 1}`,
+      lane: "memory",
+      tier: "auto",
+      op: "memory-edit",
+      mode: "replace",
+      content: String(item.content).replace("port 4000", "port 5000"),
+      target: { memoryIds: [item.memoryId] },
+      evidence: item.notes.map((n: any) => `rating:${n.ratingId}`),
+    }));
+    const res: any = await dreamingApply({ runId, v3Writes: "off", synth: { actions } }, live);
+    expect(res.errors).toEqual([]);
+
+    expect(await stored(withSecret)).toBe(secretBody);
+    expect(c.items.map((x: any) => x.memoryId)).toEqual([clean]);
+    expect(c.scrubbed).toBe(1);
+    expect(c.backlog).toBe(2);
+    expect(await stored(clean)).toBe("Staging lives on port 5000.");
+  });
+
+  test("held-out scrubbed memories do not take the slots of clean ones", async () => {
+    await getDbClient().run(`DELETE FROM memory_rating`);
+    await getDbClient().run(`DELETE FROM agent_memory`);
+    for (let i = 0; i < 10; i++) {
+      const id = await memory(`scrubbed-${i}`, {
+        chunks: [`API_TOKEN=${randomToken(32)} entry ${i}`],
+        createdHoursAgo: 100,
+      });
+      await rating(id, { hoursAgo: 50 - i }); // older notes than the clean one: first in line
+    }
+    const clean = await memory("clean-late", { createdHoursAgo: 60 });
+    await rating(clean, { hoursAgo: 4 });
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: wf, triggerType: "manual" });
+    const c = ((await gather({ runId }, live)) as any).swarm.memory.corrections;
+    expect(c.items.map((x: any) => x.memoryId)).toEqual([clean]);
+    expect(c.scrubbed).toBe(10);
+  });
+
+  test("a multi-chunk document with a secret in a later chunk is held out", async () => {
+    await getDbClient().run(`DELETE FROM memory_rating`);
+    await getDbClient().run(`DELETE FROM agent_memory`);
+    const doc = await memory("two-part-runbook", {
+      chunks: ["Part one is clean.", `Part two: GITHUB_TOKEN=${randomToken(32)} for releases.`],
+      createdHoursAgo: 80,
+    });
+    await rating(doc, { hoursAgo: 6 });
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: wf, triggerType: "manual" });
+    const c = ((await gather({ runId }, live)) as any).swarm.memory.corrections;
+    expect(c.items).toEqual([]);
+    expect(c.scrubbed).toBe(1);
   });
 });

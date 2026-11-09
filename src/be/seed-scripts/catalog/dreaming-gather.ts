@@ -484,7 +484,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // A rating on a later chunk counts for its document: it maps to chunk 0 by the same match dreaming-apply uses
   // (name, agent, chunk count, write minute). A single-chunk body is sent whole, since synthesis may replace it;
   // one longer than CORR_SINGLE_MAX is held out of the queue (counted in `oversize`) instead of being truncated.
+  // A body the egress scrubber rewrote is held out too (counted in `scrubbed`): synthesis could copy its
+  // "[REDACTED:<key>]" marker into a replace, and apply's scrubberGuard credits markers in the op content, so the
+  // original text would be lost. SQL length() is a number, so the scrubber leaves it alone; a changed code-point
+  // count catches a rewrite even when no marker text survives.
   const CORR_SINGLE_MAX = 8000;
+  const scrubbedRead = (text: string, rawLen: unknown) =>
+    text.includes("[REDACTED") || [...text].length !== Number(rawLen ?? 0);
   const corrWf = await q(
     "correctionsWorkflow",
     `SELECT COALESCE((SELECT workflowId FROM workflow_runs WHERE id = ?),
@@ -516,7 +522,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
          AND c.source = 'manual'),
      q AS MATERIALIZED (
        SELECT r.ratingId, r.docId memoryId, r.ratedId, r.taskId, r.signal, r.reasoning, r.ratedAt,
-         m.name, m.agentId, m.scope, m.version, m.alpha, m.beta, m.createdAt memCreatedAt, m.content,
+         m.name, m.agentId, m.scope, m.version, m.alpha, m.beta, m.createdAt memCreatedAt, m.content, length(m.content) rawLen,
          COALESCE(m.totalChunks, 1) totalChunks,
          (COALESCE(m.totalChunks, 1) = 1 AND length(m.content) > ?) big,
          ROW_NUMBER() OVER (PARTITION BY r.docId ORDER BY r.ratedAt DESC) rn,
@@ -531,16 +537,19 @@ export default async function (args: unknown, ctx: ScriptContext) {
      LEFT JOIN (SELECT * FROM q WHERE rn <= 3 AND memoryId IN (
        SELECT memoryId FROM q WHERE rn = 1 AND NOT big ORDER BY firstAt ASC, memoryId LIMIT ?)) f ON 1
      ORDER BY f.firstAt ASC, f.memoryId, f.rn`,
-    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, CAPS.memoryCorrections],
+    // shortcut: 2x the cap, so up to 10 held-out (scrubbed) memories cannot starve the queue; raise it if `scrubbed` grows.
+    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, CAPS.memoryCorrections * 2],
   );
   // Multi-chunk bodies may be cut for the prompt: apply refuses edits to them, so they only become proposals.
   const CORR_BODY_MAX = 3000;
   const corrItems: any[] = [];
   const corrHeld = new Set<string>();
+  const corrScrubbed = new Set<string>();
   for (const r of corrRows ?? []) {
-    if (r.memoryId == null || corrHeld.has(r.memoryId)) continue;
+    if (r.memoryId == null || corrHeld.has(r.memoryId) || corrScrubbed.has(r.memoryId)) continue;
     let item = corrItems.find((x) => x.memoryId === r.memoryId);
     if (!item) {
+      if (corrItems.length >= CAPS.memoryCorrections) continue;
       let body = String(r.content ?? "");
       const totalChunks = Number(r.totalChunks);
       // SQLite length() counts code points and JS counts UTF-16 units: re-check, never send a cut single-chunk body.
@@ -553,12 +562,20 @@ export default async function (args: unknown, ctx: ScriptContext) {
         // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
         const parts = await q(
           "memCorrectionChunks",
-          `SELECT content FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
+          `SELECT content, length(content) rawLen FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
              AND COALESCE(totalChunks, 1) = ? AND substr(createdAt, 1, 16) = substr(?, 1, 16) ORDER BY chunkIndex ASC`,
           [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
         );
         if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
         joined = parts?.length === totalChunks;
+        if (parts?.some((x: any) => scrubbedRead(String(x.content ?? ""), x.rawLen))) {
+          corrScrubbed.add(r.memoryId);
+          continue;
+        }
+      }
+      if (scrubbedRead(String(r.content ?? ""), r.rawLen)) {
+        corrScrubbed.add(r.memoryId);
+        continue;
       }
       const cut = totalChunks > 1 && body.length > CORR_BODY_MAX;
       item = {
@@ -609,6 +626,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
       backlog: Number(corrRows?.[0]?.backlog ?? 0),
       // Single-chunk memories over CORR_SINGLE_MAX chars: held out, never sent cut (synthesis could replace them).
       oversize: Number(corrRows?.[0]?.oversize ?? 0) + corrHeld.size,
+      // Memories whose body came back scrubbed: held out, never sent (a replace would persist the marker).
+      scrubbed: corrScrubbed.size,
       items: corrItems,
     },
     createdInWindow: {
