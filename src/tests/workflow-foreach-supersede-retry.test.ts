@@ -7,6 +7,7 @@ import {
   createAgent,
   createWorkflow,
   failTask,
+  getTaskById,
   getTaskByWorkflowRunStepId,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -112,6 +113,13 @@ describe("supersede retry for a foreach agent-task child", () => {
     expect(settled.retryCount).toBe(1);
     expect(settled.nextRetryAt).toBeFalsy();
     expect((await getTaskByWorkflowRunStepId(settled.id))!.id).toBe(retried.id);
+    // The fan-out carries on without the item, so neither cut is a real
+    // failure: the retried one and the last one both end superseded.
+    for (const id of [cut.id, retried.id]) {
+      const task = (await getTaskById(id))!;
+      expect(task.status).toBe("superseded");
+      expect(task.failureReason).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
+    }
 
     await completeTask((await boundTask(runId, "fan#i1")).id, "i1 done");
     const run = await waitForRun(runId, (r) => r.status === "completed");
@@ -146,6 +154,8 @@ describe("supersede retry for a foreach agent-task child", () => {
     expect(failed.retryCount).toBe(0);
     expect(failed.nextRetryAt).toBeFalsy();
     expect((await getTaskByWorkflowRunStepId(failed.id))!.id).toBe(task.id);
+    // Fail-fast: the item's step failed the run, so the cut stays failed.
+    expect((await getTaskById(task.id))!.status).toBe("failed");
   });
 
   test("a queued item keeps its concurrency slot until the retry starts it", async () => {

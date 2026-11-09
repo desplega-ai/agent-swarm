@@ -2,6 +2,7 @@ import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
   getTaskById,
+  getTaskByWorkflowRunStepId,
   getWorkflowRun,
   getWorkflowRunStep,
   markWorkflowStepTaskSuperseded,
@@ -284,6 +285,8 @@ async function isSupersedeCut(taskId: string, reason: string): Promise<boolean> 
 /**
  * Persist an agent-task result and resolve its next nodes. Synthetic foreach
  * children never checkpoint into workflow context; only their parent join does.
+ * With `failureReason` (a failed task the workflow carries on without), a
+ * supersede cut on the step's task moves to `superseded`.
  */
 export async function completeTaskStepAndResolveSuccessors(
   def: WorkflowDefinition,
@@ -308,11 +311,19 @@ export async function completeTaskStepAndResolveSuccessors(
     // A late result inside a cancelled tree routes nothing and revives nothing.
     if (await getRunLineageBlock(runId)) return UNCLAIMED;
 
+    // Read before the step settles: the task stays bound, so the step's task
+    // is the one whose failure this call absorbs.
+    const failedTaskId =
+      failureReason !== undefined
+        ? (ownerTaskId ?? (await getTaskByWorkflowRunStepId(step.id))?.id)
+        : undefined;
+
+    let result: TaskStepRoutingResult;
     if (resolveForeachParent(def, step.nodeId)) {
       // onNodeFailure:"continue" completions persist the failure reason as
       // explicit metadata — the join classifies children on THIS, not on
       // whether user-controlled output text happens to start with "[FAILED:".
-      return toRoutingResult(
+      result = toRoutingResult(
         await settleForeachChild(
           def,
           runId,
@@ -326,16 +337,25 @@ export async function completeTaskStepAndResolveSuccessors(
           { registry },
         ),
       );
+    } else {
+      await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
+      await updateWorkflowRun(runId, { status: "running" });
+      result = {
+        claimed: true,
+        foreachChild: false,
+        joined: true,
+        successors: getSuccessors(def, step.nodeId),
+        runFailed: false,
+      };
     }
 
-    await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
-    await updateWorkflowRun(runId, { status: "running" });
-    return {
-      claimed: true,
-      foreachChild: false,
-      joined: true,
-      successors: getSuccessors(def, step.nodeId),
-      runFailed: false,
-    };
+    // The workflow absorbed the failure (onNodeFailure "continue" or a
+    // collect-outcomes fan-out): the step ends `completed` and the run goes on,
+    // so a supersede cut behind it is not a real failure either. A cut whose
+    // step ends `failed` never reaches here and stays `failed`.
+    if (failedTaskId && result.claimed && !result.runFailed) {
+      await markWorkflowStepTaskSuperseded(failedTaskId);
+    }
+    return result;
   });
 }

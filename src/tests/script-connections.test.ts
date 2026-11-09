@@ -705,6 +705,9 @@ describe("script connections", () => {
       // 314 references model_profiles (made by the skipped 220) and alters
       // scheduled_tasks, which this fixture does not create.
       markMigrationApplied(database, "314_model_groups.sql");
+      // 318 updates agent_tasks.status, which this fixture's id-only
+      // agent_tasks lacks.
+      markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
       // 320 alters session_costs, which this fixture lacks.
       markMigrationApplied(database, "320_session_costs_kind.sql");
 
