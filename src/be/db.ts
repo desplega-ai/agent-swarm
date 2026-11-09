@@ -12651,23 +12651,29 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
             [id, id],
           )
         ).map((row) => row.id);
-    for (const reference of references) {
-      const table = quoteSqlIdentifier(reference.tableName);
-      const column = quoteSqlIdentifier(reference.columnName);
-      await tx.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [replacement, id]);
-    }
-
     // Workflow context is persisted JSON rather than a relational column, but
     // it exposes the same requester identity to downstream interpolation. Keep
     // it consistent with workflow_runs.created_by inside this transaction.
+    //
+    // The engine (src/workflows/engine.ts) writes workflow_runs.created_by and
+    // context.swarm.requestedByUserId from the same options.requestedByUserId,
+    // and a resume rehydrates the requester from run.createdBy. So every row
+    // whose context names this user also has created_by = this user, and the
+    // indexed created_by column can narrow both JSON passes to that user's
+    // runs instead of parsing the JSON of every row (153 s on 493k prod rows).
+    // This has to run before the generic column rewrite below, which would
+    // otherwise move created_by to the replacement (or NULL) and hide the rows.
+    // json_valid + json_extract stay as the secondary filter.
+    //
     // The sealed replay copy is what a resume reads, so rewrite it first, while
     // the scrubbed column still matches the filter.
     const sealedContexts = await tx.query<{ id: string; context_replay: string }>(
       `SELECT id, context_replay FROM workflow_runs
-       WHERE context_replay IS NOT NULL
+       WHERE created_by = ?
+         AND context_replay IS NOT NULL
          AND json_valid(context)
          AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-      [id],
+      [id, id],
     );
     for (const row of sealedContexts) {
       let context: Record<string, unknown>;
@@ -12691,18 +12697,28 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       await tx.run(
         `UPDATE workflow_runs
          SET context = json_set(context, '$.swarm.requestedByUserId', ?)
-         WHERE json_valid(context)
+         WHERE created_by = ?
+           AND json_valid(context)
            AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-        [replacementUserId, id],
+        [replacementUserId, id, id],
       );
     } else {
       await tx.run(
         `UPDATE workflow_runs
          SET context = json_remove(context, '$.swarm.requestedByUserId')
-         WHERE json_valid(context)
+         WHERE created_by = ?
+           AND json_valid(context)
            AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-        [id],
+        [id, id],
       );
+    }
+
+    // Each discovered column is indexed (migration 318), so these are
+    // index lookups rather than table scans.
+    for (const reference of references) {
+      const table = quoteSqlIdentifier(reference.tableName);
+      const column = quoteSqlIdentifier(reference.columnName);
+      await tx.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [replacement, id]);
     }
 
     await reclassifyTaskHumanFree(reclassifySeedIds);
