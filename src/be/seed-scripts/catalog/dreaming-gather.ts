@@ -481,7 +481,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // synthesis already ruled on the rating: a rejected[] item from "swarm.memory.corrections" naming "rating:<id>"
   // with a non-cap reason, or a propose action whose evidence cites "rating:<id>". Cap overflow and edits apply
   // refused leave no marker, so they come back the next night.
-  // shortcut: ratings on a chunk > 0 row are skipped (the memory is keyed by chunk 0); map chunk rows if they show up.
+  // A rating on a later chunk counts for its document: it maps to chunk 0 by the same match dreaming-apply uses
+  // (name, agent, chunk count, write minute). A single-chunk body is sent whole, since synthesis may replace it;
+  // one longer than CORR_SINGLE_MAX is held out of the queue (counted in `oversize`) instead of being truncated.
+  const CORR_SINGLE_MAX = 8000;
   const corrWf = await q(
     "correctionsWorkflow",
     `SELECT COALESCE((SELECT workflowId FROM workflow_runs WHERE id = ?),
@@ -502,30 +505,50 @@ export default async function (args: unknown, ctx: ScriptContext) {
        UNION
        SELECT e.value FROM syn, json_each(syn.o, '$.actions') x, json_each(x.value, '$.evidence') e
        WHERE x.type = 'object' AND json_extract(x.value, '$.tier') = 'propose' AND e.type = 'text' AND e.value GLOB 'rating:*'),
+     rated AS MATERIALIZED (
+       SELECT r.id ratingId, r.memoryId ratedId, r.taskId, r.signal, r.reasoning, r.createdAt ratedAt,
+         CASE WHEN COALESCE(c.chunkIndex, 0) = 0 THEN c.id ELSE (
+           SELECT h.id FROM agent_memory h WHERE h.name = c.name AND h.agentId IS c.agentId AND h.source = 'manual'
+             AND COALESCE(h.chunkIndex, 0) = 0 AND COALESCE(h.totalChunks, 1) = COALESCE(c.totalChunks, 1)
+             AND substr(h.createdAt, 1, 16) = substr(c.createdAt, 1, 16) ORDER BY h.createdAt, h.id LIMIT 1) END docId
+       FROM memory_rating r JOIN agent_memory c ON c.id = r.memoryId
+       WHERE r.source = 'explicit-self' AND r.signal < 0 AND length(trim(COALESCE(r.reasoning, ''))) > 0
+         AND c.source = 'manual'),
      q AS MATERIALIZED (
-       SELECT r.id ratingId, r.memoryId, r.taskId, r.signal, r.reasoning, r.createdAt ratedAt,
+       SELECT r.ratingId, r.docId memoryId, r.ratedId, r.taskId, r.signal, r.reasoning, r.ratedAt,
          m.name, m.agentId, m.scope, m.version, m.alpha, m.beta, m.createdAt memCreatedAt, m.content,
          COALESCE(m.totalChunks, 1) totalChunks,
-         ROW_NUMBER() OVER (PARTITION BY r.memoryId ORDER BY r.createdAt DESC) rn,
-         MIN(r.createdAt) OVER (PARTITION BY r.memoryId) firstAt
-       FROM memory_rating r JOIN agent_memory m ON m.id = r.memoryId AND COALESCE(m.chunkIndex, 0) = 0
-       WHERE r.source = 'explicit-self' AND r.signal < 0 AND length(trim(COALESCE(r.reasoning, ''))) > 0
-         AND m.source = 'manual'
-         AND julianday(r.createdAt) > julianday(COALESCE(
+         (COALESCE(m.totalChunks, 1) = 1 AND length(m.content) > ?) big,
+         ROW_NUMBER() OVER (PARTITION BY r.docId ORDER BY r.ratedAt DESC) rn,
+         MIN(r.ratedAt) OVER (PARTITION BY r.docId) firstAt
+       FROM rated r JOIN agent_memory m ON m.id = r.docId
+       WHERE julianday(r.ratedAt) > julianday(COALESCE(
            (SELECT MAX(v.createdAt) FROM agent_memory_version v WHERE v.memory_id = m.id), m.createdAt))
-         AND ('rating:' || r.id) NOT IN (SELECT ref FROM handled WHERE ref IS NOT NULL))
-     SELECT q.*, (SELECT COUNT(DISTINCT memoryId) FROM q) backlog FROM q
-     WHERE rn <= 3 AND memoryId IN (SELECT memoryId FROM q WHERE rn = 1 ORDER BY firstAt ASC, memoryId LIMIT ?)
-     ORDER BY firstAt ASC, memoryId, rn`,
-    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CAPS.memoryCorrections],
+         AND ('rating:' || r.ratingId) NOT IN (SELECT ref FROM handled WHERE ref IS NOT NULL))
+     -- The counts row survives an empty pick (memoryId NULL), so oversize-only backlogs still report.
+     SELECT f.*, s.backlog, s.oversize
+     FROM (SELECT COUNT(DISTINCT memoryId) backlog, COUNT(DISTINCT CASE WHEN big THEN memoryId END) oversize FROM q) s
+     LEFT JOIN (SELECT * FROM q WHERE rn <= 3 AND memoryId IN (
+       SELECT memoryId FROM q WHERE rn = 1 AND NOT big ORDER BY firstAt ASC, memoryId LIMIT ?)) f ON 1
+     ORDER BY f.firstAt ASC, f.memoryId, f.rn`,
+    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, CAPS.memoryCorrections],
   );
+  // Multi-chunk bodies may be cut for the prompt: apply refuses edits to them, so they only become proposals.
   const CORR_BODY_MAX = 3000;
   const corrItems: any[] = [];
+  const corrHeld = new Set<string>();
   for (const r of corrRows ?? []) {
+    if (r.memoryId == null || corrHeld.has(r.memoryId)) continue;
     let item = corrItems.find((x) => x.memoryId === r.memoryId);
     if (!item) {
       let body = String(r.content ?? "");
       const totalChunks = Number(r.totalChunks);
+      // SQLite length() counts code points and JS counts UTF-16 units: re-check, never send a cut single-chunk body.
+      if (totalChunks <= 1 && body.length > CORR_SINGLE_MAX) {
+        corrHeld.add(r.memoryId);
+        continue;
+      }
+      let joined = totalChunks <= 1;
       if (totalChunks > 1) {
         // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
         const parts = await q(
@@ -535,7 +558,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
           [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
         );
         if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
+        joined = parts?.length === totalChunks;
       }
+      const cut = totalChunks > 1 && body.length > CORR_BODY_MAX;
       item = {
         memoryId: r.memoryId,
         name: r.name,
@@ -546,14 +571,17 @@ export default async function (args: unknown, ctx: ScriptContext) {
         beta: Number(r.beta),
         totalChunks,
         multiChunk: totalChunks > 1,
-        content: body.slice(0, CORR_BODY_MAX),
-        contentTruncated: body.length > CORR_BODY_MAX,
+        content: cut ? body.slice(0, CORR_BODY_MAX) : body,
+        // true = the body shown is not the whole memory (cut for the prompt, or a chunk read came back short).
+        contentTruncated: cut || !joined,
         notes: [],
       };
       corrItems.push(item);
     }
     item.notes.push({
       ratingId: r.ratingId,
+      // The chunk row the agent rated; differs from memoryId when the rating was on a later chunk.
+      ratedMemoryId: r.ratedId,
       taskId: r.taskId ?? null,
       signal: Number(r.signal),
       ratedAt: r.ratedAt,
@@ -579,6 +607,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
       ok: corrRows !== null,
       cap: CAPS.memoryCorrections,
       backlog: Number(corrRows?.[0]?.backlog ?? 0),
+      // Single-chunk memories over CORR_SINGLE_MAX chars: held out, never sent cut (synthesis could replace them).
+      oversize: Number(corrRows?.[0]?.oversize ?? 0) + corrHeld.size,
       items: corrItems,
     },
     createdInWindow: {
