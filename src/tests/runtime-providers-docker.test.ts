@@ -799,6 +799,28 @@ describe("Docker runtime provider", () => {
     });
   });
 
+  test("list reports the workspace key from the real mount, never from a label", async () => {
+    handler = () =>
+      Response.json([
+        {
+          Id: "mounted",
+          Labels: { [RUNTIME_LABELS.runtimeId]: "a", workspaceKey: "swarm-ws-forged-0" },
+          Mounts: [
+            { Type: "volume", Name: "swarm-cache-pool", Destination: "/cache" },
+            { Type: "volume", Name: "swarm-ws-agent-0", Destination: "/workspace/personal" },
+          ],
+        },
+        {
+          Id: "ephemeral",
+          Labels: { [RUNTIME_LABELS.runtimeId]: "b", workspaceKey: "swarm-ws-agent-1" },
+          Mounts: [{ Type: "bind", Source: "/tmp", Destination: "/workspace/personal" }],
+        },
+      ]);
+    const rows = await provider.list(target, request.ownerId);
+    expect(rows.map((row) => row.meta?.workspaceKey)).toEqual(["swarm-ws-agent-0", undefined]);
+    expect(rows[0]?.meta?.[RUNTIME_LABELS.runtimeId]).toBe("a");
+  });
+
   test("maps container states and distinguishes absence from lookup failure", async () => {
     for (const [status, exitCode, expected] of [
       ["created", 0, "starting"],

@@ -19,6 +19,7 @@ import {
   insertProvisioningRuntime,
   listRuntimeInstancesForPool,
   markRuntimeTerminated,
+  touchRuntimeInstance,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import * as controllers from "../be/runtime-pools/controllers";
@@ -258,6 +259,57 @@ test("a controller that does not echo the workspace key is terminated and counte
     lastError: expect.stringContaining("Persistent workspace: controller did not mount"),
   });
   expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
+});
+
+async function provisionWithEarlyRegistration(echoWorkspace: boolean) {
+  fake.echoWorkspace = echoWorkspace;
+  const { pool, agent } = await setup({ workspace: {} });
+  let release!: () => void;
+  fake.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const provision = provisionRuntime(
+    pool,
+    agent,
+    await getControllerCommands(controllerId),
+    await ensureRuntimeOwnerId(),
+  );
+  let gatedWhileUnverified: boolean;
+  try {
+    for (let i = 0; i < 1000 && fake.requests.length < 1; i++) await Bun.sleep(5);
+    // The worker boots and registers while the provider response is still in flight.
+    const runtimeId = fake.requests[0]!.env.SWARM_RUNTIME_INSTANCE_ID!;
+    expect(
+      (await upsertRuntimeInstance({ id: runtimeId, agentId: agent.id, reportedSlots: 1 }))?.status,
+    ).toBe("active");
+    gatedWhileUnverified = !(await touchRuntimeInstance(runtimeId, agent.id));
+  } finally {
+    release();
+  }
+  await provision;
+  const runtime = (await getRuntimeInstanceById(fake.requests[0]!.env.SWARM_RUNTIME_INSTANCE_ID!))!;
+  return { pool, agent, runtime, gatedWhileUnverified };
+}
+
+test("a worker that registers before its workspace is verified gets no work and is retired on failure", async () => {
+  const { pool, agent, runtime, gatedWhileUnverified } =
+    await provisionWithEarlyRegistration(false);
+  expect(gatedWhileUnverified).toBe(true);
+  expect(runtime.status).toBe("offline");
+  expect(runtime.provisionError).toContain("controller did not mount");
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+  expect(await touchRuntimeInstance(runtime.id, agent.id)).toBe(false);
+  expect(fake.runtimes.size).toBe(0);
+  expect(await getRuntimePool(pool.id)).toMatchObject({ consecutiveFailures: 1 });
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
+});
+
+test("a worker that registers early gets work once its workspace is verified", async () => {
+  const { agent, runtime, gatedWhileUnverified } = await provisionWithEarlyRegistration(true);
+  expect(gatedWhileUnverified).toBe(true);
+  expect(runtime.status).toBe("active");
+  expect(await touchRuntimeInstance(runtime.id, agent.id)).toBe(true);
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).not.toBeNull();
 });
 
 test("an older controller boots without cache and surfaces a warning without failing the provision", async () => {

@@ -431,13 +431,26 @@ export class DockerRuntimeProvider implements RuntimeProvider {
       JSON.stringify({ label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${ownerId}`] }),
     );
     const rows = await dockerApi<
-      Array<{ Id: string; Created?: number; Labels: Record<string, string> }>
+      Array<{
+        Id: string;
+        Created?: number;
+        Labels: Record<string, string>;
+        Mounts?: Array<{ Type?: string; Name?: string; Destination?: string }>;
+      }>
     >(target, "GET", `/containers/json?all=true&filters=${filters}`);
-    return rows.map((row) => ({
-      kind: "docker",
-      externalId: row.Id,
-      createdAt: row.Created === undefined ? undefined : new Date(row.Created * 1000).toISOString(),
-      meta: row.Labels,
-    }));
+    return rows.map((row) => {
+      // Recovery trusts only the real mount as workspace evidence, never a label.
+      const { workspaceKey: _label, ...meta } = row.Labels ?? {};
+      const workspace = row.Mounts?.find(
+        (mount) => mount.Type === "volume" && mount.Destination === WORKSPACE_MOUNT_PATH,
+      );
+      return {
+        kind: "docker",
+        externalId: row.Id,
+        createdAt:
+          row.Created === undefined ? undefined : new Date(row.Created * 1000).toISOString(),
+        meta: workspace?.Name ? { ...meta, workspaceKey: workspace.Name } : meta,
+      };
+    });
   }
 }

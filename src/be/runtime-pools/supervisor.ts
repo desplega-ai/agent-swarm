@@ -196,6 +196,18 @@ async function recordProvisionFailure(
   }
 }
 
+class UnverifiedWorkspaceError extends Error {}
+
+async function retireUnverifiedRuntime(runtimeId: string, reason: string): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run(
+      "UPDATE runtime_instances SET provision_error = COALESCE(provision_error, ?) WHERE id = ?",
+      [scrubSecrets(reason), runtimeId],
+    );
+    await markRuntimeTerminated(runtimeId, reason);
+  });
+}
+
 export async function provisionRuntime(
   pool: RuntimePool,
   agent: Agent,
@@ -310,7 +322,9 @@ export async function provisionRuntime(
       } catch (terminateError) {
         reportSupervisorError(terminateError);
       }
-      throw new Error(reason);
+      // The worker may have registered during the provision: retire and revoke whatever its status.
+      await retireUnverifiedRuntime(runtimeId, reason);
+      throw new UnverifiedWorkspaceError(reason);
     }
     const cacheWarning = currentCache
       ? !controller.traits.persistentCache
@@ -357,7 +371,9 @@ export async function provisionRuntime(
     // Keep an ambiguous remote provision reserved until reconnect or disconnect recovery.
     if (error instanceof ControllerOfflineError) return false;
     try {
-      const runtime = await getRuntimeInstanceById(runtimeId);
+      // An already retired runtime still counts once toward retry and circuit state.
+      const runtime =
+        error instanceof UnverifiedWorkspaceError ? null : await getRuntimeInstanceById(runtimeId);
       await recordProvisionFailure(
         runtime ?? {
           id: null,
