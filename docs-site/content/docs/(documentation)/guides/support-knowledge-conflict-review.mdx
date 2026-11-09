@@ -1,0 +1,70 @@
+---
+title: Reviewing customer help content for conflicts with AI agents
+description: Agent Swarm can be configured to surface conflicting statements between help articles and an approved policy, with a named owner deciding each correction.
+---
+
+Agent Swarm can be configured to run a reviewed conflict check on customer-facing help content: agents surface possibly conflicting statements between a chosen set of help articles and one approved policy source, and a named support owner decides which source governs and approves every correction. That setup is assembled from documented parts, not from a built-in knowledge-audit feature, so nothing in the product ships as a conflict detector. The value is in the shape of the loop: a person decides, and the decision is recorded against the two passages that caused it.
+
+Two articles can both be live and disagree. One says a refund takes five business days, the other says ten. One says an export keeps attachments for 30 days, the other says seven. Each was true when written, or one was never true, and the customer reads whichever page the search results put first. Support then answers the same question twice with two different answers.
+
+## When a help-center tool is the better fit
+
+A standard help-center review cycle fits better in most cases, and it is the cheaper answer. If the content set is small, or one team owns all of it, or the tool you already use versions its articles and flags the stale ones, then its own review queue is the right place to work. Adding agents there adds a reading step where a named owner and a publishing date would have been enough.
+
+The same holds for a knowledge management tool with built-in ownership and versioning. When the conflict is between two drafts inside one system, that system's history answers it.
+
+Agent Swarm fits a narrower case: the check needs several sources read together, and each conflict needs a human decision recorded against the exact passages. That happens when the policy lives outside the help center, in a document the help center does not own, and when the person who owns the answer is not the person who wrote either page. Then the work is comparison and routing, not editing.
+
+## An illustrative workflow
+
+What follows is an illustration of how the documented pieces fit together. It is not a customer run and not a measured result, and adapting it to your help center is configuration work.
+
+1. The operator fixes the scope. They choose a defined set of current help articles and one approved policy source, and record the version or date of each. That set is the boundary of the check: the agent reads these articles and this policy and nothing else.
+2. An agent reads the set and lists candidate conflicts. Each entry carries both links and both dates, with the exact quoted passages side by side. Quoting matters more than summarizing, because the owner's first question will be what the article says.
+3. The support owner checks applicability. Do the two passages cover the same product, the same plan, the same version, the same region, the same customer type? Then the owner decides which source governs, or that neither does.
+4. The agent drafts a proposed correction to the article the owner named. It drafts one change per decision, so the owner reviews a proposal rather than a rewritten page.
+5. The owner edits the proposal, and a person publishes it. The agent does not publish, and the agent does not decide policy.
+
+Step three is where the hours go, and it should not be automated. Two statements can contradict each other and both be correct, and only the policy holder knows which case this is.
+
+## What the review has to handle
+
+**Version differences.** An article about an old plan and an article about the current plan can state different limits and both be accurate. The fix is a date and a version on each article, so the comparison runs against what is current. Where an article covers a retired version on purpose, the conflict is a labeling problem, not a policy problem.
+
+**Jurisdiction differences.** Rules that legitimately differ by country or state are not conflicts. A returns window that runs 14 days in one market and 30 in another is a correct pair of statements. The owner's question is whether the two passages claim to cover the same customers. If they do not, the entry closes as a false positive.
+
+**Missing sources.** Sometimes no policy covers the claim. An article promises a response time and no approved document sets one. The honest output is a recorded gap: the claim has no source, and the owner decides whether to keep the claim or ask for a policy. The agent does not invent an answer to fill the gap.
+
+**False positives.** Passages that look contradictory but cover different cases will be common. The workflow should expect them and make dismissal cheap, with the reason recorded, because an owner who has to argue with a tool stops using it.
+
+**Access boundaries.** The agent reads only the articles and the policy the operator gives it. Draft content and internal notes stay out, and so does anything the operator did not explicitly grant. That is also why the operator names the set instead of pointing the agent at the whole help center. Credentials follow the same rule: an external API is reached through a [script connection](/docs/guides/script-connections) with a credential binding, so the raw secret never enters script source.
+
+## When a conflict stays unresolved
+
+Not every conflict closes inside the review. The support owner may be unable to say which statement governs, usually because the policy belongs to another team to interpret. The item then goes to that policy owner with the quoted passages and both links, plus a date on each, and it stays open until the owner answers.
+
+The article does not stay silent while the question is open. It keeps a visible note, or the support owner holds it from further changes, so the next editor sees that a decision is pending. Holding it stops a well-meaning rewrite from settling an open policy question.
+
+The open item stays recorded until it closes. That record answers "why does this page say that" three quarters later.
+
+## What Agent Swarm provides for this
+
+The customer support playbook is the closest documented shape. Each top account gets a [per-customer working directory](/docs/playbooks/patterns/per-customer-working-directories) in agent-fs with running notes and open questions, plus recent activity. A Researcher agent pulls data in, and a human reviews and edits drafts in agent-fs before anything is sent. Nothing goes to a customer without human sign-off. Read the [proactive customer support playbook](/docs/playbooks/proactive-customer-support) for the full pattern. Swap the account for a help-center section, and the working directory becomes the record of what was checked and what was decided.
+
+The [HITL gates pattern](/docs/playbooks/patterns/hitl-gates) documents the pause this workflow turns on. A human-in-the-loop node stops a workflow until a person approves. The approve branch and the reject branch are both defined, and a timeout is set so a forgotten gate does not wedge the workflow. Agents can also ask a person directly with the `request-human-input` tool. That is the mechanism behind step three and step five, and it is why each decision can be attributed to a person.
+
+The [self-documenting release reports playbook](/docs/playbooks/self-documenting-release-reports) is the precedent for the other half: documentation changes driven by a real source of change and reviewed through a PR. The job does nothing on a day when that source did not move. Here the source of change is the approved policy rather than a commit, and applying the same discipline to published help content is the illustrative part.
+
+External systems reach the swarm through [script connections](/docs/guides/script-connections), which register an API once and bind credentials at egress, so script code never holds the raw secret. That is how exported articles or a help-center API get in without a credential in a prompt.
+
+The [AI operations governance guide](/docs/guides/ai-operations-governance) covers source-of-truth data and human approval thresholds in the same terms. The shape matches: one named owner per workflow, and an approval point on every step that cannot be undone.
+
+## Limits
+
+There is no detection accuracy to quote. An agent reading two documents can miss a conflict, especially when the contradiction is buried in a number or a conditional clause. Expect misses, and keep the ordinary review cycle running as well.
+
+The check needs custom configuration. You choose the article set and the policy source, and the approval gate is wired to your named owner.
+
+No help-center integration is documented. Articles arrive as exported files the operator places in the workflow, or through a custom script connection when the help center exposes an API. Do not assume a connector exists for the tool you use.
+
+The decision stays with a person. An agent that chose which source governs would be deciding policy, and an agent that published unaided would change what customers read with no owner behind it. Neither belongs in this design.

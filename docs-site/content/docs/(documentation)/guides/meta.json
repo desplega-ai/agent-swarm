@@ -13,6 +13,7 @@
     "agent-fs-co-deployment",
     "self-hosted-sso",
     "ai-operations-governance",
+    "support-knowledge-conflict-review",
     "e2b-provider-smoke-tests",
     "evals-harness",
     "personalization",
