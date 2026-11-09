@@ -325,7 +325,12 @@ HbResume ==
 \* repairSupersededWithoutResume (#1670), step 1.5 of the sweep: a superseded
 \* parent with no resume child gets one, within the resume budget. The 1 min
 \* floor keeps it off an in-flight supersede (hb.pc = "idle"); the 24 h cap is
-\* not modeled (the sweep runs well inside it).
+\* not modeled (the sweep runs well inside it). Workflow steps are not modeled:
+\* their cut is HbWrite's supersede and their retry is HbResume's child. Since
+\* #2892 a cut step whose retry is queued ends `superseded` with its step id
+\* cleared and no resume child, so the code query also skips
+\* failureReason = 'superseded_workflow_task'; that filter keeps the code's
+\* repair off a task whose mapped state already has its child.
 HbRepair(t) ==
     /\ G_ORPHAN_REPAIR /\ apiUp /\ hb.pc = "idle"
     /\ st[t] = "superseded" /\ gen[t] < MaxGen
@@ -564,7 +569,11 @@ SupersededHasResume ==
 \* S5: accept only takes an offer made to the accepting worker.
 AcceptOwnOffer == ~badAcc
 
-\* S6 (action): terminal is absorbing.
+\* S6 (action): terminal is absorbing. Since #2892 the code relabels a
+\* workflow step cut `failed` -> `superseded` once its retry is queued
+\* (markWorkflowStepTaskSuperseded, WHERE status = 'failed' AND failureReason =
+\* 'superseded_workflow_task'). Both labels map to this model's `superseded`
+\* (HbWrite), so the relabel is a stuttering step and S6 holds of the mapped state.
 TerminalAbsorbing == [][\A t \in Tasks : st[t] \in Terminal => st'[t] = st[t]]_vars
 
 \* L1: the work is eventually finished (completed, skipped or failed) or given up by
