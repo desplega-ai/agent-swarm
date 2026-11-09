@@ -84,8 +84,23 @@ function parseInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S>
     throw new RuntimePoolError(result.error.issues.map((issue) => issue.message).join(". "));
   return result.data;
 }
-function supportedKind(kind: string): void {
-  if (kind === "k8s") throw new RuntimePoolError("k8s provider not implemented");
+function validateRuntimeController(controller: {
+  kind: string;
+  placement: string;
+  config: Record<string, string>;
+  secretConfig?: Record<string, string | null>;
+}): void {
+  if (controller.kind !== "k8s") return;
+  if (controller.placement !== "builtin")
+    throw new RuntimePoolError("Kubernetes controllers require builtin placement");
+  for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"])
+    if (key in controller.config || typeof controller.secretConfig?.[key] === "string")
+      throw new RuntimePoolError("Kubernetes controller file paths are not supported.");
+  if (
+    "KUBERNETES_SERVICE_HOST" in controller.config ||
+    typeof controller.secretConfig?.KUBERNETES_SERVICE_HOST === "string"
+  )
+    throw new RuntimePoolError("Kubernetes deployment detection overrides are not supported.");
 }
 
 export async function listRuntimeControllers(): Promise<RuntimeController[]> {
@@ -142,6 +157,7 @@ export async function getRuntimeControllerTarget(
       : {}),
     ...controller.config,
     ...secrets,
+    KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,
   };
 }
 
@@ -200,7 +216,7 @@ export async function createRuntimeController(
   id: string = crypto.randomUUID(),
 ): Promise<RuntimeController> {
   const data = parseInput(RuntimeControllerCreateSchema, input);
-  supportedKind(data.kind);
+  validateRuntimeController(data);
   return await getDbClient().transaction(async (tx) => {
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? OR id = ?", [data.name, id])
@@ -247,7 +263,7 @@ export async function updateRuntimeController(
     );
     if (!row) throw new RuntimePoolError("Controller not found", 404);
     const data = { ...rowToController(row), ...patch };
-    supportedKind(data.kind);
+    validateRuntimeController(data);
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? AND id != ?", [data.name, id])
     )
@@ -332,7 +348,6 @@ export async function getRuntimePool(id: string): Promise<RuntimePool | null> {
   return row ? rowToPool(row) : null;
 }
 async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Promise<void> {
-  supportedKind(data.kind);
   if (data.cache && !(await createRuntimeProvider(data.kind)).traits.persistentCache) {
     throw new RuntimePoolError(`${data.kind} does not support persistent pool caches`);
   }
