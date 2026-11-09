@@ -45,6 +45,29 @@ describe("markdownToSlack", () => {
     expect(markdownToSlack("## Header")).toBe("*Header*");
   });
 
+  test("preserves the referrer heading inside a fenced code block", () => {
+    const code = "```\n#  Referrer          Views  Uniq  Share   vs 7d ago\n```";
+    expect(markdownToSlack(code)).toBe(code);
+  });
+
+  test("converts a heading outside a fenced code block", () => {
+    expect(markdownToSlack("# Heading")).toBe("*Heading*");
+    expect(markdownToSlack("# Heading\n```\n# code\n```")).toBe("*Heading*\n```\n# code\n```");
+  });
+
+  test("preserves bold markers inside inline code", () => {
+    expect(markdownToSlack("Use `**x**` and **bold**")).toBe("Use `**x**` and *bold*");
+  });
+
+  test("preserves formatting and whitespace inside code", () => {
+    const code =
+      "```ts\r\n**bold** __bold__ *italic* ~~strike~~\r\n- [link](https://example.com)\r\n![image](https://example.com/a.png)\n\n\n\n`inline`\n```";
+    expect(markdownToSlack(code)).toBe(code);
+    expect(markdownToSlack("``a ` **x** [link](url)``")).toBe("``a ` **x** [link](url)``");
+    expect(markdownToSlack("`**x**\n# code`")).toBe("`**x**\n# code`");
+    expect(markdownToSlack("```\n# unfinished\n**x**")).toBe("```\n# unfinished\n**x**");
+  });
+
   test("collapses excessive blank lines", () => {
     expect(markdownToSlack("a\n\n\n\nb")).toBe("a\n\nb");
   });

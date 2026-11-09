@@ -45,8 +45,16 @@ export function getTaskUrl(taskId: string): string {
  * - Slack:  *bold*,  *bold*,   _italic_, ~strike~,   *Header*, text (url)
  */
 export function markdownToSlack(text: string): string {
+  const code: string[] = [];
+  let codeMarker = "\uE002";
+  while (text.includes(codeMarker)) codeMarker += "\uE002";
+  // Hide code from every formatting rule, including blank-line normalization.
+  const protectedText = text.replace(/```[\s\S]*?(?:```|$)|(`+)(?!`)[\s\S]*?\1(?!`)/g, (match) => {
+    code.push(match);
+    return `${codeMarker}${code.length - 1}\uE003`;
+  });
   return (
-    text
+    protectedText
       // Images: keep alt text and expose the URL plainly.
       .replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_match, alt, url) =>
         alt ? `${alt} (${url})` : url,
@@ -68,10 +76,13 @@ export function markdownToSlack(text: string): string {
       .replace(/\uE000(.+?)\uE001/g, "*$1*")
       // Strikethrough ~~text~~ -> ~text~
       .replace(/~~(.+?)~~/g, "~$1~")
-      // Inline code already works the same
       // Bullet points already work the same
       // Remove excessive blank lines
       .replace(/\n{3,}/g, "\n\n")
+      .replace(
+        new RegExp(`${codeMarker}(\\d+)\\uE003`, "g"),
+        (_match, index) => code[Number(index)]!,
+      )
   );
 }
 
