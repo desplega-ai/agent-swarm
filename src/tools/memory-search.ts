@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
+import { attachDemotionEvidence } from "@/be/memory/demotion-evidence";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
 import { MEMORY_KEY_MAX_LENGTH } from "@/be/memory/key-paths";
 import {
@@ -11,6 +12,7 @@ import {
   recordRetrievals,
 } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
+import { dropReviewTaskCompletions, isReviewTaskId } from "@/be/memory/review-recall-filter";
 import { searchMemoryCandidates } from "@/be/memory/search-candidates";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
@@ -123,6 +125,8 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const queryEmbedding = await provider.embed(query, { kind: "query" });
 
       const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
+      // A review task never recalls other review tasks' task_completion rows.
+      const excludeReviewTaskCompletions = await isReviewTaskId(requestInfo.sourceTaskId);
       const candidates = await searchMemoryCandidates(
         store,
         queryEmbedding ?? new Float32Array(0),
@@ -134,18 +138,22 @@ export const registerMemorySearchTool = (server: McpServer) => {
           isLead,
           queryText: query,
           keyPrefix,
+          excludeReviewTaskCompletions,
         },
       );
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
-      const expanded = await expandCandidatesWithGraph(candidates, requestInfo.agentId, {
+      const graphExpanded = await expandCandidatesWithGraph(candidates, requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         source,
         keyPrefix,
         isLead,
       });
+      const expanded = excludeReviewTaskCompletions
+        ? await dropReviewTaskCompletions(graphExpanded)
+        : graphExpanded;
       if (expanded.length > 0) {
-        const ranked = rerank(expanded, { limit });
+        const ranked = rerank(await attachDemotionEvidence(expanded), { limit });
 
         // Retrieval bridge — when called inside a task scope, log one
         // `memory_retrieval` row per returned memory so server-side raters
@@ -204,13 +212,16 @@ export const registerMemorySearchTool = (server: McpServer) => {
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY and no FTS hit)
-      const recent = await store.list(requestInfo.agentId, {
+      const listed = await store.list(requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,
         source,
         keyPrefix,
       });
+      const recent = excludeReviewTaskCompletions
+        ? await dropReviewTaskCompletions(listed)
+        : listed;
 
       const consumedIds = dedupeMemoryDocumentIds(recent);
       try {

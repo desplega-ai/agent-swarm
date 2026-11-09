@@ -19,11 +19,12 @@
  *   * Q16  — `fingerprintApiKey` returns `op:<sha256-16>` for operator audit
  */
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
+import { randomChars } from "../utils/short-id";
 import { getDbClient } from "./db";
 import type { DbExecutor } from "./db-client";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
@@ -442,15 +443,8 @@ export async function unlinkIdentity(
 
 const TOKEN_PREFIX = "aswt_"; // agent-swarm-token
 
-function base62(bytes: Uint8Array): string {
-  // Map random bytes into base62 alphabet for URL-safe, unambiguous tokens.
-  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let out = "";
-  for (const b of bytes) {
-    out += alphabet[b % 62];
-  }
-  return out;
-}
+// base62 alphabet for URL-safe, unambiguous tokens.
+const TOKEN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
@@ -469,8 +463,8 @@ export async function mintToken(
   actor: IdentityActor,
   options: { source?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
-  // 24 base62 chars from 24 random bytes (~143 bits of entropy).
-  const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
+  // 24 uniformly random base62 chars (~143 bits of entropy).
+  const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);
@@ -731,7 +725,7 @@ export async function insertSessionToken(
   parentTokenId: string | null = null,
   scriptRun = false,
 ): Promise<{ tokenId: string; plaintext: string }> {
-  const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
+  const plaintext = `${SESSION_TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);

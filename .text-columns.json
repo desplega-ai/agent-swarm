@@ -412,6 +412,9 @@
     "resolvedProfile": {
       "exempt": "enum or fixed-format value"
     },
+    "modelGroup": {
+      "exempt": "enum or fixed-format value"
+    },
     "fallbackHops": {
       "exempt": "JSON hop list written by the API: profile names, an error-class enum, ISO times, and profile-check row text (var names and 5-character key suffixes only)"
     },
@@ -2205,6 +2208,9 @@
     },
     "profile": {
       "exempt": "enum or fixed-format value"
+    },
+    "modelGroup": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "script_apis": {
@@ -3419,6 +3425,13 @@
     "updated_at": {
       "exempt": "timestamp"
     },
+    "locked_until": {
+      "exempt": "timestamp"
+    },
+    "last_run_at": {
+      "exempt": "timestamp"
+    },
+    "last_error": "scrubbed",
     "created_by": {
       "exempt": "identifier"
     },
@@ -4086,6 +4099,40 @@
     },
     "fallbacks": {
       "exempt": "JSON array of profile names"
+    }
+  },
+  "model_groups": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "exempt": "enum or fixed-format value"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "seededFrom": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "model_group_members": {
+    "groupId": {
+      "exempt": "identifier"
+    },
+    "profileName": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "workflow_idempotency_keys": {

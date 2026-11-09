@@ -6,11 +6,14 @@
  *
  * - Every URL passes `safeHttpUrl`; an unsafe one drops the link or image.
  * - A Button renders only when `uiSpec.actions` declares its id. A click
- *   POSTs the task ui-action route, which runs the action once.
+ *   POSTs the task ui-action route. A `follow_up` runs once; a `script`
+ *   button stays clickable and swaps in the card the script returns.
  * - An unknown type, a missing element, or a render error shows
  *   `uiSpec.fallbackText` as prose instead of a partial card.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import { Component, type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -103,7 +106,13 @@ export function isRenderableUiSpec(uiSpec: TaskUiSpec): boolean {
   return walk(root);
 }
 
-type RenderCtx = { taskId: string; elements: Elements; actions: TaskUiSpec["actions"] };
+type RenderCtx = {
+  taskId: string;
+  elements: Elements;
+  actions: TaskUiSpec["actions"];
+  /** Shows the card a script action returned until the task query refetches. */
+  onRefreshed?: (uiSpec: TaskUiSpec) => void;
+};
 
 function renderChildren(el: SpecElement, ctx: RenderCtx): ReactNode[] {
   return el.children.map((id) => <UiSpecNode key={id} id={id} ctx={ctx} />);
@@ -191,6 +200,8 @@ export function renderUiSpecElement(
         <UiSpecActionButton
           taskId={ctx.taskId}
           actionId={actionId}
+          kind={ctx.actions[actionId]?.kind ?? "follow_up"}
+          onRefreshed={ctx.onRefreshed}
           label={text(p.label)}
           variant={
             p.style === "primary" ? "default" : p.style === "danger" ? "destructive" : "outline"
@@ -216,18 +227,26 @@ export function renderUiSpecElement(
   }
 }
 
-/** A declared card action. One click runs it; the server refuses a second run. */
+/**
+ * A declared card action. A `follow_up` runs once and the server refuses a
+ * second run. A `script` re-runs on every click and swaps in the new card.
+ */
 function UiSpecActionButton({
   taskId,
   actionId,
+  kind,
+  onRefreshed,
   label,
   variant,
 }: {
   taskId: string;
   actionId: string;
+  kind: "follow_up" | "script";
+  onRefreshed?: (uiSpec: TaskUiSpec) => void;
   label: string;
   variant: "default" | "destructive" | "outline";
 }) {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   // On the task and session pages the spawned task opens in the split screen;
   // elsewhere (no preview scope) Open navigates to its page.
@@ -238,6 +257,14 @@ function UiSpecActionButton({
     setState("running");
     try {
       const result = await api.runTaskUiAction(taskId, actionId);
+      if (result.status === "refreshed") {
+        if (result.uiSpec) onRefreshed?.(result.uiSpec);
+        for (const queryKey of [["task", taskId], ["session"], ["sessions"]]) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+        setState(kind === "script" ? "idle" : "done");
+        return;
+      }
       const spawned = result.status === "started" ? result.taskId : undefined;
       toast.success(
         result.status === "started" ? "Follow-up started." : "This button already ran.",
@@ -270,6 +297,7 @@ function UiSpecActionButton({
       data-slot="ui-spec-action"
       onClick={() => void run()}
     >
+      {kind === "script" && state === "running" ? <Loader2 className="animate-spin" /> : null}
       {label}
     </Button>
   );
@@ -457,15 +485,21 @@ class UiSpecBoundary extends Component<
   }
 }
 
+type RefreshedSpec = { from: TaskUiSpec; uiSpec: TaskUiSpec };
+
 export function TaskUiSpecView({ task }: { task: Pick<AgentTask, "id" | "uiSpec"> }) {
-  const uiSpec = task.uiSpec;
-  if (!uiSpec) return null;
+  // A refreshed card wins only over the spec it replaced, so a refetch shows the stored one.
+  const [refreshed, setRefreshed] = useState<RefreshedSpec | null>(null);
+  const stored = task.uiSpec;
+  const uiSpec = refreshed && refreshed.from === stored ? refreshed.uiSpec : stored;
+  if (!uiSpec || !stored) return null;
   const fallbackText = uiSpec.fallbackText ?? "";
   if (!isRenderableUiSpec(uiSpec)) return <UiSpecFallback text={fallbackText} />;
   const ctx: RenderCtx = {
     taskId: task.id,
     elements: uiSpec.spec.elements,
     actions: uiSpec.actions,
+    onRefreshed: (next) => setRefreshed({ from: stored, uiSpec: next }),
   };
   return (
     <div data-slot="task-ui-spec" className="min-w-0 mt-3">

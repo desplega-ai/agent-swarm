@@ -2,6 +2,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
 import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
+import type { TaskUiSpec } from "../../../../src/utils/task-ui-spec";
 import { allUsersScopeEnabled, SESSION_SCOPE_HEADER } from "../lib/all-users-scope";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
@@ -902,7 +903,11 @@ class ApiClient {
   async runTaskUiAction(
     id: string,
     actionId: string,
-  ): Promise<{ status: "started" | "already_done"; taskId?: string }> {
+  ): Promise<{
+    status: "started" | "already_done" | "refreshed";
+    taskId?: string;
+    uiSpec?: TaskUiSpec;
+  }> {
     const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/ui-actions/${encodeURIComponent(actionId)}`;
     const res = await fetch(url, {
       method: "POST",

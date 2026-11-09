@@ -659,8 +659,9 @@ export const SUPERSEDED_RESUME_REPAIR_WINDOW_MS = 24 * 60 * 60 * 1000;
  * (heartbeat remediation and `POST /api/tasks/:id/supersede`) supersede
  * first and create the resume in a later, separate write, so a process
  * crash between the two leaves this state. Workflow steps are excluded: a cut
- * step is failed, and one whose retry was queued is superseded with its
- * `failureReason` kept and its step id cleared, so it is matched on the reason.
+ * step is failed, and one the workflow carried on without (a queued retry,
+ * which clears its step id, or a step that still completed) is superseded with
+ * its `failureReason` kept, so it is matched on the reason.
  * `finishedBefore` keeps the sweep from racing
  * an in-flight supersede; `finishedAfter` bounds how far back it repairs.
  */

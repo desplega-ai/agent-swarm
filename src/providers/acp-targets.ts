@@ -1002,7 +1002,7 @@ export const fxTargetProfile: AcpTargetProfile = {
 };
 
 export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfile {
-  const target = readEnv(config, "ACP_TARGET") ?? "custom";
+  const target = readEnv(config, "ACP_TARGET")?.trim().toLowerCase() || "custom";
   if (!isAcpTarget(target)) {
     throw new AcpTargetResolutionError(
       `Unsupported ACP target "${target}". Supported targets: ${ACP_TARGET_IDS.join(", ")}.`,

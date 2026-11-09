@@ -42,6 +42,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
   finalizeSlackMessageReaction,
@@ -1568,6 +1569,50 @@ export async function streamOutcomeCard(
   });
 }
 
+/**
+ * Re-renders a settled outcome message after a script action replaced the
+ * task's card. The settled-outcome skip in the thread render never edits it,
+ * so this is its own path. Returns whether Slack was called.
+ */
+export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app) return false;
+  const task = await getTaskById(taskId);
+  if (!task?.slackChannelId || !task.slackThreadTs) return false;
+  const card = await getSlackOutcomeMessage(task.id);
+  if (!card?.ts || !card.finalizedAt || !isSettledSlackMessage(card)) return false;
+
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
+  const content = await outcomeContent(task, task.slackReplySent);
+  const presentation = await outcomePresentation(task, content);
+  if (!presentation) return false;
+  const captions = [
+    ...(await outcomeCaptionBlocks(task, content)),
+    ...(await outcomeFooter(task, tasks, duration)),
+  ];
+  const uiSpec = await outcomeUiSpec(task);
+  await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+    const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+    const cardBlocks = withCard && uiSpec ? uiSpec.blocks : [];
+    return callSlackWithRetry(app.client, "chat.update", {
+      channel: task.slackChannelId,
+      ts: card.ts,
+      text,
+      blocks: [{ type: "markdown", text }, ...cardBlocks, ...captions],
+    });
+  });
+  return true;
+}
+
+function onTaskUiSpecUpdated(data: unknown): void {
+  const taskId = (data as { taskId?: unknown } | null)?.taskId;
+  if (typeof taskId !== "string") return;
+  refreshSlackOutcomeCard(taskId).catch((error) =>
+    console.error(`[Slack] Failed to refresh the card of task ${taskId}:`, error),
+  );
+}
+
 /** Render the latest wait or final result into the chain's original card. */
 async function resolvedDeferralContent(
   wake: AgentTask,
@@ -2055,12 +2100,14 @@ function onSlackRenderTaskEvent(data: unknown): void {
 export function startSlackRenderV2Events(): void {
   if (renderEventsSubscribed) return;
   for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.on(event, onSlackRenderTaskEvent);
+  workflowEventBus.on(TASK_UI_SPEC_UPDATED_EVENT, onTaskUiSpecUpdated);
   renderEventsSubscribed = true;
 }
 
 export function stopSlackRenderV2Events(): void {
   if (!renderEventsSubscribed) return;
   for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.off(event, onSlackRenderTaskEvent);
+  workflowEventBus.off(TASK_UI_SPEC_UPDATED_EVENT, onTaskUiSpecUpdated);
   renderEventsSubscribed = false;
   if (dirtyFlushTimer) clearTimeout(dirtyFlushTimer);
   dirtyFlushTimer = null;

@@ -702,8 +702,14 @@ describe("script connections", () => {
       markMigrationApplied(database, "307_session_cost_credential_attribution.sql");
       // This one alters session_logs, which this fixture lacks.
       markMigrationApplied(database, "310_session_logs_reasoning.sql");
-      // 315 indexes workflow_runs and approval_requests, absent from this fixture.
-      markMigrationApplied(database, "315_workflow_run_retention.sql");
+      // 314 references model_profiles (made by the skipped 220) and alters
+      // scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "314_model_groups.sql");
+      // 318 updates agent_tasks.status, which this fixture's id-only
+      // agent_tasks lacks.
+      markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
+      // 320 indexes workflow_runs and approval_requests, absent from this fixture.
+      markMigrationApplied(database, "320_workflow_run_retention.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

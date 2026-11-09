@@ -1203,6 +1203,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "UI_SPEC_SCRIPT_ACTIONS",
+        label: "Card script actions",
+        description:
+          "Comma-separated name@contentHash pins (12+ hex chars of the script's contentHash) of global scripts a card Button may re-run. A script edit disarms its cards until you re-pin it. Only an admin user token or dashboard session can change it; the shared API key cannot. Empty turns script actions off.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#card-script-actions`,
+      },
+      {
         key: "SLACK_TASK_WATCHER_INTERVAL_MS",
         label: "Task watcher interval",
         description:

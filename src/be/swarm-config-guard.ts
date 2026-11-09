@@ -3,6 +3,10 @@ import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemet
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import {
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  validateScriptActionAllowlist,
+} from "../ui-spec/script-allowlist";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import {
   COMPANY_ACQUISITION_SOURCES,
@@ -113,6 +117,35 @@ export function internalConfigKeyError(key: string): Error {
         ? "/api/ranking"
         : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
+}
+
+/**
+ * Keys only an admin user (a user token or dashboard session) may write or
+ * delete: never an agent, the Lead included, a guest, or the shared operator
+ * key, which every worker holds. The deployment env can still seed them.
+ * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
+ *
+ * shortcut: this stops direct writes, not a determined holder of the
+ * operator key. That key is root: it can create an admin user and mint a
+ * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
+ * nothing from a pin, because a script action runs as the card's own agent,
+ * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * (deployment-env only, or an out-of-band human approval) if workers stop
+ * holding the operator key.
+ */
+const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+
+export function isHumanOnlyConfigKey(key: string): boolean {
+  return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
+}
+
+export function humanOnlyConfigKeyError(key: string): string {
+  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
+}
+
+/** A page session acts for its viewer but runs the page author's code. */
+export function humanOnlyConfigKeyPageError(key: string): string {
+  return `Key '${key}' cannot be changed from a page session. Change it from the dashboard or with a user token.`;
 }
 
 export function isReservedConfigKey(key: string): boolean {
@@ -381,6 +414,7 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
   DOCKER_RUNTIME: validateDockerRuntime,
   DOCKER_PIDS_LIMIT: validateDockerPidsLimit,

@@ -16,9 +16,19 @@ export type { VcsProvider } from "./types";
 export function detectVcsProvider(url: string): VcsProvider | null {
   if (isAzureDevOpsUrl(url)) return "azure-devops";
   if (isBitbucketUrl(url)) return "bitbucket";
-  // The configured GHES host wins over the loose gitlab substring checks below.
+  // The configured GHES host wins even when its hostname starts with gitlab.
   if (getGitHubLinkConfig().enterprise && isGitHubUrl(url)) return "github";
-  if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
+  let hostname: string | undefined;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    // SCP-style SSH remotes: user@host:path.
+    hostname = url
+      .trim()
+      .match(/^[^@/\s:]+@([^:/\s]+):/)?.[1]
+      ?.toLowerCase();
+  }
+  if (hostname?.startsWith("gitlab.")) return "gitlab";
   if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
   return null;
 }
