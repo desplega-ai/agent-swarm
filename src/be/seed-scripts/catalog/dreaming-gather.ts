@@ -10,8 +10,11 @@ const CAPS = {
   identityOpsTotal: 6,
   identityOpsPerAgent: 1,
   memoryStore: 5,
-  memoryEdit: 5,
+  // 5 for the lanes that existed before + memoryCorrections, since a confirmed correction is an edit.
+  memoryEdit: 15,
   memoryDelete: 10,
+  // Memories per night in swarm.memory.corrections (explicit-self rating notes). About 3 new notes a day.
+  memoryCorrections: 10,
   skillCreate: 2,
   skillUpdate: 6,
   scriptSpecs: 2,
@@ -473,6 +476,90 @@ export default async function (args: unknown, ctx: ScriptContext) {
     // memories had long titles. A newline in a name is the real defect.
     [win],
   );
+  // Correction queue: explicit-self ratings whose note says a manual memory is wrong or stale. One item per memory,
+  // oldest unhandled note first. Handled = the memory has a version newer than the rating (edited), or a non-dry
+  // synthesis already ruled on the rating: a rejected[] item from "swarm.memory.corrections" naming "rating:<id>"
+  // with a non-cap reason, or a propose action whose evidence cites "rating:<id>". Cap overflow and edits apply
+  // refused leave no marker, so they come back the next night.
+  // shortcut: ratings on a chunk > 0 row are skipped (the memory is keyed by chunk 0); map chunk rows if they show up.
+  const corrWf = await q(
+    "correctionsWorkflow",
+    `SELECT COALESCE((SELECT workflowId FROM workflow_runs WHERE id = ?),
+       (SELECT id FROM workflows WHERE name = 'dreaming' ORDER BY createdAt ASC LIMIT 1)) wf`,
+    [a.runId ?? ""],
+  );
+  const corrRows = !corrWf ? null : await q(
+    "memCorrections",
+    `WITH syn AS MATERIALIZED (
+       SELECT json_extract(s.output, '$.taskOutput') o FROM workflow_run_steps s JOIN workflow_runs r ON r.id = s.runId
+       WHERE r.workflowId = ? AND s.nodeId = 'synthesize' AND s.runId <> ? AND json_valid(s.output)
+         AND COALESCE(CASE WHEN json_valid(r.triggerData) THEN json_type(r.triggerData, '$.dryRun') = 'true'
+           OR json_extract(r.triggerData, '$.dryRun') = 'true' END, 0) = 0),
+     handled AS MATERIALIZED (
+       SELECT json_extract(j.value, '$.item') ref FROM syn, json_each(syn.o, '$.rejected') j
+       WHERE j.type = 'object' AND json_extract(j.value, '$.from') = 'swarm.memory.corrections'
+         AND COALESCE(json_extract(j.value, '$.reason'), '') NOT GLOB 'cap*'
+       UNION
+       SELECT e.value FROM syn, json_each(syn.o, '$.actions') x, json_each(x.value, '$.evidence') e
+       WHERE x.type = 'object' AND json_extract(x.value, '$.tier') = 'propose' AND e.type = 'text' AND e.value GLOB 'rating:*'),
+     q AS MATERIALIZED (
+       SELECT r.id ratingId, r.memoryId, r.taskId, r.signal, r.reasoning, r.createdAt ratedAt,
+         m.name, m.agentId, m.scope, m.version, m.alpha, m.beta, m.createdAt memCreatedAt, m.content,
+         COALESCE(m.totalChunks, 1) totalChunks,
+         ROW_NUMBER() OVER (PARTITION BY r.memoryId ORDER BY r.createdAt DESC) rn,
+         MIN(r.createdAt) OVER (PARTITION BY r.memoryId) firstAt
+       FROM memory_rating r JOIN agent_memory m ON m.id = r.memoryId AND COALESCE(m.chunkIndex, 0) = 0
+       WHERE r.source = 'explicit-self' AND r.signal < 0 AND length(trim(COALESCE(r.reasoning, ''))) > 0
+         AND m.source = 'manual'
+         AND julianday(r.createdAt) > julianday(COALESCE(
+           (SELECT MAX(v.createdAt) FROM agent_memory_version v WHERE v.memory_id = m.id), m.createdAt))
+         AND ('rating:' || r.id) NOT IN (SELECT ref FROM handled WHERE ref IS NOT NULL))
+     SELECT q.*, (SELECT COUNT(DISTINCT memoryId) FROM q) backlog FROM q
+     WHERE rn <= 3 AND memoryId IN (SELECT memoryId FROM q WHERE rn = 1 ORDER BY firstAt ASC, memoryId LIMIT ?)
+     ORDER BY firstAt ASC, memoryId, rn`,
+    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CAPS.memoryCorrections],
+  );
+  const CORR_BODY_MAX = 3000;
+  const corrItems: any[] = [];
+  for (const r of corrRows ?? []) {
+    let item = corrItems.find((x) => x.memoryId === r.memoryId);
+    if (!item) {
+      let body = String(r.content ?? "");
+      const totalChunks = Number(r.totalChunks);
+      if (totalChunks > 1) {
+        // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
+        const parts = await q(
+          "memCorrectionChunks",
+          `SELECT content FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
+             AND COALESCE(totalChunks, 1) = ? AND substr(createdAt, 1, 16) = substr(?, 1, 16) ORDER BY chunkIndex ASC`,
+          [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
+        );
+        if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
+      }
+      item = {
+        memoryId: r.memoryId,
+        name: r.name,
+        agentId: r.agentId ?? null,
+        scope: r.scope,
+        version: Number(r.version ?? 1),
+        alpha: Number(r.alpha),
+        beta: Number(r.beta),
+        totalChunks,
+        multiChunk: totalChunks > 1,
+        content: body.slice(0, CORR_BODY_MAX),
+        contentTruncated: body.length > CORR_BODY_MAX,
+        notes: [],
+      };
+      corrItems.push(item);
+    }
+    item.notes.push({
+      ratingId: r.ratingId,
+      taskId: r.taskId ?? null,
+      signal: Number(r.signal),
+      ratedAt: r.ratedAt,
+      note: String(r.reasoning ?? "").slice(0, 1000),
+    });
+  }
   const created = await q(
     "memCreatedInWindow",
     `SELECT source, COUNT(*) n FROM agent_memory WHERE julianday(createdAt) > julianday('now', ?) GROUP BY source`,
@@ -487,6 +574,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
     })),
     unhelpful: unhelpful ?? [],
     badKeys: badKeys ?? [],
+    // ok false = the queue query failed, so an empty list is not "nothing to correct".
+    corrections: {
+      ok: corrRows !== null,
+      cap: CAPS.memoryCorrections,
+      backlog: Number(corrRows?.[0]?.backlog ?? 0),
+      items: corrItems,
+    },
     createdInWindow: {
       manual: cnt("manual"),
       taskCompletion: cnt("task_completion"),
