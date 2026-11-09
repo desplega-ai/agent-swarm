@@ -866,3 +866,39 @@ that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts
 | `Probe-orphan-sweep.cfg` | CX15 found | 4,718 | 35 |
 | `Probe-task-skip.cfg` | holds | 131,404 | - |
 | `Probe-task-skip-sweep.cfg` | CX12 found | 793,008 | 34 |
+
+## Sync with #2892 (`main` @ `c8c9bfdf1`)
+
+#2892 adds one write to the `scheduleTaskStepRetry` claim transaction: after the task is detached
+and the retry is checkpointed, a task that failed with `superseded_workflow_task` moves
+`failed -> superseded` (`markWorkflowStepTaskSuperseded`, guarded on that status and reason, no
+bus event). `RetryRow` in `H7R` and `ER` already sets the row's `task` to `none`, so the detached
+task leaves the model and its status feeds no guard. The claim guards are unchanged, so the `.tla`
+and `.cfg` files are unchanged; ACTIONS.md notes the write and re-pins the `task-step-routing.ts`
+lines shifted by the PR.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 12` for
+`Probe-child-run.cfg`). Every config gives the same verdict as on `7dc87f455`, and every config
+that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts` +
+`src/tests/workflow-sub-workflow.test.ts` + `src/tests/workflow-cascade-cancel.test.ts` +
+`src/tests/workflow-agent-task-retry.test.ts` (the #2892 regression): 85 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 29,754 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 12,047 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 286 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,214 / 2,946 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,113 / 2,119 / 27,595 / 7,796 / 348 / 782 | 22 / 18 / 28 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 765 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 645 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 1,050,158 | 34 |
+| `Probe-input-await.cfg` | CX6 found | 327 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,039 / 13,164 | 20 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 3,965,730 / 146,539 | - / 34 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,342 | 19 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 9,444 / 938 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 4,668 | 35 |
+| `Probe-task-skip.cfg` | holds | 131,404 | - |
+| `Probe-task-skip-sweep.cfg` | CX12 found | 1,859,598 | 34 |
