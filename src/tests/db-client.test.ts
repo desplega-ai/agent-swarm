@@ -430,6 +430,59 @@ describe("db-client transactions on a shared WAL file (second connection)", () =
   });
 });
 
+describe("db-client event-loop time slicing", () => {
+  // ~5 ms of pure CPU per driver call. 24 chains x 6 statements queue behind
+  // the FIFO lock, whose hand-off is a microtask, so without slicing the whole
+  // burst (~700 ms) runs as one macrotask and starves every timer and socket.
+  const CPU_SQL =
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c";
+  const ROWS = 30_000;
+
+  /** Longest gap between two 1 ms timer ticks while `work` runs. */
+  async function maxTimerGapDuring(work: () => Promise<unknown>): Promise<number> {
+    let last = performance.now();
+    let maxGap = 0;
+    let running = true;
+    const ticker = (async () => {
+      while (running) {
+        await new Promise((r) => setTimeout(r, 1));
+        const now = performance.now();
+        maxGap = Math.max(maxGap, now - last);
+        last = now;
+      }
+    })();
+    await work();
+    running = false;
+    await ticker;
+    return maxGap;
+  }
+
+  const burst = () =>
+    Promise.all(
+      Array.from({ length: 24 }, async () => {
+        for (let i = 0; i < 6; i++) await client.get(CPU_SQL, [ROWS]);
+      }),
+    );
+
+  test("a burst of queued statements lets timers run between statements", async () => {
+    const startedAt = performance.now();
+    const gap = await maxTimerGapDuring(burst);
+    const totalMs = performance.now() - startedAt;
+    // Premise: the burst is long enough that an unsliced run would blow the bound.
+    expect(totalMs).toBeGreaterThan(300);
+    expect(gap).toBeLessThan(totalMs / 4);
+  });
+
+  test("a transaction callback with many statements lets timers run too", async () => {
+    const gap = await maxTimerGapDuring(() =>
+      client.transaction(async (tx) => {
+        for (let i = 0; i < 100; i++) await tx.get(CPU_SQL, [ROWS]);
+      }),
+    );
+    expect(gap).toBeLessThan(150);
+  });
+});
+
 describe("db-client slow statement warning", () => {
   // A recursive CTE is pure CPU inside one driver call, so it blocks the
   // event loop the same way a slow production query does.

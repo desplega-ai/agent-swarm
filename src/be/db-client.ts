@@ -270,6 +270,33 @@ function timedStatement<T>(sql: string, run: () => T): T {
   }
 }
 
+/**
+ * Longest stretch of DB work (driver calls plus the JS between them) that may
+ * run without handing the event loop back. The FIFO lock hands over through
+ * microtasks, so a burst of queued statements (a dozen memory searches, one
+ * store-progress with 20 deletes) otherwise runs as ONE macrotask: measured
+ * 4-30 s in which /health, scripts and MCP calls get no turn.
+ */
+const SLICE_MS = 25;
+let sliceStartedAt = 0;
+
+/** Called before each statement; yields to timers and sockets once the slice is spent. */
+async function yieldIfSliceSpent(): Promise<void> {
+  const now = performance.now();
+  if (sliceStartedAt === 0) {
+    sliceStartedAt = now;
+    // Fires at the next macrotask boundary, whoever caused it: the slice is over.
+    // A timer, not setImmediate: the yield below owns setImmediate.
+    setTimeout(() => {
+      sliceStartedAt = 0;
+    }, 0);
+    return;
+  }
+  if (now - sliceStartedAt < SLICE_MS) return;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  sliceStartedAt = 0;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -600,6 +627,8 @@ class BunSqliteClient implements DbClient {
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) {
       const db = this.getDatabase();
+      // The transaction already holds the lock, so yielding lets only timers and sockets run.
+      await yieldIfSliceSpent();
       return timed(() => op(db));
     }
     let sleptMs = 0;
@@ -610,6 +639,9 @@ class BunSqliteClient implements DbClient {
       const release = await this.lock.acquire();
       let backoff = 0;
       try {
+        // Checked while holding the lock: waiters queued behind it passed any
+        // earlier check long ago. Other callers just wait, as behind a slow statement.
+        await yieldIfSliceSpent();
         // A top-level single statement is atomic, so a repeat on BUSY is
         // exact. The final attempt spins `finalAttemptSpinMs` (see
         // transaction()).
@@ -696,19 +728,24 @@ class BunSqliteClient implements DbClient {
       return this.getDatabase();
     };
     return {
-      query: async <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
-        timedStatement(sql, () =>
+      query: async <T>(sql: string, params: DbParam[] = []): Promise<T[]> => {
+        await yieldIfSliceSpent();
+        return timedStatement(sql, () =>
           guard()
             .query<T, DbParam[]>(sql)
             .all(...params),
-        ),
-      get: async <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
-        timedStatement(sql, () =>
+        );
+      },
+      get: async <T>(sql: string, params: DbParam[] = []): Promise<T | null> => {
+        await yieldIfSliceSpent();
+        return timedStatement(sql, () =>
           guard()
             .query<T, DbParam[]>(sql)
             .get(...params),
-        ),
+        );
+      },
       run: async (sql: string, params: DbParam[] = []): Promise<{ changes: number }> => {
+        await yieldIfSliceSpent();
         const result = timedStatement(sql, () =>
           guard()
             .query(sql)
