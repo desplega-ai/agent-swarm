@@ -7,7 +7,9 @@
  * the cutoff. This fetch widens the window until it holds `limit` documents,
  * or the store has nothing more to return.
  */
+
 import { collapsedDocumentKey } from "./reranker";
+import { dropReviewTaskCompletions } from "./review-recall-filter";
 import type { MemoryCandidate, MemorySearchOptions, MemoryStore } from "./types";
 
 /** Upper bound on one widened fetch. */
@@ -29,18 +31,29 @@ export async function searchMemoryCandidates(
   store: MemoryStore,
   embedding: Float32Array,
   agentId: string,
-  options: MemorySearchOptions & { limit: number },
+  {
+    excludeReviewTaskCompletions = false,
+    ...options
+  }: MemorySearchOptions & { limit: number; excludeReviewTaskCompletions?: boolean },
 ): Promise<MemoryCandidate[]> {
+  // Dropping rows after the fetch would leave the window short, so the filter
+  // sits inside the widening loop: dropped rows count as missing documents.
+  const keep = (rows: MemoryCandidate[]) =>
+    excludeReviewTaskCompletions ? dropReviewTaskCompletions(rows) : Promise.resolve(rows);
   let fetchLimit = options.limit;
-  let rows = await store.search(embedding, agentId, { ...options, limit: fetchLimit });
+  let raw = await store.search(embedding, agentId, { ...options, limit: fetchLimit });
+  let rows = await keep(raw);
   while (fetchLimit < MAX_CANDIDATE_FETCH) {
     const documents = countCandidateDocuments(rows);
-    // Enough documents, or no chunk duplicates for the collapse to remove.
-    if (documents >= options.limit || documents === rows.length) break;
+    // Enough documents, or nothing dropped and no chunk duplicates to collapse.
+    if (documents >= options.limit || (documents === rows.length && rows.length === raw.length)) {
+      break;
+    }
     const nextLimit = Math.min(fetchLimit * WIDEN_FACTOR, MAX_CANDIDATE_FETCH);
     const wider = await store.search(embedding, agentId, { ...options, limit: nextLimit });
-    if (wider.length <= rows.length) break; // the store is exhausted
-    rows = wider;
+    if (wider.length <= raw.length) break; // the store is exhausted
+    raw = wider;
+    rows = await keep(raw);
     fetchLimit = nextLimit;
   }
   return rows;

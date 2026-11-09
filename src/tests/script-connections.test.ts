@@ -705,8 +705,11 @@ describe("script connections", () => {
       // 314 references model_profiles (made by the skipped 220) and alters
       // scheduled_tasks, which this fixture does not create.
       markMigrationApplied(database, "314_model_groups.sql");
-      // 317 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
-      markMigrationApplied(database, "317_audit_agent_columns.sql");
+      // 318 updates agent_tasks.status, which this fixture's id-only
+      // agent_tasks lacks.
+      markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
+      // 320 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
+      markMigrationApplied(database, "320_audit_agent_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

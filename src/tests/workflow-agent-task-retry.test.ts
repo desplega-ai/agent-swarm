@@ -239,6 +239,10 @@ describe("agent-task node.retry on task failure", () => {
     expect(JSON.stringify(finalStep.output)).toContain("[FAILED:");
     // No third task was ever created.
     expect((await getTaskByWorkflowRunStepId(step.id))!.id).toBe(second.id);
+    // The run went on without the step: the last cut is not a real failure.
+    const lastCut = (await getTaskById(second.id))!;
+    expect(lastCut.status).toBe("superseded");
+    expect(lastCut.failureReason).toBe("superseded_workflow_task");
   });
 
   test("a node without retry fails the run exactly as before on a non-supersede failure", async () => {
@@ -437,6 +441,64 @@ describe("implicit retry for a superseded task on a node without retry", () => {
     expect(queued.retryCount).toBe(1);
     expect((await getWorkflowRun(runId))!.status).toBe("waiting");
     expect((await getTaskById(first.id))!.status).toBe("superseded");
+  });
+});
+
+describe("a cut the workflow carries on without", () => {
+  const NO_RETRY = { ...RETRY_ONCE, maxRetries: 0 };
+
+  test("onNodeFailure:continue moves the cut to superseded and keeps it bound", async () => {
+    const runId = await startRun({ retry: NO_RETRY, onNodeFailure: "continue" });
+    const step = await synthesizeStep(runId);
+    const cut = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+    await waitFor(async () => {
+      const r = await getWorkflowRun(runId);
+      return r?.status === "completed" ? r : null;
+    }, "run completed via onNodeFailure:continue");
+    expect((await synthesizeStep(runId)).status).toBe("completed");
+    const task = (await getTaskById(cut.id))!;
+    expect(task.status).toBe("superseded");
+    expect(task.failureReason).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
+    expect(task.workflowRunStepId).toBe(step.id);
+    // A bound cut gets no resume either.
+    const orphans = await getSupersededTasksWithoutResume(
+      new Date(Date.now() + 60_000).toISOString(),
+      new Date(0).toISOString(),
+    );
+    expect(orphans.map((t) => t.id)).not.toContain(cut.id);
+  });
+
+  test("the recovery sweep applies the same rule", async () => {
+    const runId = await startRun({ retry: NO_RETRY, onNodeFailure: "continue" });
+    const step = await synthesizeStep(runId);
+    const cut = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    teardownResumeListener?.();
+    try {
+      await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      await new Promise((r) => setTimeout(r, 20));
+      await recoverIncompleteRuns(registry);
+    } finally {
+      teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
+    }
+
+    expect((await synthesizeStep(runId)).status).toBe("completed");
+    expect((await getTaskById(cut.id))!.status).toBe("superseded");
+  });
+
+  test("a real failure the workflow carries on without stays failed", async () => {
+    const runId = await startRun({ onNodeFailure: "continue" });
+    const step = await synthesizeStep(runId);
+    const task = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    await failTask(task.id, "agent crashed");
+    await waitFor(async () => {
+      const r = await getWorkflowRun(runId);
+      return r?.status === "completed" ? r : null;
+    }, "run completed via onNodeFailure:continue");
+    expect((await getTaskById(task.id))!.status).toBe("failed");
   });
 });
 

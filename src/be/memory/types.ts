@@ -139,6 +139,17 @@ export interface MemoryCandidate extends AgentMemory {
   /** Beta-Binomial usefulness posterior. Default Beta(1,1) → reranker no-op. */
   alpha: number;
   beta: number;
+  /** Per-rater rating mass that gates demotion; set by attachDemotionEvidence(). */
+  demotionEvidence?: DemotionEvidence;
+}
+
+/** Weighted explicit-self and LLM rating mass for one memory, from memory_rating. */
+export interface DemotionEvidence {
+  selfAlpha: number;
+  selfBeta: number;
+  llmAlpha: number;
+  llmBeta: number;
+  llmCount: number;
 }
 
 export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback" | "graph";
