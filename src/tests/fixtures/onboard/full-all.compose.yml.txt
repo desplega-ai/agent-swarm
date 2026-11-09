@@ -26,7 +26,7 @@ services:
       - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}
       - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
-      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}
+      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-0.5}
       - MCP_BASE_URL=http://localhost:3999
       - APP_URL=https://app.agent-swarm.dev
       - SLACK_DISABLE=false

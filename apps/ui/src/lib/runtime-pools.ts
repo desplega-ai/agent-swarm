@@ -28,9 +28,6 @@ export const RUNTIME_PROVIDER_KINDS: readonly RuntimeProviderKind[] = [
   "k8s",
 ];
 
-/** Kinds the API rejects on write. Shown disabled in pickers. */
-export const COMING_SOON_KINDS: ReadonlySet<RuntimeProviderKind> = new Set(["k8s"]);
-
 export const RUNTIME_KIND_LABEL: Record<RuntimeProviderKind, string> = {
   static: "Static",
   docker: "Docker",
@@ -44,7 +41,7 @@ export const RUNTIME_KIND_DESCRIPTION: Record<RuntimeProviderKind, string> = {
   docker: "Containers on a Docker host.",
   e2b: "E2B cloud sandboxes.",
   boxd: "boxd microVMs that run the worker image.",
-  k8s: "Coming soon.",
+  k8s: "Worker pods in a Kubernetes namespace, managed by the swarm API.",
 };
 
 export const RUNTIME_LIFECYCLES: readonly RuntimePoolLifecycle[] = ["idle", "per-task"];

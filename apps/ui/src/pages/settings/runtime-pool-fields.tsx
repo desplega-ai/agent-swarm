@@ -24,7 +24,6 @@ import {
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Switch } from "@/components/ui/switch";
 import {
-  COMING_SOON_KINDS,
   RUNTIME_DELIVERY_LABEL,
   RUNTIME_KIND_DESCRIPTION,
   RUNTIME_KIND_LABEL,
@@ -117,7 +116,6 @@ export function validate(
   const name = form.name.trim();
   if (!name) errors.name = "Enter a name.";
   else if (name.length > 200) errors.name = "Use 200 characters or fewer.";
-  if (COMING_SOON_KINDS.has(form.kind)) errors.kind = "This provider is not available yet.";
   const controller = controllers.find((c) => c.id === form.controllerId);
   if (!controller) errors.controllerId = "Pick a controller.";
   else if (controller.kind !== form.kind)
@@ -296,9 +294,8 @@ export function PoolFields({
             </SelectTrigger>
             <SelectContent>
               {RUNTIME_PROVIDER_KINDS.map((kind) => (
-                <SelectItem key={kind} value={kind} disabled={COMING_SOON_KINDS.has(kind)}>
+                <SelectItem key={kind} value={kind}>
                   {RUNTIME_KIND_LABEL[kind]}
-                  {COMING_SOON_KINDS.has(kind) ? " (coming soon)" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
