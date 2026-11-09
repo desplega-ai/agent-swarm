@@ -7,6 +7,7 @@ Thanks for your interest in contributing to Agent Swarm!
 - [Development Setup](#development-setup)
 - [Running the Project](#running-the-project)
 - [Code Quality](#code-quality)
+- [Pull Requests](#pull-requests)
 - [Building](#building)
 - [Releasing](#releasing)
 - [Project Structure](#project-structure)
@@ -176,6 +177,21 @@ bun run test:root
 ```
 
 No extra environment variables are required. `src/tests/preload.ts` seeds a fixture `SECRETS_ENCRYPTION_KEY` into the process so that the `swarm_config` encryption layer boots cleanly under test.
+
+---
+
+## Pull Requests
+
+Every PR description fills [.github/pull_request_template.md](./.github/pull_request_template.md). Keep its `**Why:**` and `**Risk:**` lines and its `##` headings, and replace each HTML comment with your text. The comments say what each part needs and how long it should be.
+
+GitHub pre-fills the template only in the web UI. `gh pr create --body` and `--fill` skip it, and so does a coding agent that calls them. Write the body to a file, check it, then open the PR from the file:
+
+```bash
+bun scripts/check-pr-body.ts --title "<title>" --body-file /tmp/pr-body.md
+gh pr create --title "<title>" --body-file /tmp/pr-body.md
+```
+
+The **PR Body** check runs the same script on every PR, and **Merge Gate** (the required check) fails while it is red. Edit the PR description to fix it; no push is needed. The detailed section rules are in the pull request block of [CLAUDE.md](./CLAUDE.md).
 
 ---
 
