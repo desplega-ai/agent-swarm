@@ -11,8 +11,9 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
+import { realtimeBus } from "../realtime/bus";
 import type { Workflow, WorkflowDefinition } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import { isWorkflowRunActive, startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
@@ -134,6 +135,113 @@ describe("WaitExecutor — event mode end-to-end", () => {
 
     const doneStep = finalSteps.find((s) => s.nodeId === "done");
     expect(doneStep?.status).toBe("completed");
+  });
+
+  test("looped event wait keeps its subscription across successive signals", async () => {
+    const registry = createExecutorRegistry(deps);
+    const eventName = "loop.signal";
+    const wf = await makeWorkflow("wait-event-loop", {
+      nodes: [
+        {
+          id: "start",
+          type: "notify",
+          config: { channel: "swarm", template: "start" },
+          next: "wait",
+        },
+        {
+          id: "wait",
+          type: "wait",
+          config: { mode: "event", eventName, scope: "global" },
+          next: { event: "check" },
+        },
+        {
+          id: "check",
+          type: "property-match",
+          config: { conditions: [{ field: "wait.payload.done", op: "eq", value: true }] },
+          next: { true: "done", false: "wait" },
+        },
+        { id: "done", type: "notify", config: { channel: "swarm", template: "done" } },
+      ],
+    });
+    const runId = await startWorkflowExecution(wf, {}, registry);
+    await initWaitBusSubscriptions(registry);
+
+    for (let sequence = 1; sequence <= 3; sequence++) {
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      const waiting = steps.filter((s) => s.nodeId === "wait" && s.status === "waiting");
+      expect(waiting).toHaveLength(1);
+      expect((await getWaitStateByStepId(waiting[0]!.id))?.status).toBe("pending");
+
+      const payload = { sequence, done: sequence === 3 };
+      workflowEventBus.emit(eventName, payload);
+      await waitFor(async () => {
+        const current = await getWorkflowRunStepsByRunId(runId);
+        return (
+          current.filter((s) => s.nodeId === "wait" && s.status === "completed").length ===
+            sequence && !isWorkflowRunActive(runId)
+        );
+      });
+      // Let the fire-and-forget bus handler finish its cleanup after walkGraph returns.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const fired = await getWaitStateByStepId(waiting[0]!.id);
+      expect(fired?.status).toBe("fired");
+      expect(fired?.firedPayload).toEqual(payload);
+      expect((await getWorkflowRun(runId))?.status).toBe(sequence === 3 ? "completed" : "waiting");
+      expect(realtimeBus.subscriberCount(`workflow:${eventName}`)).toBe(sequence === 3 ? 0 : 1);
+    }
+  });
+
+  test("consecutive waits for the same event each receive a separate signal", async () => {
+    const registry = createExecutorRegistry(deps);
+    const eventName = "consecutive.signal";
+    const wf = await makeWorkflow("wait-event-consecutive", {
+      nodes: [
+        {
+          id: "first",
+          type: "wait",
+          config: { mode: "event", eventName },
+          next: { event: "second" },
+        },
+        {
+          id: "second",
+          type: "wait",
+          config: { mode: "event", eventName },
+          next: { event: "done" },
+        },
+        { id: "done", type: "notify", config: { channel: "swarm", template: "done" } },
+      ],
+    });
+    const runId = await startWorkflowExecution(wf, {}, registry);
+    await initWaitBusSubscriptions(registry);
+
+    workflowEventBus.emit(eventName, { _runId: runId, sequence: 1 });
+    await waitFor(async () => {
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      return (
+        steps.some((s) => s.nodeId === "second" && s.status === "waiting") &&
+        !isWorkflowRunActive(runId)
+      );
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    const first = steps.find((s) => s.nodeId === "first")!;
+    const second = steps.find((s) => s.nodeId === "second")!;
+    expect((await getWaitStateByStepId(first.id))?.firedPayload).toEqual({
+      _runId: runId,
+      sequence: 1,
+    });
+    expect((await getWaitStateByStepId(second.id))?.status).toBe("pending");
+    expect(realtimeBus.subscriberCount(`workflow:${eventName}`)).toBe(1);
+
+    workflowEventBus.emit(eventName, { _runId: runId, sequence: 2 });
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
+    expect((await getWaitStateByStepId(second.id))?.firedPayload).toEqual({
+      _runId: runId,
+      sequence: 2,
+    });
+    expect(realtimeBus.subscriberCount(`workflow:${eventName}`)).toBe(0);
   });
 
   test("scope='run': mismatched _runId payload does NOT resolve the wait", async () => {
