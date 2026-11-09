@@ -5,7 +5,7 @@
 #   podman compose --env-file .env up -d
 #
 # Image version: set AGENT_SWARM_VERSION in .env to a published release.
-# Blank falls back to `latest`, which moves on every commit to main and is
+# Blank falls back to `latest`, which moves with each deploy of main and is
 # not a release. Releases: https://github.com/desplega-ai/agent-swarm/releases
 # Upgrade/rollback (migrations are forward-only, so back up first):
 # https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md

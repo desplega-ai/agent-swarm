@@ -25,7 +25,7 @@ Leave the worker volumes alone. They mount `/workspace/*` and `/logs`, which is 
 ## Pin the image version
 
 Set `AGENT_SWARM_VERSION` in `.env` to a published release before starting. It drives the tag for the API and every agent service.
-Blank resolves to `latest`, which is rebuilt on every commit to `main` and is not a release. The example sets `pull_policy: always`, so an unpinned stack can move to a newer build on any `up -d` or restart.
+Blank resolves to `latest`, which moves to a newer `main` build up to three times a day and is not a release. The example sets `pull_policy: always`, so an unpinned stack can move to a newer build on any `up -d` or restart.
 
 ```bash
 AGENT_SWARM_VERSION=<release version>

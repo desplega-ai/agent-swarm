@@ -36,7 +36,7 @@ Do not change the worker volumes. Those mount `/workspace/*` and `/logs`, which 
 
 ## Why pinning is required
 
-`latest` is rebuilt and moved on every commit to `main`. It is a development tag, not a release; a version tag is published only when the release version changes.
+`latest` moves to a newer `main` build up to three times a day. It is a development tag, not a release; a version tag is published only when the release version changes.
 The Compose example sets `pull_policy: always`, so an unpinned deployment can move to a newer build on any `up -d` or container restart — including a restart you did not intend as an upgrade.
 The API applies SQL migrations at boot. When the API and the agents drift onto different builds, code can reach schema that its own image never created.
 Pin the API and every agent service to the same published release. Read the [releases](https://github.com/desplega-ai/agent-swarm/releases).

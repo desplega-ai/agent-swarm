@@ -16,7 +16,7 @@ export function generateEnv(state: OnboardState, env: NodeJS.ProcessEnv = proces
   lines.push(`MCP_BASE_URL=http://localhost:${port}`);
   lines.push("APP_URL=https://app.agent-swarm.dev");
 
-  // Image pin. Blank resolves to `latest`, which moves on every commit to main
+  // Image pin. Blank resolves to `latest`, which moves with each deploy of main
   // and is not a release. Left blank so a fresh install behaves as before;
   // operators set a published release from
   // https://github.com/desplega-ai/agent-swarm/releases before depending on it.

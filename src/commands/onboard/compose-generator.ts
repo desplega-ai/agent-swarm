@@ -11,7 +11,7 @@ const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
 // suppression comments in one place.
 
 // Image tag for the API and agent images. Blank or unset resolves to `latest`,
-// which moves on every commit to main; operators pin a release in .env.
+// which moves with each deploy of main; operators pin a release in .env.
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const IMAGE_TAG_EXPRESSION = "${AGENT_SWARM_VERSION:-latest}";
 // Host address for published ports, from AGENT_SWARM_BIND_ADDRESS in .env. Blank
@@ -218,7 +218,7 @@ export function generateCompose(state: OnboardState): string {
   lines.push(`#   ${composeCommandText(engine, "--env-file .env up -d")}`);
   lines.push("#");
   lines.push("# Image version: set AGENT_SWARM_VERSION in .env to a published release.");
-  lines.push("# Blank falls back to `latest`, which moves on every commit to main and is");
+  lines.push("# Blank falls back to `latest`, which moves with each deploy of main and is");
   lines.push("# not a release. Releases: https://github.com/desplega-ai/agent-swarm/releases");
   lines.push("# Upgrade/rollback (migrations are forward-only, so back up first):");
   lines.push(
