@@ -39,4 +39,25 @@ describe("detectVcsProvider", () => {
     expect(detectVcsProvider("https://example.com")).toBeNull();
     expect(detectVcsProvider("https://notbitbucket.org/org/repo")).toBeNull();
   });
+
+  test("picks the provider from the host, not from a gitlab. in the path", () => {
+    for (const url of [
+      "https://github.com/acme/gitlab.client",
+      "https://github.com/acme/gitlab.internal",
+      "git@github.com:acme/gitlab.client.git",
+      "acme/gitlab.js",
+    ]) {
+      expect(detectVcsProvider(url)).toBe("github");
+    }
+
+    for (const url of [
+      "https://gitlab.com/acme/widgets",
+      "https://gitlab.example.com/group/project",
+      "https://gitlab.internal/group/project",
+      "git@gitlab.com:acme/widgets.git",
+      "ssh://git@gitlab.internal/group/project",
+    ]) {
+      expect(detectVcsProvider(url)).toBe("gitlab");
+    }
+  });
 });
