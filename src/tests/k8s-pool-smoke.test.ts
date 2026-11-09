@@ -17,7 +17,13 @@ test(
   CHILD_PROCESS_TEST_BUDGET_MS,
 );
 
-for (const mode of ["success", "pod-failure", "api-failure"] as const) {
+for (const mode of [
+  "success",
+  "pod-failure",
+  "api-failure",
+  "cleanup-failure",
+  "pod-and-cleanup-failure",
+] as const) {
   test(
     `Kubernetes smoke cleans only its test resources: ${mode}`,
     async () => {
@@ -33,6 +39,8 @@ for (const mode of ["success", "pod-failure", "api-failure"] as const) {
       };
       const operatorKey = crypto.randomUUID();
       const workerKey = `aseph_${crypto.randomUUID()}`;
+      const cleanupFails = mode.includes("cleanup-failure");
+      const podFails = mode === "pod-failure" || mode === "pod-and-cleanup-failure";
       let disabled = false;
       const deletes: string[] = [];
       const pod = {
@@ -47,7 +55,7 @@ for (const mode of ["success", "pod-failure", "api-failure"] as const) {
           containers: [
             {
               name: "worker",
-              resources: { limits: { cpu: "1", memory: mode === "pod-failure" ? "64Mi" : "2Gi" } },
+              resources: { limits: { cpu: "1", memory: podFails ? "64Mi" : "2Gi" } },
               env: [{ name: "AGENT_SWARM_API_KEY", value: workerKey }],
             },
           ],
@@ -89,6 +97,8 @@ console.log(JSON.stringify({items: owned && !state.disabled ? [state.pod] : []})
           if (path === `/api/runtime-pools/${ids.pool}/agents`)
             return Response.json({ agent: { id: ids.agent } });
           if (path === `/api/runtime-pools/${ids.pool}/runtimes`) {
+            if (disabled && cleanupFails)
+              return Response.json({ message: workerKey }, { status: 503 });
             if (!disabled && mode === "api-failure")
               return Response.json({ message: workerKey }, { status: 403 });
             return Response.json({
@@ -110,10 +120,12 @@ console.log(JSON.stringify({items: owned && !state.disabled ? [state.pod] : []})
             expect(await req.json()).toEqual({ enabled: false });
             disabled = true;
             await Bun.write(stateFile, JSON.stringify({ ids, pod, disabled }));
+            if (cleanupFails) return Response.json({ message: workerKey }, { status: 500 });
             return Response.json({});
           }
           if (req.method === "DELETE") {
             deletes.push(path);
+            if (cleanupFails) return Response.json({ message: workerKey }, { status: 500 });
             return Response.json({});
           }
           return Response.json({}, { status: 404 });
@@ -143,12 +155,27 @@ console.log(JSON.stringify({items: owned && !state.disabled ? [state.pod] : []})
           },
         );
         expect(result.exitCode).toBe(mode === "success" ? 0 : 1);
-        expect(result.stdout).toContain("deleted pods, pool, and controller");
         expect(disabled).toBe(true);
         expect(deletes).toEqual([
           `/api/runtime-pools/${ids.pool}`,
           `/api/runtime-controllers/${ids.controller}`,
         ]);
+        if (cleanupFails) {
+          expect(result.stdout).not.toContain("PASS: drained pool");
+          expect(result.stderr).toContain(`PATCH /api/runtime-pools/${ids.pool} failed (500)`);
+          expect(result.stderr).toContain(
+            `GET /api/runtime-pools/${ids.pool}/runtimes failed (503)`,
+          );
+          expect(result.stderr).toContain(
+            `DELETE /api/runtime-pools/${ids.pool}?force=true failed (500)`,
+          );
+          expect(result.stderr).toContain(
+            `DELETE /api/runtime-controllers/${ids.controller} failed (500)`,
+          );
+        } else {
+          expect(result.stdout).toContain("deleted pods, pool, and controller");
+        }
+        if (podFails) expect(result.stderr).toContain("Worker resource limits differ.");
         expect(result.stdout + result.stderr).not.toContain(operatorKey);
         expect(result.stdout + result.stderr).not.toContain(workerKey);
       } finally {

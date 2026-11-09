@@ -270,7 +270,8 @@ Supply `AGENT_SWARM_API_KEY` through the environment and configure local `kubect
 The API needs both runtime flags and the namespace-scoped Role above.
 The script creates a controller, pool, and agent with a unique test name.
 It checks worker registration, scoped credentials, pod identity, resources, and pool capacity.
-It disables the pool and verifies pod deletion before deleting its pool and controller, including after test failures.
+It attempts to disable the pool, verify pod deletion, and delete its pool and controller after successful and failed tests.
+A failed cleanup step does not prevent later steps. Errors retain the test failure and every cleanup failure.
 The API retains the offline agent and runtime history. The script does not create cloud servers or inference tasks.
 No API keys, pod environment values, or cluster connection details appear in its output.
 Use `--image` to select a worker image and `--timeout-sec` to allow longer image pulls.

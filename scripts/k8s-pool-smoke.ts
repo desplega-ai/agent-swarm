@@ -126,6 +126,7 @@ The script does not create tasks or create or delete cloud servers.`);
 
   let controllerId: string | undefined;
   let poolId: string | undefined;
+  const errors: unknown[] = [];
   try {
     const status = await api<{ runtime_pools: { enabled: boolean; supervisor: string } }>(
       "GET",
@@ -224,34 +225,48 @@ The script does not create tasks or create or delete cloud servers.`);
     console.log(
       "[k8s-smoke] PASS: in-cluster auth, worker registration, pod identity, resource limits, and capacity.",
     );
+  } catch (error) {
+    errors.push(error);
   } finally {
+    const errorsBeforeCleanup = errors.length;
+    async function cleanup(step: () => Promise<unknown>) {
+      try {
+        await step();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
     try {
       if (poolId) {
-        await api("PATCH", `/api/runtime-pools/${poolId}`, { enabled: false });
-        await waitFor(
-          async () => {
-            const rows = await api<{ runtimes: Runtime[] }>(
-              "GET",
-              `/api/runtime-pools/${poolId}/runtimes`,
-            );
-            return rows.runtimes.every((row) => row.status === "offline") &&
-              (await pods(`swarm.pool-id=${poolId}`)).length === 0
-              ? true
-              : undefined;
-          },
-          120_000,
-          "Pool teardown",
+        await cleanup(() => api("PATCH", `/api/runtime-pools/${poolId}`, { enabled: false }));
+        await cleanup(() =>
+          waitFor(
+            async () => {
+              const rows = await api<{ runtimes: Runtime[] }>(
+                "GET",
+                `/api/runtime-pools/${poolId}/runtimes`,
+              );
+              return rows.runtimes.every((row) => row.status === "offline") &&
+                (await pods(`swarm.pool-id=${poolId}`)).length === 0
+                ? true
+                : undefined;
+            },
+            120_000,
+            "Pool teardown",
+          ),
         );
-        await api("DELETE", `/api/runtime-pools/${poolId}?force=true`);
+        await cleanup(() => api("DELETE", `/api/runtime-pools/${poolId}?force=true`));
       }
-      if (controllerId) await api("DELETE", `/api/runtime-controllers/${controllerId}`);
-      if (poolId)
+      if (controllerId)
+        await cleanup(() => api("DELETE", `/api/runtime-controllers/${controllerId}`));
+      if (poolId && errors.length === errorsBeforeCleanup)
         console.log("[k8s-smoke] PASS: drained pool, deleted pods, pool, and controller.");
     } finally {
       process.removeListener("SIGINT", interrupt);
       process.removeListener("SIGTERM", interrupt);
     }
   }
+  if (errors.length) throw new Error(errors.map(String).join("\n"));
 }
 
 try {
