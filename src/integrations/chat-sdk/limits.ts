@@ -47,7 +47,8 @@ export const CHAT_FILES_PER_MESSAGE = 10;
  * Split `text` into chunks of at most `limit` characters. A chunk ends at the
  * last line break inside the window, else at the last space, else at the
  * limit. Breaks in the first half of the window are ignored, so chunks never
- * get very short.
+ * get very short. The break character stays with the chunk it ends, so
+ * joining the chunks reproduces `text` exactly.
  */
 export function splitChatMessage(text: string, limit: number): string[] {
   if (limit <= 0) throw new Error("splitChatMessage: limit must be positive");
@@ -68,9 +69,13 @@ export function splitChatMessage(text: string, limit: number): string[] {
         // advances (cut would otherwise become 0 and loop forever).
         cut = cut > 1 ? cut - 1 : cut + 1;
       }
+    } else {
+      // Keep the break character in the chunk it ends: trimming it here or
+      // stripping it from `rest` would drop it from the delivered text (#2879).
+      cut += 1;
     }
-    chunks.push(rest.slice(0, cut).trimEnd());
-    rest = rest.slice(cut).replace(/^[\n ]+/, "");
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
   }
   if (rest.length > 0 || chunks.length === 0) chunks.push(rest);
   return chunks.filter((chunk, index) => chunk.length > 0 || index === 0);
