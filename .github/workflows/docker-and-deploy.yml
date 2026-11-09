@@ -80,11 +80,11 @@ jobs:
   # Supersede: the merge queue lands each PR of a group as its own main commit, a
   # few seconds apart, and each push starts this workflow. All six build jobs sit
   # in a per-ref concurrency group with cancel-in-progress, so a newer run cancels
-  # an older run's builds, and with them its merge and notify jobs. Only the
-  # newest run publishes images; deploy.yml deploys them on a schedule. A run
-  # that bumps package.json's version is the only one that sees the bump
-  # (detect-version-change diffs against github.event.before), so it gets a
-  # group of its own and is never cancelled:
+  # an older run's builds, and with them its merge, promote and notify jobs.
+  # Only the newest run moves :latest and :slim. Prod runs :prod, which only
+  # deploy.yml moves, on a schedule. A run that bumps package.json's version is
+  # the only one that sees the bump (detect-version-change diffs against
+  # github.event.before), so it gets a group of its own and is never cancelled:
   # its :VERSION images, git tag, npm, E2B and GitHub release all still publish.
   build-and-push-server-amd64:
     runs-on: ubuntu-latest
@@ -615,6 +615,67 @@ jobs:
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
+
+  promote-main-tags:
+    name: Promote :latest and :slim
+    runs-on: ubuntu-latest
+    # Moves the main-tip tags on every merge. No deploy: prod runs :prod, which
+    # only deploy.yml moves. All writes to these tags share this lock, so a stale
+    # run cannot roll them back.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: agent-swarm-main-tags
+      # A late stale build must not evict a queued main-tip promotion.
+      queue: max
+      cancel-in-progress: false
+
+    needs:
+      - merge-server
+      - merge-worker
+      - merge-worker-slim
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Skip only when a newer main commit touches on.push.paths, so it starts its
+      # own run and promotion. A newer docs-only commit starts no run; skipping for
+      # it would leave :latest on an older build. is_tip=true means "this run
+      # promotes". Logic and regression test: scripts/deploy-guard.sh,
+      # src/tests/deploy-guard.test.ts.
+      - name: Check running commit is main tip
+        id: guard
+        shell: bash
+        run: bash scripts/deploy-guard.sh
+
+      - name: Promote moving tags
+        if: steps.guard.outputs.is_tip == 'true'
+        env:
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          API_DIGEST: ${{ needs.merge-server.outputs.digest }}
+          WORKER_DIGEST: ${{ needs.merge-worker.outputs.digest }}
+          SLIM_DIGEST: ${{ needs.merge-worker-slim.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # Use this run's manifest outputs, never a SHA tag that a rerun can move.
+          docker buildx imagetools create -t "${API_IMAGE}:latest" "${API_IMAGE}@${API_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
 
   notify-image-release:
     name: Notify Swarm Cloud image release

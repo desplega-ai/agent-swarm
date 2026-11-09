@@ -20,7 +20,8 @@ All images are multi-arch (`linux/amd64` + `linux/arm64`) and published to GitHu
 
 | Tag | When pushed | Mutability |
 |---|---|---|
-| `latest` / `slim` | When prod deploys: 09:00, 14:00 and 19:00 Europe/Madrid if `main` has new images, or on manual dispatch | Mutable — the deployed `main` commit |
+| `latest` / `slim` | Every push to `main` | Mutable — tracks main |
+| `prod` (API and worker only) | When the hosted swarm deploys: 09:00, 14:00 and 19:00 Europe/Madrid if `main` has new images, or on manual dispatch | Mutable — what the hosted swarm runs; self-hosters pin a `{VERSION}` instead |
 | `{VERSION}` / `{VERSION}-slim` (e.g. `1.123.0`, `1.123.0-slim`) | Only when `package.json` version changes | Immutable — use for reproducible deploys |
 | `sha-{GIT_SHA}` / `sha-{GIT_SHA}-slim` | Every push to `main` | Immutable — exact commit |
 
@@ -72,4 +73,4 @@ Templates are public. See the [E2B provider guide](/docs/guides/e2b-provider-smo
 
 ## Where publishing happens
 
-`.github/workflows/docker-and-deploy.yml` on pushes to `main`: builds and pushes all three image variants per-arch, merges multi-arch manifests, builds and pushes the dashboard image for both platforms in one job, notifies Swarm Cloud of new digests, and — on version bumps — publishes E2B templates, the npm package, the git tag, and the GitHub release. PRs only build the API image, the **slim** worker target, and the evals image as a merge-gate check (`.github/workflows/merge-gate.yml`), plus the dashboard image with a smoke test when its inputs change. `.github/workflows/deploy.yml` deploys the production compose three times a day (09:00, 14:00, 19:00 Europe/Madrid) when `main` has new images, and on manual dispatch: it moves `latest` / `slim` to the newest commit with all three images. A UI-only commit to `main` does not trigger the workflow, so it gets no `sha-` dashboard image; the next release publishes `{VERSION}`.
+`.github/workflows/docker-and-deploy.yml` on pushes to `main`: builds and pushes all three image variants per-arch, merges multi-arch manifests, builds and pushes the dashboard image for both platforms in one job, moves `latest` / `slim` to the run's digests, notifies Swarm Cloud of new digests, and — on version bumps — publishes E2B templates, the npm package, the git tag, and the GitHub release. PRs only build the API image, the **slim** worker target, and the evals image as a merge-gate check (`.github/workflows/merge-gate.yml`), plus the dashboard image with a smoke test when its inputs change. `.github/workflows/deploy.yml` deploys the production compose three times a day (09:00, 14:00, 19:00 Europe/Madrid) when `main` has new images, and on manual dispatch: it moves API and worker `prod` to the newest commit with both images. A UI-only commit to `main` does not trigger the workflow, so it gets no `sha-` dashboard image; the next release publishes `{VERSION}`.

@@ -59,26 +59,41 @@ If you push to `main` **without** a version change, none of the publish jobs run
 ### Moving Docker tags and deployment
 
 Merging to `main` does not deploy prod. The three manifest jobs publish SHA and
-optional version tags only. `.github/workflows/deploy.yml` promotes API/worker
-`:latest` and worker `:slim` and deploys, at 09:00, 14:00 and 19:00
-Europe/Madrid (`on.schedule` with `timezone`), and on manual dispatch. Each
-deploy restarts the API, which cuts and resumes in-flight tasks, so batching
-merges into three windows a day keeps that cost bounded.
+optional version tags, and the `promote-main-tags` job moves API/worker
+`:latest` and worker `:slim` to the run's manifest digests on every merge.
+Prod runs `:prod` (API and worker), which only `.github/workflows/deploy.yml`
+moves, at 09:00, 14:00 and 19:00 Europe/Madrid (`on.schedule` with
+`timezone`), and on manual dispatch. Each deploy restarts the API, which cuts
+and resumes in-flight tasks, so batching merges into three windows a day keeps
+that cost bounded. Prod must never read `:latest`: with `pull_policy: always`,
+any container restart would pull the main tip.
+
+`promote-main-tags` holds the `agent-swarm-main-tags` concurrency lock.
+`queue: max` preserves pending promotions (up to GitHub's 100-job limit), so a
+late stale build cannot evict a queued main-tip run. After acquiring that lock,
+it checks whether a newer main commit touches the workflow's `on.push.paths`
+(read from the workflow file, so the list lives in one place). If one does,
+that commit starts its own run, so this stale run keeps its SHA/version images
+but skips promotion. Newer commits outside those paths (docs, for example)
+start no run, so they do not block it. Logic: `scripts/deploy-guard.sh`; test:
+`src/tests/deploy-guard.test.ts`. Promotion uses the run's digest outputs,
+since even a SHA tag can change on a rerun.
 
 `scripts/deploy-select.ts` walks main's first-parent history newest first and
-takes the first commit whose API, worker and worker-slim `sha-<short>` images
-all exist; builds are superseded per ref, so not every commit has images. It
-stops at the commit the API `:latest` revision label names: reaching it means
-nothing new was built, and the run skips with a job-summary notice (no
-promotion, no Dokploy call, no Slack post). It resolves the three digests once,
-and promotion uses those digests, since a rerun can move a SHA tag. Test:
+takes the first commit whose API and worker `sha-<short>` images both exist;
+builds are superseded per ref, so not every commit has images. It stops at the
+commit the API `:prod` revision label names: reaching it means nothing new was
+built, and the run skips with a job-summary notice (no promotion, no Dokploy
+call, no Slack post). A missing `:prod` means no previous deploy: it deploys,
+with an empty change list. It resolves both digests once, and promotion uses
+those digests, since a rerun can move a SHA tag. Test:
 `src/tests/deploy-select.test.ts`.
 
-The job holds the `agent-swarm-deploy` concurrency lock through the completed
-Dokploy deploy, and selects only after taking it. Non-main dispatches cannot
-deploy. The three registry writes are sequential, so a failed promotion can
-leave partially updated tags; it fails the job before deployment, and the next
-run retries.
+The deploy job holds the `agent-swarm-deploy` concurrency lock through the
+completed Dokploy deploy, and selects only after taking it. Non-main dispatches
+cannot deploy. The two registry writes are sequential, so a failed promotion
+can leave partially updated tags; it fails the job before deployment, and the
+next run retries.
 
 Hotfix or rollback, without waiting for a window:
 
@@ -87,7 +102,7 @@ gh workflow run deploy.yml -R desplega-ai/agent-swarm                 # newest b
 gh workflow run deploy.yml -R desplega-ai/agent-swarm -f sha=<main sha>
 ```
 
-A requested SHA must be on main and have all three images. A rollback holds
+A requested SHA must be on main and have API and worker images. A rollback holds
 until the next window that finds a newer built commit.
 
 The deploy step is `scripts/dokploy-deploy.ts`. `compose.deploy` only queues the

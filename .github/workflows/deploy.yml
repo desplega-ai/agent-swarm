@@ -1,9 +1,10 @@
 name: Deploy
 
 # Prod deploys three times a day, not on every merge: each deploy restarts the
-# API and cuts in-flight tasks. docker-and-deploy.yml still builds and publishes
-# sha-<short> images on every main push; this workflow promotes the newest built
-# commit to :latest/:slim and deploys it, or skips when :latest already runs it.
+# API and cuts in-flight tasks. docker-and-deploy.yml builds sha-<short> images
+# and moves :latest/:slim on every main push; prod runs :prod instead. This
+# workflow promotes the newest built commit to api and worker :prod and deploys
+# it, or skips when :prod already runs it.
 # Hotfix: gh workflow run deploy.yml -R desplega-ai/agent-swarm [-f sha=<main sha>]
 on:
   schedule:
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Main commit to deploy (default: the newest one with all three images)"
+        description: "Main commit to deploy (default: the newest one with api and worker images)"
         required: false
         default: ""
 
@@ -31,7 +32,7 @@ jobs:
       actions: read
       contents: read
       packages: write
-    # Every moving-tag write and the complete deploy share this lock. A pending
+    # Every :prod write and the complete deploy share this lock. A pending
     # run that a newer one replaces loses nothing: selection runs after the lock.
     concurrency:
       group: agent-swarm-deploy
@@ -62,10 +63,11 @@ jobs:
         with:
           bun-version-file: package.json
 
-      # Picks the newest main commit whose api, worker and worker-slim images all
-      # exist, reads the :latest revision (the previous deploy, which also bounds
-      # the Slack change list) and pins the three digests once. action=skip when
-      # :latest already runs that commit. Test: src/tests/deploy-select.test.ts.
+      # Picks the newest main commit whose api and worker images both exist, reads
+      # the api :prod revision (the previous deploy, which also bounds the Slack
+      # change list) and pins the two digests once. action=skip when :prod already
+      # runs that commit; a missing :prod means no previous deploy.
+      # Test: src/tests/deploy-select.test.ts.
       - name: Select commit and pin digests
         id: select
         env:
@@ -74,21 +76,19 @@ jobs:
           REQUESTED_SHA: ${{ inputs.sha }}
         run: bun scripts/deploy-select.ts "$REQUESTED_SHA"
 
-      - name: Promote moving tags
+      - name: Promote :prod
         if: steps.select.outputs.action == 'deploy'
         env:
           API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
           API_DIGEST: ${{ steps.select.outputs.api_digest }}
           WORKER_DIGEST: ${{ steps.select.outputs.worker_digest }}
-          SLIM_DIGEST: ${{ steps.select.outputs.slim_digest }}
         run: |
           set -euo pipefail
 
           # Promote by the digests pinned above, never a SHA tag that a rerun can move.
-          docker buildx imagetools create -t "${API_IMAGE}:latest" "${API_IMAGE}@${API_DIGEST}"
-          docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
-          docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
+          docker buildx imagetools create -t "${API_IMAGE}:prod" "${API_IMAGE}@${API_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:prod" "${WORKER_IMAGE}@${WORKER_DIGEST}"
 
       # Dokploy queues the deploy and only creates the deployment record when its worker
       # picks the job up, which can take minutes. The script waits for that record,
@@ -140,7 +140,7 @@ jobs:
             durations="${durations}, whole run $(fmt $((now - $(date -d "$run_started" +%s))))"
           fi
 
-          # Commits between the image :latest pointed at before this deploy and this
+          # Commits between the image :prod pointed at before this deploy and this
           # one, newest first, with "(#123)" turned into PR links.
           changes=""
           if [[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$PREV_SHA" != "$DEPLOY_SHA" ]; then
