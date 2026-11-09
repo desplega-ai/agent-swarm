@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { KubernetesRuntimeProvider } from "../runtime-providers/k8s";
 import {
   type ProvisionRequest,
@@ -127,21 +127,80 @@ describe("Kubernetes runtime provider", () => {
     expect(JSON.stringify(handle)).not.toContain(request.env.API_KEY!);
   });
 
-  test("reads the token file again after service account token rotation", async () => {
-    const path = `/tmp/k8s-pool-token-${crypto.randomUUID()}`;
-    files.push(path);
+  test("reads fixed service account files again after token rotation", async () => {
     const first = crypto.randomUUID();
     const second = crypto.randomUUID();
-    await Bun.write(path, first);
-    delete target.K8S_TOKEN;
-    target.K8S_TOKEN_FILE = path;
-    await provider.provision(target, request);
-    await Bun.write(path, second);
-    await provider.provision(target, { ...request, runtimeId: crypto.randomUUID() });
-    expect(calls.map((req) => req.headers.get("authorization"))).toEqual([
-      `Bearer ${first}`,
-      `Bearer ${second}`,
-    ]);
+    let current = first;
+    const originalFile = Bun.file;
+    const read = spyOn(Bun, "file").mockImplementation((path, options) => {
+      if (path === "/var/run/secrets/kubernetes.io/serviceaccount/token")
+        return { text: async () => current } as ReturnType<typeof Bun.file>;
+      if (path === "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+        return { text: async () => "cluster-ca" } as ReturnType<typeof Bun.file>;
+      return originalFile(path, options);
+    });
+    const send = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ metadata }))
+      .mockResolvedValueOnce(Response.json({ metadata }));
+    try {
+      const config = { KUBERNETES_SERVICE_HOST: "10.0.0.1", K8S_NAMESPACE: "workers" };
+      await provider.provision(config, request);
+      current = second;
+      await provider.provision(config, { ...request, runtimeId: crypto.randomUUID() });
+      expect(send.mock.calls.map(([url]) => String(url))).toEqual([
+        "https://kubernetes.default.svc/api/v1/namespaces/workers/pods",
+        "https://kubernetes.default.svc/api/v1/namespaces/workers/pods",
+      ]);
+      expect(
+        send.mock.calls.map(([, options]) => new Headers(options?.headers).get("authorization")),
+      ).toEqual([`Bearer ${first}`, `Bearer ${second}`]);
+      for (const [, options] of send.mock.calls)
+        expect(options).toMatchObject({ tls: { ca: "cluster-ca" } });
+      expect(read.mock.calls.map(([path]) => path)).toEqual([
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+        "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+        "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+      ]);
+    } finally {
+      read.mockRestore();
+      send.mockRestore();
+    }
+  });
+
+  test("external endpoints never inherit mounted service account credentials", async () => {
+    const config = { K8S_API_URL: server.url.origin, KUBERNETES_SERVICE_HOST: "10.0.0.1" };
+    const read = spyOn(Bun, "file");
+    try {
+      expect(provider.checkConfig(config).ready).toBe(false);
+      await expect(provider.provision(config, request)).rejects.toThrow("Set K8S_TOKEN");
+      expect(read).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("rejects controller file paths before reading or forwarding host secrets", async () => {
+    const path = `/tmp/k8s-review-secret-${crypto.randomUUID()}`;
+    files.push(path);
+    await Bun.write(path, crypto.randomUUID());
+    const read = spyOn(Bun, "file");
+    try {
+      for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"]) {
+        const config = { ...target, [key]: path };
+        if (key === "K8S_TOKEN_FILE") delete config.K8S_TOKEN;
+        expect(provider.checkConfig(config).ready).toBe(false);
+        await expect(provider.provision(config, request)).rejects.toThrow("not supported");
+        await expect(provider.list(config, request.ownerId)).rejects.toThrow("not supported");
+        await expect(provider.terminate(config, handle)).rejects.toThrow("not supported");
+        expect(await provider.status(config, handle)).toBe("unknown");
+      }
+      expect(read).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   test("keeps worker and cluster credentials out of Kubernetes failure messages", async () => {

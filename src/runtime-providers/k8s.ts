@@ -36,6 +36,8 @@ class KubernetesApiError extends Error {
 }
 
 function configuration(target: RuntimeTargetConfig) {
+  if ("K8S_TOKEN_FILE" in target || "K8S_CA_FILE" in target)
+    throw new Error("Kubernetes controller file paths are not supported.");
   const inCluster = !target.K8S_API_URL && !!target.KUBERNETES_SERVICE_HOST;
   let url: URL;
   try {
@@ -58,15 +60,13 @@ function configuration(target: RuntimeTargetConfig) {
   const namespace = target.K8S_NAMESPACE || "default";
   if (namespace.length > 63 || !DNS_LABEL.test(namespace))
     throw new Error("K8S_NAMESPACE must be a valid Kubernetes namespace.");
-  const tokenFile =
-    target.K8S_TOKEN_FILE || (inCluster ? `${SERVICE_ACCOUNT_DIR}/token` : undefined);
-  if (!target.K8S_TOKEN?.trim() && !tokenFile)
-    throw new Error("Set K8S_TOKEN in secretConfig or configure K8S_TOKEN_FILE.");
+  if (!target.K8S_TOKEN?.trim() && !inCluster)
+    throw new Error("Set K8S_TOKEN in secretConfig or use in-cluster authentication.");
   return {
     url,
     namespace,
-    tokenFile,
-    caFile: target.K8S_CA_FILE || (inCluster ? `${SERVICE_ACCOUNT_DIR}/ca.crt` : undefined),
+    tokenFile: inCluster ? `${SERVICE_ACCOUNT_DIR}/token` : undefined,
+    caFile: inCluster ? `${SERVICE_ACCOUNT_DIR}/ca.crt` : undefined,
   };
 }
 

@@ -199,15 +199,17 @@ Configure these keys on the controller:
 | `K8S_API_URL` | Kubernetes API origin. Requires HTTPS, except for loopback HTTP during local tests. |
 | `K8S_NAMESPACE` | Existing namespace for worker pods. Defaults to `default`. |
 | `K8S_TOKEN` | Bearer token. Store it in encrypted `secretConfig`. |
-| `K8S_TOKEN_FILE` | Alternative token file, read for each request to support token rotation. |
 | `K8S_CA_CERT` | Optional PEM certificate authority for the cluster. |
-| `K8S_CA_FILE` | Alternative certificate authority file. TLS verification always remains enabled. |
 | `K8S_SERVICE_ACCOUNT` | Optional service account for worker pods. Workers receive no Kubernetes API token. |
 | `K8S_IMAGE_PULL_SECRETS` | Optional comma-separated names of registry Secrets in the worker namespace. |
 
 These are controller settings, not deployment environment variables.
 When the API runs inside Kubernetes, omit `K8S_API_URL` and token settings.
 The adapter uses `https://kubernetes.default.svc` and the mounted service account token and CA.
+The adapter reads the projected token for each request to support token rotation.
+Controller settings cannot select host files. `K8S_TOKEN_FILE` and `K8S_CA_FILE` are rejected.
+External endpoints require an explicit token and cannot inherit the API's mounted credentials.
+TLS verification always remains enabled.
 Set `K8S_NAMESPACE` explicitly when workers must use a namespace other than `default`.
 The API service account needs `get`, `list`, `create`, and `delete` permissions on pods in that namespace.
 Use a dedicated namespace to limit the controller's authority.

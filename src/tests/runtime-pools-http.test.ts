@@ -310,6 +310,31 @@ describe("runtime pools HTTP", () => {
     expect(pool.status).toBe(200);
     expect(pool.data.pool.kind).toBe("k8s");
   });
+  test("user controller writers cannot configure Kubernetes host file paths", async () => {
+    const input = { name: "k8s-files", kind: "k8s", placement: "builtin" };
+    const created = await dispatch("/api/runtime-controllers", "POST", input, "user");
+    expect(created.status).toBe(200);
+    const id = created.data.controller.id;
+    for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"]) {
+      for (const field of ["config", "secretConfig"]) {
+        const patch = { [field]: { [key]: "/var/run/secrets/kubernetes.io/serviceaccount/token" } };
+        const rejected = await dispatch(
+          "/api/runtime-controllers",
+          "POST",
+          { ...input, ...patch, name: `k8s-files-${key}-${field}` },
+          "user",
+        );
+        expect(rejected.status).toBe(400);
+        expect(rejected.data.error).toContain("not supported");
+        expect(
+          (await dispatch(`/api/runtime-controllers/${id}`, "PATCH", patch, "user")).status,
+        ).toBe(400);
+      }
+    }
+    const unchanged = await dispatch(`/api/runtime-controllers/${id}`, "GET", undefined, "user");
+    expect(unchanged.data.controller.config).toEqual({});
+    expect(unchanged.data.controller.secretConfigKeys).toEqual([]);
+  });
   test("pool writes permit operators and users only; leads may only bind", async () => {
     expect((await dispatch("/api/runtime-pools", "POST", poolInput, "worker")).status).toBe(403);
     expect((await dispatch("/api/runtime-pools", "POST", poolInput, "lead")).status).toBe(403);
