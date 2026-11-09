@@ -295,6 +295,17 @@ preserving Unicode code points,
 to stay below the embedding input token limit without a tokenizer dependency.
 An empty content query returns no results without recording retrievals.
 
+## Review tasks skip review completions
+
+When the searching task (`X-Source-Task-ID`, or the MCP call's task) is a review
+task, `POST /api/memory/search` and the `memory-search` tool drop `task_completion`
+memories whose source task is also a review task. A review task is one with
+`taskType = "review"` or a `re-review` / `pr-review-demo` tag
+(`src/be/memory/review-recall-filter.ts`); prompt text is never matched. The
+filter runs inside `searchMemoryCandidates` (dropped rows count as missing
+documents, so the fetch widens) and again after graph expansion. Other sources,
+non-review searchers and source tasks that no longer exist are unchanged.
+
 ## Trigger paths
 
 This runbook applies when modifying:
