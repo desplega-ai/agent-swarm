@@ -28,6 +28,7 @@ import {
   MAX_TASK_CITATIONS,
   upsertTaskCitations,
 } from "@/be/task-citations";
+import { hasTaskUiSpecCheckRefusal, upsertTaskUiSpec } from "@/be/task-ui-spec";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { can } from "@/rbac";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "@/tasks/task-skip";
@@ -38,8 +39,11 @@ import {
 } from "@/tasks/terminal-result-guard";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { validateTaskUiSpec } from "@/ui-spec/validate";
+import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { taskCitationIssues, taskCitationWarnings } from "@/utils/task-citations";
+import { UI_SPEC_ACTION_ID } from "@/utils/task-ui-spec";
 import { ensure } from "../utils/business-use";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
@@ -199,6 +203,27 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             'Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.',
           ),
+        uiSpec: z
+          .object({
+            spec: z
+              .object({
+                root: z.string().min(1),
+                elements: z.record(z.string(), z.unknown()),
+                state: z.record(z.string(), z.unknown()).optional(),
+              })
+              .describe("A json-render spec for the chat catalog. Root must be a Card."),
+            actions: z
+              .record(
+                z.string().regex(UI_SPEC_ACTION_ID),
+                z.object({ kind: z.literal("follow_up"), prompt: z.string().min(1).max(4000) }),
+              )
+              .optional()
+              .describe("Actions that Button ids name. Needs UI_SPEC_ACTIONS_ENABLED=true."),
+          })
+          .optional()
+          .describe(
+            "Optional rich card for this result, rendered in the Slack outcome card, the session view and Chat SDK channels. `output` stays the prose answer. A Slack card shows only the spec of its own task. See the ui-spec skill.",
+          ),
         learning: z
           .union([
             z.string(),
@@ -246,6 +271,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         failureReason,
         attachments,
         citations,
+        uiSpec,
         learning,
         persistMemory,
         chainedTaskId,
@@ -398,6 +424,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
       }
 
       let learningWrite: Promise<TaskLearningResult> | undefined;
+      // A sentence about the uiSpec, appended to a successful result message.
+      let uiSpecNote: string | undefined;
       const result = await getDbClient().transaction(async () => {
         const agent = await getAgentById(requestInfo.agentId ?? "");
 
@@ -606,9 +634,45 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
+        // uiSpec: stored only with a completion, and only when the flag is on.
+        // An invalid spec refuses the first completion, like citations above.
+        let uiSpecToStore: Parameters<typeof upsertTaskUiSpec>[1] | undefined;
+        if (uiSpec && !isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
+          uiSpecNote = "uiSpec ignored: UI_SPEC_ENABLED is off.";
+        } else if (uiSpec && status !== "completed") {
+          uiSpecNote = 'uiSpec is stored only with status "completed".';
+        } else if (uiSpec) {
+          const validation = validateTaskUiSpec(uiSpec, {
+            taskId,
+            actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),
+          });
+          if (validation.ok) {
+            uiSpecToStore = {
+              spec: validation.spec,
+              ...(validation.actions ? { actions: validation.actions } : {}),
+              fallbackText: validation.fallbackText,
+            };
+          } else if (!(await hasTaskUiSpecCheckRefusal(taskId))) {
+            await createLogEntry({
+              eventType: "task_ui_spec_check_refused",
+              agentId: agent.id,
+              taskId,
+              newValue: validation.issues.join("\n"),
+            });
+            return {
+              success: false,
+              task: existingTask,
+              message: `Completion refused: uiSpec is not valid. The task stays ${existingTask.status}. Fix these, then call store-progress again:\n- ${validation.issues.join("\n- ")}\nThis check refuses once per task; the next completion is accepted without the spec.`,
+            };
+          } else {
+            uiSpecNote = `uiSpec dropped: ${validation.issues[0]}`;
+          }
+        }
+
         // Handle status change
         if (status === "completed") {
           const result = await completeTask(taskId, output);
+          if (result && uiSpecToStore) await upsertTaskUiSpec(taskId, uiSpecToStore);
           if (result) {
             updatedTask = result;
 
@@ -737,9 +801,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       const learningResult = await learningWrite;
       const { success } = result;
-      const message = learningResult
-        ? `${result.message} ${learningSentence(learningResult)}`
-        : result.message;
+      const message = [
+        result.message,
+        ...(learningResult ? [learningSentence(learningResult)] : []),
+        ...(success && uiSpecNote ? [uiSpecNote] : []),
+      ].join(" ");
       const task = result.task
         ? {
             id: result.task.id,

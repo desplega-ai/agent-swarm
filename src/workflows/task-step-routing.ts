@@ -4,6 +4,7 @@ import {
   getTaskById,
   getWorkflowRun,
   getWorkflowRunStep,
+  markWorkflowStepTaskSuperseded,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -216,9 +217,10 @@ export const SUPERSEDE_RETRY_POLICY: RetryPolicy = {
  * bound to the failed task, detach that task (the executor reuses any task
  * bound to the step, so a bound failed task would park the retry forever), and
  * record the failure with `nextRetryAt` so the retry poller re-dispatches a new
- * task. Bounded by `maxRetries` via the step's persisted `retryCount`, read
- * only after ownership is confirmed: a stale caller's step snapshot may carry
- * the counter of a newer attempt.
+ * task. A detached task failed by a supersede cut moves to `superseded`.
+ * Bounded by `maxRetries` via the step's persisted `retryCount`, read only
+ * after ownership is confirmed: a stale caller's step snapshot may carry the
+ * counter of a newer attempt.
  *
  * A foreach child (`<foreachId>#<key>`) with an `agent-task` body takes the
  * parent foreach node's `retry`, else the same supersede default. While queued
@@ -266,6 +268,9 @@ export async function scheduleTaskStepRetry(
     if (current.retryCount >= policy.maxRetries) return "not-eligible";
     await detachTaskFromWorkflowRunStep(taskId);
     await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
+    // A supersede cut that gets a retry is not a real failure: the step goes
+    // on in a fresh task. A cut with no retry stays `failed`.
+    await markWorkflowStepTaskSuperseded(taskId);
     return "scheduled";
   });
 }

@@ -44,7 +44,13 @@ const conversationsOpen = mock(async ({ users }: { users: string }) => ({
 }));
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
-    client: { chat: { update, postMessage }, conversations: { open: conversationsOpen } },
+    client: {
+      chat: { update, postMessage },
+      conversations: {
+        open: conversationsOpen,
+        info: async () => ({ ok: true, channel: { is_ext_shared: false } }),
+      },
+    },
   }),
 }));
 

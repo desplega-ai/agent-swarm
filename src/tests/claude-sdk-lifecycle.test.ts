@@ -417,7 +417,12 @@ describe("Claude SDK production adapter lifecycle", () => {
           userClaudeMdExclude(),
         ],
         enabledPlugins: { [LEGACY_CONTEXT_MODE_CLAUDE_PLUGIN]: false },
+        showThinkingSummaries: true,
       });
+      // SDK sessions ignore the setting; the fixture reports 2.1.263, so the flag is passed.
+      expect(
+        argv.slice(argv.indexOf("--thinking-display"), argv.indexOf("--thinking-display") + 2),
+      ).toEqual(["--thinking-display", "summarized"]);
       expect(argv).not.toContain(settingsFile);
       // The version probe carries the same merged settings value.
       const spawns = (await Bun.file(`${stateFile}.spawns`).text())

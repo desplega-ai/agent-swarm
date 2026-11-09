@@ -115,7 +115,7 @@ function summarizeCosts(costs: SessionCost[] | undefined): CostStats | null {
     harnessCost: hasHarnessCosts ? sum((c) => c.harnessCostUsd ?? 0) : null,
     inputTokens: sum((c) => c.inputTokens),
     outputTokens: sum((c) => c.outputTokens),
-    cacheReadTokens: sum((c) => c.cacheReadTokens),
+    cacheReadTokens: sum((c) => c.cacheReadTokens ?? 0),
     cacheWriteTokens: sum((c) => c.cacheWriteTokens ?? 0),
     durationMs: sum((c) => c.durationMs),
     turns: sum((c) => c.numTurns ?? 0),

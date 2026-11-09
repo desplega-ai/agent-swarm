@@ -2,6 +2,8 @@
 
 React + Vite + shadcn/ui + Tailwind + AG Grid + react-query dashboard for the Agent Swarm API.
 
+Provider key rows show compact limits, remaining percentages, and reset countdowns. Put quota explanations and account details in a popover, not expanded rows.
+
 ## Design Context
 
 Strategic design context lives in [PRODUCT.md](./PRODUCT.md) (register, users, positioning, brand personality, design principles) and the visual system in [DESIGN.md](./DESIGN.md) (tokens, typography, elevation, component doctrine). Read them before designing or restyling any UI surface.

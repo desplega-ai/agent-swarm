@@ -405,6 +405,97 @@ describe("Docker runtime provider", () => {
     });
   });
 
+  const createBody = () =>
+    JSON.parse(String(calls[0]?.init.body)) as { HostConfig: Record<string, unknown> };
+
+  test("isolation keys are absent from the create request by default", async () => {
+    await provider.provision(target, request);
+    const hostConfig = createBody().HostConfig;
+    for (const key of ["Runtime", "PidsLimit", "CapDrop", "CapAdd", "SecurityOpt", "MemorySwap"])
+      expect(hostConfig).not.toHaveProperty(key);
+    expect(Object.keys(hostConfig).sort()).toEqual(["ExtraHosts", "Memory", "NanoCpus"]);
+  });
+
+  test("DOCKER_RUNTIME and DOCKER_PIDS_LIMIT map to HostConfig fields", async () => {
+    await provider.provision(
+      { ...target, DOCKER_RUNTIME: " runsc ", DOCKER_PIDS_LIMIT: "256" },
+      request,
+    );
+    expect(createBody().HostConfig).toMatchObject({ Runtime: "runsc", PidsLimit: 256 });
+    expect(createBody().HostConfig).not.toHaveProperty("CapDrop");
+  });
+
+  test("DOCKER_HARDENED drops capabilities, forbids escalation, and disables swap", async () => {
+    await provider.provision({ ...target, DOCKER_HARDENED: "true" }, request);
+    expect(createBody().HostConfig).toEqual({
+      ExtraHosts: ["host.docker.internal:host-gateway"],
+      Memory: 128 * 1024 * 1024,
+      MemorySwap: 128 * 1024 * 1024,
+      NanoCpus: 500_000_000,
+      CapDrop: ["ALL"],
+      CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"],
+      SecurityOpt: ["no-new-privileges:true"],
+    });
+  });
+
+  test("DOCKER_HARDENED sets MemorySwap only when memory is limited", async () => {
+    await provider.provision(
+      { ...target, DOCKER_HARDENED: "true" },
+      { ...request, resources: { cpu: 1 } },
+    );
+    const hostConfig = createBody().HostConfig;
+    expect(hostConfig.CapDrop).toEqual(["ALL"]);
+    expect(hostConfig).not.toHaveProperty("Memory");
+    expect(hostConfig).not.toHaveProperty("MemorySwap");
+  });
+
+  // Same parse as every other boolean setting (parseEnvFlag): true/1, any case.
+  for (const value of ["1", "TRUE", " true "]) {
+    test(`DOCKER_HARDENED=${JSON.stringify(value)} turns the profile on`, async () => {
+      await provider.provision({ ...target, DOCKER_HARDENED: value }, request);
+      expect(createBody().HostConfig.CapDrop).toEqual(["ALL"]);
+    });
+  }
+
+  for (const value of ["false", "0", "yes", ""]) {
+    test(`DOCKER_HARDENED=${JSON.stringify(value)} leaves the profile off`, async () => {
+      await provider.provision({ ...target, DOCKER_HARDENED: value }, request);
+      expect(createBody().HostConfig).not.toHaveProperty("CapDrop");
+      expect(createBody().HostConfig).not.toHaveProperty("MemorySwap");
+    });
+  }
+
+  for (const [key, value] of [
+    ["DOCKER_PIDS_LIMIT", "0"],
+    ["DOCKER_PIDS_LIMIT", "-5"],
+    ["DOCKER_PIDS_LIMIT", "12abc"],
+    ["DOCKER_PIDS_LIMIT", "1.5"],
+    ["DOCKER_PIDS_LIMIT", "99999999999999999999"],
+    ["DOCKER_RUNTIME", "run sc"],
+    ["DOCKER_RUNTIME", "../runsc"],
+    ["DOCKER_RUNTIME", "runsc;rm"],
+  ] as const) {
+    test(`rejects ${key}=${JSON.stringify(value)} in checkConfig and before any Docker call`, async () => {
+      const status = provider.checkConfig({ ...target, [key]: value });
+      expect(status.ready).toBe(false);
+      expect(status.missing).toEqual([key]);
+      expect(status.hint).toContain(key);
+      await expect(provider.provision({ ...target, [key]: value }, request)).rejects.toThrow(key);
+      expect(calls).toHaveLength(0);
+    });
+  }
+
+  test("checkConfig accepts valid isolation keys", () => {
+    expect(
+      provider.checkConfig({
+        ...target,
+        DOCKER_RUNTIME: "io.containerd.runsc.v1",
+        DOCKER_HARDENED: "true",
+        DOCKER_PIDS_LIMIT: "512",
+      }),
+    ).toEqual({ ready: true, missing: [] });
+  });
+
   test("pulls a missing image and waits for the stream before retrying creation", async () => {
     let creates = 0;
     let finishPull!: () => void;

@@ -58,10 +58,11 @@ import {
   SteeringRequestError,
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
+import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { chatThreadOfContextKey } from "../tasks/context-key";
-import { TaskCreationBlockedError } from "../tasks/errors";
+import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -97,6 +98,7 @@ import {
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
+import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -221,6 +223,7 @@ const GetTaskResponseSchema = AgentTaskSchema.extend({
   logs: z.array(AgentLogSchema),
   attachments: z.array(TaskAttachmentSchema),
   citations: z.array(TaskCitationSchema),
+  uiSpec: TaskUiSpecSchema.nullable(),
 });
 
 const FinishTaskSuccessSchema = z.object({
@@ -402,7 +405,7 @@ const createTask = route({
     },
     403: {
       description:
-        "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -785,6 +788,31 @@ const resumeTaskRoute = route({
   },
 });
 
+const runTaskUiActionRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/ui-actions/{actionId}",
+  pattern: ["api", "tasks", null, "ui-actions", null],
+  session: { taskParam: "id" },
+  rbac: { permission: "task.action.own" },
+  summary: "Run the action a task card Button declares",
+  description:
+    "Runs the task card action once per task and action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string(), actionId: z.string() }),
+  responses: {
+    200: {
+      description: "The action started, or it already ran",
+      schema: z.object({
+        status: z.enum(["started", "already_done"]),
+        taskId: z.string().optional(),
+      }),
+    },
+    403: { description: "Only the task requester may run the action" },
+    404: { description: "Task or action not found" },
+    409: { description: "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)" },
+  },
+});
+
 const supersedeTaskRoute = route({
   method: "post",
   path: "/api/tasks/{id}/supersede",
@@ -792,7 +820,7 @@ const supersedeTaskRoute = route({
   session: { taskParam: "id" },
   summary: "Supersede an in-progress task (terminate + spawn resume follow-up)",
   description:
-    'Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine\'s retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.',
+    "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z
@@ -1240,6 +1268,12 @@ export async function handleTasks(
           parentTaskId: parsed.body.parentTaskId || undefined,
           // Human chat starts a new output contract; agent children keep inheriting.
           inheritParentOutputSchema: principal.kind === "agent",
+          // Un mensaje humano abre trabajo nuevo; el padre conserva contexto, no requisitos del worker.
+          // Solo en respuestas a un hilo: sin padre no hay requisitos que heredar.
+          routingAffinity:
+            parsed.body.parentTaskId && (principal.kind === "user" || principal.kind === "operator")
+              ? { capabilities: [] }
+              : undefined,
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
@@ -1273,6 +1307,21 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      if (error instanceof TaskRoutingAuthorizationError) {
+        console.warn(
+          "[HTTP] Task assignment rejected:",
+          scrubSecrets(
+            JSON.stringify({
+              parentTaskId: parsed.body.parentTaskId,
+              source: parsed.body.source ?? "api",
+              contextKey: parsed.body.contextKey ?? parentTask?.contextKey,
+              reason: error.message,
+            }),
+          ),
+        );
+        jsonError(res, error.message, 403);
+        return true;
+      }
       if (error instanceof TaskCreationBlockedError) {
         createTask.respond(res, 422, { error: error.reason, extension: error.extension });
         return true;
@@ -1731,6 +1780,7 @@ export async function handleTasks(
       logs,
       attachments,
       citations: await getTaskCitations(task.id),
+      uiSpec: await getTaskUiSpec(task.id),
     });
     return true;
   }
@@ -2141,6 +2191,55 @@ export async function handleTasks(
     return true;
   }
 
+  if (runTaskUiActionRoute.match(req.method, pathSegments)) {
+    const parsed = await runTaskUiActionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await getTaskById(parsed.params.id);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!(await canActOnOwnTask(req, myAgentId, task))) {
+      jsonError(res, "Not authorized to act on this task", 403);
+      return true;
+    }
+    // Only a user clicks a card button: a user token, or a dashboard tab on the
+    // operator key that names its user. An agent, or an operator call with no
+    // picked user, resolves to no user, so the requester check refuses it.
+    // TRUST_BODY_REQUESTED_BY_USER_ID=false stops trusting a caller-named user
+    // on the shared key, so then only a user token can click.
+    const actor = await resolveSessionActor(req, myAgentId);
+    const tokenUserId = authUserId(getRequestAuth(req));
+    const trustsPickedUser = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
+    const actorUserId =
+      actor.kind === "user" && (tokenUserId || trustsPickedUser)
+        ? (actor.userId ?? undefined)
+        : undefined;
+    const result = await runTaskUiAction({
+      taskId: task.id,
+      actionId: parsed.params.actionId,
+      surface: "web",
+      actorUserId,
+    });
+    switch (result.status) {
+      case "forbidden":
+        jsonError(res, "Only the task requester may run this action", 403);
+        return true;
+      case "unknown_action":
+        jsonError(res, "This task declares no such action", 404);
+        return true;
+      case "disabled":
+        jsonError(res, "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED)", 409);
+        return true;
+      case "already_done":
+        runTaskUiActionRoute.respond(res, 200, { status: "already_done" });
+        return true;
+      case "started":
+        runTaskUiActionRoute.respond(res, 200, result);
+        return true;
+    }
+  }
+
   if (resumeTaskRoute.match(req.method, pathSegments)) {
     const parsed = await resumeTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -2253,8 +2352,9 @@ export async function handleTasks(
     }
 
     // Workflow-step tasks: fail back to the engine instead of superseding.
-    // Check this BEFORE the supersede UPDATE so we don't leave a workflow
-    // step in `superseded` if the engine expects `failed`.
+    // Check this BEFORE the supersede UPDATE: the engine's retry path runs off
+    // `task.failed`. Once it queues the step's retry it moves the task to
+    // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
       const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
       if (task.agentId) {

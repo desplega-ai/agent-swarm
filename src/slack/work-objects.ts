@@ -1,6 +1,7 @@
 import type { App, SlackEventMiddlewareArgs } from "@slack/bolt";
 import type { EntityPresentDetailsArguments, WebClient } from "@slack/web-api";
 import { getAgentById, getTaskById } from "../be/db";
+import { withUiSpecFallback } from "../ui-spec/fallback";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getTaskUrl } from "./blocks";
 import { wasEventSeen } from "./event-dedup";
@@ -44,7 +45,9 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
   if (task.slackChannelId !== event.channel) return { error: { status: "restricted" } };
 
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
-  const result = slackTaskOutput(task) || task.failureReason || task.progress;
+  const prose = slackTaskOutput(task) || task.failureReason || task.progress;
+  // The card text joins the prose before truncate(), so the 2800 cap still holds.
+  const result = prose ? await withUiSpecFallback(task.id, prose) : prose;
   return {
     metadata: {
       entity_type: "slack#/entities/task",

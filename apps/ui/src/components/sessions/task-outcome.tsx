@@ -15,6 +15,7 @@ import { InlineIdentifierCode } from "@/components/shared/inline-identifier-code
 import { JsonTree } from "@/components/shared/json-tree";
 import { SwarmLinkChip, useSwarmLinkPlugins } from "@/components/shared/markdown-link-chip";
 import { ShowMore } from "@/components/shared/show-more";
+import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -50,13 +51,24 @@ export function TaskOutcome({
   if (reason) return <OutcomeFrame label={reason.label} text={reason.text} tone={reason.tone} />;
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
     const json = parseJsonOutput(task.output);
-    if (json) return <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />;
+    const uiSpec = task.uiSpec ? <TaskUiSpecView task={task} /> : null;
+    if (json) {
+      return (
+        <>
+          <OutcomeJson data={json} raw={task.output.trim()} hideCopy={hideCopy} />
+          {uiSpec}
+        </>
+      );
+    }
     return (
-      <OutcomeProse
-        text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
-        hideCopy={hideCopy}
-        clamp={clamp}
-      />
+      <>
+        <OutcomeProse
+          text={renderTaskCitations(task.output, task.citations ?? [], "markdown")}
+          hideCopy={hideCopy}
+          clamp={clamp}
+        />
+        {uiSpec}
+      </>
     );
   }
   // The chain-of-thought above already covers active states — only fall

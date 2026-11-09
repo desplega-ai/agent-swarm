@@ -2070,6 +2070,7 @@ async function reportKeyUsage(
         keyIndex: selection.index,
         taskId,
         ...(selection.plan ? { plan: selection.plan } : {}),
+        ...(selection.planRaw ? { planRaw: selection.planRaw } : {}),
       }),
     });
   } catch {
@@ -2990,7 +2991,7 @@ async function saveCostData(
   }
 
   try {
-    const body = { ...cost, id: crypto.randomUUID() };
+    const body = { ...cost, id: cost.id ?? crypto.randomUUID() };
     const response = await postWithRetry(
       `${apiUrl}/api/session-costs`,
       headers,
@@ -4650,25 +4651,9 @@ export async function spawnProviderProcess(
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
-    // A resolved config-store pool slot always wins over OPENAI_API_KEY at
-    // runtime — `resolveCodexAuthMode` in codex-adapter.ts revalidates and
-    // writes chatgpt-mode auth.json whenever `codexSlot` is set, and OPENAI_API_KEY
-    // is only forwarded to the spawned CLI when auth.json is NOT in chatgpt
-    // mode. Gating this on `credentialSelections[0]`'s rate-limit status
-    // (the old behavior) reported OPENAI_API_KEY as the credential used on
-    // every task as long as OPENAI_API_KEY itself wasn't rate-limited — even
-    // when a healthy CODEX_OAUTH pool slot was the credential actually
-    // authenticating the session (issue: credentialKeyType mislabeled
-    // OPENAI_API_KEY, and CODEX_OAUTH usage never reported to
-    // /api/keys/report-usage so no api_key_status row was ever created for
-    // the pool slot).
-    const oauthIsPrimary =
-      oauthIsPoolBacked ||
-      credentialSelections.length === 0 ||
-      (credentialSelections[0]?.isRateLimitFallback &&
-        oauthSelection &&
-        !oauthSelection.isRateLimitFallback);
-    if (oauthSelection && realTaskId && oauthIsPrimary) {
+    // Both pool credentials and standalone ChatGPT auth suppress OPENAI_API_KEY
+    // in the adapter. Report the same credential that authenticates the session.
+    if (oauthSelection && realTaskId) {
       reportKeyUsage(
         opts.apiUrl,
         opts.apiKey,
@@ -4697,6 +4682,26 @@ export async function spawnProviderProcess(
       ).catch(() => {});
     }
   }
+
+  // Match harness authentication for both cost attribution and failure reports.
+  // isPoolBacked controls slot revalidation, not whether ChatGPT auth wins.
+  const primarySelection = oauthSelection ?? credentialSelections[0];
+  const credentialInfo = primarySelection
+    ? {
+        keyType: primarySelection.keyType,
+        keySuffix: primarySelection.keySuffix,
+        keyIndex: primarySelection.index,
+        authFence: primarySelection.authFailureFence,
+      }
+    : undefined;
+
+  // Capture attribution before the harness starts. Each resume gets a new execution.
+  const costAttribution = {
+    id: crypto.randomUUID(),
+    credentialKeyType: credentialInfo?.keyType ?? null,
+    credentialKeySuffix: credentialInfo?.keySuffix ?? null,
+    harness: opts.harnessProvider,
+  };
 
   // Prompt-path skills can resolve inside createSession, before the event
   // buffer below exists; the tracker holds them until `attach`.
@@ -5119,6 +5124,8 @@ export async function spawnProviderProcess(
         case "result":
           lastCostHolder.value = {
             ...event.cost,
+            ...costAttribution,
+            agentId: opts.agentId,
             taskId: realTaskId,
             sessionId: opts.runnerSessionId,
           };
@@ -5336,7 +5343,13 @@ export async function spawnProviderProcess(
         // Retain cost data for the concurrent final API writes.
         result.cost ??= lastCostHolder.value;
         if (result.cost) {
-          result.cost = { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId };
+          result.cost = {
+            ...result.cost,
+            ...costAttribution,
+            agentId: opts.agentId,
+            taskId: realTaskId,
+            sessionId: opts.runnerSessionId,
+          };
           sessionSpan.setAttributes({
             "gen_ai.response.model": result.cost.model,
             "gen_ai.usage.input_tokens": result.cost.inputTokens ?? 0,
@@ -5449,38 +5462,6 @@ export async function spawnProviderProcess(
         throw error;
       }),
     );
-
-  // Build credential info for rate limit tracking.
-  // For codex: a resolved CODEX_OAUTH pool slot (oauthIsPoolBacked) is always
-  // the credential actually used at runtime (see resolveCodexAuthMode in
-  // codex-adapter.ts — config store beats OPENAI_API_KEY whenever both
-  // exist), so it must win here too, independent of OPENAI_API_KEY's
-  // rate-limit status. Otherwise fall back to the OPENAI_API_KEY-rate-limited
-  // cross-keyType failover this block already handled.
-  let primarySelection: CredentialSelection | undefined;
-  const firstCred = credentialSelections[0];
-  if (oauthSelection && oauthIsPoolBacked) {
-    primarySelection = oauthSelection;
-  } else if (firstCred && oauthSelection) {
-    if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
-      primarySelection = oauthSelection;
-      console.log(
-        `[credentials] Cross-keyType failover: ${firstCred.keyType} all rate-limited, using ${oauthSelection.keyType} [...${oauthSelection.keySuffix}]`,
-      );
-    } else {
-      primarySelection = firstCred;
-    }
-  } else {
-    primarySelection = firstCred ?? oauthSelection;
-  }
-  const credentialInfo = primarySelection
-    ? {
-        keyType: primarySelection.keyType,
-        keySuffix: primarySelection.keySuffix,
-        keyIndex: primarySelection.index,
-        authFence: primarySelection.authFailureFence,
-      }
-    : undefined;
 
   const runningTask: RunningTask = {
     taskId: effectiveTaskId,

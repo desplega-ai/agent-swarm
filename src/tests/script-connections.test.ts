@@ -697,8 +697,13 @@ describe("script connections", () => {
       markMigrationApplied(database, "301_favorites_key_type.sql");
       // 293 alters agent_tasks, workflow_runs, script_runs and session_tokens.
       markMigrationApplied(database, "293_savings_component_links.sql");
-      // 304 indexes workflow_runs and approval_requests, absent from this fixture.
-      markMigrationApplied(database, "304_workflow_run_retention.sql");
+      // These migrations alter api_key_status and session_costs, which this fixture lacks.
+      markMigrationApplied(database, "306_provider_account_telemetry.sql");
+      markMigrationApplied(database, "307_session_cost_credential_attribution.sql");
+      // This one alters session_logs, which this fixture lacks.
+      markMigrationApplied(database, "310_session_logs_reasoning.sql");
+      // 315 indexes workflow_runs and approval_requests, absent from this fixture.
+      markMigrationApplied(database, "315_workflow_run_retention.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

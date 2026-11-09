@@ -717,6 +717,35 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "DOCKER_RUNTIME",
+        label: "Docker OCI runtime",
+        description:
+          "OCI runtime name for provisioned Docker workers, such as runsc or kata. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "runsc",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_HARDENED",
+        label: "Docker hardened workers",
+        description:
+          "Drop all capabilities except the worker entrypoint set, forbid privilege escalation, and disable swap for provisioned Docker workers. Controller configuration overrides this fallback.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_PIDS_LIMIT",
+        label: "Docker PID limit",
+        description:
+          "Maximum number of processes in each provisioned Docker worker. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "512",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:
@@ -1151,6 +1180,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Slack delegated-result delivery",
         description:
           "Master switch for deferred ask conclusion, child result cards, and the closure-based reaction gate. Requires SLACK_RENDER_V2. Off reverts to the legacy per-ask outcome card on the next tick.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_ENABLED",
+        label: "Rich result cards",
+        description:
+          "Let agents attach a json-render card (uiSpec) to a task result, rendered on the Slack outcome card and in the session view. Agents get the rich-card prompt section. Off: store-progress ignores uiSpec, Slack and text-only surfaces skip the card, and the section is dropped.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_ACTIONS_ENABLED",
+        label: "Rich card action buttons",
+        description:
+          "Allow Button elements in result cards, each naming a follow-up action the card declares. Requires UI_SPEC_ENABLED. Off refuses a card with a Button; LinkButton always works.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/slack-integration`,

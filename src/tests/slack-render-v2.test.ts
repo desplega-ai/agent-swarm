@@ -45,6 +45,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { upsertTaskCitations } from "../be/task-citations";
+import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
@@ -66,6 +67,7 @@ import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
 import { registerSlackReplyTool } from "../tools/slack-reply";
 import type { AgentTask, TaskAttachment } from "../types";
+import { validateTaskUiSpec } from "../ui-spec/validate";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-slack-render-v2.sqlite";
@@ -89,6 +91,10 @@ let rejectedUpdateMessages: string[] = [];
 let rejectedStopTs: string | undefined;
 let rejectedStopCode = "rate_limited";
 let postMessageErrorCode: string | undefined;
+// A message whose blocks hold this block type is refused with
+// `rejectedBlockCode`, as Slack refuses blocks it cannot render.
+let rejectedBlockType: string | undefined;
+let rejectedBlockCode = "invalid_blocks";
 let disableRenderAfterMethod: string | undefined;
 
 type RemoteMessage = {
@@ -157,6 +163,15 @@ let apiCallGate: ((method: string) => Promise<void>) | undefined;
 const mockApiCall = mock(async (method: string, payload: Record<string, unknown>) => {
   calls.push({ method, payload });
   await apiCallGate?.(method);
+  if (
+    rejectedBlockType &&
+    ["chat.postMessage", "chat.stopStream", "chat.update"].includes(method) &&
+    (payload.blocks as { type?: string }[] | undefined)?.some(
+      (block) => block.type === rejectedBlockType,
+    )
+  ) {
+    throw { data: { error: rejectedBlockCode } };
+  }
   if (method === disableRenderAfterMethod) {
     disableRenderAfterMethod = undefined;
     process.env.SLACK_RENDER_V2 = "false";
@@ -335,6 +350,8 @@ beforeEach(async () => {
   rejectedStopTs = undefined;
   rejectedStopCode = "rate_limited";
   postMessageErrorCode = undefined;
+  rejectedBlockType = undefined;
+  rejectedBlockCode = "invalid_blocks";
   disableRenderAfterMethod = undefined;
   nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
@@ -4510,5 +4527,345 @@ describe("withStatusLead", () => {
   ])("keeps the blank line before a %s", (_name, body) => {
     expect(withStatusLead("✅", body)).toBe(`✅\n\n${body}`);
     expect(withStatusLead("❌ **Failed:**", body)).toBe(`❌ **Failed:**\n\n${body}`);
+  });
+});
+
+// --- Task UI specs on the outcome card ---------------------------------------
+
+const UI_SPEC_FIXTURE_DIR = `${import.meta.dir}/fixtures/ui-spec-slack`;
+// UPDATE_UI_SPEC_FIXTURES=1 rewrites the expected payloads from the current
+// render instead of comparing against them.
+const updateUiSpecFixtures = process.env.UPDATE_UI_SPEC_FIXTURES === "1";
+
+type UiSpecFixture = {
+  uiSpec: { spec: { root: string; elements: Record<string, unknown> } };
+  [key: string]: unknown;
+};
+
+async function readUiSpecFixture(name: string): Promise<UiSpecFixture> {
+  return (await Bun.file(`${UI_SPEC_FIXTURE_DIR}/${name}.json`).json()) as UiSpecFixture;
+}
+
+/** Compares `expected` with the fixture's fields, or writes them in update mode. */
+async function matchUiSpecFixture(
+  name: string,
+  fixture: UiSpecFixture,
+  expected: Record<string, unknown>,
+): Promise<void> {
+  if (updateUiSpecFixtures) {
+    await Bun.write(
+      `${UI_SPEC_FIXTURE_DIR}/${name}.json`,
+      `${JSON.stringify({ ...fixture, ...expected }, null, 2)}\n`,
+    );
+    return;
+  }
+  for (const [key, value] of Object.entries(expected)) expect(fixture[key]).toEqual(value);
+}
+
+/** Stores a spec the way store-progress does: validated, with its fallback text. */
+async function storeUiSpec(taskId: string, fixture: UiSpecFixture): Promise<string> {
+  const validated = validateTaskUiSpec(fixture.uiSpec, { taskId, actionsEnabled: false });
+  if (!validated.ok) throw new Error(validated.issues.join("; "));
+  await upsertTaskUiSpec(taskId, { spec: validated.spec, fallbackText: validated.fallbackText });
+  return validated.fallbackText;
+}
+
+async function slackAskTask(label: string) {
+  const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+  const { channelId, threadTs } = uniqueSlackAddress(`C_${label.toUpperCase()}`);
+  const ask = await createTaskExtended(`${label} ask`, {
+    agentId: lead.id,
+    source: "slack",
+    slackChannelId: channelId,
+    slackThreadTs: threadTs,
+    contextKey: slackContextKey({ channelId, threadTs }),
+  });
+  await startTask(ask.id);
+  return { lead, ask };
+}
+
+type Block = { type: string; [key: string]: unknown };
+
+function stopStreamCalls(): Array<{ method: string; payload: Record<string, unknown> }> {
+  return calls.filter((call) => call.method === "chat.stopStream");
+}
+
+function isFooter(block: Block | undefined, taskId: string): boolean {
+  return block?.type === "context" && JSON.stringify(block).includes(taskId.slice(0, 8));
+}
+
+describe("Slack outcome card from a task uiSpec", () => {
+  beforeEach(() => {
+    process.env.UI_SPEC_ENABLED = "true";
+  });
+
+  afterEach(() => {
+    delete process.env.UI_SPEC_ENABLED;
+  });
+
+  test.each([
+    "deploys",
+    "video",
+    "incident",
+  ])("%s: the spec blocks go first in chat.stopStream, the footer last", async (name) => {
+    const fixture = await readUiSpecFixture(name);
+    const { ask } = await slackAskTask(`Card ${name}`);
+    const fallbackText = await storeUiSpec(ask.id, fixture);
+    await completeTask(ask.id, "Here is the summary.");
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    // Notifications carry the answer alone: no card text in the stream.
+    expect(started?.payload.markdown_text).toBe("✅ Here is the summary.");
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
+
+    const stops = stopStreamCalls();
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.payload.markdown_text).toBeUndefined();
+    const blocks = stops[0]?.payload.blocks as Block[];
+    expect(isFooter(blocks.at(-1), ask.id)).toBe(true);
+    await matchUiSpecFixture(name, fixture, { specBlocks: blocks.slice(0, -1), fallbackText });
+  });
+
+  test("the video example renders in the required block order, with a 5-row table", async () => {
+    const fixture = await readUiSpecFixture("video");
+    const { ask } = await slackAskTask("Card order");
+    await storeUiSpec(ask.id, fixture);
+    await completeTask(ask.id, "Q3 is up.");
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+
+    const blocks = stopStreamCalls()[0]?.payload.blocks as Block[];
+    expect(blocks.map((block) => block.type)).toEqual([
+      "header",
+      "actions",
+      "section",
+      "data_visualization",
+      "data_visualization",
+      "section",
+      "data_table",
+      "actions",
+      "context",
+      "context",
+    ]);
+    expect((blocks[2] as { fields?: unknown[] }).fields).toHaveLength(6);
+    const table = blocks.find((block) => block.type === "data_table") as Block & {
+      rows: unknown[];
+    };
+    expect(table.rows).toHaveLength(5);
+    expect(table).not.toHaveProperty("page_size");
+  });
+
+  test("with UI_SPEC_ENABLED off the stored spec is ignored", async () => {
+    const fixture = await readUiSpecFixture("deploys");
+    const { ask } = await slackAskTask("Card off");
+    await storeUiSpec(ask.id, fixture);
+    await completeTask(ask.id, "Deploys are up.");
+    await backdateLastUpdated([ask.id], 20);
+    delete process.env.UI_SPEC_ENABLED;
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const stops = stopStreamCalls();
+    expect(stops).toHaveLength(1);
+    const blocks = stops[0]?.payload.blocks as Block[];
+    expect(blocks).toHaveLength(1);
+    expect(isFooter(blocks[0], ask.id)).toBe(true);
+    expect(stops[0]?.payload.markdown_text).toBeUndefined();
+  });
+
+  test("Slack refusing the card blocks retries once without them, with the fallback text", async () => {
+    const fixture = await readUiSpecFixture("video");
+    const { ask } = await slackAskTask("Card refused");
+    const fallbackText = await storeUiSpec(ask.id, fixture);
+    await completeTask(ask.id, "Q3 is up.");
+    await backdateLastUpdated([ask.id], 20);
+    rejectedBlockType = "data_table";
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const stops = stopStreamCalls();
+    expect(stops).toHaveLength(2);
+    const [first, retry] = stops as [(typeof stops)[0], (typeof stops)[0]];
+    expect((first.payload.blocks as Block[]).some((block) => block.type === "data_table")).toBe(
+      true,
+    );
+    const retryBlocks = retry.payload.blocks as Block[];
+    expect(retryBlocks).toHaveLength(1);
+    expect(isFooter(retryBlocks[0], ask.id)).toBe(true);
+    expect(retry.payload.markdown_text).toBe(`\n\n${fallbackText}`);
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeTruthy();
+    await matchUiSpecFixture(
+      "video-rejected-by-slack",
+      await readUiSpecFixture("video-rejected-by-slack"),
+      {
+        slackError: "invalid_blocks",
+        firstCallBlockTypes: (first.payload.blocks as Block[]).map((block) => block.type),
+        retryCallBlockTypes: retryBlocks.map((block) => block.type),
+        retryMarkdownText: retry.payload.markdown_text,
+      },
+    );
+  });
+
+  test("the chat.postMessage fallback also retries without the card blocks", async () => {
+    const fixture = await readUiSpecFixture("deploys");
+    const { ask } = await slackAskTask("Card post refused");
+    const fallbackText = await storeUiSpec(ask.id, fixture);
+    await completeTask(ask.id, "Deploys are up.");
+    await backdateLastUpdated([ask.id], 20);
+    await ensureSlackThreadTree([ask.id]);
+    rejectedBlockType = "data_table";
+    rejectedBlockCode = "msg_blocks_too_long";
+    startStreamFailuresRemaining = 1;
+    calls.length = 0;
+    try {
+      await processSlackRenderV2();
+    } finally {
+      startStreamFailuresRemaining = 0;
+    }
+
+    const posts = calls.filter(
+      (call) =>
+        call.method === "chat.postMessage" &&
+        (call.payload.blocks as Block[] | undefined)?.[0]?.type === "markdown",
+    );
+    expect(posts).toHaveLength(2);
+    const text = `✅ Deploys are up.\n\n${fallbackText}`;
+    expect(posts[1]?.payload.text).toBe(text);
+    const blocks = posts[1]?.payload.blocks as Block[];
+    expect(blocks[0]).toEqual({ type: "markdown", text });
+    expect(blocks.some((block) => block.type === "data_table")).toBe(false);
+  });
+
+  test("a stored spec that no longer converts shows its fallback text under the answer", async () => {
+    const fixture = await readUiSpecFixture("three-charts-stale");
+    const { ask } = await slackAskTask("Card stale");
+    // Stored straight to the table: validation refuses 3 charts today, so
+    // this stands for a spec that a later package version stopped accepting.
+    const storedFallbackText = "*Q3 revenue at a glance*\nRevenue: $4.2M (+18%)";
+    await upsertTaskUiSpec(ask.id, { spec: fixture.uiSpec.spec, fallbackText: storedFallbackText });
+    await completeTask(ask.id, "Q3 is up.");
+    await backdateLastUpdated([ask.id], 20);
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    calls.length = 0;
+    try {
+      await processSlackRenderV2();
+    } finally {
+      warn.mockRestore();
+    }
+
+    const stops = stopStreamCalls();
+    expect(stops).toHaveLength(1);
+    const blocks = stops[0]?.payload.blocks as Block[];
+    expect(blocks).toHaveLength(1);
+    expect(isFooter(blocks[0], ask.id)).toBe(true);
+    expect(stops[0]?.payload.markdown_text).toBe(`\n\n${storedFallbackText}`);
+    await matchUiSpecFixture("three-charts-stale", fixture, {
+      renderIssues: ["at most 2 Chart per message"],
+      storedFallbackText,
+      specBlocks: [],
+      stopStreamMarkdownText: stops[0]?.payload.markdown_text,
+    });
+  });
+
+  test("an ask card never shows a worker child's spec", async () => {
+    const { ask } = await slackAskTask("Card child");
+    const worker = await createAgent({ name: "Card Child Worker", isLead: false, status: "idle" });
+    const child = await createTaskExtended("build the card", {
+      agentId: worker.id,
+      source: "mcp",
+      parentTaskId: ask.id,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(child.id);
+    await storeUiSpec(child.id, await readUiSpecFixture("deploys"));
+    await completeTask(child.id, "Card built.");
+    await completeTask(ask.id, "Deploys are up.");
+    await backdateLastUpdated([ask.id, child.id], 20);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const askStop = stopStreamCalls().find((call) =>
+      isFooter((call.payload.blocks as Block[]).at(-1), ask.id),
+    );
+    const blocks = askStop?.payload.blocks as Block[];
+    expect(blocks.map((block) => block.type)).toEqual(["context"]);
+  });
+
+  test("a deferral card rewrite puts the wake-up's spec between the answer and the captions", async () => {
+    const fixture = await readUiSpecFixture("deploys");
+    const { lead, ask } = await slackAskTask("Card deferral");
+    await completeTask(ask.id, "Checking back today at 18:38", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const card = await getSlackOutcomeMessage(ask.id);
+
+    const schedule = await createScheduledTask({
+      name: "deferred-ui-spec",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await storeUiSpec(wake.id, fixture);
+    await completeTask(wake.id, "Deploys are up.");
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
+    );
+    const blocks = rewrite?.payload.blocks as Block[];
+    expect(blocks[0]).toEqual({ type: "markdown", text: "✅ Deploys are up." });
+    expect(blocks.slice(1)).toEqual(fixture.specBlocks as Block[]);
+  });
+
+  describe("with SLACK_RENDER_V2_DELEGATION", () => {
+    beforeEach(async () => {
+      process.env.SLACK_RENDER_V2_DELEGATION = "true";
+      await ensureSlackDelegationActivation();
+    });
+
+    afterEach(() => {
+      delete process.env.SLACK_RENDER_V2_DELEGATION;
+    });
+
+    test("a worker's child card begins its blocks with the worker's spec", async () => {
+      const fixture = await readUiSpecFixture("deploys");
+      const { ask } = await slackAskTask("Card delegated");
+      const worker = await createAgent({
+        name: "Card Delegated Worker",
+        isLead: false,
+        status: "idle",
+      });
+      const child = await createTaskExtended("build the delegated card", {
+        agentId: worker.id,
+        source: "mcp",
+        parentTaskId: ask.id,
+        followUpConfig: { disabled: true },
+      });
+      await startTask(child.id);
+      await storeUiSpec(child.id, fixture);
+      await completeTask(child.id, "Card built.");
+      calls.length = 0;
+      await processSlackRenderV2();
+
+      const childStop = stopStreamCalls().find((call) =>
+        isFooter((call.payload.blocks as Block[]).at(-1), child.id),
+      );
+      const blocks = childStop?.payload.blocks as Block[];
+      expect(blocks.slice(0, -1)).toEqual(fixture.specBlocks as Block[]);
+    });
   });
 });

@@ -204,6 +204,12 @@ On OrbStack Macs, set `DOCKER_HOST="unix://$HOME/.orbstack/run/docker.sock"`.
 The adapter always includes `host.docker.internal:host-gateway`.
 Requests can set memory in MiB and CPU count through `resources`.
 
+Three optional keys harden each runtime. `DOCKER_RUNTIME` names an OCI runtime (`runsc`, `kata`) and becomes `HostConfig.Runtime`. The name accepts letters, digits, `.`, `-`, and `_`.
+`DOCKER_HARDENED` set to `true` or `1` drops all capabilities, adds back `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, and `KILL` (the set the worker entrypoint needs), sets `no-new-privileges:true`, and sets `MemorySwap` equal to `Memory` when the request limits memory. Other values leave the profile off.
+`DOCKER_PIDS_LIMIT` is a positive integer and becomes `HostConfig.PidsLimit`.
+An invalid `DOCKER_RUNTIME` or `DOCKER_PIDS_LIMIT` makes `checkConfig` report that key and makes provisioning fail before any Docker call. Absent keys leave the create request unchanged.
+The API config guard validates the three keys with the same rules.
+
 When creation returns 404 with `No such image`, the adapter pulls the requested image and retries creation once.
 Untagged references use `tag=latest`. Registry ports do not count as tags, and digest references remain unchanged.
 It consumes the pull response to completion and rejects errors embedded in the response stream.

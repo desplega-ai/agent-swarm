@@ -53,6 +53,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { TaskUiSpecView } from "@/components/shared/task-ui-spec-view";
 import { TaskTranscript } from "@/components/shared/transcript/task-transcript";
 import { buildTranscriptRows } from "@/components/shared/transcript/transcript-rows";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
@@ -753,6 +754,7 @@ export default function TaskDetailPage() {
           taskIds={knownTaskIds}
         />
       </ShowMore>
+      {task.uiSpec ? <TaskUiSpecView task={task} /> : null}
       {actions.answer ? (
         <div className="mt-1 -ml-1.5 flex">
           <Tooltip>

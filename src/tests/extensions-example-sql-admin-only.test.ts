@@ -175,11 +175,14 @@ describe("sql-admin-only extension", () => {
     expect(result.reason).toContain("role is not set");
   });
 
-  test("blocks db-query when the task row does not exist", async () => {
-    const { ctx } = makeCtx();
+  // The runner sends a random correlation id as X-Source-Task-Id for sessions with
+  // no task (pool or channel-message triggers). That id has no task row: allow.
+  test("allows db-query when the task row does not exist", async () => {
+    const { ctx, queries, warns } = makeCtx();
     const result = await handler(call("db-query", crypto.randomUUID()), ctx);
-    expect(result.action).toBe("block");
-    expect(result.reason).toContain("not found");
+    expect(result).toBeUndefined();
+    expect(queries).toHaveLength(1);
+    expect(warns).toHaveLength(0);
   });
 
   test("blocks db-query when the lookup outlives its budget", async () => {

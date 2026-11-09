@@ -957,6 +957,25 @@ function extractTextContent(content: unknown): string {
     .trim();
 }
 
+/**
+ * pi-ai thinking blocks with text, in the Claude `{type:"thinking"}` shape, so
+ * the session-log row renders through the same path as Claude's. Redacted or
+ * empty blocks are dropped.
+ */
+export function extractPiThinkingBlocks(
+  message: unknown,
+): Array<{ type: "thinking"; thinking: string }> {
+  if (!message || typeof message !== "object") return [];
+  const msg = message as { role?: string; content?: unknown };
+  if (msg.role !== "assistant" || !Array.isArray(msg.content)) return [];
+  return msg.content.flatMap((block) => {
+    const b = block as { type?: unknown; thinking?: unknown; redacted?: unknown };
+    if (b?.type !== "thinking" || b.redacted === true || typeof b.thinking !== "string") return [];
+    const thinking = b.thinking.trim();
+    return thinking ? [{ type: "thinking" as const, thinking }] : [];
+  });
+}
+
 export function extractPiAssistantText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
   const msg = message as { role?: string; content?: unknown };
@@ -1067,6 +1086,7 @@ export class PiMonoSession implements ProviderSession {
   private logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   /** Track last emitted message text to avoid duplicates across turns */
   private lastEmittedMessage = "";
+  private lastEmittedThinking = "";
   /** Last assistant text surfaced by pi-mono; used as runner fallback output. */
   private lastAssistantText = "";
   /** Phase 7: wallclock start so we can populate `durationMs` on the cost row. */
@@ -1251,7 +1271,14 @@ export class PiMonoSession implements ProviderSession {
         if (text) {
           this.lastAssistantText = text;
         }
-        if (text && text !== this.lastEmittedMessage) {
+        // The session-log row keeps thinking blocks (first, as pi-ai orders
+        // them) and is written for thinking-only turns too, such as the one
+        // before a tool call. The `message` event stays text-only.
+        const thinkingBlocks = extractPiThinkingBlocks(event.message);
+        const thinkingKey = thinkingBlocks.map((b) => b.thinking).join("\n");
+        const isNewThinking = thinkingKey !== "" && thinkingKey !== this.lastEmittedThinking;
+        const isNewText = text !== "" && text !== this.lastEmittedMessage;
+        if (isNewThinking || isNewText) {
           const model = this.reportedModel();
           this.emit({
             type: "raw_log",
@@ -1259,11 +1286,17 @@ export class PiMonoSession implements ProviderSession {
               type: "assistant",
               message: {
                 role: "assistant",
-                content: [{ type: "text", text }],
+                content: [
+                  ...(isNewThinking ? thinkingBlocks : []),
+                  ...(isNewText ? [{ type: "text", text }] : []),
+                ],
                 model,
               },
             }),
           });
+          if (isNewThinking) this.lastEmittedThinking = thinkingKey;
+        }
+        if (isNewText) {
           this.emit({ type: "message", role: "assistant", content: text });
           this.lastEmittedMessage = text;
         }

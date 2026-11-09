@@ -217,7 +217,11 @@ interface RuntimeCtx {
 function isThreadSession(value: unknown): value is { key: string; scope?: "user" | "shared" } {
   if (typeof value !== "object" || value === null) return false;
   const { key, scope } = value as { key?: unknown; scope?: unknown };
-  return typeof key === "string" && (scope === undefined || scope === "user" || scope === "shared");
+  return (
+    typeof key === "string" &&
+    key !== "" &&
+    (scope === undefined || scope === "user" || scope === "shared")
+  );
 }
 
 /** The route mirrored into json-render state at `/route`. */
@@ -1000,11 +1004,16 @@ export function AppSurface({
           const outcomeParam = (params as Record<string, unknown>)[OUTCOME_PARAM];
           const outcomePath =
             typeof outcomeParam === "string" && outcomeParam !== "" ? outcomeParam : null;
+          let createdRowId: string | undefined;
           try {
             if (params.op === "create") {
-              setLastResponse(
-                await api.createAppRow(targetAppId, params.model, params.values ?? {}),
+              const created = await api.createAppRow(
+                targetAppId,
+                params.model,
+                params.values ?? {},
               );
+              setLastResponse(created);
+              createdRowId = created.row.id;
               // The Form injects its own id, so a successful create resets the
               // fields the user just submitted. Inside an element instance
               // that id is already `instances/<key>/<origId>`.
@@ -1024,7 +1033,16 @@ export function AppSurface({
               setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
             await ctx.refetchModel(targetAppId, params.model);
-            if (outcomePath) ctx.store.set(outcomePath, { status: "ok" });
+            // A create also reports the new row's id: a Form publishes it to
+            // the rest of its chain as `$chain.createdRowId`.
+            if (outcomePath) {
+              ctx.store.set(
+                outcomePath,
+                createdRowId === undefined
+                  ? { status: "ok" }
+                  : { status: "ok", rowId: createdRowId },
+              );
+            }
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             if (outcomePath) ctx.store.set(outcomePath, { status: "error", error: message });
@@ -1093,18 +1111,34 @@ export function AppSurface({
             report({ status: "error", error: message });
             haltChain(message, reportStepFailure);
           }
+          // Same rule for a session: a key that did not resolve (a `$chain`
+          // sentinel, a dropped `$chain` key, an empty `$state` read) would
+          // create a task outside the session the next page reads.
+          const session: unknown = (params as Record<string, unknown>).session;
+          if (session !== undefined && !isThreadSession(session)) {
+            const message =
+              "app.action session.key must resolve to a session key; with no row id yet, put the create step before this one";
+            ctx.store.set(path, { status: "error", error: message } satisfies ActionSlot);
+            report({ status: "error", error: message });
+            haltChain(message, reportStepFailure);
+          }
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
             const followUp: unknown = (params as Record<string, unknown>).followUp;
-            const session: unknown = (params as Record<string, unknown>).session;
             const response = await api.invokeAppAction(
               targetAppId,
               name,
               params?.input,
               parentTaskId,
               {
-                // `followUp: false` (SessionThread sets it) skips the Lead review.
-                followUp: typeof followUp === "boolean" ? followUp : undefined,
+                // `followUp: false` (SessionThread sets it) skips the Lead review;
+                // any session step defaults to it, one task per message.
+                followUp:
+                  typeof followUp === "boolean"
+                    ? followUp
+                    : isThreadSession(session)
+                      ? false
+                      : undefined,
                 // A SessionThread's session; the server builds the context key.
                 session: isThreadSession(session) ? session : undefined,
                 requestedByUserId: ctx.userId ?? undefined,
@@ -1294,36 +1328,38 @@ export function AppSurface({
   const shellSurface =
     shellItems && activePage ? (
       <JsonRenderThemeProvider value={appThemeAttr ?? null}>
-        <StateProvider store={store}>
-          <VisibilityProvider>
-            <ActionProvider handlers={compiled.handlers}>
-              <AppShell
-                items={shellItems}
-                activePage={activePageName}
-                onNavigate={(href) => navigate(href)}
-                // The dashboard header names the app in the default view only.
-                appName={mode === "default" ? undefined : app.name}
-                title={activePage.title ?? activePageName}
-                description={activePage.description}
-                crumbs={pageCrumbs}
-                actions={
-                  headerSpec ? (
-                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
-                  ) : null
-                }
-                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
-                scrollRef={scrollRef}
-              >
-                {actionError && (
-                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
-                    {actionError}
-                  </AlertCallout>
-                )}
-                {renderedSpec}
-              </AppShell>
-            </ActionProvider>
-          </VisibilityProvider>
-        </StateProvider>
+        <AppScopeProvider value={app.id}>
+          <StateProvider store={store}>
+            <VisibilityProvider>
+              <ActionProvider handlers={compiled.handlers}>
+                <AppShell
+                  items={shellItems}
+                  activePage={activePageName}
+                  onNavigate={(href) => navigate(href)}
+                  // The dashboard header names the app in the default view only.
+                  appName={mode === "default" ? undefined : app.name}
+                  title={activePage.title ?? activePageName}
+                  description={activePage.description}
+                  crumbs={pageCrumbs}
+                  actions={
+                    headerSpec ? (
+                      <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                    ) : null
+                  }
+                  surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                  scrollRef={scrollRef}
+                >
+                  {actionError && (
+                    <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                      {actionError}
+                    </AlertCallout>
+                  )}
+                  {renderedSpec}
+                </AppShell>
+              </ActionProvider>
+            </VisibilityProvider>
+          </StateProvider>
+        </AppScopeProvider>
       </JsonRenderThemeProvider>
     ) : null;
 

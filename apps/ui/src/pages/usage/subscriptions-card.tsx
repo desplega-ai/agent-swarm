@@ -1,11 +1,27 @@
 import { openAICompatibleProviders, providerKeyVars } from "@desplega/model-catalog";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleAlert, Info, RotateCcw } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useSubscriptionPlans } from "@/api/hooks/use-api-keys";
-import type { UsageSummaryByCredentialRow } from "@/api/types";
+import { useApiKeyStatuses, useSubscriptionPlans } from "@/api/hooks/use-api-keys";
+import type { ApiKeyStatus, UsageSummaryByCredentialRow } from "@/api/types";
+import { KeyQuotaDetails, QuotaBar } from "@/components/providers/key-quota-details";
 import { PlanPicker } from "@/components/shared/plan-picker";
+import { ProviderIcon } from "@/components/shared/provider-icon";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useMinuteClock } from "@/hooks/use-minute-clock";
+import { resetLabel } from "@/lib/ai-providers";
+import {
+  currentQuotaWindows,
+  type QuotaWindow,
+  quotaIsHigh,
+  quotaLabel,
+  quotaRemaining,
+  quotaResetIn,
+} from "@/lib/provider-quota";
 import {
   credentialKey,
   type SubscriptionLine,
@@ -14,11 +30,10 @@ import {
 import { cn } from "@/lib/utils";
 import { formatCount, formatDay, formatUsd } from "./usage-format";
 
-/** Average month length, used to prorate a monthly list price to days. */
-
-const SUBSCRIPTION_LABELS: Record<string, string> = {
-  CLAUDE_CODE_OAUTH_TOKEN: "Claude",
-  CODEX_OAUTH: "ChatGPT",
+/** Subscription providers, in display order: label and mark. */
+const SUBSCRIPTION_PROVIDERS: Record<string, { label: string; icon: "anthropic" | "openai" }> = {
+  CLAUDE_CODE_OAUTH_TOKEN: { label: "Claude", icon: "anthropic" },
+  CODEX_OAUTH: { label: "ChatGPT", icon: "openai" },
 };
 
 const PAY_AS_YOU_GO_LABELS: Record<string, string> = {
@@ -35,12 +50,24 @@ const PAY_AS_YOU_GO_LABELS: Record<string, string> = {
   DEVIN_API_KEY: "Devin API key",
 };
 
-/** Desktop row layout. Below it, each row stacks and the amounts carry their own labels. */
-const ROW_GRID = "@3xl:grid-cols-[minmax(0,1fr)_17rem_6rem_6rem_8rem]";
-
 /** Saved share of the API value, as a whole percent. */
 function savedPercent(saved: number, apiValue: number): string {
   return `${apiValue > 0 ? Math.round((saved / apiValue) * 100) : 0}%`;
+}
+
+/** A saving in green, a loss (plans cost more) in red with a minus sign. */
+function SavedAmount({ saved, className }: { saved: number; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "font-mono tabular-nums",
+        saved >= 0 ? "text-status-success-strong" : "text-status-error-strong",
+        className,
+      )}
+    >
+      {saved >= 0 ? formatUsd(saved) : `-${formatUsd(-saved)}`}
+    </span>
+  );
 }
 
 function Suffix({ suffix }: { suffix: string | null }) {
@@ -51,8 +78,9 @@ function Suffix({ suffix }: { suffix: string | null }) {
 /**
  * What the subscription runs would cost at API prices, minus what their
  * plans cost over the same days. Only credentials with a known plan count.
- * Pay-as-you-go spend is listed below for the full picture. The headline
- * comes first; both lists start folded so the chart stays on the first screen.
+ * Each subscription is a card with its current provider limits, grouped by
+ * provider. Pay-as-you-go spend is listed below for the full picture. Both
+ * lists start folded so the chart stays on the first screen.
  */
 export function SubscriptionsCard({
   rows,
@@ -65,7 +93,7 @@ export function SubscriptionsCard({
   /** An agent or user filter is on: API values cover part of the runs, plan costs do not shrink. */
   filtered: boolean;
 }) {
-  const { data: catalog } = useSubscriptionPlans();
+  const { data: catalog, isLoading: catalogLoading } = useSubscriptionPlans();
 
   const { lines, payg, counted, apiValue, plansCost, saved } = useMemo(
     () => subscriptionSavings(rows, catalog?.plans ?? [], windowStartMs, Date.now()),
@@ -73,69 +101,85 @@ export function SubscriptionsCard({
   );
   const missing = lines.length - counted.length;
   const paygTotal = payg.reduce((sum, row) => sum + row.costUsd, 0);
+  const unattributed = rows.filter((row) => row.keyType === null);
+  const unattributedSessions = unattributed.reduce((sum, row) => sum + row.sessions, 0);
+
+  // The headline needs the plan prices: without them every plan reads unknown.
+  if (catalogLoading) {
+    return (
+      <Card className="gap-5 py-5" aria-busy="true">
+        <CardContent className="space-y-3 px-5">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+          <Skeleton className="h-6 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="gap-5 py-5">
       <CardContent className="relative space-y-4 px-5">
-        <h2 className="absolute top-0 right-5 text-xs font-normal text-muted-foreground">
+        <h2 className="absolute top-0 right-5 hidden text-xs font-normal text-muted-foreground sm:block">
           Subscriptions vs API
         </h2>
         {lines.length === 0 ? (
-          <p className="pr-36 text-sm text-muted-foreground">
-            No subscription runs in this window. All spend used pay-as-you-go keys.
+          <p className="text-sm text-muted-foreground sm:pr-36">
+            No attributed subscription runs in this window.
+          </p>
+        ) : !catalog ? (
+          <p className="text-sm text-muted-foreground sm:pr-36">
+            Plan prices did not load, so savings are unknown.
+          </p>
+        ) : counted.length === 0 ? (
+          <p className="text-sm sm:pr-36">
+            Pick a plan for each subscription to see what it saves.
           </p>
         ) : (
-          <div className="space-y-1 pr-36">
-            {counted.length === 0 ? (
-              <p className="text-sm">Pick a plan for each subscription to see what it saves.</p>
-            ) : saved >= 0 ? (
-              <p className="flex flex-wrap items-baseline gap-x-3 text-2xl font-semibold">
-                <span>
-                  Saved{" "}
-                  <span className="font-mono tabular-nums text-status-success-strong">
-                    {formatUsd(saved)}
-                  </span>
-                </span>
-                <span className="text-sm font-medium text-status-success-strong">
-                  {savedPercent(saved, apiValue)} saved
-                </span>
-              </p>
-            ) : (
-              <p className="text-2xl font-semibold">
-                Plans cost <span className="font-mono tabular-nums">{formatUsd(-saved)}</span> more
-                than API prices
-              </p>
-            )}
-            {counted.length > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                API value of subscription runs{" "}
-                <span className="font-mono tabular-nums text-foreground">
-                  {formatUsd(apiValue)}
-                </span>
-                , minus plans{" "}
-                <span className="font-mono tabular-nums text-foreground">
-                  {formatUsd(plansCost)}
-                </span>
-                .
-              </p>
-            ) : null}
-            {counted.length > 0 && saved < 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Plan cost is prorated per day from the first session in the window.
-              </p>
-            ) : null}
-            {filtered && counted.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                A filter is on. API values count only the filtered runs, but plan costs are for the
-                whole credential.
-              </p>
-            ) : null}
-            {missing > 0 && counted.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {missing === 1
-                  ? "1 subscription has no plan yet. Its savings are not counted."
-                  : `${missing} subscriptions have no plan yet. Their savings are not counted.`}
-              </p>
+          <div className="space-y-1.5 sm:pr-36">
+            <p className="flex flex-wrap items-baseline gap-x-3 text-2xl font-semibold">
+              <span>
+                Saved <SavedAmount saved={saved} />
+              </span>
+              <span
+                className={cn(
+                  "text-sm font-medium",
+                  saved >= 0 ? "text-status-success-strong" : "text-status-error-strong",
+                )}
+              >
+                {saved >= 0 ? `${savedPercent(saved, apiValue)} saved` : "plans cost more"}
+              </span>
+            </p>
+            <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+              API value
+              <span className="font-mono tabular-nums text-foreground">{formatUsd(apiValue)}</span>
+              <span aria-hidden>·</span>
+              plans
+              <span className="font-mono tabular-nums text-foreground">{formatUsd(plansCost)}</span>
+              <ExplainTip
+                label="How savings are counted"
+                content={`API value of the subscription runs minus their plans at list price (checked ${formatDay(catalog.checkedAt, true)}), prorated per day from each credential's first session in the window.`}
+              />
+            </p>
+            {missing > 0 || filtered ? (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {missing > 0 ? (
+                  <NoteBadge
+                    label={`${missing} without a plan`}
+                    tip={
+                      missing === 1
+                        ? "Its savings are not counted. Pick its plan below."
+                        : "Their savings are not counted. Pick their plans below."
+                    }
+                  />
+                ) : null}
+                {filtered ? (
+                  <NoteBadge
+                    label="Filter on"
+                    tip="API values count only the filtered runs, but plan costs are for the whole credential."
+                  />
+                ) : null}
+              </div>
             ) : null}
           </div>
         )}
@@ -146,25 +190,7 @@ export function SubscriptionsCard({
             count={lines.length}
             total={formatUsd(lines.reduce((sum, line) => sum + line.row.costUsd, 0))}
           >
-            <div className="@container">
-              <div
-                className={cn(
-                  "hidden gap-x-4 border-b border-border-subtle pb-2 text-xs whitespace-nowrap text-muted-foreground @3xl:grid",
-                  ROW_GRID,
-                )}
-              >
-                <span>Subscription</span>
-                <span>Plan</span>
-                <span className="text-right">API value</span>
-                <span className="text-right">Plan cost</span>
-                <span className="text-right">Saved</span>
-              </div>
-              <ul className="divide-y divide-border-subtle">
-                {lines.map((line) => (
-                  <SubscriptionRow key={line.key} line={line} />
-                ))}
-              </ul>
-            </div>
+            <SubscriptionGroups lines={lines} />
           </FoldedList>
         ) : null}
 
@@ -191,15 +217,64 @@ export function SubscriptionsCard({
           </FoldedList>
         ) : null}
 
-        <p className="text-xs text-muted-foreground">
-          {catalog ? `List prices checked ${formatDay(catalog.checkedAt, true)}. ` : null}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {unattributed.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5">
+              Unattributed
+              <span className="font-mono tabular-nums text-foreground">
+                {formatUsd(unattributed.reduce((sum, row) => sum + row.costUsd, 0))}
+              </span>
+              · {formatCount(unattributedSessions)}
+              {unattributedSessions === 1 ? " session" : " sessions"}
+              <ExplainTip
+                label="About unattributed spend"
+                content="These sessions reported no credential, so their billing type is unknown."
+              />
+            </span>
+          ) : (
+            <span />
+          )}
           <Link to="/integrations/ai" className="text-primary hover:underline">
-            Rename credentials on the AI providers page
+            Rename credentials
           </Link>
-          .
-        </p>
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * An info icon that opens its explanation in a popover. Unlike `InfoTip`, the
+ * trigger takes focus and opens on tap, so keyboard and touch users can read it.
+ */
+function ExplainTip({ label, content }: { label: string; content: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        type="button"
+        aria-label={label}
+        className="inline-flex shrink-0 cursor-help items-center rounded-sm text-muted-foreground/70 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <Info aria-hidden className="size-3" />
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        collisionPadding={16}
+        className="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs"
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A short muted note whose explanation opens from its info icon. */
+function NoteBadge({ label, tip }: { label: string; tip: string }) {
+  return (
+    <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
+      {label}
+      <ExplainTip label={`About ${label}`} content={tip} />
+    </Badge>
   );
 }
 
@@ -241,73 +316,210 @@ function FoldedList({
         </span>
         <span className="font-mono text-sm tabular-nums">{total}</span>
       </button>
-      {open ? <div id={bodyId}>{children}</div> : null}
+      {open ? (
+        <div id={bodyId} className="pt-3">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function SubscriptionRow({ line }: { line: SubscriptionLine }) {
-  const { row, planCost, saved } = line;
-  const typeLabel = (row.keyType && SUBSCRIPTION_LABELS[row.keyType]) ?? row.keyType ?? "";
+/** Subscription cards under a header per provider, providers in a fixed order. */
+function SubscriptionGroups({ lines }: { lines: SubscriptionLine[] }) {
+  // Quota windows come from the key status rows, the same source as the AI providers page.
+  const { data: statuses } = useApiKeyStatuses();
+  const nowMs = useMinuteClock();
+  const groups = Object.entries(SUBSCRIPTION_PROVIDERS)
+    .map(([keyType, provider]) => ({
+      keyType,
+      provider,
+      lines: lines.filter((line) => line.row.keyType === keyType),
+    }))
+    .filter((group) => group.lines.length > 0);
   return (
-    <li className={cn("grid grid-cols-3 items-center gap-x-4 gap-y-2 py-3", ROW_GRID)}>
-      <div className="col-span-3 min-w-0 @3xl:col-span-1">
-        <p className="truncate text-sm font-medium">
-          {row.name ?? (
-            <>
-              {typeLabel} <Suffix suffix={row.keySuffix} />
-            </>
-          )}
-        </p>
-        <p className="truncate text-xs text-muted-foreground">
-          {row.name ? (
-            <>
-              {typeLabel} <Suffix suffix={row.keySuffix} />,{" "}
-            </>
-          ) : null}
-          {formatCount(row.sessions)} {row.sessions === 1 ? "session" : "sessions"}
-        </p>
-      </div>
-      <div className="col-span-3 @3xl:col-span-1">
+    <div className="@container space-y-5">
+      {groups.map((group) => (
+        <section key={group.keyType} aria-label={group.provider.label} className="space-y-2">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
+            <ProviderIcon provider={group.provider.icon} className="size-4 opacity-100" />
+            {group.provider.label}
+            <span className="font-mono text-xs font-normal text-muted-foreground tabular-nums">
+              {group.lines.length}
+            </span>
+          </h3>
+          <ul className="space-y-2">
+            {group.lines.map((line) => (
+              <SubscriptionCard
+                key={line.key}
+                line={line}
+                typeLabel={group.provider.label}
+                statuses={(statuses ?? []).filter(
+                  (s) => s.keyType === line.row.keyType && s.keySuffix === line.row.keySuffix,
+                )}
+                nowMs={nowMs}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SubscriptionCard({
+  line,
+  typeLabel,
+  statuses,
+  nowMs,
+}: {
+  line: SubscriptionLine;
+  typeLabel: string;
+  statuses: ApiKeyStatus[];
+  nowMs: number;
+}) {
+  const { row, planCost, saved } = line;
+  const label = row.name ?? `${typeLabel} ...${row.keySuffix ?? ""}`;
+  const windows = currentQuotaWindows(statuses, nowMs);
+  return (
+    <li className="space-y-3 rounded-lg border border-border-subtle bg-card p-3 @xl:p-4">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">
+            {row.name ?? (
+              <>
+                {typeLabel} <Suffix suffix={row.keySuffix} />
+              </>
+            )}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {row.name ? (
+              <>
+                <Suffix suffix={row.keySuffix} /> ·{" "}
+              </>
+            ) : null}
+            {formatCount(row.sessions)} {row.sessions === 1 ? "session" : "sessions"}
+          </p>
+        </div>
         <PlanPicker
           credential={row}
-          label={`Plan for ${row.name ?? `${typeLabel} ...${row.keySuffix ?? ""}`}`}
+          label={`Plan for ${label}`}
+          className="w-full @xl:w-auto @xl:flex-nowrap"
         />
       </div>
-      <Amount label="API value">{formatUsd(row.costUsd)}</Amount>
-      <Amount label="Plan cost">{planCost === null ? null : formatUsd(planCost)}</Amount>
-      <Amount label="Saved">
-        {saved === null ? null : saved >= 0 ? (
-          <>
-            <span className="text-status-success-strong">{formatUsd(saved)}</span>
-            <span className="text-xs text-muted-foreground">
-              {savedPercent(saved, row.costUsd)}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="text-muted-foreground">+{formatUsd(-saved)}</span>
-            <span className="font-sans text-xs text-muted-foreground">plan cost</span>
-          </>
+      <div
+        className={cn(
+          "grid gap-x-6 gap-y-3",
+          windows.length > 0 && "@2xl:grid-cols-[13rem_minmax(0,1fr)] @2xl:items-center",
         )}
-      </Amount>
+      >
+        <div className="min-w-0">
+          {saved === null ? (
+            <>
+              <p className="font-mono text-2xl font-semibold tabular-nums">
+                {formatUsd(row.costUsd)}
+              </p>
+              <p className="text-xs text-muted-foreground">API value · no plan, not counted</p>
+            </>
+          ) : (
+            <>
+              <p className="flex items-baseline gap-2">
+                <SavedAmount saved={saved} className="text-2xl font-semibold" />
+                <span
+                  className={cn(
+                    "text-xs",
+                    saved >= 0 ? "text-status-success-strong" : "text-status-error-strong",
+                  )}
+                >
+                  {saved >= 0 ? `saved · ${savedPercent(saved, row.costUsd)}` : "plan costs more"}
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                API value{" "}
+                <span className="font-mono tabular-nums text-foreground">
+                  {formatUsd(row.costUsd)}
+                </span>{" "}
+                · plan{" "}
+                <span className="font-mono tabular-nums text-foreground">
+                  {formatUsd(planCost ?? 0)}
+                </span>
+              </p>
+            </>
+          )}
+        </div>
+        {windows.length > 0 ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                aria-label={`Limits and usage for ${label}`}
+                className="h-auto w-full flex-col items-stretch gap-2 px-2 py-1.5 font-normal"
+              >
+                {windows.map((w) => (
+                  <WindowMeter key={w.key} window={w} nowMs={nowMs} />
+                ))}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              collisionPadding={16}
+              aria-label={`${label} quota details`}
+              className="max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto"
+            >
+              <KeyQuotaDetails
+                poolKey={{ keyType: row.keyType ?? "", suffix: row.keySuffix, label, statuses }}
+                windows={windows}
+                nowMs={nowMs}
+              />
+            </PopoverContent>
+          </Popover>
+        ) : null}
+      </div>
     </li>
   );
 }
 
-/** A right-aligned amount. In the stacked layout the column header is gone, so the label rides along. */
-function Amount({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * One limit window: label, remaining share and reset countdown, with the bar
+ * between them on wide cards and on its own line on narrow ones.
+ */
+function WindowMeter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
+  const label = quotaLabel(window);
+  const warning = window.limited || window.overageStatus === "rejected";
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted-foreground @3xl:hidden">{label}</p>
-      <p
-        className={cn(
-          "flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm tabular-nums @3xl:justify-end",
-          children === null && "text-muted-foreground",
-        )}
-      >
-        {children ?? "n/a"}
-      </p>
-    </div>
+    <span className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-xs @xl:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_9rem]">
+      <span className="flex min-w-0 items-center gap-1 text-left text-foreground/70">
+        <span className="truncate" title={label}>
+          {label}
+        </span>
+        {warning ? (
+          <CircleAlert
+            aria-label="Limit or credits restricted"
+            className="size-3 shrink-0 text-status-warning-strong"
+          />
+        ) : null}
+      </span>
+      <span className="inline-flex items-center justify-end gap-2 tabular-nums @xl:col-start-3">
+        <span className={cn(quotaIsHigh(window.percent) && "text-status-warning-strong")}>
+          {window.percent === null ? "Use not reported" : `${quotaRemaining(window.percent)}% left`}
+        </span>
+        {window.resetsAtMs !== null ? (
+          <span
+            className="inline-flex items-center gap-1 text-foreground/70"
+            title={`Resets ${resetLabel(window.resetsAtMs)}`}
+          >
+            <RotateCcw aria-hidden className="size-3" />
+            {quotaResetIn(window.resetsAtMs, nowMs)}
+          </span>
+        ) : null}
+      </span>
+      {window.percent === null ? null : (
+        <QuotaBar
+          percent={window.percent}
+          className="col-span-2 h-1.5 @xl:col-span-1 @xl:col-start-2 @xl:row-start-1"
+        />
+      )}
+    </span>
   );
 }
