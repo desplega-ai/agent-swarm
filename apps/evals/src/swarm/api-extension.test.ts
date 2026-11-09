@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
@@ -52,6 +52,76 @@ describe("loadApiExtension", () => {
   test("a bundle with no name fails before any sandbox", async () => {
     await writeFile(join(dir, "p.json"), JSON.stringify({ manifest: {}, files: {} }));
     await expect(loadApiExtension({ path: join(dir, "p.json") })).rejects.toThrow("manifest");
+  });
+
+  describe("a bundle cannot reach files outside itself", () => {
+    let outside: string;
+    let bundle: string;
+    beforeEach(async () => {
+      outside = await mkdtemp(join(tmpdir(), "api-extension-outside-"));
+      await writeFile(join(outside, "secret.txt"), "TOP-SECRET");
+      bundle = join(dir, "bundle");
+      await mkdir(bundle);
+    });
+    afterEach(async () => {
+      await rm(outside, { recursive: true, force: true });
+    });
+    const withAssets = (assets: unknown) =>
+      writeFile(join(bundle, "manifest.json"), JSON.stringify({ ...manifest, assets }));
+
+    test("rejects a traversal or absolute hooks path", async () => {
+      for (const hooks of ["../x.ts", `${outside}/secret.txt`, "a/../../x.ts", "a\\b.ts", ""]) {
+        await withAssets({ hooks });
+        await expect(loadApiExtension({ path: bundle })).rejects.toThrow("unsafe bundle path");
+      }
+    });
+
+    test("rejects an unsafe script path and a non-string one", async () => {
+      await writeFile(join(bundle, "hooks.ts"), "x");
+      await withAssets({ hooks: "hooks.ts", scripts: [{ file: "../secret.txt" }] });
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("unsafe bundle path");
+      await withAssets({ hooks: "hooks.ts", scripts: [{ file: 5 }] });
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("unsafe bundle path");
+    });
+
+    test("rejects a symlinked hooks file, even one that points inside the bundle", async () => {
+      await withAssets({ hooks: "hooks.ts" });
+      await symlink(join(outside, "secret.txt"), join(bundle, "hooks.ts"));
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("symlink");
+      await rm(join(bundle, "hooks.ts"));
+      await writeFile(join(bundle, "real.ts"), "x");
+      await symlink(join(bundle, "real.ts"), join(bundle, "hooks.ts"));
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("symlink");
+    });
+
+    test("rejects a file under a symlinked directory", async () => {
+      await symlink(outside, join(bundle, "lib"));
+      await withAssets({ hooks: "hooks.ts", scripts: [{ file: "lib/secret.txt" }] });
+      await writeFile(join(bundle, "hooks.ts"), "x");
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("symlink");
+    });
+
+    test("rejects a symlinked manifest.json and install-payload.json", async () => {
+      await symlink(join(outside, "secret.txt"), join(bundle, "manifest.json"));
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("symlink");
+      await rm(join(bundle, "manifest.json"));
+      await writeFile(join(outside, "p.json"), JSON.stringify({ manifest, files: {} }));
+      await symlink(join(outside, "p.json"), join(bundle, "install-payload.json"));
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("symlink");
+    });
+
+    test("a missing hooks file is an error, not a skip", async () => {
+      await withAssets({ hooks: "hooks.ts" });
+      await expect(loadApiExtension({ path: bundle })).rejects.toThrow("not found");
+    });
+
+    test("a bundle reached through a symlinked root still loads", async () => {
+      await withAssets({ hooks: "hooks.ts" });
+      await writeFile(join(bundle, "hooks.ts"), "ok");
+      await symlink(bundle, join(dir, "link"));
+      const loaded = await loadApiExtension({ path: join(dir, "link") });
+      expect(loaded.payload.files).toEqual({ "hooks.ts": "ok" });
+    });
   });
 });
 
