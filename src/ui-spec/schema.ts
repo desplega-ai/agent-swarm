@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { UI_SPEC_ACTION_ID } from "../utils/task-ui-spec";
+import { UI_SPEC_ACTION_ID, UI_SPEC_MAX_ACTIONS } from "../utils/task-ui-spec";
 
 /** One declared card action, as an agent or a script sends it. */
 export const TaskUiSpecActionInputSchema = z.discriminatedUnion("kind", [
@@ -28,8 +28,11 @@ export const TaskUiSpecInputSchema = z.object({
     .describe("A json-render spec for the chat catalog. Root must be a Card."),
   actions: z
     .record(z.string().regex(UI_SPEC_ACTION_ID), TaskUiSpecActionInputSchema)
+    .refine((actions) => Object.keys(actions).length <= UI_SPEC_MAX_ACTIONS, {
+      message: `At most ${UI_SPEC_MAX_ACTIONS} actions.`,
+    })
     .optional()
     .describe(
-      "Actions that Button ids name. Needs UI_SPEC_ACTIONS_ENABLED=true. A `script` action also needs its script pinned in UI_SPEC_SCRIPT_ACTIONS.",
+      `Actions that Button ids name, at most ${UI_SPEC_MAX_ACTIONS}. Needs UI_SPEC_ACTIONS_ENABLED=true. A \`script\` action also needs its script pinned in UI_SPEC_SCRIPT_ACTIONS.`,
     ),
 });

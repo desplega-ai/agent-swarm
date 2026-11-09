@@ -12,6 +12,9 @@ export const UI_SPEC_MAX_BLOCKS = 45;
 /** Max elements in one Slack `actions` block. */
 export const UI_SPEC_MAX_ACTIONS_ROW_ELEMENTS = 25;
 
+/** Max entries in a uiSpec's `actions` map. Bounds the write-time script checks. */
+export const UI_SPEC_MAX_ACTIONS = 25;
+
 /** Prefix on the Slack `action_id` of every spec Button. */
 export const UI_SPEC_ACTION_PREFIX = "swarm_ui:";
 

@@ -407,6 +407,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
       }
 
       let learningWrite: Promise<TaskLearningResult> | undefined;
+      // Script-action checks read config and scripts. They run here, before the
+      // BEGIN IMMEDIATE below, so those reads never hold the write lock. A click
+      // re-checks the allowlist, so a pin removed in between still disarms it.
+      const uiSpecScriptIssues =
+        uiSpec && status === "completed" && isEnvFlagEnabled("UI_SPEC_ENABLED", false)
+          ? await scriptActionIssues(uiSpec.actions)
+          : [];
+
       // A sentence about the uiSpec, appended to a successful result message.
       let uiSpecNote: string | undefined;
       const result = await getDbClient().transaction(async () => {
@@ -626,10 +634,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
           uiSpecNote = 'uiSpec is stored only with status "completed".';
         } else if (uiSpec) {
           // Script actions are checked first, so a bad one uses the same single refusal.
-          const scriptIssues = await scriptActionIssues(uiSpec.actions);
           const validation =
-            scriptIssues.length > 0
-              ? { ok: false as const, issues: scriptIssues }
+            uiSpecScriptIssues.length > 0
+              ? { ok: false as const, issues: uiSpecScriptIssues }
               : validateTaskUiSpec(uiSpec, {
                   taskId,
                   actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),

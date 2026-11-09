@@ -71,6 +71,7 @@ The engine checks every spec when you store it. It refuses a spec that breaks a 
 | A Slack table shows 5 rows per page | The native Slack table pages 5 rows at a time, with a pager. You cannot change the page size. Put the most important rows first. |
 | 32 KiB | The JSON of `spec` is at most 32,768 bytes. |
 | 45 Slack blocks, 25 elements in one `Actions` row | Slack Block Kit limits for one message. |
+| At most 25 entries in `actions` | Each `script` action is checked against the allowlist when the card is stored. |
 | https URLs only | `LinkButton.url`, `Image.url` and `Card.imageUrl` must start with `https:`. The engine refuses `http:`, `javascript:`, `data:` and `file:` URLs. |
 
 ## Buttons

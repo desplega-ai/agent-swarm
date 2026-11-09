@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as dbModule from "../be/db";
 import {
   closeDb,
   createAgent,
@@ -18,15 +19,18 @@ import {
   startTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { isInTransaction } from "../be/db-client";
+import * as scriptsDbModule from "../be/scripts/db";
 import { insertScript, upsertScriptByName } from "../be/scripts/db";
 import * as runSavedModule from "../be/scripts/run-saved";
 import { acquireTaskUiScriptActionRun, getTaskUiSpec, upsertTaskUiSpec } from "../be/task-ui-spec";
 import { __resetInjectedEnvTracking, loadGlobalConfigsIntoEnv } from "../http/core";
 import { registerStoreProgressTool } from "../tools/store-progress";
 import { runTaskUiAction } from "../ui-spec/actions";
+import { TaskUiSpecInputSchema } from "../ui-spec/schema";
 import { scriptActionIssues } from "../ui-spec/script-actions";
 import type { TaskUiSpec, TaskUiSpecDocument } from "../utils/task-ui-spec";
-import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
+import { TASK_UI_SPEC_UPDATED_EVENT, UI_SPEC_MAX_ACTIONS } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 
 const dbPath = `/tmp/test-task-ui-script-actions-${crypto.randomUUID()}.sqlite`;
@@ -195,7 +199,40 @@ describe("write-time checks", () => {
     );
   });
 
+  test(`a uiSpec with more than ${UI_SPEC_MAX_ACTIONS} actions fails the input schema`, () => {
+    const actions = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`a${i}`, refreshAction]));
+    const parse = (n: number) =>
+      TaskUiSpecInputSchema.safeParse({ spec: card("Deploys"), actions: actions(n) }).success;
+    expect(parse(UI_SPEC_MAX_ACTIONS)).toBe(true);
+    expect(parse(UI_SPEC_MAX_ACTIONS + 1)).toBe(false);
+  });
+
+  test("many actions read the allowlist once and each script once", async () => {
+    const configSpy = spyOn(dbModule, "getSwarmConfigs");
+    const scriptSpy = spyOn(scriptsDbModule, "getScript");
+    try {
+      const actions = Object.fromEntries(
+        Array.from({ length: UI_SPEC_MAX_ACTIONS }, (_, i) => [`a${i}`, refreshAction]),
+      );
+      expect(await scriptActionIssues(actions)).toEqual([]);
+      expect(configSpy).toHaveBeenCalledTimes(1);
+      expect(scriptSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      configSpy.mockRestore();
+      scriptSpy.mockRestore();
+    }
+  });
+
   test("store-progress refuses an unlisted script action once", async () => {
+    // The allowlist read must not run inside the completion write transaction.
+    const realGetSwarmConfigs = dbModule.getSwarmConfigs;
+    const allowlistReadsInTransaction: boolean[] = [];
+    const configSpy = spyOn(dbModule, "getSwarmConfigs").mockImplementation(async (filter) => {
+      if (filter?.key === "UI_SPEC_SCRIPT_ACTIONS")
+        allowlistReadsInTransaction.push(isInTransaction());
+      return realGetSwarmConfigs(filter);
+    });
     process.env.UI_SPEC_SCRIPT_ACTIONS = "";
     const server = new McpServer({ name: "script-action-test", version: "1" });
     registerStoreProgressTool(server);
@@ -228,6 +265,8 @@ describe("write-time checks", () => {
     expect(accepted.structuredContent.success).toBe(true);
     expect((await getTaskById(task.id))?.status).toBe("completed");
     expect(await getTaskUiSpec(task.id)).toBeNull();
+    configSpy.mockRestore();
+    expect(allowlistReadsInTransaction).toEqual([false, false]);
   });
 });
 

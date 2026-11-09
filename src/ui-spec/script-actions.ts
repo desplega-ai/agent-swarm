@@ -56,13 +56,28 @@ async function readScriptActionAllowlist(): Promise<string | undefined> {
  * that name exists, and its current contentHash matches a pin. A script edit
  * disarms its cards until a human re-pins it.
  */
+type AllowlistPin = ReturnType<typeof parseScriptActionAllowlist>["pins"][number];
+
+/** Per-call lookups, so a uiSpec with many actions reads the allowlist once and each script once. */
+interface ScriptActionLookups {
+  allPins: AllowlistPin[];
+  scripts: Map<string, Promise<ScriptRecord | null>>;
+}
+
+async function loadScriptActionLookups(): Promise<ScriptActionLookups> {
+  return {
+    allPins: parseScriptActionAllowlist(await readScriptActionAllowlist()).pins,
+    scripts: new Map(),
+  };
+}
+
 export async function resolveScriptAction(
   actionId: string,
   action: ScriptAction,
+  lookups?: ScriptActionLookups,
 ): Promise<ResolvedScriptAction> {
-  const pins = parseScriptActionAllowlist(await readScriptActionAllowlist()).pins.filter(
-    (pin) => pin.name === action.script,
-  );
+  const { allPins, scripts } = lookups ?? (await loadScriptActionLookups());
+  const pins = allPins.filter((pin) => pin.name === action.script);
   if (pins.length === 0) {
     return {
       ok: false,
@@ -70,7 +85,12 @@ export async function resolveScriptAction(
       issue: `Action "${actionId}" runs script "${action.script}", which is not allowlisted in UI_SPEC_SCRIPT_ACTIONS.`,
     };
   }
-  const script = await getScript({ name: action.script, scope: "global" });
+  let lookup = scripts.get(action.script);
+  if (!lookup) {
+    lookup = getScript({ name: action.script, scope: "global" });
+    scripts.set(action.script, lookup);
+  }
+  const script = await lookup;
   if (!script) {
     return {
       ok: false,
@@ -107,18 +127,24 @@ function argsIssue(actionId: string, action: ScriptAction, script: ScriptRecord)
     : null;
 }
 
-/** Write-time issues of every `script` action in `actions`. Empty when all pass. */
+/**
+ * Write-time issues of every `script` action in `actions`. Empty when all pass.
+ * Reads the allowlist once and each named script once. store-progress calls
+ * it before its write transaction, so no lookup runs under the write lock.
+ */
 export async function scriptActionIssues(
   actions: Record<string, TaskUiSpecAction> | undefined,
 ): Promise<string[]> {
   const issues: string[] = [];
+  let lookups: ScriptActionLookups | undefined;
   for (const [actionId, action] of Object.entries(actions ?? {})) {
     if (action.kind !== "script") continue;
     if (!isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false)) {
       issues.push(`Action "${actionId}" needs UI_SPEC_ACTIONS_ENABLED=true.`);
       continue;
     }
-    const resolved = await resolveScriptAction(actionId, action);
+    lookups ??= await loadScriptActionLookups();
+    const resolved = await resolveScriptAction(actionId, action, lookups);
     const issue = resolved.ok ? argsIssue(actionId, action, resolved.script) : resolved.issue;
     if (issue) issues.push(issue);
   }
