@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
+import { attachDemotionEvidence } from "@/be/memory/demotion-evidence";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
 import { MEMORY_KEY_MAX_LENGTH } from "@/be/memory/key-paths";
 import {
@@ -145,7 +146,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         isLead,
       });
       if (expanded.length > 0) {
-        const ranked = rerank(expanded, { limit });
+        const ranked = rerank(await attachDemotionEvidence(expanded), { limit });
 
         // Retrieval bridge — when called inside a task scope, log one
         // `memory_retrieval` row per returned memory so server-side raters

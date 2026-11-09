@@ -167,17 +167,25 @@ server-side `implicit-citation` source.
 |---|---|---|
 | `MEMORY_RATERS` | `implicit-citation,explicit-self` | Comma-separated allow-list, e.g. `implicit-citation,llm,explicit-self`. Unset enables citation ratings and self-rating hints, including on existing deployments. An explicitly empty value disables all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
 | `MEMORY_RATER_WEIGHTS` | unset (all multipliers = 1.0) | Optional `name:multiplier,...` per-rater weight overrides clamped into `[0, 1]`. Used to dial down a noisy rater without yanking it from the allow-list. |
-| `MEMORY_DEMOTION_FLOOR` | `1.0` (no demotion) | Lower bound for `usefulness(α, β)` in the reranker. Default `1.0` means a thoroughly-disliked memory never ranks below baseline; lower it (e.g. `0.5`) per deployment once telemetry shows the negative signal is reliable (Q1 resolution from the v1.5 plan). |
+| `MEMORY_DEMOTION_FLOOR` | `0.5` | Lower bound for `usefulness(α, β)` in the reranker, applied only to memories that pass the demotion gate below. `1.0` disables demotion. |
 
 ### Reranker formula
 
 ```
-usefulness(α, β) = clamp(2 × α / (α + β), MEMORY_DEMOTION_FLOOR, 2.0)
+usefulness(α, β) = clamp(2 × α / (α + β), demoted ? MEMORY_DEMOTION_FLOOR : 1.0, 2.0)
 score             = similarity × recency_decay × access_boost × source_quality × path_weight × usefulness(α, β)
 ```
 
 A fresh memory has `(α=1, β=1)` so `usefulness = 1.0` — it ranks identically
-to a pre-v1.5 memory until ratings start flowing in. Rating events are
+to a pre-v1.5 memory until ratings start flowing in.
+
+The pooled α/β mixes every rater, and most negatives say "surfaced but not
+used here" (implicit-citation misses, LLM off-topic scores). So a net-negative
+memory is `demoted` only when `memory_rating` shows a correctness signal
+(`attachDemotionEvidence`, run before `rerank()`): its `explicit-self` ratings
+are net-negative, or, with no `explicit-self` verdict, it has at least 10 `llm`
+ratings with a Beta(1,1) mean below 0.25. Net-positive `explicit-self` ratings
+veto demotion. Rating events are
 commutative (Beta updates compose by addition) so racing applies converge
 without idempotency checks.
 

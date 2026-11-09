@@ -64,7 +64,7 @@ template; the Description columns below hold that text.
 | `MEMORY_HYBRID_SEARCH` | `1` | Combines keyword and vector memory search. Leave as is. |
 | `MEMORY_GRAPH_EXPANSION` | `1` | Turns on graph-based expansion of memory search. Leave as is. |
 | `MEMORY_RATERS` | `implicit-citation,explicit-self` | Memory quality signals to record. Leave as is. |
-| `MEMORY_DEMOTION_FLOOR` | `1.0` | Memory demotion strength; 1.0 means none. Leave as is. |
+| `MEMORY_DEMOTION_FLOOR` | `0.5` | Lowest ranking multiplier for a memory the agents rated wrong (net-negative `explicit-self` ratings, or at least 10 clearly negative `llm` ratings). Off-topic votes never demote. `1.0` turns demotion off. Leave as is. |
 
 ### `agent-fs`
 
