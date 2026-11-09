@@ -208,6 +208,7 @@ When the API runs inside Kubernetes, omit `K8S_API_URL` and token settings.
 The adapter uses `https://kubernetes.default.svc` and the mounted service account token and CA.
 The adapter reads the projected token for each request to support token rotation.
 Controller settings cannot select host files. `K8S_TOKEN_FILE` and `K8S_CA_FILE` are rejected.
+Only the deployment environment can set `KUBERNETES_SERVICE_HOST` for cluster detection.
 External endpoints require an explicit token and cannot inherit the API's mounted credentials.
 TLS verification always remains enabled.
 Set `K8S_NAMESPACE` explicitly when workers must use a namespace other than `default`.
@@ -255,6 +256,24 @@ Missing pods and UID conflicts permit repeated teardown.
 Kubernetes response bodies remain excluded from errors because validation responses can contain worker credentials.
 
 ### CLI verification
+
+Run the repeatable lifecycle smoke against a disposable API deployed inside Kubernetes:
+
+```bash
+bun scripts/k8s-pool-smoke.ts --help
+bun scripts/k8s-pool-smoke.ts \
+  --api <test-api-url> --worker-api <worker-reachable-api-url> \
+  --namespace <test-worker-namespace> --context <kubectl-context>
+```
+
+Supply `AGENT_SWARM_API_KEY` through the environment and configure local `kubectl` access.
+The API needs both runtime flags and the namespace-scoped Role above.
+The script creates a controller, pool, and agent with a unique test name.
+It checks worker registration, scoped credentials, pod identity, resources, and pool capacity.
+It disables the pool and verifies pod deletion before deleting its pool and controller, including after test failures.
+The API retains the offline agent and runtime history. The script does not create cloud servers or inference tasks.
+No API keys, pod environment values, or cluster connection details appear in its output.
+Use `--image` to select a worker image and `--timeout-sec` to allow longer image pulls.
 
 For an API inside Kubernetes, create the namespace and RoleBinding above, then create a controller without cluster credentials:
 
