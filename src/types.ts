@@ -2871,6 +2871,19 @@ export const TriggerConfigSchema = z
       verification: WebhookVerificationSchema.optional().describe(
         "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
       ),
+      events: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event.",
+        ),
+      eventHeader: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event.",
+        ),
     }),
     z.object({
       type: z.literal("schedule"),
