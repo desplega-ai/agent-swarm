@@ -497,7 +497,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
        (SELECT id FROM workflows WHERE name = 'dreaming' ORDER BY createdAt ASC LIMIT 1)) wf`,
     [a.runId ?? ""],
   );
-  const corrRows = !corrWf ? null : await q(
+  // The scrubber rewrites a body after the query returns, so a held-out memory is only known here. Page by
+  // excluding every memory already read: a run of scrubbed or held memories at the head of the queue can no
+  // longer fill the window and starve the clean corrections behind it night after night.
+  const corrPage = (seen: string[]) => q(
     "memCorrections",
     `WITH syn AS MATERIALIZED (
        SELECT json_extract(s.output, '$.taskOutput') o FROM workflow_run_steps s JOIN workflow_runs r ON r.id = s.runId
@@ -535,75 +538,93 @@ export default async function (args: unknown, ctx: ScriptContext) {
      SELECT f.*, s.backlog, s.oversize
      FROM (SELECT COUNT(DISTINCT memoryId) backlog, COUNT(DISTINCT CASE WHEN big THEN memoryId END) oversize FROM q) s
      LEFT JOIN (SELECT * FROM q WHERE rn <= 3 AND memoryId IN (
-       SELECT memoryId FROM q WHERE rn = 1 AND NOT big ORDER BY firstAt ASC, memoryId LIMIT ?)) f ON 1
+       SELECT memoryId FROM q WHERE rn = 1 AND NOT big
+         AND memoryId NOT IN (SELECT value FROM json_each(?)) ORDER BY firstAt ASC, memoryId LIMIT ?)) f ON 1
      ORDER BY f.firstAt ASC, f.memoryId, f.rn`,
-    // shortcut: 2x the cap, so up to 10 held-out (scrubbed) memories cannot starve the queue; raise it if `scrubbed` grows.
-    [String(corrWf[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, CAPS.memoryCorrections * 2],
+    [String(corrWf?.[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, JSON.stringify(seen), CAPS.memoryCorrections * 2],
   );
+  // Each page adds only unseen memories, so the loop ends when the queue is exhausted. The page guard is a
+  // runaway stop: 50 pages x 20 memories is ten times the backlog seen in prod.
+  const CORR_MAX_PAGES = 50;
+  // ok false = a page query failed, so the items read so far are not the whole queue.
+  let corrOk = !!corrWf;
+  let corrCounts: any = null;
+  const corrSeen: string[] = [];
   // Multi-chunk bodies may be cut for the prompt: apply refuses edits to them, so they only become proposals.
   const CORR_BODY_MAX = 3000;
   const corrItems: any[] = [];
   const corrHeld = new Set<string>();
   const corrScrubbed = new Set<string>();
-  for (const r of corrRows ?? []) {
-    if (r.memoryId == null || corrHeld.has(r.memoryId) || corrScrubbed.has(r.memoryId)) continue;
-    let item = corrItems.find((x) => x.memoryId === r.memoryId);
-    if (!item) {
-      if (corrItems.length >= CAPS.memoryCorrections) continue;
-      let body = String(r.content ?? "");
-      const totalChunks = Number(r.totalChunks);
-      // SQLite length() counts code points and JS counts UTF-16 units: re-check, never send a cut single-chunk body.
-      if (totalChunks <= 1 && body.length > CORR_SINGLE_MAX) {
-        corrHeld.add(r.memoryId);
-        continue;
-      }
-      let joined = totalChunks <= 1;
-      if (totalChunks > 1) {
-        // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
-        const parts = await q(
-          "memCorrectionChunks",
-          `SELECT content, length(content) rawLen FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
-             AND COALESCE(totalChunks, 1) = ? AND substr(createdAt, 1, 16) = substr(?, 1, 16) ORDER BY chunkIndex ASC`,
-          [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
-        );
-        if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
-        joined = parts?.length === totalChunks;
-        if (parts?.some((x: any) => scrubbedRead(String(x.content ?? ""), x.rawLen))) {
+  for (let page = 0; corrOk && page < CORR_MAX_PAGES && corrItems.length < CAPS.memoryCorrections; page++) {
+    const rows = await corrPage(corrSeen);
+    if (rows === null) {
+      corrOk = false;
+      break;
+    }
+    corrCounts ??= rows[0] ?? null;
+    const fresh = [...new Set(rows.map((r: any) => r.memoryId).filter((id: unknown) => id != null))] as string[];
+    if (!fresh.length) break;
+    corrSeen.push(...fresh);
+    for (const r of rows) {
+      if (r.memoryId == null || corrHeld.has(r.memoryId) || corrScrubbed.has(r.memoryId)) continue;
+      let item = corrItems.find((x) => x.memoryId === r.memoryId);
+      if (!item) {
+        if (corrItems.length >= CAPS.memoryCorrections) continue;
+        let body = String(r.content ?? "");
+        const totalChunks = Number(r.totalChunks);
+        // SQLite length() counts code points and JS counts UTF-16 units: re-check, never send a cut single-chunk body.
+        if (totalChunks <= 1 && body.length > CORR_SINGLE_MAX) {
+          corrHeld.add(r.memoryId);
+          continue;
+        }
+        let joined = totalChunks <= 1;
+        if (totalChunks > 1) {
+          // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
+          const parts = await q(
+            "memCorrectionChunks",
+            `SELECT content, length(content) rawLen FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
+               AND COALESCE(totalChunks, 1) = ? AND substr(createdAt, 1, 16) = substr(?, 1, 16) ORDER BY chunkIndex ASC`,
+            [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
+          );
+          if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
+          joined = parts?.length === totalChunks;
+          if (parts?.some((x: any) => scrubbedRead(String(x.content ?? ""), x.rawLen))) {
+            corrScrubbed.add(r.memoryId);
+            continue;
+          }
+        }
+        if (scrubbedRead(String(r.content ?? ""), r.rawLen)) {
           corrScrubbed.add(r.memoryId);
           continue;
         }
+        const cut = totalChunks > 1 && body.length > CORR_BODY_MAX;
+        item = {
+          memoryId: r.memoryId,
+          name: r.name,
+          agentId: r.agentId ?? null,
+          scope: r.scope,
+          version: Number(r.version ?? 1),
+          alpha: Number(r.alpha),
+          beta: Number(r.beta),
+          totalChunks,
+          multiChunk: totalChunks > 1,
+          content: cut ? body.slice(0, CORR_BODY_MAX) : body,
+          // true = the body shown is not the whole memory (cut for the prompt, or a chunk read came back short).
+          contentTruncated: cut || !joined,
+          notes: [],
+        };
+        corrItems.push(item);
       }
-      if (scrubbedRead(String(r.content ?? ""), r.rawLen)) {
-        corrScrubbed.add(r.memoryId);
-        continue;
-      }
-      const cut = totalChunks > 1 && body.length > CORR_BODY_MAX;
-      item = {
-        memoryId: r.memoryId,
-        name: r.name,
-        agentId: r.agentId ?? null,
-        scope: r.scope,
-        version: Number(r.version ?? 1),
-        alpha: Number(r.alpha),
-        beta: Number(r.beta),
-        totalChunks,
-        multiChunk: totalChunks > 1,
-        content: cut ? body.slice(0, CORR_BODY_MAX) : body,
-        // true = the body shown is not the whole memory (cut for the prompt, or a chunk read came back short).
-        contentTruncated: cut || !joined,
-        notes: [],
-      };
-      corrItems.push(item);
+      item.notes.push({
+        ratingId: r.ratingId,
+        // The chunk row the agent rated; differs from memoryId when the rating was on a later chunk.
+        ratedMemoryId: r.ratedId,
+        taskId: r.taskId ?? null,
+        signal: Number(r.signal),
+        ratedAt: r.ratedAt,
+        note: String(r.reasoning ?? "").slice(0, 1000),
+      });
     }
-    item.notes.push({
-      ratingId: r.ratingId,
-      // The chunk row the agent rated; differs from memoryId when the rating was on a later chunk.
-      ratedMemoryId: r.ratedId,
-      taskId: r.taskId ?? null,
-      signal: Number(r.signal),
-      ratedAt: r.ratedAt,
-      note: String(r.reasoning ?? "").slice(0, 1000),
-    });
   }
   const created = await q(
     "memCreatedInWindow",
@@ -619,13 +640,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
     })),
     unhelpful: unhelpful ?? [],
     badKeys: badKeys ?? [],
-    // ok false = the queue query failed, so an empty list is not "nothing to correct".
+    // ok false = a queue page failed, so the list may be short or empty; it is not "nothing to correct".
     corrections: {
-      ok: corrRows !== null,
+      ok: corrOk,
       cap: CAPS.memoryCorrections,
-      backlog: Number(corrRows?.[0]?.backlog ?? 0),
+      backlog: Number(corrCounts?.backlog ?? 0),
       // Single-chunk memories over CORR_SINGLE_MAX chars: held out, never sent cut (synthesis could replace them).
-      oversize: Number(corrRows?.[0]?.oversize ?? 0) + corrHeld.size,
+      oversize: Number(corrCounts?.oversize ?? 0) + corrHeld.size,
       // Memories whose body came back scrubbed: held out, never sent (a replace would persist the marker).
       scrubbed: corrScrubbed.size,
       items: corrItems,

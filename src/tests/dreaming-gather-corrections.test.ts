@@ -406,6 +406,50 @@ describe("dreaming-gather correction queue: scrubbed bodies, gather to apply", (
     expect(c.scrubbed).toBe(10);
   });
 
+  test("more scrubbed memories than one query window cannot starve the clean ones behind them", async () => {
+    await getDbClient().run(`DELETE FROM memory_rating`);
+    await getDbClient().run(`DELETE FROM agent_memory`);
+    // 25 > the 20-memory window a single query reads, so the clean notes start on a later page.
+    for (let i = 0; i < 25; i++) {
+      const id = await memory(`scrubbed-${i}`, {
+        chunks: [`API_TOKEN=${randomToken(32)} entry ${i}`],
+        createdHoursAgo: 100,
+      });
+      await rating(id, { hoursAgo: 60 - i });
+    }
+    const clean: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const id = await memory(`clean-${i}`, { createdHoursAgo: 90 });
+      await rating(id, { hoursAgo: 30 - i });
+      clean.push(id);
+    }
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: wf, triggerType: "manual" });
+    const c = ((await gather({ runId }, live)) as any).swarm.memory.corrections;
+    expect(c.ok).toBe(true);
+    // Oldest notes first, stopped at the cap of 10; the 2 newest clean ones wait for the next night.
+    expect(c.items.map((x: any) => x.memoryId)).toEqual(clean.slice(0, 10));
+    expect(c.scrubbed).toBe(25);
+    expect(c.backlog).toBe(37);
+  });
+
+  test("memories held out in JS for UTF-16 length do not starve the queue either", async () => {
+    await getDbClient().run(`DELETE FROM memory_rating`);
+    await getDbClient().run(`DELETE FROM agent_memory`);
+    // 4001 code points pass SQL's 8000 check but are 8002 UTF-16 units, so gather holds them after the query.
+    for (let i = 0; i < 21; i++) {
+      const id = await memory(`wide-${i}`, { chunks: ["😀".repeat(4001)], createdHoursAgo: 100 });
+      await rating(id, { hoursAgo: 60 - i });
+    }
+    const clean = await memory("clean-after-wide", { createdHoursAgo: 90 });
+    await rating(clean, { hoursAgo: 4 });
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: wf, triggerType: "manual" });
+    const c = ((await gather({ runId }, live)) as any).swarm.memory.corrections;
+    expect(c.items.map((x: any) => x.memoryId)).toEqual([clean]);
+    expect(c.oversize).toBe(21);
+  });
+
   test("a multi-chunk document with a secret in a later chunk is held out", async () => {
     await getDbClient().run(`DELETE FROM memory_rating`);
     await getDbClient().run(`DELETE FROM agent_memory`);
