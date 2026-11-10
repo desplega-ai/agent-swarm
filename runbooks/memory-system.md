@@ -310,9 +310,22 @@ task, `POST /api/memory/search` and the `memory-search` tool drop `task_completi
 memories whose source task is also a review task. A review task is one with
 `taskType = "review"` or a `re-review` / `pr-review-demo` tag
 (`src/be/memory/review-recall-filter.ts`); prompt text is never matched. The
-filter runs inside `searchMemoryCandidates` (dropped rows count as missing
-documents, so the fetch widens) and again after graph expansion. Other sources,
-non-review searchers and source tasks that no longer exist are unchanged.
+store applies the rule in the SQL of every search arm
+(`MemorySearchOptions.excludeReviewTaskCompletions`), so excluded rows never fill
+the candidate window and the fetch does not widen for them. `searchMemoryCandidates`
+runs the same rule in JS as a net for a store that ignores the option, and the
+routes run it again after graph expansion. Other sources, non-review searchers and
+source tasks that no longer exist are unchanged.
+
+## Health on the search path
+
+`store.search` routes on `getHealth().retrievalMode`. The health counts are
+synchronous `COUNT(*)` scans of `agent_memory` and `memory_vec`, so search reuses
+one result for `SEARCH_HEALTH_TTL_MS` (60 s). A populate drops the cached result,
+and a vec write drops a cached fallback, so the first vector switches search to
+the vec path at once. A cached `vec` result survives writes and can be up to 60 s
+stale. `GET /api/memory/health` calls `getHealth()` and returns fresh counts on
+every call. Tests: `src/tests/memory-search-stall.test.ts`.
 
 ## Trigger paths
 
