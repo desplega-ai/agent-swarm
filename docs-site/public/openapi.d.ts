@@ -9237,7 +9237,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a GitHub App installation token for worker git and gh
-         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent may call it; user and guest tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
+         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
          */
         post: {
             parameters: {

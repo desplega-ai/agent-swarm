@@ -113,6 +113,21 @@ describe("swarm-github-token", () => {
   );
 
   test(
+    "never caches into a pre-existing dir that is not mode 700",
+    async () => {
+      const { env } = sandbox();
+      const cacheDir = env.SWARM_GITHUB_TOKEN_CACHE_DIR!;
+      mkdirSync(cacheDir, { mode: 0o755 });
+      chmodSync(cacheDir, 0o755);
+      expect(expectChildOk(await helper(env), "first").stdout.trim()).toBe(APP_TOKEN);
+      expect(existsSync(join(cacheDir, "token"))).toBe(false);
+      expectChildOk(await helper(env), "second");
+      expect(calls).toBe(2);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
     "refetches a token inside the 5-minute refresh window",
     async () => {
       mode = "short";

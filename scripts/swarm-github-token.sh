@@ -23,9 +23,11 @@ pat() {
     printf '%s' "${GH_ENTERPRISE_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
 }
 
-# Cache holds "<expiry epoch> <token>". Used only from a dir we own (mode 700).
+# Cache holds "<expiry epoch> <token>". Used only from a dir we own with mode 700;
+# files are written fresh under umask 077 and renamed in, so they stay 600.
 cache_usable() {
-    [ -d "$cache_dir" ] && [ -O "$cache_dir" ] && [ ! -L "$cache_dir" ]
+    [ -d "$cache_dir" ] && [ -O "$cache_dir" ] && [ ! -L "$cache_dir" ] &&
+        [ "$(stat -c '%a' "$cache_dir" 2>/dev/null)" = 700 ]
 }
 
 read_cache() {

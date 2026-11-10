@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getWorkerInstallationToken } from "../github/app";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveRequestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -11,7 +12,7 @@ const installationTokenRoute = route({
   pattern: ["api", "github", "installation-token"],
   summary: "Mint a GitHub App installation token for worker git and gh",
   description:
-    "Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent may call it; user and guest tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.",
+    "Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.",
   tags: ["GitHub"],
   body: z.object({}).optional(),
   responses: {
@@ -43,7 +44,10 @@ export async function handleGitHubToken(
     precedence: "agent-first",
     requireRegisteredAgent: true,
   });
-  if (principal?.kind !== "agent" || !principal.agentId) {
+  // Task tokens are ACP harness credentials (they read no secrets either): refuse them.
+  const auth = getRequestAuth(req);
+  const taskToken = auth?.kind === "agent" && auth.tokenKind === "task";
+  if (principal?.kind !== "agent" || !principal.agentId || taskToken) {
     jsonError(res, "Only a registered agent may mint a GitHub installation token", 403);
     return true;
   }

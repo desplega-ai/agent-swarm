@@ -16,8 +16,8 @@ import {
 import { generateKeyPairSync } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { closeDb, createAgent, createUser, initDb } from "../be/db";
-import { mintToken } from "../be/users";
+import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import { mintRuntimeToken, mintSessionToken, mintToken } from "../be/users";
 import { resetGitHub } from "../github/app";
 import { handleCore } from "../http/core";
 import { handleGitHubToken } from "../http/github-token";
@@ -144,10 +144,21 @@ describe("POST /api/github/installation-token", () => {
     }
   });
 
+  test("a worker runtime token is an agent and gets the token", async () => {
+    const runtime = await mintRuntimeToken(agentId, crypto.randomUUID(), 60_000);
+    const res = await call({ Authorization: `Bearer ${runtime.plaintext}` });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { token: string }).token).toBe(INSTALLATION_TOKEN);
+  });
+
   test("refuses callers that are not a registered agent", async () => {
     const user = await createUser({ name: "Dashboard user" });
     const { plaintext } = await mintToken(user.id, "rest", { kind: "operator", id: "op:test" });
+    // ACP harnesses hold task tokens: they never get a GitHub token.
+    const task = await createTaskExtended("acp task", { agentId });
+    const taskToken = await mintSessionToken(agentId, task.id, 60_000);
     const cases: [string, Record<string, string>, number][] = [
+      ["ACP task token", { Authorization: `Bearer ${taskToken.plaintext}` }, 403],
       ["no key", { "X-Agent-ID": agentId }, 401],
       ["wrong key", { Authorization: "Bearer wrong", "X-Agent-ID": agentId }, 401],
       ["operator key without agent id", { Authorization: `Bearer ${API_KEY}` }, 403],

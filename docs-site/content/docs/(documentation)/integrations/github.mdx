@@ -151,9 +151,9 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 GITHUB_APP_INSTALLATION_ID=12345678   # the installation on your org (Settings > GitHub Apps > Configure; the id is in the URL)
 ```
 
-The App needs **Contents: Read & Write** to push, **Pull requests: Read & Write** for `gh pr`, and **Workflows: Read & Write** if agents edit `.github/workflows/`. `GITHUB_WEBHOOK_SECRET` is not required for worker auth.
+The App needs **Contents: Read & Write** to push, **Pull requests: Read & Write** for `gh pr`, and **Workflows: Read & Write** if agents edit `.github/workflows/`. `GITHUB_WEBHOOK_SECRET` is not required for worker auth. `GITHUB_APP_INSTALLATION_ID` is deployment-env only: `PUT /api/config` rejects it, so a config writer cannot pick the installation.
 
-At boot each worker asks `POST /api/github/installation-token` (swarm API key plus `X-Agent-ID`; only registered agents get a token). When the API answers with a token, the worker:
+At boot each worker asks `POST /api/github/installation-token` (swarm API key plus `X-Agent-ID`). Only registered agents get a token; user tokens and ACP task tokens are refused. When the API answers with a token, the worker:
 
 - sets `swarm-github-token git-credential` as the git credential helper for the GitHub host, and
 - links a `gh` wrapper that passes the current token to `gh` on each call.
