@@ -144,7 +144,7 @@ curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
 | Kind | Support |
 | --- | --- |
 | `docker` | Yes, a named volume per workspace. `sizeGb` is ignored: the `local` driver has no quota. |
-| `k8s` | Not yet. |
+| `k8s` | Yes, a `ReadWriteOncePod` PersistentVolumeClaim per workspace, `sizeGb` (default 20) Gi. Needs Kubernetes 1.29+ and a CSI driver that supports the access mode. Set `K8S_STORAGE_CLASS` on the controller to pick the storage class, and grant the API `get` and `create` on `persistentvolumeclaims`. |
 | `e2b` | No. E2B volumes are in private beta and E2B advises against Git and package installs on them. Pause and resume already keep the sandbox disk. |
 | `boxd` | Not yet. |
 | `static` | Not applicable. The operator owns the worker's disk. |
@@ -175,6 +175,9 @@ workspace yourself once no runtime uses it:
 ```bash
 docker volume ls --filter label=swarm.workspace=true
 docker volume rm swarm-ws-<agentId>-<slot>
+# Kubernetes
+kubectl -n <namespace> get pvc -l swarm.workspace=true
+kubectl -n <namespace> delete pvc swarm-ws-<agentId>-<slot>
 ```
 
 On boot, the worker fetches and resets clean default-branch checkouts it finds in
