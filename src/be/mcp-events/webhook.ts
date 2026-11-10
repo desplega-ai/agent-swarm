@@ -15,6 +15,7 @@ import {
   EgressDeniedError,
   type GuardedFetchOptions,
 } from "@/utils/egress-guard";
+import { parseEnvFlag } from "@/utils/env-flag";
 
 export type DeliveryErrorCategory =
   | "connection_refused"
@@ -48,6 +49,15 @@ export function __setWebhookTestOverrides(overrides: WebhookTestOverrides | null
 }
 
 /**
+ * MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS=true accepts http:// and loopback or
+ * private callback URLs. Off by default; for local development and the
+ * black-box e2e suite, which run the receiver on 127.0.0.1.
+ */
+function allowPrivateCallbacks(): boolean {
+  return parseEnvFlag(process.env.MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS, false);
+}
+
+/**
  * Decodes a Standard Webhooks `whsec_` secret. Returns null unless the value is
  * `whsec_` followed by base64 of 24 to 64 bytes (SEP-3415 "Secret generation").
  */
@@ -71,8 +81,9 @@ export function callbackUrlProblem(rawUrl: unknown): string | null {
   let parsed: URL;
   try {
     parsed = assertUrlSafe(rawUrl, {
-      allowInsecure: testOverrides?.allowInsecure === true,
-      allowPrivateHosts: testOverrides?.guard?.policy?.allowPrivate === true,
+      allowInsecure: allowPrivateCallbacks() || testOverrides?.allowInsecure === true,
+      allowPrivateHosts:
+        allowPrivateCallbacks() || testOverrides?.guard?.policy?.allowPrivate === true,
     });
   } catch (error) {
     return error instanceof Error ? error.message : "delivery.url is not allowed";
@@ -100,7 +111,7 @@ export type PostResult =
 
 function guardedFetch(): typeof fetch {
   return createGuardedFetch(testOverrides?.baseFetch ?? fetch, {
-    policy: { allowPrivate: false, allowlist: null },
+    policy: { allowPrivate: allowPrivateCallbacks(), allowlist: null },
     ...testOverrides?.guard,
   });
 }

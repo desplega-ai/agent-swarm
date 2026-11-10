@@ -1635,6 +1635,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "false",
       },
       {
+        key: "MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS",
+        label: "Allow private MCP Events callbacks",
+        description:
+          "Let /mcp-user event subscriptions deliver to http:// and private-network callback URLs, overriding the SSRF guard. Enable only for trusted local development and tests.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/mcp-events`,
+      },
+      {
         key: "BUDGET_ADMISSION_DISABLED",
         label: "Disable budget admission",
         description:

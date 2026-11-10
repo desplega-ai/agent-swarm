@@ -42,6 +42,7 @@ A non-`2xx` response is retried up to 5 attempts in about 14 minutes, with the s
 ## Security
 
 - Every POST, including the verification challenge, goes through the API's egress guard: the hostname is resolved at send time, private and loopback addresses are refused, the request connects to the checked address, and redirects are not followed.
+- `MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS=true` lifts the `https` and public-address rules, for local development and the e2e suite only. It is off by default.
 - Signing secrets are encrypted at rest with the [secrets encryption key](/docs/guides/secrets-encryption).
 - A subscription only matches tasks whose requester is the subscribing user, and a deactivated user receives nothing.
 - Error categories such as `http_5xx` or `challenge_failed` are reported back; raw endpoint responses never are.
