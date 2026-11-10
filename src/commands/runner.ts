@@ -2373,8 +2373,9 @@ export async function createSessionReportingAuthFailure(
  * the API is older than the worker).
  */
 /**
- * Ask the API to move a task that hit a provider error to its next fallback
- * profile (runbooks/model-tiers.md § Fallbacks on provider errors). Only a
+ * Ask the API to move a task that hit a provider error to another key of its
+ * profile's pool, or to its next fallback profile
+ * (runbooks/model-tiers.md § Fallbacks on provider errors). Only a
  * task claim gave a profile (`resolvedProfile`) can hop. `superseded`: the
  * task is terminal and its resume runs the fallback, so the caller must not
  * finish it. Otherwise the caller fails it as usual, led by `failureReason`
@@ -2398,7 +2399,7 @@ export async function requestProviderFallback(
   if (!outcome.ok) return { superseded: false };
   if (outcome.kind === "resumed") {
     console.log(
-      `[${role}] Task ${taskId.slice(0, 8)} hit ${input.errorClass} on ${input.resolvedProfile}; resuming on the next fallback profile`,
+      `[${role}] Task ${taskId.slice(0, 8)} hit ${input.errorClass} on ${input.resolvedProfile}; resuming on another key or the next fallback profile`,
     );
     return { superseded: true };
   }
