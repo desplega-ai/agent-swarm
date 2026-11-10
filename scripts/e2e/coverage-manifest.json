@@ -544,8 +544,8 @@
       "scenarios": ["workflow-definitions"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
-      "scenarios": ["workflow-engine-control", "workflow-engine-cancel"]
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "scenarios": ["workflow-engine-control", "workflow-engine-cancel", "workflow-webhook-filter"]
     },
     "workflow-engine-nodes": {
       "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",

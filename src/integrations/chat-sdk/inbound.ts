@@ -511,8 +511,8 @@ export async function flushChatThread(
         { alreadyAuthenticated: true },
       );
       if (result.skipped) {
-        // The workflow's webhook trigger sets an `events` allowlist; chat
-        // dispatch carries no event header, so the allowlist drops it.
+        // Header or body filter, or the events allowlist, dropped the delivery.
+        // Chat dispatch sends no HTTP headers, so a header clause skips it.
         console.warn(`[chat-sdk] ${threadId}: workflow webhook trigger skipped (${result.reason})`);
         return;
       }
