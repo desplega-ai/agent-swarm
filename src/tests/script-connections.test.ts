@@ -710,6 +710,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
       // 319 indexes user FK columns on tables this fixture does not create.
       markMigrationApplied(database, "319_user_fk_indexes.sql");
+      // 320 alters session_costs, which this fixture lacks.
+      markMigrationApplied(database, "320_session_costs_kind.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

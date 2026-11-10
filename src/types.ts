@@ -1249,12 +1249,47 @@ export const UserSchema = z
     dailyBudgetUsd: z.number().nullable().optional(),
     // Lifecycle (Phase 064). CHECK constraint enforces these three values.
     status: z.enum(["invited", "active", "suspended"]).default("active"),
+    // Set while a merge job (POST /api/users/{id}/merge) still rewrites this
+    // user's rows into the target. Such a user cannot authenticate, and
+    // identity lookups resolve to the target. Absent once the job deletes it.
+    mergedIntoUserId: z.string().nullable().optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
   .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
+
+export const UserMergeJobStatusSchema = z.enum(["pending", "running", "done", "failed"]);
+export type UserMergeJobStatus = z.infer<typeof UserMergeJobStatusSchema>;
+
+/**
+ * Background merge of one user into another (`user_merge_jobs`). The route
+ * moves identities and aliases synchronously and queues the attribution
+ * rewrite; `src/be/user-merge-jobs.ts` runs it in batches and deletes the
+ * source when done. `progress` counts rewritten rows per step, keyed like
+ * `phase` (`workflow-context`, `<table>.<column>`, `delete-user`). A failed
+ * attempt keeps the job `pending` with `error` set and `nextAttemptAt` in the
+ * future until the attempt cap, then the job is `failed`.
+ */
+export const UserMergeJobSchema = z
+  .object({
+    id: z.string(),
+    sourceUserId: z.string(),
+    targetUserId: z.string(),
+    status: UserMergeJobStatusSchema,
+    phase: z.string().nullable(),
+    progress: z.record(z.string(), z.number()),
+    error: z.string().nullable(),
+    attempts: z.number(),
+    nextAttemptAt: z.string().nullable(),
+    createdAt: z.string(),
+    startedAt: z.string().nullable(),
+    finishedAt: z.string().nullable(),
+  })
+  .openapi("UserMergeJob");
+
+export type UserMergeJob = z.infer<typeof UserMergeJobSchema>;
 
 export const RbacRoleSchema = z
   .object({
@@ -2009,6 +2044,11 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+// Migration 320: what incurred the row. 'harness' is a worker session;
+// 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
+export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
+export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;
+
 export const SessionCostModelBreakdownSchema = z
   .object({
     model: z.string(),
@@ -2056,6 +2096,7 @@ export const SessionCostSchema = z
     //   'estimated'      — the API priced fallback token counts at an assumed
     //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
+    kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
     cacheWrite5mTokens: z.number().int().nullable().optional(),
@@ -4205,6 +4246,9 @@ export const PricingProviderSchema = z.enum([
   "cursor",
   "grok",
   "fx",
+  // SystemOne decisions recorded on a task; model keys are `<host>/<model>`
+  // (e.g. `cloudflare/clef`). No seeded rows: unpriced until an operator adds one.
+  "system-one",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

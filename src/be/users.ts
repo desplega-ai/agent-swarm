@@ -66,6 +66,7 @@ type UserRow = {
   metadata: string | null;
   dailyBudgetUsd: number | null;
   status: string;
+  mergedIntoUserId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -83,6 +84,7 @@ function rowToUser(row: UserRow): User {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
+    ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -99,6 +101,21 @@ export async function findUserById(id: string): Promise<User | null> {
 }
 
 /**
+ * A user whose merge job still runs (`users.mergedIntoUserId` set) is the
+ * target for every identity lookup: the merge route already moved its
+ * identities and aliases, and the background job only rewrites attribution
+ * before it deletes the row. Lookups by id are left alone so the People page
+ * and the job itself still see the source row.
+ */
+async function followMergedUser(row: UserRow): Promise<User | null> {
+  if (!row.mergedIntoUserId) return rowToUser(row);
+  const target = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [
+    row.mergedIntoUserId,
+  ]);
+  return target ? rowToUser(target) : null;
+}
+
+/**
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
@@ -109,7 +126,7 @@ export async function findUserByExternalId(kind: string, externalId: string): Pr
        WHERE x.kind = ? AND x.externalId = ?`,
     [kind, externalId],
   );
-  return row ? rowToUser(row) : null;
+  return row ? followMergedUser(row) : null;
 }
 
 /**
@@ -124,15 +141,19 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
   const db = getDbClient();
 
-  // Primary email (case-insensitive)
-  const primary = await db.get<UserRow>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [
-    email,
-  ]);
+  // Primary email (case-insensitive). A merge source keeps its primary email
+  // until the job deletes it, while the target already holds it as an alias,
+  // so the source row must not win here.
+  const primary = await db.get<UserRow>(
+    "SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND mergedIntoUserId IS NULL",
+    [email],
+  );
   if (primary) return rowToUser(primary);
 
   // Alias array
   const aliasRows = await db.query<UserRow>(
-    "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
+    `SELECT * FROM users
+     WHERE emailAliases IS NOT NULL AND emailAliases != '[]' AND mergedIntoUserId IS NULL`,
   );
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
@@ -155,14 +176,17 @@ export async function findUsersByName(name: string): Promise<User[]> {
   if (!trimmed) return [];
   const client = getDbClient();
 
-  const exact = await client.query<UserRow>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)", [
-    trimmed,
-  ]);
+  // A merge source (mergedIntoUserId set) is on its way out; its target is
+  // found by its own name.
+  const exact = await client.query<UserRow>(
+    "SELECT * FROM users WHERE LOWER(name) = LOWER(?) AND mergedIntoUserId IS NULL",
+    [trimmed],
+  );
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
   const prefixed = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'",
+    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%' AND mergedIntoUserId IS NULL",
     [firstToken],
   );
   return prefixed.map(rowToUser);

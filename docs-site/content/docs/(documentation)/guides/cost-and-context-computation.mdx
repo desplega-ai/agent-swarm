@@ -110,6 +110,25 @@ The OpenTelemetry counter `agentswarm.cost.drift.usd` records the absolute
 non-zero difference with a `drift_sign` attribute, making it the operational
 watchdog for stale adapter-local pricing or recompute drift.
 
+### SystemOne decisions on a task
+
+A SystemOne decision (Jev, Clef) made through the `system-one-decide` tool is
+charged to the task it serves. The tool takes the task from its `taskId`
+argument, else from the caller's `X-Source-Task-Id` header. A caller may charge
+only its own task; an extension may charge the task whose event it handles. A
+call with no task in scope records nothing.
+
+Each decision writes one `session_costs` row with `kind: 'system-one'`,
+`sessionId: 'system-one:<uuid>'`, model `<host>/<model>` (for example
+`cloudflare/clef`) and the decision's input and output tokens. The API prices
+it from `pricing` rows under provider `system-one`. None are seeded, so a
+decision is `unpriced` at $0 with its tokens kept until an operator adds rates
+through `POST /api/pricing`. Harness rows carry `kind: 'harness'`.
+
+Task totals sum every row, and a SystemOne cost is never inside a harness
+session's cost, so totals do not double count. Filter on `kind` to split the
+two. A workflow `system-one-decision` node has no task and records no row.
+
 ## Attribution coverage and autonomous work
 
 The usage summary separates total spend from spend that could truthfully be

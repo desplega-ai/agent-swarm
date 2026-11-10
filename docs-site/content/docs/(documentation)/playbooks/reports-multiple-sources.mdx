@@ -69,6 +69,7 @@ Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-too
 ## Patterns used
 
 - [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — digests skip on a quiet day instead of posting an empty report.
+- For preparing a supplier renewal briefing from several documents for a human owner, see the [supplier renewal decision guide](https://www.agent-swarm.dev/blog/omnia/ai-supplier-renewal-decision).
 
 ## Tips for new swarm users
 
@@ -79,3 +80,7 @@ Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-too
 - **Cache slow warehouse queries in KV** with a short TTL — a 1-hour cache is invisible to users and saves a lot of cycles.
 - **Ask the swarm questions in Slack and let it pick the source** — a well-skilled lead routes "active orgs last week?" to [Clerk](https://clerk.com/), "activation funnel?" to [PostHog](https://posthog.com/), "top GSC query?" to [Google Search Console](https://search.google.com/search-console), without you naming the source.
 - **The same collection plus synthesis pattern can assemble evidence beyond reporting:** deterministic steps gather a supplier invoice's records and compare the lines with its purchase order, then an agent writes the pack a finance owner reviews in [Reviewing supplier invoice and purchase order discrepancies with AI agents](/docs/guides/ai-invoice-discrepancy-review).
+
+## Related
+
+Related guide: [post-incident business impact review](https://www.agent-swarm.dev/blog/omnia/ai-incident-business-impact-review) applies the same deterministic collection to an outage window, with a source on every line.

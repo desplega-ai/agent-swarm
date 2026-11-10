@@ -4000,7 +4000,8 @@
               "amp",
               "cursor",
               "grok",
-              "fx"
+              "fx",
+              "system-one"
             ]
           },
           "model": {
@@ -4458,6 +4459,14 @@
               "pricing-table",
               "unpriced",
               "estimated"
+            ],
+            "default": "harness"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "harness",
+              "system-one"
             ],
             "default": "harness"
           },
@@ -5274,6 +5283,12 @@
             ],
             "default": "active"
           },
+          "mergedIntoUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5288,6 +5303,85 @@
           "name",
           "createdAt",
           "lastUpdatedAt"
+        ]
+      },
+      "UserMergeJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceUserId": {
+            "type": "string"
+          },
+          "targetUserId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ]
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "progress": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceUserId",
+          "targetUserId",
+          "status",
+          "phase",
+          "progress",
+          "error",
+          "attempts",
+          "nextAttemptAt",
+          "createdAt",
+          "startedAt",
+          "finishedAt"
         ]
       },
       "WorkflowDefinition": {
@@ -43292,7 +43386,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43378,7 +43473,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43497,7 +43593,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43584,7 +43681,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -54120,7 +54218,8 @@
                       "amp",
                       "cursor",
                       "grok",
-                      "fx"
+                      "fx",
+                      "system-one"
                     ]
                   },
                   "createdAt": {
@@ -69974,7 +70073,8 @@
     },
     "/api/users/{id}/merge": {
       "post": {
-        "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
+        "summary": "Merge another user into this one: moves identities + email aliases, queues the rest",
+        "description": "Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.",
         "tags": [
           "Users"
         ],
@@ -70012,137 +70112,19 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Merged user",
+          "202": {
+            "description": "The queued merge job",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "user": {
-                      "anyOf": [
-                        {
-                          "allOf": [
-                            {
-                              "$ref": "#/components/schemas/User"
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "identities": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string"
-                                      },
-                                      "externalId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "kind",
-                                      "externalId"
-                                    ]
-                                  }
-                                },
-                                "tokens": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "label": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "tokenPreview": {
-                                        "type": "string"
-                                      },
-                                      "createdAt": {
-                                        "type": "string"
-                                      },
-                                      "lastUsedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "revokedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "label",
-                                      "tokenPreview",
-                                      "createdAt",
-                                      "lastUsedAt",
-                                      "revokedAt"
-                                    ]
-                                  }
-                                },
-                                "recentEvents": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "eventType": {
-                                        "type": "string"
-                                      },
-                                      "actor": {
-                                        "type": "string"
-                                      },
-                                      "before": {},
-                                      "after": {},
-                                      "createdAt": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "eventType",
-                                      "actor",
-                                      "createdAt"
-                                    ]
-                                  }
-                                }
-                              },
-                              "required": [
-                                "identities",
-                                "tokens",
-                                "recentEvents"
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
                     }
                   },
                   "required": [
-                    "user"
+                    "job"
                   ]
                 }
               }
@@ -70189,7 +70171,142 @@
             }
           },
           "409": {
-            "description": "Source is the last active admin (last_admin)",
+            "description": "Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs": {
+      "get": {
+        "summary": "List background user merge jobs, newest first",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merge jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserMergeJob"
+                      }
+                    }
+                  },
+                  "required": [
+                    "jobs"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs/{jobId}": {
+      "get": {
+        "summary": "A background user merge job (poll until status is done or failed)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The merge job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
+                    }
+                  },
+                  "required": [
+                    "job"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
             "content": {
               "application/json": {
                 "schema": {
