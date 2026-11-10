@@ -902,3 +902,45 @@ that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts
 | `Probe-orphan-sweep.cfg` | CX15 found | 4,668 | 35 |
 | `Probe-task-skip.cfg` | holds | 131,404 | - |
 | `Probe-task-skip-sweep.cfg` | CX12 found | 1,859,598 | 34 |
+
+## Sync with #2928 and #2932 (`main` @ `b3ba784f4`)
+
+#2932 adds one write to the `completeTaskStepAndResolveSuccessors` claim transaction: when the
+call carries a `failureReason`, the step's task moves `failed -> superseded` if it failed with
+`superseded_workflow_task` (`markWorkflowStepTaskSuperseded`, the guarded `UPDATE` #2892 added, no
+bus event), once the step is claimed and the run has not failed. Only the `onNodeFailure:
+"continue"` branch of `handleTaskFailureUnguarded`, the sweep's matching absorb path and a
+collect-outcomes foreach pass a `failureReason`. The model's failure path is fail-fast (`EF`,
+`H7`), so it never takes that call. The transaction is the claim `E2` and `H8` already model: its
+guards (step `waiting`, the `ownerTaskId` fence, `TreeLive`) and its step and run writes are
+unchanged, and the new write only changes the status of the task on the row that transaction
+completes, which no modelled guard reads. #2928 changes the wait bus listener cleanup
+(`processBusEvent`), process-local bookkeeping of the unmodelled wait node kind with no run or
+step write. The `.tla` and `.cfg` files are unchanged; ACTIONS.md notes both and re-pins the
+`task-step-routing.ts` lines shifted by #2932.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 12` for
+`Probe-child-run.cfg`). Every config gives the same verdict as on `c8c9bfdf1`, and every config
+that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts` +
+`src/tests/workflow-sub-workflow.test.ts` + `src/tests/workflow-cascade-cancel.test.ts` +
+`src/tests/workflow-agent-task-retry.test.ts` (now with the #2932 regressions): 88 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 37,277 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 14,710 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 244 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,549 / 2,935 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,189 / 1,998 / 33,636 / 7,178 / 250 / 882 | 22 / 19 / 29 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,094 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 564 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 573,104 | 34 |
+| `Probe-input-await.cfg` | CX6 found | 266 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,106 / 13,164 | 20 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 3,965,730 / 289,235 | - / 34 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,441 | 20 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 9,444 / 586 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 4,502 | 35 |
+| `Probe-task-skip.cfg` | holds | 131,404 | - |
+| `Probe-task-skip-sweep.cfg` | CX12 found | 828,465 | 34 |

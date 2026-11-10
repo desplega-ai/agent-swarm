@@ -118,6 +118,14 @@ export interface DbClient extends DbExecutor {
    * rejection is contained and logged, never an unhandled rejection.
    */
   afterCommit(fn: () => void | Promise<void>): void;
+  /**
+   * Run `fn` synchronously if the currently-open outermost transaction rolls
+   * back, including a COMMIT that fails; dropped on commit. With no
+   * transaction open it does nothing. For undoing process-local state taken
+   * inside the transaction. A hook registered inside a savepoint that rolls
+   * back runs only if the outer transaction rolls back too.
+   */
+  afterRollback(fn: () => void): void;
 }
 
 const LOCK_WATCHDOG_MS = 30_000;
@@ -166,6 +174,8 @@ type TxContext = {
   closed: boolean;
   /** Hooks to run after COMMIT; dropped on ROLLBACK. */
   afterCommit: (() => void | Promise<void>)[];
+  /** Hooks to run after ROLLBACK; dropped on COMMIT. */
+  afterRollback: (() => void)[];
 };
 
 const txContext = new AsyncLocalStorage<TxContext>();
@@ -496,7 +506,7 @@ class BunSqliteClient implements DbClient {
     deadlineAt?: number,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
-    const ctx: TxContext = { closed: false, afterCommit: [] };
+    const ctx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
     let began = false;
     try {
       const db = this.getDatabase();
@@ -544,6 +554,13 @@ class BunSqliteClient implements DbClient {
         } catch {
           // Connection-level failure while rolling back; surface the original error.
         }
+        for (const hook of ctx.afterRollback) {
+          try {
+            hook();
+          } catch (hookErr) {
+            console.error("[db-client] afterRollback hook threw:", hookErr);
+          }
+        }
       }
       throw err;
     } finally {
@@ -560,6 +577,11 @@ class BunSqliteClient implements DbClient {
       return;
     }
     this.scheduleHook(fn);
+  }
+
+  afterRollback(fn: () => void): void {
+    const ctx = txContext.getStore();
+    if (ctx && !ctx.closed) ctx.afterRollback.push(fn);
   }
 
   private scheduleHook(fn: () => void | Promise<void>): void {

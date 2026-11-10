@@ -24,7 +24,11 @@ import { checkProfileForAgent } from "../be/model-profile-check";
 import { recordClaimModelResolution } from "../be/model-tier-resolution";
 import { handleModelProfiles } from "../http/model-profiles";
 import { handleTasks } from "../http/tasks";
-import { nextFallback } from "../tasks/worker-follow-up";
+import {
+  getNextResumeGeneration,
+  nextFallback,
+  RESUME_GENERATION_TAG_PREFIX,
+} from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
@@ -420,6 +424,18 @@ describe("same-profile key retry", () => {
     expect((await nextFallback(task, "rate_limit")).kind).toBe("none");
   });
 
+  test("a task with a key type but no recorded key never retries on a key", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-c"), "aaaaa");
+    // Without the suffix the pick cannot exclude the key that failed.
+    const noSuffix = { ...task, credentialKeySuffix: undefined };
+    expect(noSuffix.credentialKeyType).toBe(KEY_TYPE);
+    expect(await nextFallback(noSuffix, "rate_limit")).toEqual({ kind: "none", message: null });
+    // Control: the same task with its suffix retries.
+    expect((await nextFallback(task, "rate_limit")).kind).toBe("picked");
+  });
+
   test("all keys benched gives no pick and a reason that names the exhausted keys", async () => {
     await seedChain();
     await seedPool(["aaaaa", "bbbbb"]);
@@ -592,6 +608,40 @@ describe("supersede with provider_fallback", () => {
     // The worker fails it itself: the task is untouched and has no resume.
     expect((await getTaskById(third!.id))?.status).toBe("in_progress");
     expect(await resumeOf(third!.id)).toBeNull();
+  });
+
+  test("a fallback resume does not spend the crash-recovery budget", async () => {
+    await seedChain();
+    // A fresh task: two fallback hops leave it at generation 0.
+    const first = await runningTask("claude-a");
+    await supersede(first.id, { reason: "provider_fallback", errorClass: "rate_limit" });
+    const second = await resumeOf(first.id);
+    expect(second?.tags.some((t) => t.startsWith("resume-generation:"))).toBe(false);
+    await recordClaimModelResolution(
+      { id: second!.id, profile: second!.profile },
+      { id: CLAUDE_ID, harnessProvider: "claude" },
+    );
+    await startTask(second!.id);
+    await supersede(second!.id, { reason: "provider_fallback", errorClass: "overloaded" });
+    const third = await resumeOf(second!.id);
+    expect(getNextResumeGeneration(third!)).toBe(1);
+
+    // A task already one crash deep: the hop keeps its generation, so the
+    // crash after it is generation 2, not 3.
+    const crashed = await createTaskExtended("crashed work", {
+      agentId: CLAUDE_ID,
+      profile: "claude-a",
+      tags: [`${RESUME_GENERATION_TAG_PREFIX}1`],
+    });
+    await recordClaimModelResolution(
+      { id: crashed.id, profile: "claude-a" },
+      { id: CLAUDE_ID, harnessProvider: "claude" },
+    );
+    await startTask(crashed.id);
+    await supersede(crashed.id, { reason: "provider_fallback", errorClass: "rate_limit" });
+    const hopped = await resumeOf(crashed.id);
+    expect(hopped?.tags).toContain(`${RESUME_GENERATION_TAG_PREFIX}1`);
+    expect(getNextResumeGeneration(hopped!)).toBe(2);
   });
 
   test("the resume stays on the agent when a competing claim fills the freed slot", async () => {

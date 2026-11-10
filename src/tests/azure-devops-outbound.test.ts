@@ -24,6 +24,7 @@ import { initWorkflows, stopRetryPoller, stopWaitPoller } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import commentedFixture from "./fixtures/azure-boards/workitem.commented.json";
 import updatedFixture from "./fixtures/azure-boards/workitem.updated.json";
+import { waitUntil } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-azure-devops-outbound.sqlite";
 const SECRET = "outbound-secret";
@@ -65,8 +66,20 @@ async function linkedTask(workItemId: number | string): Promise<string> {
   return task.id;
 }
 
-/** Let the fire-and-forget handlers run. */
-const settle = () => new Promise((r) => setTimeout(r, 25));
+/** Poll until `count` PATCHes are recorded; the outbound handlers are fire-and-forget. */
+function waitForPatches(count: number): Promise<void> {
+  return waitUntil(
+    () => patches.length >= count,
+    () => `expected ${count} work item PATCH(es), got ${patches.length}`,
+  );
+}
+
+/**
+ * Fixed wait before asserting that NO effect happened. An absence has no
+ * condition to poll for, and the handlers expose no promise to await, so this
+ * gives an effect that should not exist time to show up.
+ */
+const quiesce = () => Bun.sleep(50);
 
 async function post(body: Json) {
   const req = {
@@ -146,7 +159,7 @@ describe("work item state transitions", () => {
     process.env.AZURE_DEVOPS_WORKITEM_STATE_STARTED = "Doing";
     const taskId = await linkedTask(9);
     emitTaskStarted({ id: taskId } as never);
-    await settle();
+    await waitForPatches(1);
     expect(patches).toHaveLength(1);
     expect(patches[0]?.url).toBe(`${ORG_URL}/_apis/wit/workitems/9?api-version=7.1`);
     expect(patches[0]?.contentType).toBe("application/json-patch+json");
@@ -157,7 +170,7 @@ describe("work item state transitions", () => {
     process.env.AZURE_DEVOPS_WORKITEM_STATE_DONE = " Done ";
     const taskId = await linkedTask(9);
     workflowEventBus.emit("task.completed", { taskId, output: "ok" });
-    await settle();
+    await waitForPatches(1);
     expect(patches[0]?.body[0]?.value).toBe("Done");
   });
 
@@ -165,7 +178,7 @@ describe("work item state transitions", () => {
     const taskId = await linkedTask(9);
     emitTaskStarted({ id: taskId } as never);
     workflowEventBus.emit("task.completed", { taskId });
-    await settle();
+    await quiesce();
     expect(patches).toHaveLength(0);
   });
 
@@ -173,7 +186,7 @@ describe("work item state transitions", () => {
     process.env.AZURE_DEVOPS_WORKITEM_STATE_DONE = "Done";
     const task = await createTaskExtended("plain", {});
     workflowEventBus.emit("task.completed", { taskId: task.id });
-    await settle();
+    await quiesce();
     expect(patches).toHaveLength(0);
   });
 
@@ -182,7 +195,7 @@ describe("work item state transitions", () => {
     patchStatus = 400;
     const taskId = await linkedTask(9);
     workflowEventBus.emit("task.completed", { taskId });
-    await settle();
+    await waitForPatches(1);
     expect(patches).toHaveLength(1);
   });
 
@@ -191,7 +204,7 @@ describe("work item state transitions", () => {
     const taskId = await linkedTask(9);
     teardownAzureDevOpsOutbound();
     workflowEventBus.emit("task.completed", { taskId });
-    await settle();
+    await quiesce();
     expect(patches).toHaveLength(0);
   });
 });
@@ -264,6 +277,7 @@ describe("work item state ordering and commit boundary", () => {
     process.env.AZURE_DEVOPS_WORKITEM_STATE_STARTED = "Doing";
     process.env.AZURE_DEVOPS_WORKITEM_STATE_DONE = "Done";
     const taskId = await linkedTask(9);
+    const requested: string[] = [];
     const applied: string[] = [];
     let releaseDoing!: () => void;
     const held = new Promise<void>((resolve) => {
@@ -273,18 +287,26 @@ describe("work item state ordering and commit boundary", () => {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method !== "PATCH") return inner(input, init);
       const value = JSON.parse(String(init.body))[0].value as string;
+      requested.push(value);
       if (value === "Doing") await held;
       applied.push(value);
       return new Response("{}", { status: 200 });
     }) as typeof fetch;
 
     emitTaskStarted({ id: taskId } as never);
-    await settle();
+    await waitUntil(
+      () => requested.includes("Doing"),
+      () => "the Doing PATCH never reached fetch",
+    );
     workflowEventBus.emit("task.completed", { taskId });
-    await settle();
+    // Absence check: Done must not land while Doing is held.
+    await quiesce();
     expect(applied).toEqual([]);
     releaseDoing();
-    await settle();
+    await waitUntil(
+      () => applied.length >= 2,
+      () => `expected Doing then Done to be applied, got ${JSON.stringify(applied)}`,
+    );
     expect(applied).toEqual(["Doing", "Done"]);
   });
 
@@ -297,7 +319,7 @@ describe("work item state ordering and commit boundary", () => {
         throw new Error("rollback");
       })
       .catch(() => {});
-    await settle();
+    await quiesce();
     expect(patches).toHaveLength(0);
   });
 
@@ -307,7 +329,7 @@ describe("work item state ordering and commit boundary", () => {
     await getDbClient().transaction(async () => {
       emitTaskStarted({ id: taskId } as never);
     });
-    await settle();
+    await waitForPatches(1);
     expect(patches).toHaveLength(1);
     expect(patches[0]?.body[0]?.value).toBe("Doing");
   });
@@ -413,7 +435,18 @@ describe("work item workflow events: trust and delivery boundaries", () => {
     const onCommented = await make("azure-devops.work_item.commented");
     await post(assigned());
     await post(fresh(commentedFixture));
-    await settle();
+    const runCounts = async () => [
+      (await listWorkflowRuns(onAssigned.id)).length,
+      (await listWorkflowRuns(onCommented.id)).length,
+    ];
+    let counts = [0, 0];
+    await waitUntil(
+      async () => {
+        counts = await runCounts();
+        return counts.every((n) => n >= 1);
+      },
+      () => `expected one run per trigger workflow, got [assigned, commented] = ${counts}`,
+    );
     expect(await listWorkflowRuns(onAssigned.id)).toHaveLength(1);
     expect(await listWorkflowRuns(onCommented.id)).toHaveLength(1);
   });

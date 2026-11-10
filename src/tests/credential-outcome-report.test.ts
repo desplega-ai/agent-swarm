@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { reportCredentialOutcomeThenFinish } from "../commands/credential-outcome-report";
 import { type ApiConfig, ensureTaskFinished } from "../commands/runner";
 import type { ProviderResult } from "../providers/types";
+import { resolveCredentialPools } from "../utils/credentials";
 
 /**
  * Completion-path regression for a `credits_required` seat mismatch. The
@@ -24,6 +25,7 @@ let requests: RecordedRequest[] = [];
 let seatReportRespondedAt: number | undefined;
 let keyReportRespondedAt: number | undefined;
 let originalFetch: typeof fetch;
+let failKeyReport = false;
 
 beforeAll(() => {
   originalFetch = globalThis.fetch;
@@ -42,6 +44,7 @@ beforeAll(() => {
       return Response.json({ success: true, message: "recorded" });
     }
     if (path === "/api/keys/report-rate-limit") {
+      if (failKeyReport) return Response.json({ error: "db busy" }, { status: 503 });
       await Bun.sleep(SEAT_REPORT_DELAY_MS);
       keyReportRespondedAt = Date.now();
       return Response.json({ success: true });
@@ -61,6 +64,7 @@ beforeEach(() => {
   requests = [];
   seatReportRespondedAt = undefined;
   keyReportRespondedAt = undefined;
+  failKeyReport = false;
 });
 
 const apiConfig: ApiConfig = {
@@ -196,6 +200,53 @@ describe("reportCredentialOutcomeThenFinish — key-wide rate limit", () => {
     expect(finish).toBeDefined();
     expect(keyReportRespondedAt).toBeDefined();
     expect(finish!.at).toBeGreaterThanOrEqual(keyReportRespondedAt!);
+  });
+});
+
+describe("reportCredentialOutcomeThenFinish — lost key bench write", () => {
+  test("logs the failed write and keeps the failed key out of the resume's draw", async () => {
+    failKeyReport = true;
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { modelWindowBlocks } = await completeTask(
+        "44444444-4444-4444-8444-444444444444",
+        {
+          exitCode: 1,
+          isError: true,
+          sessionId: "session-5",
+          failureReason: "You've hit your weekly limit · resets 5pm (UTC)",
+        },
+        "claude-opus-5-5",
+      );
+      const logged = (spy: typeof log) => spy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged(log)).not.toContain("Reported key");
+      expect(logged(warn)).toContain("Failed to report key ...TJAAA as rate-limited: HTTP 503");
+
+      // The resume draws from a pool where the API still lists every key, and
+      // again where the availability read failed too. Neither may pick key 3.
+      const pool = ["t-AAAAA", "t-BBBBB", "t-CCCCC", "t-TJAAA"];
+      for (const availableIndicesMap of [
+        { [credentialInfo.keyType]: { availableIndices: [0, 1, 2, 3] } },
+        {},
+      ]) {
+        for (let draw = 0; draw < 40; draw++) {
+          const env: Record<string, string | undefined> = {
+            [credentialInfo.keyType]: pool.join(","),
+          };
+          const [selection] = await resolveCredentialPools(env, {
+            provider: "claude",
+            model: "claude-opus-5-5",
+            availableIndicesMap,
+            localBlocks: modelWindowBlocks,
+          });
+          expect(selection?.index).not.toBe(3);
+        }
+      }
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+    }
   });
 });
 
