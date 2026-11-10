@@ -3,6 +3,10 @@ import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemet
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import {
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  validateScriptActionAllowlist,
+} from "../ui-spec/script-allowlist";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import {
   COMPANY_ACQUISITION_SOURCES,
@@ -113,6 +117,35 @@ export function internalConfigKeyError(key: string): Error {
         ? "/api/ranking"
         : "/api/onboarding";
   return new Error(`Key '${key}' is managed by ${owner}`);
+}
+
+/**
+ * Keys only an admin user (a user token or dashboard session) may write or
+ * delete: never an agent, the Lead included, a guest, or the shared operator
+ * key, which every worker holds. The deployment env can still seed them.
+ * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
+ *
+ * shortcut: this stops direct writes, not a determined holder of the
+ * operator key. That key is root: it can create an admin user and mint a
+ * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
+ * nothing from a pin, because a script action runs as the card's own agent,
+ * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * (deployment-env only, or an out-of-band human approval) if workers stop
+ * holding the operator key.
+ */
+const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+
+export function isHumanOnlyConfigKey(key: string): boolean {
+  return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
+}
+
+export function humanOnlyConfigKeyError(key: string): string {
+  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
+}
+
+/** A page session acts for its viewer but runs the page author's code. */
+export function humanOnlyConfigKeyPageError(key: string): string {
+  return `Key '${key}' cannot be changed from a page session. Change it from the dashboard or with a user token.`;
 }
 
 export function isReservedConfigKey(key: string): boolean {
@@ -231,11 +264,15 @@ function enumValidator(key: string, options: string[]): Record<string, ConfigVal
 /** Build `{ KEY: validator }` entries accepting a Slack emoji shortcode. */
 function shortcodeValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
-    `Invalid ${key} (must be a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
+    `Invalid ${key} (must be empty to disable, or a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
   return Object.fromEntries(
     keys.map((key) => [
       key,
-      (value: unknown) => (normalizeSlackReactionShortcode(value) !== null ? null : message(key)),
+      (value: unknown) =>
+        typeof value === "string" &&
+        (value.trim() === "" || normalizeSlackReactionShortcode(value) !== null)
+          ? null
+          : message(key),
     ]),
   );
 }
@@ -347,6 +384,27 @@ export function validateTaskAutoTitleModel(value: unknown): string | null {
     : "Invalid TASK_AUTO_TITLE_MODEL (provider must be openrouter, anthropic, openai, or openai-codex)";
 }
 
+/**
+ * Docker runtime isolation keys. Empty clears the key. The Docker adapter
+ * applies the same rules (`src/runtime-providers/docker.ts`), so a value
+ * this guard accepts never fails `checkConfig`.
+ */
+export function validateDockerRuntime(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_RUNTIME (must be a string)";
+  const name = value.trim();
+  return !name || /^[A-Za-z0-9._-]+$/.test(name)
+    ? null
+    : "Invalid DOCKER_RUNTIME (use an OCI runtime name: letters, digits, '.', '-', '_')";
+}
+
+export function validateDockerPidsLimit(value: unknown): string | null {
+  if (typeof value !== "string") return "Invalid DOCKER_PIDS_LIMIT (must be a string)";
+  const limit = value.trim();
+  return !limit || (/^[1-9]\d*$/.test(limit) && Number.isSafeInteger(Number(limit)))
+    ? null
+    : "Invalid DOCKER_PIDS_LIMIT (must be a positive integer, or empty)";
+}
+
 export const validateControllerTokenTtlDays = boundedIntegerValidators(
   ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
   1,
@@ -360,7 +418,10 @@ export const validateControllerGraceSec = boundedIntegerValidators(
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
-  ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
+  [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
+  ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
+  DOCKER_RUNTIME: validateDockerRuntime,
+  DOCKER_PIDS_LIMIT: validateDockerPidsLimit,
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   RUNTIME_CONTROLLER_TOKEN_TTL_DAYS: validateControllerTokenTtlDays,
@@ -565,6 +626,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_DISABLE",
     "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
+    "SLACK_RENDER_V2_TASK_TREE_ENABLED",
     "SLACK_RENDER_V2_DELEGATION",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
     "GITHUB_DISABLE",
@@ -670,6 +732,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "AGENT_LOG_RETENTION_DAYS",
       "EVENTS_RETENTION_DAYS",
       "SCRIPT_RUNS_RETENTION_DAYS",
+      "WORKFLOW_RUNS_RETENTION_DAYS",
       // A kept-version count, not days. The floor of 1 is what guarantees the
       // sweep never deletes the newest version of any (agentId, field).
       "CONTEXT_VERSIONS_KEEP_LATEST",

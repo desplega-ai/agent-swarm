@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 7dc87f45. Every action maps to file:line and the SQL  *)
+(* behaves on main @ b3ba784f. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -30,7 +30,9 @@ CONSTANTS
     BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
     G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
     TIMER_RACE,         \* boot triage may fire before runRebootSweep finishes (timing assumption off)
-    RUNTIME_POOLS       \* RUNTIME_POOLS_ENABLED (#2045, default off): pool routing, wake release, runtime recovery
+    RUNTIME_POOLS,      \* RUNTIME_POOLS_ENABLED (#2045, default off): pool routing, wake release, runtime recovery
+    WORKFLOW_STEP,      \* the root task is a workflow agent-task step: a cut fails back to the engine (#2262)
+    G_STEP_CUT_FILTER   \* repair and boot-triage read: AND failureReason IS NOT 'superseded_workflow_task' (#2892)
 
 None == "none"
 Tasks == 1..NTasks
@@ -60,13 +62,18 @@ VARIABLES
     wc, ac,   \* crash counters
     liveKill, \* history: a remediation killed a live, progressing task
     badAcc,   \* history: an accept took a task offered to someone else
+    cut,      \* workflow-step state of the row: "none" (not a step task) | "step"
+              \* (bound to its step) | "cut" (failed, failureReason
+              \* superseded_workflow_task) | "queued" (detached, relabelled
+              \* superseded, step retry queued) | "retried" (the retry's task
+              \* exists) | "absorbed" (relabelled superseded, still bound, no retry)
     bt        \* boot-triage gate for the current API boot: armed (90 s timer
               \* pending), hit (runRebootSweep failed a task: the in-memory
               \* rebootAffectedTasks), and history of the gate step: fired,
               \* dirty (a finding or an unreadable status), created (Lead task)
 
 vars == <<st, own, offTo, par, gen, pin, ver, stale, sess, touched, running,
-          alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+          alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 Free == {s \in Tasks : st[s] = "free"}
 
@@ -82,6 +89,12 @@ NewChild(s, p, o, g, isPin) ==
     /\ par' = [par EXCEPT ![s] = p]
     /\ gen' = [gen EXCEPT ![s] = g]
     /\ pin' = [pin EXCEPT ![s] = isPin]
+
+\* Rows getSupersededTasksWithoutResume can return, given status 'superseded'
+\* and no resume child. An absorbed cut stays bound to its step, so
+\* `workflowRunStepId IS NULL` already skips it; a queued or retried cut is
+\* detached, and only the failureReason term (#2892) skips it.
+RepairSees(t) == cut[t] = "none" \/ (~G_STEP_CUT_FILTER /\ cut[t] \in {"queued", "retried"})
 
 BtOff == [armed |-> FALSE, hit |-> FALSE, fired |-> FALSE, dirty |-> FALSE, created |-> FALSE]
 
@@ -107,6 +120,7 @@ Init ==
     /\ wc = 0 /\ ac = 0
     /\ liveKill = FALSE /\ badAcc = FALSE
     /\ bt = BtOff
+    /\ cut = [t \in Tasks |-> IF WORKFLOW_STEP /\ t = 1 THEN "step" ELSE "none"]
 
 ---------------------------------------------------------------------------
 (* Worker-driven lifecycle (via HTTP: every step needs the API up).       *)
@@ -117,7 +131,7 @@ ClaimRead(w, t) ==
     /\ st[t] = "unassigned"
     /\ cl' = [cl EXCEPT ![w] = t]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   running, alive, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* ... then UPDATE ... WHERE id = ? AND status = 'unassigned'
 ClaimWrite(w) ==
@@ -133,7 +147,7 @@ ClaimWrite(w) ==
               /\ touched' = [touched EXCEPT ![t] = TRUE]
          ELSE UNCHANGED <<st, own, running, sess, stale, touched>>
     /\ UNCHANGED <<offTo, par, gen, pin, ver, alive, acc, hb, rb, apiUp, wc, ac,
-                   liveKill, badAcc, bt>>
+                   liveKill, badAcc, bt, cut>>
 
 \* acceptTask: JS check offeredTo = me ...
 AcceptRead(w, t) ==
@@ -141,7 +155,7 @@ AcceptRead(w, t) ==
     /\ st[t] = "offered" /\ offTo[t] = w
     /\ acc' = [acc EXCEPT ![w] = t]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, cl, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   running, alive, cl, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* ... then UPDATE SET agentId=?, status='pending' WHERE status IN ('offered','reviewing')
 AcceptWrite(w) ==
@@ -154,7 +168,7 @@ AcceptWrite(w) ==
               /\ badAcc' = (badAcc \/ offTo[t] # w)
          ELSE UNCHANGED <<st, own, badAcc>>
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running,
-                   alive, cl, hb, rb, apiUp, wc, ac, liveKill, bt>>
+                   alive, cl, hb, rb, apiUp, wc, ac, liveKill, bt, cut>>
 
 \* rejectTask, and releaseStaleOfferedTasksForOfflineAgents (same write).
 Reject(t) ==
@@ -162,7 +176,7 @@ Reject(t) ==
     /\ st' = [st EXCEPT ![t] = "unassigned"]
     /\ offTo' = [offTo EXCEPT ![t] = None]
     /\ UNCHANGED <<own, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* No such path exists in the code; switched on only to show the drift.
 ReOffer(t, w) ==
@@ -170,7 +184,7 @@ ReOffer(t, w) ==
     /\ st' = [st EXCEPT ![t] = "offered"]
     /\ offTo' = [offTo EXCEPT ![t] = w]
     /\ UNCHANGED <<own, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* poll.ts: pre-assigned pending -> in_progress (startTask, WHERE status='pending')
 PollStart(w, t) ==
@@ -182,7 +196,7 @@ PollStart(w, t) ==
     /\ stale' = [stale EXCEPT ![t] = FALSE]
     /\ touched' = [touched EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, alive, cl, acc, hb, rb, apiUp,
-                   wc, ac, liveKill, badAcc, bt>>
+                   wc, ac, liveKill, badAcc, bt, cut>>
 
 \* runner.ts POST /api/active-sessions (before provider spawn)
 RegisterSession(w, t) ==
@@ -190,7 +204,7 @@ RegisterSession(w, t) ==
     /\ st[t] \notin Terminal
     /\ sess' = [sess EXCEPT ![t] = "live"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* PostToolUse hook -> PUT /api/active-sessions/heartbeat (tool activity), or
 \* POST /api/session-logs {taskId} -> refreshActiveSessionOnActivity (provider output, #1879)
@@ -198,7 +212,7 @@ SessionBeat(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ sess[t] = "prelive"
     /\ sess' = [sess EXCEPT ![t] = "live"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* updateTaskProgress: no status guard; bumps lastUpdatedAt unconditionally.
 Progress(w, t) ==
@@ -207,7 +221,7 @@ Progress(w, t) ==
     /\ stale' = [stale EXCEPT ![t] = FALSE]
     /\ touched' = [touched EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, sess, running, alive, cl, acc,
-                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* completeTask: WHERE status NOT IN terminal; worker then drops the session.
 \* skipTask (#2571, /finish or store-progress with status 'skipped', owner
@@ -219,17 +233,17 @@ Complete(w, t) ==
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, alive, cl, acc,
-                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
-\* reconcileActiveTasks, runner.ts:5401): cancelled on every poll via
+\* reconcileActiveTasks, runner.ts:5617): cancelled on every poll via
 \* /cancelled-tasks (core.ts:699), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* API drain handoff (#1837): a worker that sees X-Swarm-Draining on /ping or
 \* /api/poll calls POST /api/tasks/:id/supersede for its own in-flight task
@@ -242,19 +256,28 @@ AbortTerminal(w, t) ==
 \* drain's refusal to dispatch only removes behaviors and is not modeled.
 \* Since #2736 the same route also runs for a provider error on a task with a
 \* claim-time profile (requestProviderFallback, reason provider_fallback):
-\* the resume always pins to the caller, ignoring capacity, and runs the next
-\* fallback profile. Same guards and the same state change, so this action
+\* the resume always pins to the caller, ignoring capacity, and runs the same
+\* profile on another key or the next fallback profile. Same guards and the same state change, so this action
 \* covers it; PROVIDER_FALLBACK enables it without the drain. No fallback left
 \* is a no-op on the server (the worker then fails the task: Complete).
+\* A workflow-step task takes the route's other branch: failTask with reason
+\* superseded_workflow_task and no resume (drain only; a provider fallback
+\* changes nothing for a step). The engine's actions below take it from there.
 DrainHandoff(w, t) ==
     /\ (DRAIN_HANDOFF \/ PROVIDER_FALLBACK) /\ apiUp /\ alive[w] /\ t \in running[w]
     /\ st[t] = "in_progress" /\ own[t] = w
-    /\ \E s \in Free :
-         /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
-         /\ own' = [own EXCEPT ![s] = w]
-         /\ par' = [par EXCEPT ![s] = t]
-         /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
-         /\ pin' = [pin EXCEPT ![s] = TRUE]
+    /\ IF cut[t] = "step"
+         THEN /\ DRAIN_HANDOFF
+              /\ st'  = [st  EXCEPT ![t] = "failed"]
+              /\ cut' = [cut EXCEPT ![t] = "cut"]
+              /\ UNCHANGED <<own, par, gen, pin>>
+         ELSE /\ \E s \in Free :
+                   /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
+                   /\ own' = [own EXCEPT ![s] = w]
+                   /\ par' = [par EXCEPT ![s] = t]
+                   /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
+                   /\ pin' = [pin EXCEPT ![s] = TRUE]
+              /\ UNCHANGED cut
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
                    apiUp, wc, ac, liveKill, badAcc, bt>>
 
@@ -267,38 +290,40 @@ WorkerCrash(w) ==
     /\ acc' = [acc EXCEPT ![w] = 0]
     /\ wc' = wc + 1
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, hb, rb,
-                   apiUp, ac, liveKill, badAcc, bt>>
+                   apiUp, ac, liveKill, badAcc, bt, cut>>
 
 WorkerRestart(w) ==
     /\ ~alive[w]
     /\ alive' = [alive EXCEPT ![w] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   running, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* Time passes without a lastUpdatedAt write.
 Age(t) ==
     /\ st[t] = "in_progress" /\ ~stale[t]
     /\ stale' = [stale EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, sess, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 ---------------------------------------------------------------------------
 (* Heartbeat sweep (API process).                                         *)
 
 \* detectAndRemediateStalledTasks: candidate read + classify + decide.
 \* Case C (live session) only records, so it never enters this action.
+\* A workflow-step task always takes the fail branch (decideRemediation).
 HbRead(t) ==
     /\ apiUp /\ hb.pc = "idle"
     /\ st[t] = "in_progress" /\ stale[t] /\ own[t] # None
     /\ sess[t] \in {"none", "dead"}
-    /\ LET resume == ~HasActiveChild(t) /\ gen[t] < MaxGen /\ Free # {}
+    /\ LET resume == cut[t] = "none" /\ ~HasActiveChild(t) /\ gen[t] < MaxGen /\ Free # {}
        IN hb' = [pc |-> "decided", t |-> t, snap |-> ver[t],
                  act |-> IF resume THEN "supersede" ELSE "fail"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, cl, acc, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   running, alive, cl, acc, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* supersedeTask / failTask: WHERE id = ? AND status NOT IN terminal
-\* AND lastUpdatedAt = <observed> (expectedLastUpdatedAt, #1668).
+\* AND lastUpdatedAt = <observed> (expectedLastUpdatedAt, #1668). The fail of
+\* a workflow-step task carries failureReason superseded_workflow_task (cut).
 HbWrite ==
     LET t == hb.t IN
     /\ apiUp /\ hb.pc = "decided"
@@ -307,8 +332,9 @@ HbWrite ==
               /\ liveKill' = (liveKill \/ LiveNow(t))
               /\ sess' = [sess EXCEPT ![t] = IF @ = "dead" THEN "none" ELSE @]
               /\ hb' = [hb EXCEPT !.pc = IF hb.act = "supersede" THEN "resume" ELSE "idle"]
+              /\ cut' = [cut EXCEPT ![t] = IF @ = "step" THEN "cut" ELSE @]
          ELSE /\ hb' = [hb EXCEPT !.pc = "idle"]
-              /\ UNCHANGED <<st, liveKill, sess>>
+              /\ UNCHANGED <<st, liveKill, sess, cut>>
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, running, alive,
                    cl, acc, rb, apiUp, wc, ac, badAcc, bt>>
 
@@ -320,19 +346,21 @@ HbResume ==
     /\ \E s \in Free : NewChild(s, t, own[t], gen[t] + 1, TRUE)
     /\ hb' = [hb EXCEPT !.pc = "idle"]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, rb,
-                   apiUp, wc, ac, liveKill, badAcc, bt>>
+                   apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* repairSupersededWithoutResume (#1670), step 1.5 of the sweep: a superseded
 \* parent with no resume child gets one, within the resume budget. The 1 min
 \* floor keeps it off an in-flight supersede (hb.pc = "idle"); the 24 h cap is
-\* not modeled (the sweep runs well inside it).
+\* not modeled (the sweep runs well inside it). Since #2892 a workflow-step
+\* cut can also be `superseded` with no resume child; the query's failureReason
+\* term keeps the repair off it (RepairSees, G_STEP_CUT_FILTER).
 HbRepair(t) ==
     /\ G_ORPHAN_REPAIR /\ apiUp /\ hb.pc = "idle"
-    /\ st[t] = "superseded" /\ gen[t] < MaxGen
+    /\ st[t] = "superseded" /\ gen[t] < MaxGen /\ RepairSees(t)
     /\ ~\E s \in Tasks : par[s] = t
     /\ \E s \in Free : NewChild(s, t, own[t], gen[t] + 1, TRUE)
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
-                   apiUp, wc, ac, liveKill, badAcc, bt>>
+                   apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* autoAssignPoolTasks -> routePoolTasks (#2045) -> assignUnassignedTaskPending:
 \* UPDATE SET agentId=?, status='pending' WHERE status='unassigned' (+ snapshot CAS).
@@ -342,7 +370,7 @@ AutoAssign(t, w) ==
     /\ st' = [st EXCEPT ![t] = "pending"]
     /\ own' = [own EXCEPT ![t] = w]
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* escalateUnreclaimedResumes: tx { cancel pending pin; Lead reroute ->
 \* re-delegated to an explicit agent }. Over budget: fail the pin instead.
@@ -359,14 +387,14 @@ Reaper(s) ==
                 /\ gen' = [gen EXCEPT ![n] = gen[s] + 1]
                 /\ pin' = [pin EXCEPT ![n] = FALSE]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
-                   apiUp, wc, ac, liveKill, badAcc, bt>>
+                   apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* cleanupStaleResources: delete sessions whose heartbeat is > 30 min old.
 CleanupSession(t) ==
     /\ apiUp /\ sess[t] = "dead"
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 ---------------------------------------------------------------------------
 (* Runtime pools (#2045): API-side writes gated by RUNTIME_POOLS_ENABLED.  *)
@@ -383,7 +411,7 @@ WakeRelease(t) ==
     /\ st' = [st EXCEPT ![t] = "unassigned"]
     /\ own' = [own EXCEPT ![t] = None]
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* recordProvisionFailure: after the last provisioning attempt, failTask on the
 \* agent's oldest ready pending task (WHERE status NOT IN terminal).
@@ -391,7 +419,7 @@ ProvisionFail(t) ==
     /\ RUNTIME_POOLS /\ apiUp /\ st[t] = "pending" /\ own[t] # None /\ ~alive[own[t]]
     /\ st' = [st EXCEPT ![t] = "failed"]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* recoverRuntime -> recoverSessions -> remediateTaskForDeadRuntime: a runtime
 \* declared dead (supervisor, socket-disconnect check) has each in_progress task
@@ -399,22 +427,64 @@ ProvisionFail(t) ==
 \* The lastUpdatedAt CAS reads the row right before the write, so read and
 \* write are one step; supersede and resume are collapsed as in DrainHandoff
 \* (HbRepair closes a crash between them). The session row is deleted.
+\* A workflow-step task takes the fail branch with the cut reason, as in HbWrite.
 RuntimeRecover(t) ==
     /\ RUNTIME_POOLS /\ apiUp /\ st[t] = "in_progress" /\ own[t] # None
     /\ t \notin running[own[t]]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ liveKill' = (liveKill \/ LiveNow(t))
-    /\ IF ~HasActiveChild(t) /\ gen[t] < MaxGen /\ Free # {}
-         THEN \E s \in Free :
-                /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
-                /\ own' = [own EXCEPT ![s] = own[t]]
-                /\ par' = [par EXCEPT ![s] = t]
-                /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
-                /\ pin' = [pin EXCEPT ![s] = TRUE]
+    /\ IF cut[t] = "none" /\ ~HasActiveChild(t) /\ gen[t] < MaxGen /\ Free # {}
+         THEN /\ \E s \in Free :
+                   /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
+                   /\ own' = [own EXCEPT ![s] = own[t]]
+                   /\ par' = [par EXCEPT ![s] = t]
+                   /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
+                   /\ pin' = [pin EXCEPT ![s] = TRUE]
+              /\ UNCHANGED cut
          ELSE /\ st' = [st EXCEPT ![t] = "failed"]
+              /\ cut' = [cut EXCEPT ![t] = IF @ = "step" THEN "cut" ELSE @]
               /\ UNCHANGED <<own, par, gen, pin>>
     /\ UNCHANGED <<offTo, ver, stale, touched, running, alive, cl, acc, hb, rb,
                    apiUp, wc, ac, badAcc, bt>>
+
+---------------------------------------------------------------------------
+(* Workflow agent-task steps (WORKFLOW_STEP): the engine's side of a      *)
+(* supersede cut. A cut whose step ends failed keeps its `failed` row.     *)
+
+\* scheduleTaskStepRetry (#2262), from task.failed or the workflow recovery
+\* sweep. One transaction: detach the cut task from its step, queue the step's
+\* retry (nextRetryAt) and, since #2892, relabel the task failed -> superseded
+\* (markWorkflowStepTaskSuperseded: WHERE status = 'failed' AND failureReason =
+\* 'superseded_workflow_task'). The step's retryCount is carried in `gen`. The
+\* relabel bumps lastUpdatedAt on a terminal row, which no modeled guard reads.
+StepRetryQueue(t) ==
+    /\ WORKFLOW_STEP /\ apiUp /\ st[t] = "failed" /\ cut[t] = "cut" /\ gen[t] < MaxGen
+    /\ st'  = [st  EXCEPT ![t] = "superseded"]
+    /\ cut' = [cut EXCEPT ![t] = "queued"]
+    /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+
+\* Retry poller, about 30 s later: the agent-task executor inserts one fresh
+\* task bound to the step, for the node's agent or the pool. It is not a child
+\* of the cut task (no parentTaskId, not taskType 'resume').
+StepRetryTask(t) ==
+    /\ WORKFLOW_STEP /\ apiUp /\ cut[t] = "queued"
+    /\ \E s \in Free, o \in Workers \cup {None} :
+         /\ NewChild(s, 0, o, gen[t] + 1, FALSE)
+         /\ cut' = [cut EXCEPT ![t] = "retried", ![s] = "step"]
+    /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
+
+\* completeTaskStepAndResolveSuccessors with a failureReason (#2932): the
+\* workflow absorbs the failure (onNodeFailure "continue", or a
+\* collect-outcomes fan-out), the step ends completed, and the same relabel
+\* runs in that transaction. No retry; the task stays bound to its step.
+StepAbsorb(t) ==
+    /\ WORKFLOW_STEP /\ apiUp /\ st[t] = "failed" /\ cut[t] = "cut"
+    /\ st'  = [st  EXCEPT ![t] = "superseded"]
+    /\ cut' = [cut EXCEPT ![t] = "absorbed"]
+    /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 ---------------------------------------------------------------------------
 (* API crash + boot + runRebootSweep.                                     *)
@@ -429,7 +499,7 @@ ApiCrash ==
     /\ ac' = ac + 1
     /\ bt' = [bt EXCEPT !.armed = FALSE, !.hit = FALSE]  \* timer and process memory lost
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, wc, liveKill, badAcc>>
+                   running, alive, wc, liveKill, badAcc, cut>>
 
 \* Boot also arms the boot-triage timer (startHeartbeatChecklist, T+90 s).
 ApiBoot ==
@@ -441,7 +511,7 @@ ApiBoot ==
               pc |-> "idle", t |-> 0]
     /\ bt' = [BtOff EXCEPT !.armed = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, running,
-                   alive, cl, acc, hb, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, wc, ac, liveKill, badAcc, cut>>
 
 \* runRebootSweep: skip if claimed after boot, if the session heartbeated
 \* since boot, or (#1669) if its heartbeat is younger than the classifier's
@@ -462,7 +532,7 @@ RebootFail(t) ==
        ELSE /\ rb' = [rb EXCEPT !.todo = @ \ {t}]
             /\ UNCHANGED <<st, liveKill, bt>>
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running,
-                   alive, cl, acc, hb, apiUp, wc, ac, badAcc>>
+                   alive, cl, acc, hb, apiUp, wc, ac, badAcc, cut>>
 
 \* Reboot retry child: fresh task, generation tag restarts at 0.
 RebootRetry ==
@@ -472,18 +542,19 @@ RebootRetry ==
          ELSE UNCHANGED <<st, own, par, gen, pin>>
     /\ rb' = [rb EXCEPT !.pc = "idle"]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb,
-                   apiUp, wc, ac, liveKill, badAcc, bt>>
+                   apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 ---------------------------------------------------------------------------
 (* Boot triage gate (#1973): createBootTriageTask at T+90 s.              *)
 
 \* getBootTriageFindings, read from the state the gate sees. The fourth
 \* count, rebootInterrupted, is bt.hit. A superseded task whose resume is the
-\* in-flight HbResume is under the 1 min floor, so it does not count.
+\* in-flight HbResume is under the 1 min floor, so it does not count; nor does
+\* a relabelled workflow-step cut (same query as HbRepair, #2892).
 Stalled == \E t \in Tasks : st[t] = "in_progress" /\ stale[t]
 SupersededNoResume ==
     \E t \in Tasks : /\ st[t] = "superseded" /\ ~\E s \in Tasks : par[s] = t
-                     /\ ~(hb.pc = "resume" /\ hb.t = t)
+                     /\ ~(hb.pc = "resume" /\ hb.t = t) /\ RepairSees(t)
 \* Agent status is not a variable: any pending/offered task may have an
 \* offline or unregistered holder.
 OrphanChoices == IF \E t \in Tasks : st[t] \in {"pending", "offered"}
@@ -507,7 +578,7 @@ BootTriage ==
                    dirty   |-> ~readOk \/ findings,
                    created |-> ~clean /\ (G_STATUS_FALLBACK \/ statusOk)]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, cut>>
 
 ---------------------------------------------------------------------------
 Next ==
@@ -519,6 +590,7 @@ Next ==
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)
          \/ CleanupSession(t) \/ RebootFail(t)
          \/ WakeRelease(t) \/ ProvisionFail(t) \/ RuntimeRecover(t)
+         \/ StepRetryQueue(t) \/ StepRetryTask(t) \/ StepAbsorb(t)
     \/ HbWrite \/ HbResume \/ RebootRetry \/ ApiCrash \/ ApiBoot \/ BootTriage
 
 Fairness ==
@@ -542,6 +614,7 @@ TypeOK ==
     /\ ver \in [Tasks -> 0..MaxVer]
     /\ sess \in [Tasks -> {"none", "live", "prelive", "dead"}]
     /\ bt \in [armed: BOOLEAN, hit: BOOLEAN, fired: BOOLEAN, dirty: BOOLEAN, created: BOOLEAN]
+    /\ cut \in [Tasks -> {"none", "step", "cut", "queued", "retried", "absorbed"}]
 
 \* S1: at most one worker executes a given task row.
 OneRunner == \A t \in Tasks : Cardinality({w \in Workers : t \in running[w]}) <= 1
@@ -555,25 +628,31 @@ NoLiveKill == ~liveKill
 \* S4 (safety form, current design): every superseded task has a child
 \* outside the in-flight resume step. An API crash between supersede and
 \* resume still breaks it; L2 is the recovery form the repair sweep (#1670)
-\* satisfies.
+\* satisfies. A relabelled workflow-step cut (#2892) is `superseded` by design
+\* with no resume: its work continues in the step's retry or not at all.
 SupersededHasResume ==
     \A t \in Tasks :
-        (st[t] = "superseded" /\ ~(hb.pc = "resume" /\ hb.t = t))
+        (st[t] = "superseded" /\ cut[t] = "none" /\ ~(hb.pc = "resume" /\ hb.t = t))
             => \E s \in Tasks : par[s] = t
 
 \* S5: accept only takes an offer made to the accepting worker.
 AcceptOwnOffer == ~badAcc
 
-\* S6 (action): terminal is absorbing.
-TerminalAbsorbing == [][\A t \in Tasks : st[t] \in Terminal => st'[t] = st[t]]_vars
+\* S6 (action): terminal is absorbing, but for one relabel: since #2892 the
+\* workflow engine moves a `failed` supersede cut to `superseded`.
+TerminalAbsorbing ==
+    [][\A t \in Tasks : st[t] \in Terminal =>
+          \/ st'[t] = st[t]
+          \/ st[t] = "failed" /\ cut[t] = "cut" /\ st'[t] = "superseded"]_vars
 
 \* L1: the work is eventually finished (completed, skipped or failed) or given up by
 \* recovery with a recorded failure; a lineage never sits forever with no
 \* active row and no finished row.
 Finished == \E t \in Tasks : st[t] \in {"completed", "failed", "skipped"}
 EventuallyFinished == <>Finished
-\* L2: a superseded task eventually has a resume.
-SupersededGetsResume == \A t \in Tasks : (st[t] = "superseded") ~> (\E s \in Tasks : par[s] = t)
+\* L2: a superseded task eventually has a resume (workflow-step cuts aside, as in S4).
+SupersededGetsResume ==
+    \A t \in Tasks : (st[t] = "superseded" /\ cut[t] = "none") ~> (\E s \in Tasks : par[s] = t)
 
 \* S7 (#1973): the boot-triage gate creates a Lead task exactly when the boot
 \* had a finding (reboot-interrupted, stalled, orphaned, superseded without

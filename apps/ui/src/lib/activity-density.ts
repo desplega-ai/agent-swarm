@@ -156,3 +156,50 @@ export function densityPeak(lanes: DensityLane[]): number {
   }
   return peak;
 }
+
+export interface DensityTick {
+  at: number;
+  /** Centre of the label, in px from the axis's left edge. */
+  x: number;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+/** Hour steps the axis may thin to, in order of preference. */
+const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12];
+
+/**
+ * Hour ticks for an axis `widthPx` wide. The step grows (1h, 2h, 3h...) until
+ * neighbouring labels sit `labelPx + gapPx` apart, ticks land on local hours
+ * divisible by the step, and a tick is dropped when its label would leave the
+ * axis or run into the `reservePx` kept free at the right edge (the "now" pill).
+ */
+export function densityHourTicks({
+  startMs,
+  endMs,
+  widthPx,
+  labelPx,
+  reservePx,
+  gapPx = 8,
+}: {
+  startMs: number;
+  endMs: number;
+  widthPx: number;
+  labelPx: number;
+  reservePx: number;
+  gapPx?: number;
+}): DensityTick[] {
+  if (widthPx <= 0 || endMs <= startMs) return [];
+  const pxPerHour = (widthPx * HOUR_MS) / (endMs - startMs);
+  const step =
+    HOUR_STEPS.find((hours) => hours * pxPerHour >= labelPx + gapPx) ??
+    HOUR_STEPS[HOUR_STEPS.length - 1]!;
+  const ticks: DensityTick[] = [];
+  for (let at = Math.ceil(startMs / HOUR_MS) * HOUR_MS; at < endMs; at += HOUR_MS) {
+    if (new Date(at).getHours() % step !== 0) continue;
+    const x = ((at - startMs) / (endMs - startMs)) * widthPx;
+    if (x - labelPx / 2 < 0) continue;
+    if (x + labelPx / 2 > widthPx - reservePx - gapPx) continue;
+    ticks.push({ at, x });
+  }
+  return ticks;
+}

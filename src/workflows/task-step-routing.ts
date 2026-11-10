@@ -2,8 +2,10 @@ import {
   detachTaskFromWorkflowRunStep,
   getDbClient,
   getTaskById,
+  getTaskByWorkflowRunStepId,
   getWorkflowRun,
   getWorkflowRunStep,
+  markWorkflowStepTaskSuperseded,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -21,6 +23,7 @@ import { getSuccessors } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveStepNode } from "./foreach-body";
 import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
+import { claimAndOweWalk, type SuccessorWalkDebt } from "./successor-routing";
 
 export interface TaskStepRoutingResult {
   /**
@@ -35,6 +38,8 @@ export interface TaskStepRoutingResult {
   successors: WorkflowNode[];
   /** True when this call failed the run: nothing may route or re-park it. */
   runFailed: boolean;
+  /** This claim's hold on the run; pass it to the `walkGraph` that routes `successors`. */
+  successorDebt?: SuccessorWalkDebt;
 }
 
 const UNCLAIMED: TaskStepRoutingResult = {
@@ -141,7 +146,7 @@ export async function checkpointPortStepAndResolveSuccessors(
   ctx: Record<string, unknown>,
   registry?: ExecutorRegistry,
 ): Promise<PortStepRoutingResult> {
-  return await getDbClient().transaction(async (): Promise<PortStepRoutingResult> => {
+  return await claimAndOweWalk(runId, async () => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return UNCLAIMED;
     const run = await getWorkflowRun(runId);
@@ -216,9 +221,10 @@ export const SUPERSEDE_RETRY_POLICY: RetryPolicy = {
  * bound to the failed task, detach that task (the executor reuses any task
  * bound to the step, so a bound failed task would park the retry forever), and
  * record the failure with `nextRetryAt` so the retry poller re-dispatches a new
- * task. Bounded by `maxRetries` via the step's persisted `retryCount`, read
- * only after ownership is confirmed: a stale caller's step snapshot may carry
- * the counter of a newer attempt.
+ * task. A detached task failed by a supersede cut moves to `superseded`.
+ * Bounded by `maxRetries` via the step's persisted `retryCount`, read only
+ * after ownership is confirmed: a stale caller's step snapshot may carry the
+ * counter of a newer attempt.
  *
  * A foreach child (`<foreachId>#<key>`) with an `agent-task` body takes the
  * parent foreach node's `retry`, else the same supersede default. While queued
@@ -266,6 +272,9 @@ export async function scheduleTaskStepRetry(
     if (current.retryCount >= policy.maxRetries) return "not-eligible";
     await detachTaskFromWorkflowRunStep(taskId);
     await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
+    // A supersede cut that gets a retry is not a real failure: the step goes
+    // on in a fresh task. A cut with no retry stays `failed`.
+    await markWorkflowStepTaskSuperseded(taskId);
     return "scheduled";
   });
 }
@@ -279,6 +288,8 @@ async function isSupersedeCut(taskId: string, reason: string): Promise<boolean> 
 /**
  * Persist an agent-task result and resolve its next nodes. Synthetic foreach
  * children never checkpoint into workflow context; only their parent join does.
+ * With `failureReason` (a failed task the workflow carries on without), a
+ * supersede cut on the step's task moves to `superseded`.
  */
 export async function completeTaskStepAndResolveSuccessors(
   def: WorkflowDefinition,
@@ -293,7 +304,7 @@ export async function completeTaskStepAndResolveSuccessors(
   // The task step, optional foreach join checkpoint, workflow context, and
   // running status must commit together. A crash after this transaction is
   // recoverable through the running-run graph re-walk.
-  return await getDbClient().transaction(async (): Promise<TaskStepRoutingResult> => {
+  return await claimAndOweWalk(runId, async () => {
     // Re-read inside the transaction: callers checked `waiting` before their
     // own awaits, so the claim is only authoritative here.
     const current = await getWorkflowRunStep(step.id);
@@ -303,11 +314,19 @@ export async function completeTaskStepAndResolveSuccessors(
     // A late result inside a cancelled tree routes nothing and revives nothing.
     if (await getRunLineageBlock(runId)) return UNCLAIMED;
 
+    // Read before the step settles: the task stays bound, so the step's task
+    // is the one whose failure this call absorbs.
+    const failedTaskId =
+      failureReason !== undefined
+        ? (ownerTaskId ?? (await getTaskByWorkflowRunStepId(step.id))?.id)
+        : undefined;
+
+    let result: TaskStepRoutingResult;
     if (resolveForeachParent(def, step.nodeId)) {
       // onNodeFailure:"continue" completions persist the failure reason as
       // explicit metadata — the join classifies children on THIS, not on
       // whether user-controlled output text happens to start with "[FAILED:".
-      return toRoutingResult(
+      result = toRoutingResult(
         await settleForeachChild(
           def,
           runId,
@@ -321,16 +340,25 @@ export async function completeTaskStepAndResolveSuccessors(
           { registry },
         ),
       );
+    } else {
+      await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
+      await updateWorkflowRun(runId, { status: "running" });
+      result = {
+        claimed: true,
+        foreachChild: false,
+        joined: true,
+        successors: getSuccessors(def, step.nodeId),
+        runFailed: false,
+      };
     }
 
-    await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
-    await updateWorkflowRun(runId, { status: "running" });
-    return {
-      claimed: true,
-      foreachChild: false,
-      joined: true,
-      successors: getSuccessors(def, step.nodeId),
-      runFailed: false,
-    };
+    // The workflow absorbed the failure (onNodeFailure "continue" or a
+    // collect-outcomes fan-out): the step ends `completed` and the run goes on,
+    // so a supersede cut behind it is not a real failure either. A cut whose
+    // step ends `failed` never reaches here and stays `failed`.
+    if (failedTaskId && result.claimed && !result.runFailed) {
+      await markWorkflowStepTaskSuperseded(failedTaskId);
+    }
+    return result;
   });
 }

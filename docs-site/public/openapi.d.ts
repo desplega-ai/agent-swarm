@@ -2770,6 +2770,7 @@ export interface paths {
                                 idleSince?: string | null;
                                 leaseExpiresAt?: string | null;
                                 taskId?: string | null;
+                                workspaceSlot?: number | null;
                                 reportedSlots: number;
                                 credentialReady?: boolean | null;
                                 /** Format: date-time */
@@ -6397,6 +6398,7 @@ export interface paths {
                         scope?: string;
                         scopeId?: string;
                         plan?: string;
+                        planRaw?: string;
                     };
                 };
             };
@@ -6663,7 +6665,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record provider-emitted rate-limit window telemetry for an API key */
+        /**
+         * Record provider-emitted rate-limit window telemetry for an API key
+         * @description Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -6682,12 +6687,96 @@ export interface paths {
                                 status: string;
                                 utilization?: number;
                                 resetsAt?: number;
+                                fieldObservedAt?: {
+                                    /** Format: date-time */
+                                    durationMins?: string;
+                                    /** Format: date-time */
+                                    resetsAt?: string;
+                                    /** Format: date-time */
+                                    label?: string;
+                                    /** Format: date-time */
+                                    normalModelSlug?: string;
+                                };
+                                durationMins?: number;
+                                /** @enum {string} */
+                                source?: "claude" | "codex";
+                                limitId?: string;
+                                label?: string;
+                                normalModelSlug?: string;
+                                overageStatus?: string;
+                                overageDisabledReason?: string;
                                 isUsingOverage?: boolean;
                                 surpassedThreshold?: number;
                                 /** Format: date-time */
                                 lastSeenAt: string;
                             };
                         };
+                        account?: {
+                            /** @enum {string} */
+                            source: "codex" | "claude";
+                            /** Format: date-time */
+                            observedAt: string;
+                            fieldObservedAt?: {
+                                /** Format: date-time */
+                                ordinaryUsageAllowed?: string;
+                                /** Format: date-time */
+                                resetCreditsAvailable?: string;
+                            };
+                            ordinaryUsageAllowed?: boolean | null;
+                            resetCreditsAvailable?: number | null;
+                            limits?: {
+                                [key: string]: {
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        planRaw?: string;
+                                        /** Format: date-time */
+                                        label?: string;
+                                        /** Format: date-time */
+                                        normalModelSlug?: string;
+                                        /** Format: date-time */
+                                        credits?: string;
+                                        /** Format: date-time */
+                                        spend?: string;
+                                        /** Format: date-time */
+                                        spendControlReached?: string;
+                                        /** Format: date-time */
+                                        reachedType?: string;
+                                    };
+                                    windowRemovedAt?: {
+                                        /** Format: date-time */
+                                        primary?: string;
+                                        /** Format: date-time */
+                                        secondary?: string;
+                                    };
+                                    planRaw?: string | null;
+                                    label?: string | null;
+                                    normalModelSlug?: string | null;
+                                    credits?: {
+                                        hasCredits: boolean;
+                                        unlimited: boolean;
+                                        balance?: string | null;
+                                    } | null;
+                                    spend?: {
+                                        limit: string;
+                                        used: string;
+                                        remainingPercent: number;
+                                        resetsAt: number;
+                                    } | null;
+                                    spendControlReached?: boolean | null;
+                                    reachedType?: string | null;
+                                };
+                            };
+                        };
+                        replace?: {
+                            /** @enum {string} */
+                            source: "codex";
+                            limitId: string;
+                            /** Format: date-time */
+                            observedAt: string;
+                            slots: ("primary" | "secondary")[];
+                        }[];
                         scope?: string;
                         scopeId?: string;
                     };
@@ -6718,6 +6807,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Telemetry report exceeds 256 KiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6924,15 +7022,92 @@ export interface paths {
                                         status: string;
                                         utilization?: number;
                                         resetsAt?: number;
+                                        fieldObservedAt?: {
+                                            /** Format: date-time */
+                                            durationMins?: string;
+                                            /** Format: date-time */
+                                            resetsAt?: string;
+                                            /** Format: date-time */
+                                            label?: string;
+                                            /** Format: date-time */
+                                            normalModelSlug?: string;
+                                        };
+                                        durationMins?: number;
+                                        /** @enum {string} */
+                                        source?: "claude" | "codex";
+                                        limitId?: string;
+                                        label?: string;
+                                        normalModelSlug?: string;
+                                        overageStatus?: string;
+                                        overageDisabledReason?: string;
                                         isUsingOverage?: boolean;
                                         surpassedThreshold?: number;
                                         /** Format: date-time */
                                         lastSeenAt: string;
                                     };
                                 };
+                                providerAccount: {
+                                    /** @enum {string} */
+                                    source: "codex" | "claude";
+                                    /** Format: date-time */
+                                    observedAt: string;
+                                    fieldObservedAt?: {
+                                        /** Format: date-time */
+                                        ordinaryUsageAllowed?: string;
+                                        /** Format: date-time */
+                                        resetCreditsAvailable?: string;
+                                    };
+                                    ordinaryUsageAllowed?: boolean | null;
+                                    resetCreditsAvailable?: number | null;
+                                    limits?: {
+                                        [key: string]: {
+                                            /** Format: date-time */
+                                            observedAt: string;
+                                            fieldObservedAt?: {
+                                                /** Format: date-time */
+                                                planRaw?: string;
+                                                /** Format: date-time */
+                                                label?: string;
+                                                /** Format: date-time */
+                                                normalModelSlug?: string;
+                                                /** Format: date-time */
+                                                credits?: string;
+                                                /** Format: date-time */
+                                                spend?: string;
+                                                /** Format: date-time */
+                                                spendControlReached?: string;
+                                                /** Format: date-time */
+                                                reachedType?: string;
+                                            };
+                                            windowRemovedAt?: {
+                                                /** Format: date-time */
+                                                primary?: string;
+                                                /** Format: date-time */
+                                                secondary?: string;
+                                            };
+                                            planRaw?: string | null;
+                                            label?: string | null;
+                                            normalModelSlug?: string | null;
+                                            credits?: {
+                                                hasCredits: boolean;
+                                                unlimited: boolean;
+                                                balance?: string | null;
+                                            } | null;
+                                            spend?: {
+                                                limit: string;
+                                                used: string;
+                                                remainingPercent: number;
+                                                resetsAt: number;
+                                            } | null;
+                                            spendControlReached?: boolean | null;
+                                            reachedType?: string | null;
+                                        };
+                                    };
+                                } | null;
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                detectedPlanRaw: string | null;
                                 lastSeatMismatchAt: string | null;
                                 lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
@@ -6954,6 +7129,152 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keys/window-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Swarm-observed usage within current provider windows
+         * @description Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    keyType?: string;
+                    keySuffix?: string;
+                    scope?: string;
+                    scopeId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Independent windows with receipt-time tokens and explicit measurement coverage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            asOf: string;
+                            /** @enum {string} */
+                            accounting: "session_cost_receipt_time";
+                            windows: {
+                                statusId: string;
+                                keyType: string;
+                                keySuffix: string;
+                                scope: string;
+                                scopeId: string | null;
+                                windowKey: string;
+                                durationMins: number | null;
+                                startsAt: string | null;
+                                endsAt: string | null;
+                                dataThrough: string;
+                                observedAt: string;
+                                observationAgeMs: number;
+                                modelScope: {
+                                    /** @enum {string} */
+                                    kind: "account" | "family" | "unknown";
+                                    model: string | null;
+                                };
+                                /** @enum {string|null} */
+                                unavailableReason: "missing_reset" | "unknown_duration" | "unknown_model_scope" | "window_not_started" | null;
+                                usage: {
+                                    sessions: number;
+                                    errorSessions: number;
+                                    completedTasks: number;
+                                    tokens: {
+                                        uncachedInput: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        output: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheRead: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        cacheWrite: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        reasoning: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                        thinking: {
+                                            value: number | null;
+                                            measuredSessions: number;
+                                            missingSessions: number;
+                                        };
+                                    };
+                                    modelUnattributedSessions: number;
+                                    swarmUnattributedSessions: number;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid filters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Requested usage exceeds the aggregation bounds */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Usage query budget exhausted. Retry after one second */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11697,6 +12018,381 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List model groups
+         * @description Every model group with its member profiles in order, by name.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Model groups */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            groups: {
+                                id: string;
+                                name: string;
+                                description: string | null;
+                                seededFrom: string | null;
+                                members: string[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create a model group
+         * @description A group is an ordered list of model profiles that may span harnesses. Every member must be an existing profile, listed once. The name may not be a model profile's (groups and profiles share one name space; 409). Lead, operator or dashboard user.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        description?: string | null;
+                        /** @description Profile names in preference order, first preferred. Any harness; no repeats. */
+                        members: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Group created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A group or profile with that name exists */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-groups/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one model group */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The model group */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete a model group
+         * @description Refused (409) for a shipped tier group (`smol`, `regular`, `smart`, `ultra`; edit it instead, it would come back at the next boot), and while a schedule names the group or a task holds it (unfinished, or superseded and still owed its resume). Lead, operator or dashboard user.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Group deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            deleted: true;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The group is a seed or still in use */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a model group
+         * @description Changes the description (`null` clears it). The name is fixed; reorder or replace members with `PUT /api/model-groups/{name}/members`. Lead, operator or dashboard user.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        description: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Group updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/model-groups/{name}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a model group's members
+         * @description Replaces the whole ordered member list in one transaction; send the full list to reorder. Every member must be an existing profile, listed once. Lead, operator or dashboard user.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Profile names in preference order, first preferred. Any harness; no repeats. */
+                        members: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Members replaced */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            name: string;
+                            description: string | null;
+                            seededFrom: string | null;
+                            members: string[];
+                            createdAt: string;
+                            lastUpdatedAt: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No group with that name */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model-profiles": {
         parameters: {
             query?: never;
@@ -11752,7 +12448,7 @@ export interface paths {
         put?: never;
         /**
          * Create a model profile
-         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).
+         * @description A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. The name may not be a model group's (one name space; 409). Operator only (the shared API key).
          */
         post: {
             parameters: {
@@ -11825,7 +12521,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A profile with that name exists */
+                /** @description A profile or model group with that name exists */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -11902,7 +12598,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, a model group lists it as a member, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
@@ -14648,7 +15344,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -15369,6 +16065,32 @@ export interface paths {
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
                             }[];
+                            uiSpec: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "script";
+                                        script: string;
+                                        args?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                };
+                                fallbackText: string;
+                            } | null;
                         };
                     };
                 };
@@ -15902,6 +16624,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the action a task card Button declares
+         * @description Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    actionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "started" | "already_done" | "refreshed";
+                            taskId?: string;
+                            uiSpec?: {
+                                spec: {
+                                    root: string;
+                                    elements: {
+                                        [key: string]: unknown;
+                                    };
+                                    state?: {
+                                        [key: string]: unknown;
+                                    };
+                                };
+                                actions?: {
+                                    [key: string]: {
+                                        /** @enum {string} */
+                                        kind: "follow_up";
+                                        prompt: string;
+                                    } | {
+                                        /** @enum {string} */
+                                        kind: "script";
+                                        script: string;
+                                        args?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                };
+                                fallbackText: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task or action not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The script failed or returned an invalid card; the old card stays */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The script action ran recently; `Retry-After` says when it can run again */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{id}/supersede": {
         parameters: {
             query?: never;
@@ -15913,7 +16752,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent: on the same profile while a key-scoped error (`rate_limit`, `credits`) leaves another unbenched key in its pool, else on the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -17831,7 +18670,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -17859,7 +18698,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -17922,7 +18761,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -17974,7 +18813,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                     effectiveFrom: string;
@@ -20642,12 +21481,16 @@ export interface paths {
                         id?: string;
                         sessionId: string;
                         agentId: string;
+                        credentialKeyType?: string | null;
+                        credentialKeySuffix?: string | null;
+                        /** @enum {string|null} */
+                        harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
-                        cacheReadTokens?: number;
+                        cacheReadTokens?: number | null;
                         cacheWriteTokens?: number | null;
                         cacheWrite5mTokens?: number | null;
                         cacheWrite1hTokens?: number | null;
@@ -20667,7 +21510,7 @@ export interface paths {
                         }[];
                         isError?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                         createdAt?: number;
                     };
                 };
@@ -20688,6 +21531,24 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Untrusted session attribution */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Session identity conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -20747,6 +21608,8 @@ export interface paths {
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             };
                             daily: {
                                 date: string;
@@ -20755,6 +21618,8 @@ export interface paths {
                                 outputTokens: number;
                                 sessions: number;
                                 subscriptionCostUsd: number;
+                                credentialUnattributedCostUsd: number;
+                                credentialUnattributedSessions: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -22248,6 +23113,32 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        } | {
+                                            /** @enum {string} */
+                                            kind: "script";
+                                            script: string;
+                                            args?: {
+                                                [key: string]: unknown;
+                                            };
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
@@ -22264,6 +23155,32 @@ export interface paths {
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
                                 }[];
+                                uiSpec: {
+                                    spec: {
+                                        root: string;
+                                        elements: {
+                                            [key: string]: unknown;
+                                        };
+                                        state?: {
+                                            [key: string]: unknown;
+                                        };
+                                    };
+                                    actions?: {
+                                        [key: string]: {
+                                            /** @enum {string} */
+                                            kind: "follow_up";
+                                            prompt: string;
+                                        } | {
+                                            /** @enum {string} */
+                                            kind: "script";
+                                            script: string;
+                                            args?: {
+                                                [key: string]: unknown;
+                                            };
+                                        };
+                                    };
+                                    fallbackText: string;
+                                } | null;
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -25062,6 +25979,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tool-hooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run extension tool hooks for a harness-native tool call
+         * @description A worker shim reports a harness built-in tool call (bash, read, write, edit). `phase: pre` runs `pre.tool.call` with `callOrigin: native` and returns the decision. `phase: post` runs `post.tool.call` observe-only and returns 202 at once. Only extensions whose manifest `toolSources` includes `"native"` receive these calls. The server runs the secret scrubber over the body before any handler sees it, so handlers read `[REDACTED:<name>]` in place of a secret. A `modify` whose args still carry that marker is rejected and the call continues unchanged. Shims must also scrub worker-side before sending.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        phase: "pre";
+                        /** @description Worker harness, such as `claude` or `pi`. */
+                        harness: string;
+                        /** @description Canonical tool name, such as `bash` or `edit`. */
+                        tool: string;
+                        /** @description The harness's own tool name. */
+                        nativeTool?: string;
+                        /** @description Canonical tool arguments. */
+                        args?: unknown;
+                        /** @description The harness's own argument shape. */
+                        rawArgs?: unknown;
+                        toolCallId?: string;
+                        parentToolCallId?: string;
+                    } | {
+                        /** @enum {string} */
+                        phase: "post";
+                        /** @description Worker harness, such as `claude` or `pi`. */
+                        harness: string;
+                        /** @description Canonical tool name, such as `bash` or `edit`. */
+                        tool: string;
+                        /** @description The harness's own tool name. */
+                        nativeTool?: string;
+                        /** @description Canonical tool arguments. */
+                        args?: unknown;
+                        /** @description The harness's own argument shape. */
+                        rawArgs?: unknown;
+                        toolCallId?: string;
+                        parentToolCallId?: string;
+                        result?: unknown;
+                        isError?: boolean;
+                        durationMs: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Pre-call decision */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            action: "continue";
+                        } | {
+                            /** @enum {string} */
+                            action: "modify";
+                            args?: unknown;
+                        } | {
+                            /** @enum {string} */
+                            action: "block";
+                            reason: string;
+                        };
+                    };
+                };
+                /** @description Post-call event accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            accepted: true;
+                        };
+                    };
+                };
+                /** @description Invalid body or missing X-Agent-ID header */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trackers/jira/authorize": {
         parameters: {
             query?: never;
@@ -27661,7 +28686,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Merge another user into this one — moves identities + email aliases, deletes source */
+        /**
+         * Merge another user into this one: moves identities + email aliases, queues the rest
+         * @description Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -27679,37 +28707,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Merged user */
-                200: {
+                /** @description The queued merge job */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            user: (components["schemas"]["User"] & {
-                                identities: {
-                                    kind: string;
-                                    externalId: string;
-                                }[];
-                                tokens: {
-                                    id: string;
-                                    userId: string;
-                                    label: string | null;
-                                    tokenPreview: string;
-                                    createdAt: string;
-                                    lastUsedAt: string | null;
-                                    revokedAt: string | null;
-                                }[];
-                                recentEvents: {
-                                    id: string;
-                                    userId: string;
-                                    eventType: string;
-                                    actor: string;
-                                    before?: unknown;
-                                    after?: unknown;
-                                    createdAt: string;
-                                }[];
-                            }) | null;
+                            job: components["schemas"]["UserMergeJob"];
                         };
                     };
                 };
@@ -27749,7 +28754,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Source is the last active admin (last_admin) */
+                /** @description Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -27760,6 +28765,114 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List background user merge jobs, newest first */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "running" | "done" | "failed";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Merge jobs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            jobs: components["schemas"]["UserMergeJob"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A background user merge job (poll until status is done or failed) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The merge job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            job: components["schemas"]["UserMergeJob"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Job not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -28725,6 +29838,26 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
+                            /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
+                            events?: string[];
+                            /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
+                            eventHeader?: string;
+                            /**
+                             * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                             * @enum {string}
+                             */
+                            preset?: "github" | "gitlab" | "standard-webhooks";
+                            /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                            filter?: {
+                                /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                                headers?: {
+                                    [key: string]: string | string[];
+                                };
+                                /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                                body?: {
+                                    [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                                };
+                            };
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -28916,6 +30049,26 @@ export interface paths {
                                  * @default 300
                                  */
                                 toleranceSeconds?: number;
+                            };
+                            /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
+                            events?: string[];
+                            /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
+                            eventHeader?: string;
+                            /**
+                             * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                             * @enum {string}
+                             */
+                            preset?: "github" | "gitlab" | "standard-webhooks";
+                            /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                            filter?: {
+                                /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                                headers?: {
+                                    [key: string]: string | string[];
+                                };
+                                /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                                body?: {
+                                    [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                                };
                             };
                         } | {
                             /** @enum {string} */
@@ -29735,6 +30888,31 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            skipped: true;
+                            /** @enum {string} */
+                            reason: "event-not-allowed";
+                            event: string | null;
+                        } | {
+                            /** @enum {boolean} */
+                            skipped: true;
+                            /** @enum {string} */
+                            reason: "filter-not-matched";
+                            match: {
+                                /** @enum {string} */
+                                source: "header" | "body";
+                                path: string;
+                            };
+                        };
+                    };
+                };
                 /** @description Webhook processed */
                 201: {
                     headers: {
@@ -30653,6 +31831,8 @@ export interface components {
             /** Format: uri */
             homepage?: string;
             author?: string;
+            /** @description Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`. */
+            toolSources?: ("mcp" | "native")[];
         };
         ExtensionInstallBody: {
             /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
@@ -30961,7 +32141,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -31072,7 +32252,7 @@ export interface components {
         };
         PricingRow: {
             /** @enum {string} */
-            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
             model: string;
             /** @enum {string} */
             tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
@@ -31205,15 +32385,19 @@ export interface components {
             /** Format: uuid */
             taskId?: string;
             agentId: string;
+            credentialKeyType?: string | null;
+            credentialKeySuffix?: string | null;
+            /** @enum {string|null} */
+            harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
             totalCostUsd: number;
             /** @default 0 */
             inputTokens: number;
             /** @default 0 */
             outputTokens: number;
-            /** @default 0 */
-            cacheReadTokens: number;
-            /** @default 0 */
-            cacheWriteTokens: number;
+            /** @default null */
+            cacheReadTokens: number | null;
+            /** @default null */
+            cacheWriteTokens: number | null;
             /** @default 0 */
             reasoningOutputTokens: number;
             /** @default 0 */
@@ -31228,6 +32412,11 @@ export interface components {
              * @enum {string}
              */
             costSource: "harness" | "pricing-table" | "unpriced" | "estimated";
+            /**
+             * @default harness
+             * @enum {string}
+             */
+            kind: "harness" | "system-one";
             harnessCostUsd?: number | null;
             cacheWrite5mTokens?: number | null;
             cacheWrite1hTokens?: number | null;
@@ -31420,10 +32609,28 @@ export interface components {
              * @enum {string}
              */
             status: "invited" | "active" | "suspended";
+            mergedIntoUserId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        UserMergeJob: {
+            id: string;
+            sourceUserId: string;
+            targetUserId: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "done" | "failed";
+            phase: string | null;
+            progress: {
+                [key: string]: number;
+            };
+            error: string | null;
+            attempts: number;
+            nextAttemptAt: string | null;
+            createdAt: string;
+            startedAt: string | null;
+            finishedAt: string | null;
         };
         WorkflowDefinition: {
             nodes: components["schemas"]["WorkflowNode"][];
@@ -31548,6 +32755,26 @@ export interface components {
                      * @default 300
                      */
                     toleranceSeconds: number;
+                };
+                /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
+                events?: string[];
+                /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
+                eventHeader?: string;
+                /**
+                 * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                 * @enum {string}
+                 */
+                preset?: "github" | "gitlab" | "standard-webhooks";
+                /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                filter?: {
+                    /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                    headers?: {
+                        [key: string]: string | string[];
+                    };
+                    /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                    body?: {
+                        [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                    };
                 };
             } | {
                 /** @enum {string} */
@@ -31799,6 +33026,26 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
+                /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
+                events?: string[];
+                /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
+                eventHeader?: string;
+                /**
+                 * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                 * @enum {string}
+                 */
+                preset?: "github" | "gitlab" | "standard-webhooks";
+                /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                filter?: {
+                    /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                    headers?: {
+                        [key: string]: string | string[];
+                    };
+                    /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                    body?: {
+                        [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                    };
+                };
             } | {
                 /** @enum {string} */
                 type: "schedule";
@@ -31870,6 +33117,10 @@ export interface components {
                 mountPath: string;
             } | null;
             /** @default null */
+            workspace: {
+                sizeGb?: number;
+            } | null;
+            /** @default null */
             ttlSec: number | null;
             /** @default true */
             enabled: boolean;
@@ -31901,6 +33152,7 @@ export interface components {
             idleSince?: string | null;
             leaseExpiresAt?: string | null;
             taskId?: string | null;
+            workspaceSlot?: number | null;
             reportedSlots: number;
             credentialReady?: boolean | null;
             metadata: {
@@ -35941,6 +37193,10 @@ export interface operations {
                         mountPath: string;
                     } | null;
                     /** @default null */
+                    workspace?: {
+                        sizeGb?: number;
+                    } | null;
+                    /** @default null */
                     ttlSec?: number | null;
                     /** @default true */
                     enabled?: boolean;
@@ -36146,6 +37402,9 @@ export interface operations {
                     } | null;
                     cache?: {
                         mountPath: string;
+                    } | null;
+                    workspace?: {
+                        sizeGb?: number;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;

@@ -136,6 +136,7 @@ interface RuntimeInstanceRow {
   idle_since: string | null;
   lease_expires_at: string | null;
   task_id: string | null;
+  workspace_slot?: number | null;
   status: string;
   reported_slots: number;
   credential_ready: number | null;
@@ -169,6 +170,7 @@ function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
     idleSince: row.idle_since ?? null,
     leaseExpiresAt: row.lease_expires_at ?? null,
     taskId: row.task_id ?? null,
+    workspaceSlot: row.workspace_slot ?? null,
     status: row.status as RuntimeInstanceStatus,
     reportedSlots: row.reported_slots,
     credentialReady: row.credential_ready === null ? null : row.credential_ready === 1,
@@ -264,11 +266,12 @@ export async function insertProvisioningRuntime(instance: {
   poolId: string;
   controllerId: string;
   reportedSlots?: number;
+  workspaceSlot?: number | null;
 }): Promise<RuntimeInstance> {
   const row = await getDbClient().get<RuntimeInstanceRow>(
     `INSERT INTO runtime_instances (id, agent_id, pool_id, controller_id, status,
-       reported_slots, provision_requested_at)
-     VALUES (?, ?, ?, ?, 'provisioning', ?, ?) RETURNING *`,
+       reported_slots, provision_requested_at, workspace_slot)
+     VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?) RETURNING *`,
     [
       instance.id,
       instance.agentId,
@@ -276,9 +279,26 @@ export async function insertProvisioningRuntime(instance: {
       instance.controllerId,
       instance.reportedSlots ?? 1,
       new Date().toISOString(),
+      instance.workspaceSlot ?? null,
     ],
   );
   return rowToRuntimeInstance(row!);
+}
+
+/** Lowest workspace slot no live runtime of this agent holds. Call inside the insert transaction. */
+export async function nextFreeWorkspaceSlot(agentId: string): Promise<number> {
+  const taken = new Set(
+    (
+      await getDbClient().query<{ slot: number }>(
+        `SELECT workspace_slot AS slot FROM runtime_instances
+         WHERE agent_id = ? AND workspace_slot IS NOT NULL AND status != 'offline'`,
+        [agentId],
+      )
+    ).map((row) => row.slot),
+  );
+  let slot = 0;
+  while (taken.has(slot)) slot++;
+  return slot;
 }
 
 export async function markRuntimeTerminated(id: string, reason: string): Promise<void> {
@@ -298,6 +318,12 @@ export async function markRuntimeTerminated(id: string, reason: string): Promise
 }
 
 /**
+ * A workspace runtime can register before the supervisor checks its mount. It
+ * gets no work until the supervisor stores the verified handle.
+ */
+const WORKSPACE_CONFIRMED_SQL = "(workspace_slot IS NULL OR external_handle IS NOT NULL)";
+
+/**
  * Refresh a live runtime instance's liveness from the worker's ping cadence.
  *
  * Matches only a row that is already live and owned by the caller, so worker
@@ -310,7 +336,8 @@ export async function touchRuntimeInstance(id: string, agentId: string): Promise
     `UPDATE runtime_instances
      SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND ${WORKSPACE_CONFIRMED_SQL}`,
     [id, agentId, runtimeLivenessCutoff()],
   );
   return result.changes > 0;
@@ -374,7 +401,8 @@ export async function isRuntimeInstanceLive(
   if (!id) return false;
   const row = await getDbClient().get<{ c: number }>(
     `SELECT COUNT(*) c FROM runtime_instances
-     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND ${WORKSPACE_CONFIRMED_SQL}`,
     [id, agentId, runtimeLivenessCutoff()],
   );
   return (row?.c ?? 0) > 0;

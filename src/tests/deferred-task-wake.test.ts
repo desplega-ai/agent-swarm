@@ -17,6 +17,7 @@ import {
   getScheduledTaskById,
   getTaskById,
   initDb,
+  markWorkflowStepTaskSuperseded,
   skipTask,
   startTask,
   supersedeTask,
@@ -36,7 +37,7 @@ import {
 import { dispatchScheduleTarget, executeSchedule } from "../scheduler/scheduler";
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import { registerDeferTaskTool } from "../tools/defer-task";
-import type { AgentTask } from "../types";
+import { type AgentTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "../types";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 type Result = { structuredContent: { success: boolean; message: string; scheduleId?: string } };
@@ -170,6 +171,13 @@ async function awaitWatchedTask(scheduleId: string, taskId: string) {
     await Bun.sleep(5);
   }
   throw new Error("Event bus did not transfer the watched task");
+}
+
+/** A workflow-step supersede cut whose retry the engine queued: failed, then superseded. */
+async function cutWithQueuedRetry(taskId: string) {
+  await failTask(taskId, SUPERSEDED_WORKFLOW_TASK_REASON);
+  expect(await markWorkflowStepTaskSuperseded(taskId)).toBe(true);
+  expect((await getTaskById(taskId))?.status).toBe("superseded");
 }
 
 async function multiFixture(mode?: "all" | "any", event: TaskWakeEvent = "settled") {
@@ -867,6 +875,60 @@ describe("defer-task wakeOn", () => {
     await completeTask(resume.id, "done");
     await reconcileDeferredTaskWaits(resume.id);
     expect(await children(scheduleId)).toHaveLength(1);
+  });
+
+  test("an all-settled wait wakes when its other member settles after a workflow-step cut moved to superseded", async () => {
+    await initDeferredTaskWaits();
+    const { producers, schedule } = await multiFixture("all");
+    const [cut, other] = producers as [AgentTask, AgentTask];
+    await cutWithQueuedRetry(cut.id);
+    await reconcileDeferredTaskWaits(cut.id);
+    expect(await children(schedule.id)).toHaveLength(0);
+    await completeTask(other.id, "other done");
+    const child = await awaitChild(schedule.id);
+    expect(child.task).toContain(`${cut.id} (failed)`);
+    expect(child.task).toContain(`${other.id} (completed)`);
+    expect(await waitState(schedule.id)).toMatchObject({
+      status: "fired",
+      firedBy: "task.completed",
+    });
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test.each([
+    ["settled", true],
+    ["task.failed", true],
+    ["task.completed", false],
+  ] as const)("a workflow-step cut already moved to superseded reads as failed for %s", async (event, wakes) => {
+    // Listener off: the retry's move to superseded lands before the wait reads
+    // the failure, the order a live process can also commit in.
+    const { producer, schedule } = await fixture(event);
+    await cutWithQueuedRetry(producer.id);
+    await reconcileDeferredTaskWaits(producer.id);
+    if (wakes) {
+      expect((await awaitChild(schedule.id)).task).toContain(
+        `Wake-up cause: task.failed for task ${producer.id}`,
+      );
+      expect(await waitState(schedule.id)).toMatchObject({ firedBy: "task.failed" });
+    } else {
+      expect(await children(schedule.id)).toHaveLength(0);
+      expect(await waitState(schedule.id)).toMatchObject({ status: "pending" });
+      await executeSchedule(schedule);
+      expect(await waitState(schedule.id)).toMatchObject({ firedBy: "ceiling" });
+    }
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("restart reconciles a workflow-step cut and its sibling settled while the listener was down", async () => {
+    const { producers, schedule } = await multiFixture("all");
+    await cutWithQueuedRetry(producers[0]!.id);
+    await completeTask(producers[1]!.id, "done while stopped");
+    closeDb();
+    initDb(path);
+    await initDeferredTaskWaits();
+    expect(await waitState(schedule.id)).toMatchObject({ status: "fired" });
+    expect(await children(schedule.id)).toHaveLength(1);
   });
 
   test("unmatched task or event does not wake", async () => {

@@ -412,6 +412,9 @@
     "resolvedProfile": {
       "exempt": "enum or fixed-format value"
     },
+    "modelGroup": {
+      "exempt": "enum or fixed-format value"
+    },
     "fallbackHops": {
       "exempt": "JSON hop list written by the API: profile names, an error-class enum, ISO times, and profile-check row text (var names and 5-character key suffixes only)"
     },
@@ -532,6 +535,7 @@
     }
   },
   "api_key_status": {
+    "detectedPlanRaw": "scrubbed",
     "id": {
       "exempt": "identifier"
     },
@@ -571,6 +575,7 @@
     "provider": {
       "exempt": "enum or fixed-format value"
     },
+    "providerAccount": "scrubbed",
     "rateLimitWindows": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
@@ -2203,6 +2208,9 @@
     },
     "profile": {
       "exempt": "enum or fixed-format value"
+    },
+    "modelGroup": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "script_apis": {
@@ -2647,6 +2655,9 @@
     }
   },
   "session_costs": {
+    "credentialKeyType": { "exempt": "credential type identifier" },
+    "credentialKeySuffix": { "exempt": "credential suffix identifier" },
+    "harness": { "exempt": "enum or fixed-format value" },
     "id": {
       "exempt": "identifier"
     },
@@ -2663,6 +2674,9 @@
       "exempt": "enum or fixed-format value"
     },
     "costSource": {
+      "exempt": "enum or fixed-format value"
+    },
+    "kind": {
       "exempt": "enum or fixed-format value"
     },
     "createdAt": {
@@ -2688,6 +2702,9 @@
     "content": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
+    },
+    "reasoningKind": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "session_shares": {
@@ -3095,6 +3112,8 @@
     }
   },
   "slack_render_v2_state": {
+    "reconcile_cursors": { "exempt": "JSON of internal pagination identifiers" },
+    "task_tree_enabled_at": { "exempt": "timestamp" },
     "activated_at": {
       "exempt": "timestamp"
     },
@@ -3389,6 +3408,65 @@
       "exempt": "identifier"
     }
   },
+  "task_ui_action_runs": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "action_id": {
+      "exempt": "enum or fixed-format value"
+    },
+    "surface": {
+      "exempt": "enum or fixed-format value"
+    },
+    "slack_user_id": {
+      "exempt": "identifier"
+    },
+    "result_task_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "locked_until": {
+      "exempt": "timestamp"
+    },
+    "last_run_at": {
+      "exempt": "timestamp"
+    },
+    "last_error": "scrubbed",
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "task_ui_specs": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "catalog": {
+      "exempt": "enum or fixed-format value"
+    },
+    "spec": "scrubbed",
+    "actions": "scrubbed",
+    "fallback_text": "scrubbed",
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "tracker_agent_mapping": {
     "id": {
       "exempt": "identifier"
@@ -3585,6 +3663,7 @@
     "status": {
       "exempt": "enum or fixed-format value"
     },
+    "mergedIntoUserId": { "exempt": "identifier" },
     "createdAt": {
       "exempt": "timestamp"
     },
@@ -3895,6 +3974,9 @@
     "cache": {
       "exempt": "JSON cache mount path and server-owned generation key"
     },
+    "workspace": {
+      "exempt": "JSON workspace mount path, slot count and size"
+    },
     "resolved_image": {
       "exempt": "provider artifact reference"
     },
@@ -4026,6 +4108,40 @@
     },
     "fallbacks": {
       "exempt": "JSON array of profile names"
+    }
+  },
+  "model_groups": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "exempt": "enum or fixed-format value"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "seededFrom": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "model_group_members": {
+    "groupId": {
+      "exempt": "identifier"
+    },
+    "profileName": {
+      "exempt": "enum or fixed-format value"
     }
   },
   "workflow_idempotency_keys": {
@@ -4177,5 +4293,40 @@
     "instructionsHash": { "exempt": "hash or digest" },
     "skillKeys": { "exempt": "JSON array of import item keys" },
     "createdAt": { "exempt": "timestamp" }
+  },
+  "user_merge_jobs": {
+    "id": { "exempt": "identifier" },
+    "sourceUserId": { "exempt": "identifier" },
+    "targetUserId": { "exempt": "identifier" },
+    "status": { "exempt": "enum or fixed-format value" },
+    "phase": { "exempt": "enum or fixed-format value" },
+    "progress": { "exempt": "JSON object of row counts keyed by phase" },
+    "error": "scrubbed",
+    "nextAttemptAt": { "exempt": "timestamp" },
+    "createdAt": { "exempt": "timestamp" },
+    "startedAt": { "exempt": "timestamp" },
+    "finishedAt": { "exempt": "timestamp" },
+    "created_by": { "exempt": "identifier" },
+    "updated_by": { "exempt": "identifier" }
+  },
+  "mcp_event_subscriptions": {
+    "id": { "exempt": "identifier" },
+    "userId": { "exempt": "identifier" },
+    "tokenId": { "exempt": "identifier" },
+    "eventName": { "exempt": "enum or fixed-format value" },
+    "argumentsJson": { "exempt": "canonical JSON of validated subscription arguments (an optional task id)" },
+    "url": { "exempt": "client-supplied callback URL, must round-trip byte-exact for delivery" },
+    "secretSealed": { "exempt": "ciphertext (encryptSecret)" },
+    "previousSecretSealed": { "exempt": "ciphertext (encryptSecret)" },
+    "previousSecretUntil": { "exempt": "timestamp" },
+    "verifiedAt": { "exempt": "timestamp" },
+    "expiresAt": { "exempt": "timestamp" },
+    "lastDeliveryAt": { "exempt": "timestamp" },
+    "lastError": { "exempt": "enum or fixed-format value" },
+    "failedSince": { "exempt": "timestamp" },
+    "createdAt": { "exempt": "timestamp" },
+    "updatedAt": { "exempt": "timestamp" },
+    "created_by": { "exempt": "identifier" },
+    "updated_by": { "exempt": "identifier" }
   }
 }

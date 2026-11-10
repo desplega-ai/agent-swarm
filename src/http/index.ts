@@ -17,8 +17,10 @@ import {
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
 import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { initMcpEventsDispatcher } from "../be/mcp-events/dispatcher";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
@@ -114,6 +116,7 @@ import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
+import { handleModelGroups } from "./model-groups";
 import { handleModelProfiles } from "./model-profiles";
 import { handleModelsCatalog } from "./models-catalog";
 import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
@@ -151,6 +154,7 @@ import { handleStatus } from "./status";
 import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTelemetryUi } from "./telemetry-ui";
+import { handleToolHooks } from "./tool-hooks";
 import { handleTrackers } from "./trackers";
 import { handleUsedBy } from "./used-by";
 import { handleUserRoles } from "./user-roles";
@@ -403,6 +407,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
         () => handleModelProfiles(req, res, pathSegments, queryParams, myAgentId),
+        () => handleModelGroups(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
@@ -426,6 +431,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleToolHooks(req, res, pathSegments, queryParams, myAgentId),
         () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
@@ -650,6 +656,18 @@ startEventLoopLagProbe();
 // credential saved only in swarm_config silently reverts to the stale env
 // value on the next deploy (2026-09-16 prod Slack outage). Reserved keys
 // (API_KEY, SECRETS_ENCRYPTION_KEY, ...) stay env-only regardless.
+// New-install seed: a database created by this boot gets the default
+// retention values as global config rows. Runs before the load below so the
+// rows are injected. Non-fatal: a failed seed leaves retention off.
+try {
+  await seedDbRetentionDefaults();
+} catch (err) {
+  console.warn(
+    "[startup] Retention defaults seed failed (non-fatal):",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 let startupConfigsInjected: string[] = [];
 try {
   startupConfigsInjected = await loadGlobalConfigsIntoEnv(true);
@@ -863,6 +881,9 @@ httpServer
     initAzureDevOps();
     initAzureDevOpsOutbound();
 
+    // MCP Events webhook delivery for /mcp-user subscribers (gated per event by MCP_USER_EVENTS_ENABLED)
+    initMcpEventsDispatcher();
+
     // Initialize Bitbucket Cloud webhook handler (if configured)
     initBitbucket();
 
@@ -971,6 +992,15 @@ httpServer
       .then(({ runBootScrubSweep }) => runBootScrubSweep())
       .catch((err) => {
         console.error("[boot-scrub-sweep] startup scrub failed (non-fatal):", err);
+      });
+
+    // User merges queued by POST /api/users/{id}/merge run in batches off the
+    // request. A job the previous process left running or failed is re-queued
+    // and continues from its last committed batch. See src/be/user-merge-jobs.ts.
+    import("../be/user-merge-jobs")
+      .then(({ resumeUserMergeJobs }) => resumeUserMergeJobs())
+      .catch((err) => {
+        console.error("[user-merge] startup resume failed (non-fatal):", err);
       });
 
     // Source key backfill is idempotent, resumable, and non-fatal.

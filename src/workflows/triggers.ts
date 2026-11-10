@@ -4,6 +4,7 @@ import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";
+import { decideWebhookDelivery, type WebhookDeliverySkip } from "./webhook-filter";
 
 type WebhookTriggerConfig = Extract<TriggerConfig, { type: "webhook" }>;
 
@@ -152,6 +153,11 @@ export async function verifyWebhookRequest(
   }
 }
 
+/** Outcome of a webhook delivery: a started run, or a delivery the trigger filter dropped. */
+export type WebhookTriggerResult =
+  | { runId: string; skipped?: undefined }
+  | (WebhookDeliverySkip & { runId?: undefined });
+
 export interface HandleWebhookTriggerOptions {
   /**
    * Skip the "workflow must declare a webhook trigger" gate. ONLY for callers
@@ -175,10 +181,12 @@ export interface HandleWebhookTriggerOptions {
  * 3. If `hmacSecret` / `verification` is set, resolves the signature header +
  *    secret and verifies the signature against the raw body bytes
  * 4. Parses the raw body as JSON (falling back to the raw string when the
- *    body is non-JSON) so downstream `{{trigger.deep.path}}` interpolation
- *    can traverse the object — matches the shape produced by the
- *    `trigger-workflow` MCP tool.
- * 5. Starts the workflow execution with the parsed payload
+ *    body is non-JSON) so the delivery filter and downstream
+ *    `{{trigger.deep.path}}` interpolation see the same value
+ * 5. Applies `filter` and the deprecated `events` allowlist. A miss returns
+ *    a `skipped` result and does not persist a run. A trigger whose filter
+ *    or preset is not the documented shape fails closed with 500
+ * 6. Starts the workflow execution with the parsed payload
  */
 export async function handleWebhookTrigger(
   workflowId: string,
@@ -186,7 +194,7 @@ export async function handleWebhookTrigger(
   headers: HeaderBag,
   registry: ExecutorRegistry,
   options: HandleWebhookTriggerOptions = {},
-): Promise<{ runId: string }> {
+): Promise<WebhookTriggerResult> {
   const workflow = await getWorkflow(workflowId);
   if (!workflow) {
     throw new WebhookError("Workflow not found", 404);
@@ -223,10 +231,19 @@ export async function handleWebhookTrigger(
     );
   }
 
-  // Parse the raw body so downstream nodes can interpolate deep paths
-  // (e.g. `{{trigger.message.from}}`). A non-JSON body falls back to the raw
-  // string so non-JSON webhooks don't break.
+  // Parse after verification. A non-JSON body stays a string: body clauses
+  // miss on it, and a delivery with no body clause still starts a run.
+  // Downstream `{{trigger.deep.path}}` uses this value.
   const triggerData = parseTriggerPayload(payload);
+  if (webhookTrigger) {
+    // After verification, so a bad signature is still a 401. Before the run
+    // is persisted, so a dropped delivery writes no rows.
+    const decision = decideWebhookDelivery(webhookTrigger, headers, triggerData);
+    if (decision.action === "invalid") {
+      throw new WebhookError(decision.message, 500);
+    }
+    if (decision.action === "skip") return decision.skip;
+  }
 
   const runId = await startWorkflowExecution(workflow, triggerData, registry, {
     triggerType: "event",

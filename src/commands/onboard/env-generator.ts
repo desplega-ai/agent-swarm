@@ -53,7 +53,7 @@ export function generateEnv(state: OnboardState, env: NodeJS.ProcessEnv = proces
   lines.push("MEMORY_HYBRID_SEARCH=1");
   lines.push("MEMORY_GRAPH_EXPANSION=1");
   lines.push("MEMORY_RATERS=implicit-citation,explicit-self");
-  lines.push("MEMORY_DEMOTION_FLOOR=1.0");
+  lines.push("MEMORY_DEMOTION_FLOOR=0.5");
 
   if (state.bundleAgentFs) {
     lines.push("");

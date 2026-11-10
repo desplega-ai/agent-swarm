@@ -172,6 +172,8 @@ export interface CredentialSelection {
   seatBlockedIndices?: number[];
   /** Subscription plan id detected on the credential (`SUBSCRIPTION_PLANS`), reported with its usage. */
   plan?: string | null;
+  /** Raw provider identity, independent of a priced catalog selection. */
+  planRaw?: string | null;
   /** `authFailureFence` from `GET /api/keys/available`, read before the task (Codex pool only). */
   authFailureFence?: number;
 }
@@ -596,6 +598,13 @@ export async function resolveCredentialPools(
       let modelBlockedCount = allowedIdx
         ? (info?.modelBlockedIndices?.filter(inAllowlist).length ?? 0)
         : (info?.modelBlockedIndices?.length ?? 0);
+      // A key-wide report this worker could not persist (`reportCredentialOutcomeThenFinish`)
+      // still keeps the key out of the next draw, also when the availability read failed too.
+      const keyBlocked = (i: number) => (opts?.localBlocks?.get(`${envVar}:${i}:key`) ?? 0) > nowMs;
+      const pool = splitCredentialPool(val).map((_, i) => i);
+      if (pool.some(keyBlocked)) {
+        available = (available ?? pool.filter(inAllowlist)).filter((i) => !keyBlocked(i));
+      }
       if (available && window && opts?.localBlocks) {
         const beforeCount = available.length;
         available = available.filter((i) => {

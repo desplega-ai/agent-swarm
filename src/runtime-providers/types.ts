@@ -21,6 +21,8 @@ export interface RuntimeProviderTraits {
   supportsPause: boolean;
   /** Can mount a persistent cache shared by all runtimes of one pool. */
   persistentCache?: boolean;
+  /** Can mount a persistent per-agent workspace at WORKSPACE_MOUNT_PATH. */
+  persistentWorkspace?: boolean;
   /** Provider hard cap on runtime lifetime, if any. */
   maxTtlSec?: number;
   /** Continuous runtime limit for the configured infrastructure tier. */
@@ -49,6 +51,11 @@ export interface ProvisionRequest {
   resources?: { cpu?: number; memoryMb?: number };
   /** Provider-neutral cache identity, allocated by the API rather than the operator. */
   cache?: { key: string; mountPath: string };
+  /**
+   * Persistent workspace mounted at WORKSPACE_MOUNT_PATH. The adapter must echo
+   * `meta.workspaceKey` on the handle, or the supervisor terminates the runtime.
+   */
+  workspace?: { key: string; sizeGb?: number };
   ttlSec?: number;
   /** Ownership labels, used by list() to find runtimes this swarm started. */
   labels: Record<string, string>;
@@ -62,6 +69,13 @@ export interface RuntimeCacheReference {
 
 export function poolCacheKey(poolId: string, generation?: string): string {
   return `swarm-cache-${poolId}${generation ? `-${generation}` : ""}`;
+}
+
+export const WORKSPACE_MOUNT_PATH = "/workspace/personal";
+
+/** No pool and no generation: the volume outlives the pool and survives a rebind. */
+export function workspaceVolumeKey(agentId: string, slot: number): string {
+  return `swarm-ws-${agentId.toLowerCase()}-${slot}`;
 }
 
 export interface RuntimeHandle {
@@ -106,3 +120,6 @@ export const RUNTIME_LABELS = {
   poolId: "swarm.pool-id",
   agentId: "swarm.agent-id",
 } as const;
+
+/** Marks a persistent workspace volume; releaseCache refuses anything carrying it. */
+export const WORKSPACE_LABEL = "swarm.workspace";

@@ -1,0 +1,172 @@
+name: Deploy
+
+# Prod deploys three times a day, not on every merge: each deploy restarts the
+# API and cuts in-flight tasks. An external scheduler dispatches this workflow on
+# main with no inputs at 09:00, 14:00 and 19:00 Europe/Madrid, and the
+# deploy-release job in docker-and-deploy.yml dispatches it after a release
+# (package.json version bump) builds its images.
+# docker-and-deploy.yml builds sha-<short> images
+# and moves :latest/:slim on every main push; prod runs :prod instead. This
+# workflow promotes the newest built commit to api and worker :prod and deploys
+# it, or skips when :prod already runs it.
+# Hotfix: gh workflow run deploy.yml -R desplega-ai/agent-swarm [-f sha=<main sha>]
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Main commit to deploy (default: the newest one with api and worker images)"
+        required: false
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy:
+    name: Promote images and deploy
+    runs-on: ubuntu-latest
+    # Run the deploy code from main only; the selection itself checks the SHA is on main.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      # actions: read lets the Slack step read the run start time.
+      actions: read
+      contents: read
+      packages: write
+    # Every :prod write and the complete deploy share this lock. A pending
+    # run that a newer one replaces loses nothing: selection runs after the lock.
+    concurrency:
+      group: agent-swarm-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Record start time
+        id: start
+        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # Picks the newest main commit whose api and worker images both exist, reads
+      # the api :prod revision (the previous deploy, which also bounds the Slack
+      # change list) and pins the two digests once. action=skip when :prod already
+      # runs that commit; a missing :prod means no previous deploy.
+      # Test: src/tests/deploy-select.test.ts.
+      - name: Select commit and pin digests
+        id: select
+        env:
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          REQUESTED_SHA: ${{ inputs.sha }}
+        run: bun scripts/deploy-select.ts "$REQUESTED_SHA"
+
+      - name: Promote :prod
+        if: steps.select.outputs.action == 'deploy'
+        env:
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          API_DIGEST: ${{ steps.select.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.select.outputs.worker_digest }}
+        run: |
+          set -euo pipefail
+
+          # Promote by the digests pinned above, never a SHA tag that a rerun can move.
+          docker buildx imagetools create -t "${API_IMAGE}:prod" "${API_IMAGE}@${API_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:prod" "${WORKER_IMAGE}@${WORKER_DIGEST}"
+
+      # Dokploy queues the deploy and only creates the deployment record when its worker
+      # picks the job up, which can take minutes. The script waits for that record,
+      # re-triggers if none appears, and fails only on a real error. See its header.
+      - name: Deploy Agent Swarm
+        if: steps.select.outputs.action == 'deploy'
+        env:
+          DOKPLOY_URL: https://app.dokploy.com
+          DOKPLOY_COMPOSE_ID: u-iCRBK0Ta-pOedSaTjqc
+          DOKPLOY_TOKEN: ${{ secrets.DOKPLOY_TOKEN }}
+        run: bun scripts/dokploy-deploy.ts
+
+      # Posts the deploy outcome to the deploys channel through a Slack incoming
+      # webhook (bound to its channel when the webhook is created). Runs on success,
+      # failure and cancel of a selected deploy, never on a skip. No secret means
+      # no post, so this never blocks a deploy; a failed post only logs a warning.
+      - name: Notify Slack
+        if: always() && steps.select.outputs.action == 'deploy'
+        continue-on-error: true
+        env:
+          WEBHOOK: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ job.status }}
+          VERSION: ${{ steps.select.outputs.version }}
+          DEPLOY_SHA: ${{ steps.select.outputs.sha }}
+          PREV_SHA: ${{ steps.select.outputs.prev_sha }}
+          STARTED: ${{ steps.start.outputs.epoch }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice::DEPLOY_SLACK_WEBHOOK_URL is not set; skipping the Slack deploy notification"
+            exit 0
+          fi
+
+          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
+          case "$STATUS" in
+            success) headline=":white_check_mark: *agent-swarm deploy succeeded*" ;;
+            cancelled) headline=":heavy_minus_sign: *agent-swarm deploy cancelled*" ;;
+            *) headline=":x: *agent-swarm deploy failed*" ;;
+          esac
+
+          fmt() { if [ "$1" -ge 60 ]; then echo "$(($1 / 60))m $(($1 % 60))s"; else echo "$1s"; fi; }
+          now="$(date +%s)"
+          durations="deploy job $(fmt $((now - ${STARTED:-$now})))"
+          run_started="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .run_started_at 2>/dev/null || true)"
+          if [ -n "$run_started" ]; then
+            durations="${durations}, whole run $(fmt $((now - $(date -d "$run_started" +%s))))"
+          fi
+
+          # Commits between the image :prod pointed at before this deploy and this
+          # one, newest first, with "(#123)" turned into PR links.
+          changes=""
+          if [[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$PREV_SHA" != "$DEPLOY_SHA" ]; then
+            changes="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_SHA}...${DEPLOY_SHA}" | jq -r --arg url "$repo_url" '
+              def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+              select(.status == "ahead")
+              | "Changes since <\($url)/commit/\(.base_commit.sha)|\(.base_commit.sha[0:7])> (\(.total_commits)):",
+                ((.commits | reverse)[:15][]
+                  | "• <\($url)/commit/\(.sha)|\(.sha[0:7])> "
+                    + (.commit.message | split("\n")[0] | esc
+                       | gsub("\\(#(?<n>[0-9]+)\\)"; "(<\($url)/pull/\(.n)|#\(.n)>)"))),
+                (if .total_commits > 15 then "…and \(.total_commits - 15) more" else empty end)
+            ' 2>/dev/null || true)"
+          fi
+
+          text="${headline}: v${VERSION} <${repo_url}/commit/${DEPLOY_SHA}|${DEPLOY_SHA:0:7}>"
+          text="${text}"$'\n'"Duration: ${durations} · <${run_url}|workflow run>"
+          if [ -n "$changes" ]; then
+            text="${text}"$'\n'"${changes}"
+          fi
+
+          payload="$(jq -n --arg text "$text" '{text: $text, unfurl_links: false, unfurl_media: false}')"
+          if curl -sS --fail-with-body --max-time 20 -H 'content-type: application/json' --data "$payload" "$WEBHOOK"; then
+            echo
+            echo "::notice::Posted the deploy outcome (${STATUS}) to Slack"
+          else
+            echo "::warning::Slack deploy notification failed; the deploy result is unaffected"
+          fi

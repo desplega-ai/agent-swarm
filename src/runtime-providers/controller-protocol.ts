@@ -17,6 +17,7 @@ const traitsSchema = z.object({
   ephemeralDisk: z.boolean(),
   supportsPause: z.boolean(),
   persistentCache: z.boolean().optional(),
+  persistentWorkspace: z.boolean().optional(),
   maxTtlSec: z.number().positive().optional(),
   maxContinuousSec: z.number().positive().optional(),
 });
@@ -35,6 +36,12 @@ const provisionSchema = z.object({
   cache: RuntimePoolCacheSchema.extend({
     key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/),
   }).optional(),
+  workspace: z
+    .object({
+      key: z.string().regex(/^swarm-ws-[a-z0-9-]+-\d+$/),
+      sizeGb: z.number().int().positive().optional(),
+    })
+    .optional(),
 });
 const command = { type: z.literal("cmd"), id: z.string().min(1) };
 export const ControllerCommandSchema = z.discriminatedUnion("op", [

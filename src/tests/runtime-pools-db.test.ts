@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  workspaceFormFromPool,
+  workspaceInput,
+} from "../../apps/ui/src/lib/runtime-pool-workspace";
 import { encryptSecret } from "../be/crypto";
 import {
   closeDb,
@@ -20,6 +24,7 @@ import {
   getPoolForAgent,
   getRuntimeController,
   getRuntimeControllerSecrets,
+  getRuntimeControllerTarget,
   getRuntimePool,
   listAgentsForPool,
   listRuntimeControllers,
@@ -52,6 +57,24 @@ beforeEach(async () => {
 });
 
 describe("runtime pools persistence", () => {
+  test("Kubernetes deployment detection ignores controller overrides from existing rows", async () => {
+    const controller = await createRuntimeController({
+      name: "cluster-auth",
+      kind: "k8s",
+      placement: "builtin",
+    });
+    await getDbClient().run("UPDATE runtime_controllers SET config = ? WHERE id = ?", [
+      JSON.stringify({ KUBERNETES_SERVICE_HOST: "controller-host" }),
+      controller.id,
+    ]);
+    const stored = (await getRuntimeController(controller.id))!;
+    expect((await getRuntimeControllerTarget(stored, {})).KUBERNETES_SERVICE_HOST).toBeUndefined();
+    expect(
+      (await getRuntimeControllerTarget(stored, { KUBERNETES_SERVICE_HOST: "deployment-host" }))
+        .KUBERNETES_SERVICE_HOST,
+    ).toBe("deployment-host");
+  });
+
   test("pool caches default off, persist across edits, and can be disabled explicitly", async () => {
     const controller = await createRuntimeController({ name: "cache-controller", kind: "docker" });
     const base = {
@@ -127,6 +150,82 @@ describe("runtime pools persistence", () => {
       ).rejects.toThrow("does not support persistent pool caches");
     }
     expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
+  });
+
+  test("workspace pools are accepted on Docker and k8s, rejected elsewhere, and kept on update", async () => {
+    for (const kind of ["static", "e2b", "boxd"] as const) {
+      const controller = await createRuntimeController({ name: `${kind}-ws-validation`, kind });
+      await expect(
+        createRuntimePool({
+          name: `unsupported-workspace-${kind}`,
+          kind,
+          placements: [controller.id],
+          image: "worker:test",
+          workspace: {},
+        }),
+      ).rejects.toThrow(`${kind} does not support persistent workspaces`);
+    }
+    const k8s = await createRuntimeController({
+      name: "k8s-ws-validation",
+      kind: "k8s",
+      placement: "builtin",
+    });
+    const k8sPool = await createRuntimePool({
+      name: "k8s-workspace",
+      kind: "k8s",
+      placements: [k8s.id],
+      image: "worker:test",
+      workspace: { sizeGb: 10 },
+    });
+    expect(k8sPool.workspace).toEqual({ sizeGb: 10 });
+    const docker = await createRuntimeController({ name: "docker-ws-validation", kind: "docker" });
+    await expect(
+      createRuntimePool({
+        name: "bad-size",
+        kind: "docker",
+        placements: [docker.id],
+        image: "worker:test",
+        workspace: { sizeGb: 0 },
+      }),
+    ).rejects.toThrow();
+    const plain = await createRuntimePool({
+      name: "plain",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+    });
+    expect(plain.workspace).toBeNull();
+    const pool = await createRuntimePool({
+      name: "workspace",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+      workspace: { sizeGb: 40 },
+    });
+    expect(pool.workspace).toEqual({ sizeGb: 40 });
+    expect((await updateRuntimePool(pool.id, { minRuntimes: 1 })).workspace).toEqual({
+      sizeGb: 40,
+    });
+    expect((await updateRuntimePool(pool.id, { workspace: null })).workspace).toBeNull();
+  });
+
+  test("a dashboard save that leaves the workspace control alone keeps the stored workspace", async () => {
+    const docker = await createRuntimeController({ name: "docker-ws-untouched", kind: "docker" });
+    const pool = await createRuntimePool({
+      name: "workspace-untouched",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+      workspace: { sizeGb: 40 },
+    });
+    const form = workspaceFormFromPool(pool);
+    const untouched = workspaceInput(pool.kind, form).input;
+    expect("workspace" in untouched).toBe(false);
+    expect((await updateRuntimePool(pool.id, { name: "renamed", ...untouched })).workspace).toEqual(
+      { sizeGb: 40 },
+    );
+    const off = workspaceInput(pool.kind, { ...form, workspace: false, workspaceTouched: true });
+    expect((await updateRuntimePool(pool.id, off.input)).workspace).toBeNull();
   });
 
   test("cache mount validation accepts isolated cache subdirectories", async () => {
@@ -288,10 +387,10 @@ describe("runtime pools persistence", () => {
       "Pool kind must equal controller kind",
     );
     await expect(createRuntimePool({ ...input, kind: "k8s" })).rejects.toThrow(
-      "k8s provider not implemented",
+      "Pool kind must equal controller kind",
     );
     await expect(createRuntimeController({ name: "k8s", kind: "k8s" })).rejects.toThrow(
-      "k8s provider not implemented",
+      "Kubernetes controllers require builtin placement",
     );
     const pool = await createRuntimePool({ ...input, maxRuntimes: 3, minRuntimes: 2 });
     await expect(updateRuntimePool(pool.id, { maxRuntimes: 1 })).rejects.toMatchObject({
@@ -311,6 +410,27 @@ describe("runtime pools persistence", () => {
       env: { MODE: "test" },
     });
     expect(await getRuntimePool(pool.id)).toEqual(updated);
+  });
+  test("creates builtin Kubernetes controllers and pools", async () => {
+    const controller = await createRuntimeController({
+      name: "kubernetes",
+      kind: "k8s",
+      placement: "builtin",
+      config: { K8S_API_URL: "https://cluster.test", K8S_NAMESPACE: "workers" },
+      secretConfig: { K8S_TOKEN: crypto.randomUUID() },
+    });
+    expect(controller.secretConfigKeys).toEqual(["K8S_TOKEN"]);
+    expect(JSON.stringify(controller)).not.toContain('"K8S_TOKEN":');
+    const pool = await createRuntimePool({
+      name: "kubernetes",
+      kind: "k8s",
+      placements: [controller.id],
+      image: "worker:test",
+    });
+    expect(pool.kind).toBe("k8s");
+    await expect(updateRuntimeController(controller.id, { placement: "remote" })).rejects.toThrow(
+      "Kubernetes controllers require builtin placement",
+    );
   });
   test("encrypts secrets, merges and removes keys, and restores scrubbing after a restart", async () => {
     const secret = crypto.randomUUID() + crypto.randomUUID();

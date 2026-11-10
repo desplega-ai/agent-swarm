@@ -34,7 +34,8 @@
  * Optional: `--changed-files-file <file>` / PR_CHANGED_FILES_FILE (one path per
  * line; a local run without it uses `git diff` against origin/main) and
  * `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions), and
- * PR_TEMPLATE_PATH (the template to check against; default below).
+ * PR_TEMPLATE_PATH (the template to check against; default below), and
+ * PR_BODY_PROBLEMS_FILE (on failure, the problems are written there as a Markdown list).
  *
  * CI: `.github/workflows/pr-body.yml` passes the env above. On success, each
  * picked choice and the risk level are written to GITHUB_OUTPUT (for example
@@ -316,6 +317,9 @@ if (import.meta.main) {
     process.exit(0);
   }
 
+  // pr-body-comment.yml posts this list on fork PRs, whose authors cannot read the job log easily.
+  const problemsFile = process.env.PR_BODY_PROBLEMS_FILE;
+  if (problemsFile) await Bun.write(problemsFile, problems.map((p) => `- ${p}\n`).join(""));
   console.error(`PR body does not match ${TEMPLATE_PATH}:`);
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error("\nLead lines:");

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { RUNTIME_WORKSPACE_KINDS } from "../../apps/ui/src/lib/runtime-pool-workspace";
 import { canProvisionKind, createRuntimeProvider } from "../runtime-providers";
 import { type RuntimeProviderKind, RuntimeProviderKindSchema } from "../types";
 
 const repoRoot = join(import.meta.dir, "..", "..");
 const kinds = RuntimeProviderKindSchema.options;
-const notImplemented = { k8s: "adapter not implemented" };
 
 interface TouchPoint {
   file: string;
@@ -26,7 +26,7 @@ const TOUCH_POINTS: TouchPoint[] = [
       }
       throw new Error("Factory accepted an unregistered runtime provider.");
     },
-    exempt: notImplemented,
+    exempt: {},
   },
   {
     file: "src/runtime-providers/<kind>.ts",
@@ -39,7 +39,7 @@ const TOUCH_POINTS: TouchPoint[] = [
       }
       return present;
     },
-    exempt: notImplemented,
+    exempt: {},
   },
   {
     file: "runbooks/runtime-providers.md",
@@ -47,7 +47,7 @@ const TOUCH_POINTS: TouchPoint[] = [
       const source = await Bun.file(join(repoRoot, "runbooks/runtime-providers.md")).text();
       return kinds.filter((kind) => new RegExp(`^#{2,3} ${kind}\\s*$`, "m").test(source));
     },
-    exempt: notImplemented,
+    exempt: {},
   },
   {
     file: "apps/ui/src/lib/runtime-pools.ts (RUNTIME_PROVIDER_KINDS)",
@@ -60,7 +60,6 @@ const TOUCH_POINTS: TouchPoint[] = [
       if (!match?.[1]) throw new Error("Cannot find RUNTIME_PROVIDER_KINDS in runtime-pools.ts.");
       return [...match[1].matchAll(/["']([^"']+)["']/g)].map((match) => match[1] as string);
     },
-    // The UI lists k8s too (disabled, "coming soon"), so no kind is exempt.
     exempt: {},
   },
 ];
@@ -88,22 +87,22 @@ describe("runtime provider registration", () => {
   }
 
   test("static provisioning lookup matches adapter traits", async () => {
-    expect(canProvisionKind("k8s")).toBe(false);
-    for (const kind of kinds.filter((kind) => kind !== "k8s"))
+    for (const kind of kinds)
       expect(canProvisionKind(kind)).toBe((await createRuntimeProvider(kind)).traits.canProvision);
   });
 
-  for (const kind of kinds.filter((kind) => kind !== "k8s")) {
+  test("dashboard workspace kinds match adapter traits", async () => {
+    for (const kind of kinds)
+      expect(RUNTIME_WORKSPACE_KINDS.includes(kind)).toBe(
+        (await createRuntimeProvider(kind)).traits.persistentWorkspace === true,
+      );
+  });
+
+  for (const kind of kinds) {
     test(`factory creates ${kind}`, async () => {
       expect((await createRuntimeProvider(kind)).kind).toBe(kind);
     });
   }
-
-  test("k8s explicitly rejects provisioning support", async () => {
-    await expect(createRuntimeProvider("k8s")).rejects.toThrow(
-      'Unknown runtime provider: "k8s" (not implemented). Supported: static, docker, e2b, boxd',
-    );
-  });
 
   test("static workers remain operator-managed", async () => {
     const provider = await createRuntimeProvider("static");

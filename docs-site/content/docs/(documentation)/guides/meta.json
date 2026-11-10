@@ -3,6 +3,8 @@
   "pages": [
     "choosing-an-ai-operating-model",
     "small-tech-team-operating-model",
+    "customer-renewal-review",
+    "ai-invoice-discrepancy-review",
     "deployment",
     "one-click-deploy",
     "kubernetes",
@@ -21,6 +23,7 @@
     "provider-capability-matrix",
     "harness-providers",
     "task-steering",
+    "mcp-events",
     "claude-code-mod",
     "observability-opentelemetry",
     "host-requirements",

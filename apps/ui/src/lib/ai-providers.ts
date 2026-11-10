@@ -1,5 +1,6 @@
 import type { ApiKeyStatus, CodexAccount, PoolKey, UsageSummaryByCredentialRow } from "@/api/types";
 import type { ProviderIconKey } from "./agent-runtime-models";
+import { rawPlanOf } from "./provider-quota";
 
 /*
  * The LLM providers that Connect › AI providers can add, in Add menu order.
@@ -759,13 +760,17 @@ export interface ProviderKey {
   lastUsedAt: string | null;
   plan: string | null;
   planSource: ApiKeyStatus["planSource"];
-  /** 0 to 100, when the provider reports the window (Claude tokens). */
-  window5h: number | null;
-  window7d: number | null;
+  /** The provider's raw plan claim, when known (`pro`, `promax`). */
+  planRaw: string | null;
   costToday: number;
   cost7d: number;
   /** The `api_key_status` row: rename, set plan and clear rate limit need it. */
   status: ApiKeyStatus | null;
+  /**
+   * Every status row of this credential (global and per agent). Quota windows
+   * read all of them through `currentQuotaWindows`, which counts each once.
+   */
+  statuses: ApiKeyStatus[];
 }
 
 export interface ProviderRow {
@@ -807,12 +812,6 @@ function codexHealth(account: CodexAccount): KeyHealth {
   return "ok";
 }
 
-/** A utilization fraction (0..1) as a whole percent. */
-function windowPercent(status: ApiKeyStatus | null, window: string): number | null {
-  const value = status?.rateLimitWindows?.[window]?.utilization;
-  return typeof value === "number" ? Math.round(value * 100) : null;
-}
-
 function costFor(
   rows: UsageSummaryByCredentialRow[] | undefined,
   keyType: string,
@@ -821,6 +820,11 @@ function costFor(
   if (!suffix) return 0;
   const row = rows?.find((r) => r.keyType === keyType && r.keySuffix === suffix);
   return row?.costUsd ?? 0;
+}
+
+/** A reset time in epoch milliseconds, with the date when not today. */
+export function resetLabel(ms: number): string {
+  return backAt(new Date(ms).toISOString());
 }
 
 /** The rate-limit clock time, with the date when it is not today. */
@@ -868,12 +872,10 @@ export interface ProviderRowsInput {
  * rows add the name, plan, usage windows and last use.
  */
 export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
-  const statusFor = (keyType: string, suffix: string | null) =>
+  const statusesFor = (keyType: string, suffix: string | null) =>
     suffix
-      ? (input.statuses?.find(
-          (s) => s.keyType === keyType && s.keySuffix === suffix && s.scope === "global",
-        ) ?? null)
-      : null;
+      ? (input.statuses ?? []).filter((s) => s.keyType === keyType && s.keySuffix === suffix)
+      : [];
 
   function makeKey(
     keyType: string,
@@ -881,10 +883,14 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
     suffix: string | null,
     fallbackLabel: string,
     health: KeyHealth,
-    reason: string | null,
-    rateLimitedUntil: string | null,
+    details: {
+      reason?: string | null;
+      rateLimitedUntil?: string | null;
+      accountPlan?: string | null;
+    },
   ): ProviderKey {
-    const status = statusFor(keyType, suffix);
+    const statuses = statusesFor(keyType, suffix);
+    const status = statuses.find((s) => s.scope === "global") ?? null;
     return {
       id: `${keyType}:${index}:${suffix ?? ""}`,
       keyType,
@@ -893,16 +899,16 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
       label: status?.name || fallbackLabel,
       name: status?.name ?? null,
       health,
-      reason,
-      rateLimitedUntil: rateLimitedUntil ?? status?.rateLimitedUntil ?? null,
+      reason: details.reason ?? null,
+      rateLimitedUntil: details.rateLimitedUntil ?? status?.rateLimitedUntil ?? null,
       lastUsedAt: status?.lastUsedAt ?? null,
       plan: status?.plan ?? null,
       planSource: status?.planSource ?? null,
-      window5h: windowPercent(status, "five_hour"),
-      window7d: windowPercent(status, "seven_day"),
+      planRaw: rawPlanOf(statuses, details.accountPlan),
       costToday: costFor(input.usageToday, keyType, suffix),
       cost7d: costFor(input.usage7d, keyType, suffix),
       status,
+      statuses,
     };
   }
 
@@ -936,23 +942,20 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
           account.suffix,
           account.email ?? `Account in slot ${account.slot}`,
           codexHealth(account),
-          account.status === "needs_login" ? "sign in again" : null,
-          null,
+          {
+            reason: account.status === "needs_login" ? "sign in again" : null,
+            accountPlan: account.plan,
+          },
         ),
       );
     } else {
       const pool = input.pools[poolVar];
       readOnly = pool?.readOnly ?? false;
       keys = (pool?.keys ?? []).map((key) =>
-        makeKey(
-          poolVar,
-          key.index,
-          key.suffix,
-          `Key ending ${key.suffix}`,
-          poolKeyHealth(key),
-          key.error,
-          key.rateLimitedUntil,
-        ),
+        makeKey(poolVar, key.index, key.suffix, `Key ending ${key.suffix}`, poolKeyHealth(key), {
+          reason: key.error,
+          rateLimitedUntil: key.rateLimitedUntil,
+        }),
       );
     }
     if (keys.length === 0) continue;

@@ -189,6 +189,7 @@ export default async function bootTriage(args: any, ctx: any) {
      FROM agent_tasks p
      LEFT JOIN agents a ON a.id = p.agentId
      WHERE p.status = 'superseded'
+       AND p.failureReason IS NOT 'superseded_workflow_task'
        AND datetime(p.lastUpdatedAt) >= datetime(?, ?)
        AND NOT EXISTS (
          SELECT 1

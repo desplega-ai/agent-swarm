@@ -194,6 +194,28 @@ describe("db-client transactions", () => {
     expect(await names()).toEqual([]);
   });
 
+  test("afterRollback runs when the outer transaction rolls back, not when it commits", async () => {
+    const fired: string[] = [];
+    await client.transaction(async () => {
+      await client.transaction(async (tx) => {
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["kept"]);
+        client.afterRollback(() => fired.push("committed"));
+      });
+    });
+    await expect(
+      client.transaction(async () => {
+        await client.transaction(async (tx) => {
+          await tx.run("INSERT INTO items (name) VALUES (?)", ["doomed"]);
+          client.afterRollback(() => fired.push("rolled back"));
+        });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    client.afterRollback(() => fired.push("no transaction"));
+    expect(fired).toEqual(["rolled back"]);
+    expect(await names()).toEqual(["kept"]);
+  });
+
   test("a throwing getDatabase does not wedge the lock", async () => {
     let boom = true;
     const flaky = createBunSqliteClient(() => {
@@ -427,6 +449,152 @@ describe("db-client transactions on a shared WAL file (second connection)", () =
     other.run("UPDATE counters SET n = n + 10 WHERE id = 1");
     const row = await fileClient.get<{ n: number }>("SELECT n FROM counters WHERE id = 1");
     expect(row?.n).toBe(11);
+  });
+});
+
+describe("db-client event-loop time slicing", () => {
+  // ~5 ms of pure CPU per driver call. 24 chains x 6 statements queue behind
+  // the FIFO lock, whose hand-off is a microtask, so without slicing the whole
+  // burst (~700 ms) runs as one macrotask and starves every timer and socket.
+  const CPU_SQL =
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c";
+  const ROWS = 30_000;
+
+  /** Longest gap between two 1 ms timer ticks while `work` runs. */
+  async function maxTimerGapDuring(work: () => Promise<unknown>): Promise<number> {
+    let last = performance.now();
+    let maxGap = 0;
+    let running = true;
+    const ticker = (async () => {
+      while (running) {
+        await new Promise((r) => setTimeout(r, 1));
+        const now = performance.now();
+        maxGap = Math.max(maxGap, now - last);
+        last = now;
+      }
+    })();
+    await work();
+    running = false;
+    await ticker;
+    return maxGap;
+  }
+
+  const burst = () =>
+    Promise.all(
+      Array.from({ length: 24 }, async () => {
+        for (let i = 0; i < 6; i++) await client.get(CPU_SQL, [ROWS]);
+      }),
+    );
+
+  test("a burst of queued statements lets timers run between statements", async () => {
+    const startedAt = performance.now();
+    const gap = await maxTimerGapDuring(burst);
+    const totalMs = performance.now() - startedAt;
+    // Premise: the burst is long enough that an unsliced run would blow the bound.
+    expect(totalMs).toBeGreaterThan(300);
+    expect(gap).toBeLessThan(totalMs / 4);
+  });
+
+  test("a transaction callback with many statements lets timers run too", async () => {
+    const gap = await maxTimerGapDuring(() =>
+      client.transaction(async (tx) => {
+        for (let i = 0; i < 100; i++) await tx.get(CPU_SQL, [ROWS]);
+      }),
+    );
+    expect(gap).toBeLessThan(150);
+  });
+});
+
+describe("db-client time slicing keeps transaction boundaries", () => {
+  const burn = (ms: number) => {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {
+      // spin: exhausts the 25 ms slice
+    }
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const insert = (e: DbExecutor | DbClient, name: string) =>
+    e.run("INSERT INTO items (name) VALUES (?)", [name]);
+
+  test("ambient sibling of a failing statement cannot escape a rolled-back transaction", async () => {
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "inside");
+        burn(35);
+        await Promise.all([
+          client.run("INSERT INTO missing VALUES (1)"),
+          insert(client, "escaped"),
+        ]);
+      }),
+    ).rejects.toThrow();
+    await settle();
+    expect(await names()).toEqual([]);
+  });
+
+  test("tx-executor sibling of a failing statement cannot escape a rolled-back transaction", async () => {
+    await expect(
+      client.transaction(async (tx) => {
+        await insert(tx, "inside");
+        burn(35);
+        await Promise.all([tx.run("INSERT INTO missing VALUES (1)"), insert(tx, "escaped")]);
+      }),
+    ).rejects.toThrow();
+    await settle();
+    expect(await names()).toEqual([]);
+  });
+
+  test("sibling inside a rolled-back savepoint cannot escape it", async () => {
+    await client.transaction(async () => {
+      await insert(client, "kept");
+      await expect(
+        client.transaction(async () => {
+          await insert(client, "inner");
+          burn(35);
+          await Promise.all([
+            client.run("INSERT INTO missing VALUES (1)"),
+            insert(client, "escaped"),
+          ]);
+        }),
+      ).rejects.toThrow();
+      await settle();
+    });
+    expect(await names()).toEqual(["kept"]);
+  });
+
+  test("an unawaited statement still belongs to its transaction after the slice is spent", async () => {
+    await client.transaction(async () => {
+      await insert(client, "inside");
+      burn(35);
+      void insert(client, "late"); // runs at call time, as before slicing
+    });
+    expect(await names()).toEqual(["inside", "late"]);
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "gone");
+        burn(35);
+        void insert(client, "gone-late");
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await settle();
+    expect(await names()).toEqual(["inside", "late"]);
+  });
+
+  test("concurrent ambient statements after a rollback all land, none leak from the rollback", async () => {
+    await expect(
+      client.transaction(async () => {
+        await insert(client, "rolled-back");
+        burn(35);
+        await Promise.all([
+          client.run("INSERT INTO missing VALUES (1)"),
+          insert(client, "escaped"),
+        ]);
+      }),
+    ).rejects.toThrow();
+    burn(35);
+    await Promise.all(["a", "b", "c"].map((n) => insert(client, n)));
+    await settle();
+    expect((await names()).sort()).toEqual(["a", "b", "c"]);
   });
 });
 

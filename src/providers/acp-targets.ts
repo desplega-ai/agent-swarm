@@ -427,7 +427,7 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
-/** Qwen Code's `--auth-type` choices (0.26.9). `qwen-oauth` and `qwen-subscription` need an interactive sign-in, so they are left out. */
+/** Qwen Code's `--auth-type` choices (0.27.1). `qwen-oauth` and `qwen-subscription` need an interactive sign-in, so they are left out. */
 const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
 
 // Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt
@@ -1002,7 +1002,7 @@ export const fxTargetProfile: AcpTargetProfile = {
 };
 
 export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfile {
-  const target = readEnv(config, "ACP_TARGET") ?? "custom";
+  const target = readEnv(config, "ACP_TARGET")?.trim().toLowerCase() || "custom";
   if (!isAcpTarget(target)) {
     throw new AcpTargetResolutionError(
       `Unsupported ACP target "${target}". Supported targets: ${ACP_TARGET_IDS.join(", ")}.`,

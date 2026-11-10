@@ -2,9 +2,8 @@
 // page.
 //
 // Each entry maps to a **non-secret** `swarm_config` row in the `global` scope
-// (the same store the Integrations UI writes to). Env vars win at boot; a value
-// saved here becomes effective after the server's debounced auto-reload (or the
-// explicit "Reload config" button). Entries flagged `restartRequired` are read
+// (the same store the Integrations UI writes to). Stored values override deployment
+// env at boot and after the server's debounced auto-reload. Entries flagged `restartRequired` are read
 // once at process start and need a full server restart.
 //
 // Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) and anything
@@ -48,6 +47,8 @@ export interface ConfigCatalogEntry {
   label: string;
   description: string;
   kind: ConfigCatalogKind;
+  /** An empty saved string disables this Slack icon. */
+  emptyDisablesIcon?: boolean;
   /** Native storage unit for numeric durations. Never inferred by the renderer. */
   unit?: DurationUnit;
   /** Allowed values for enum and comma-separated multiselect controls. */
@@ -717,6 +718,35 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "DOCKER_RUNTIME",
+        label: "Docker OCI runtime",
+        description:
+          "OCI runtime name for provisioned Docker workers, such as runsc or kata. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "runsc",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_HARDENED",
+        label: "Docker hardened workers",
+        description:
+          "Drop all capabilities except the worker entrypoint set, forbid privilege escalation, and disable swap for provisioned Docker workers. Controller configuration overrides this fallback.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_PIDS_LIMIT",
+        label: "Docker PID limit",
+        description:
+          "Maximum number of processes in each provisioned Docker worker. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "512",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:
@@ -922,15 +952,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   {
     id: "database",
     title: "Database",
-    description:
-      "Safety controls for database queries and opt-in retention of non-critical log tables.",
+    description: "Safety controls for database queries and retention of non-critical log tables.",
     icon: Database,
     entries: [
       {
         key: "SESSION_LOG_RETENTION_DAYS",
         label: "Session log retention",
         description:
-          "Delete session_logs rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes session transcripts.",
+          "Delete session_logs rows older than this many days. New installs start at 30 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes session transcripts.",
         kind: "number",
         unit: "days",
         placeholder: "30",
@@ -940,27 +969,27 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_LOG_RETENTION_DAYS",
         label: "Agent log retention",
         description:
-          "Delete agent_log rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes task and agent history.",
+          "Delete agent_log rows older than this many days. New installs start at 90 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes task and agent history.",
         kind: "number",
         unit: "days",
-        placeholder: "30",
+        placeholder: "90",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "EVENTS_RETENTION_DAYS",
         label: "Event retention",
         description:
-          "Delete events rows older than this many days. Leave unset to disable this table's sweep. Aggregate event totals become retention-window totals.",
+          "Delete events rows older than this many days. New installs start at 90 days; reset to turn this sweep off. Existing installs: off until set. Aggregate event totals become retention-window totals.",
         kind: "number",
         unit: "days",
-        placeholder: "30",
+        placeholder: "90",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "CONTEXT_VERSIONS_KEEP_LATEST",
         label: "Context version retention",
         description:
-          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. Leave unset to disable this table's sweep. Deletion permanently removes older profile history.",
+          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. New installs start at 100; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes older profile history.",
         kind: "number",
         placeholder: "100",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
@@ -969,10 +998,20 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SCRIPT_RUNS_RETENTION_DAYS",
         label: "Script run retention",
         description:
-          "Delete finished script_runs rows (completed, failed, cancelled, aborted) older than this many days, with their journal. Running and paused runs and runs with an idempotency key are kept. Leave unset to disable this table's sweep. Deletion permanently removes script run source, args and output.",
+          "Delete finished script_runs rows (completed, failed, cancelled, aborted) older than this many days, with their journal. Running and paused runs and runs with an idempotency key are kept. New installs start at 30 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes script run source, args and output.",
         kind: "number",
         unit: "days",
-        placeholder: "95",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "WORKFLOW_RUNS_RETENTION_DAYS",
+        label: "Workflow run retention",
+        description:
+          "Delete terminal workflow runs this many days after completion, with their steps and unused definition snapshots. Active runs and trees with a live or recent descendant are kept. Tasks and trigger deduplication survive. Leave unset to disable; deleted run links return 404.",
+        kind: "number",
+        unit: "days",
+        placeholder: "30",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
@@ -1100,6 +1139,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Plug,
     entries: [
       {
+        key: "MCP_USER_EVENTS_ENABLED",
+        label: "User MCP events",
+        description:
+          "Offer MCP Events webhooks (task.completed, task.failed) on /mcp-user. Enabled by default; turn off to stop advertising the capability, answer events/* with method not found, and stop deliveries.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/mcp-events`,
+      },
+      {
         key: "SLACK_MODE",
         label: "Slack transport",
         description:
@@ -1131,7 +1179,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
-          "Show one editable task tree per thread and immutable streamed outcome cards by default. Turn off to use the legacy per-task message renderer.",
+          "Use streamed outcome cards and an optional task tree in each Slack thread. Turn off to use the legacy per-task message renderer.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_RENDER_V2_TASK_TREE_ENABLED",
+        label: "Show task tree in Slack threads",
+        description:
+          "Post and update a message showing tasks and their status in each Slack thread. Requires Slack thread renderer v2.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack`,
@@ -1144,6 +1201,33 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_ENABLED",
+        label: "Rich result cards",
+        description:
+          "Let agents attach a json-render card (uiSpec) to a task result, rendered on the Slack outcome card and in the session view. Agents get the rich-card prompt section. Off: store-progress ignores uiSpec, Slack and text-only surfaces skip the card, and the section is dropped.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_ACTIONS_ENABLED",
+        label: "Rich card action buttons",
+        description:
+          "Allow Button elements in result cards, each naming a follow-up action the card declares. Requires UI_SPEC_ENABLED. Off refuses a card with a Button; LinkButton always works.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "UI_SPEC_SCRIPT_ACTIONS",
+        label: "Card script actions",
+        description:
+          "Comma-separated name@contentHash pins (12+ hex chars of the script's contentHash) of global scripts a card Button may re-run. A script edit disarms its cards until you re-pin it. Only an admin user token or dashboard session can change it; the shared API key cannot. Empty turns script actions off.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#card-script-actions`,
       },
       {
         key: "SLACK_TASK_WATCHER_INTERVAL_MS",
@@ -1192,6 +1276,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_ACCEPTED",
+        emptyDisablesIcon: true,
         label: "Accepted-message reaction",
         description:
           "Slack emoji shortcode the bot adds when a task is accepted from a channel mention, thread reply, follow-up or assistant DM. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1201,6 +1286,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_BUFFERED",
+        emptyDisablesIcon: true,
         label: "Buffered-message reaction",
         description:
           "Slack emoji shortcode the bot adds when message 2 and later arrive in an additive buffer window. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1210,6 +1296,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_NOW",
+        emptyDisablesIcon: true,
         label: "Instant-flush reaction",
         description:
           "Slack emoji shortcode the bot adds when the !now command flushes the buffer. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1219,6 +1306,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_STEERED",
+        emptyDisablesIcon: true,
         label: "Steering-accepted reaction",
         description:
           "Slack emoji shortcode the bot adds when a thread message is accepted as steering for a running task. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1228,6 +1316,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_COMPLETED",
+        emptyDisablesIcon: true,
         label: "Completed-task reaction",
         description:
           "Slack emoji shortcode the bot adds when every task linked to the trigger message reached status completed. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name. Change this when another tool in the workspace acts on the default emoji.",
@@ -1237,6 +1326,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_FAILED",
+        emptyDisablesIcon: true,
         label: "Failed-task reaction",
         description:
           "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1246,6 +1336,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_SKIPPED",
+        emptyDisablesIcon: true,
         label: "Skipped-message reaction",
         description:
           "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1255,9 +1346,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_STATUS_ICON_COMPLETED",
+        emptyDisablesIcon: true,
         label: "Completed status icon",
         description:
-          "Slack emoji shortcode for the done glyph in thread text: task tree, thread header and outcome cards. Bare name or :name:, same rules as the reaction keys. Unset or invalid keeps the stock check mark. Unlike reactions there is no fallback: a name the workspace lacks renders as literal :name:.",
+          "Slack emoji shortcode for the done glyph in thread text: task tree, thread header and outcome cards. Bare name or :name:, same rules as the reaction keys. Unset uses the stock check mark. Empty disables the icon. Unlike reactions there is no fallback: a name the workspace lacks renders as literal :name:.",
         kind: "string",
         defaultValue: "white_check_mark",
         docsUrl: `${DOCS}integrations/slack`,
@@ -1569,6 +1661,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Let MCP OAuth flows target private-network hosts, overriding the SSRF guard. Enable only for trusted local development.",
         kind: "boolean",
         defaultValue: "false",
+      },
+      {
+        key: "MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS",
+        label: "Allow private MCP Events callbacks",
+        description:
+          "Let /mcp-user event subscriptions deliver to http:// and private-network callback URLs, overriding the SSRF guard. Enable only for trusted local development and tests.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/mcp-events`,
       },
       {
         key: "BUDGET_ADMISSION_DISABLED",

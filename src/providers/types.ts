@@ -11,6 +11,11 @@ export type CostModelUsage = {
 
 /** Data for session cost tracking. Shared across all provider adapters. */
 export interface CostData {
+  /** Stable report identity and attribution captured by the worker at execution start. */
+  id?: string;
+  credentialKeyType?: string | null;
+  credentialKeySuffix?: string | null;
+  harness?: ProviderName | null;
   sessionId: string;
   taskId?: string;
   agentId: string;
@@ -73,6 +78,10 @@ export interface CostData {
 import type { ProviderName, SteerMode } from "../types";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import type { ModelFamily } from "../utils/model-rate-limit-windows";
+import type {
+  ProviderAccountTelemetry,
+  RateLimitReplacement,
+} from "../utils/provider-account-telemetry";
 import type { ReasoningEffort } from "./reasoning-effort";
 
 /** Normalized event emitted by any provider adapter. */
@@ -242,6 +251,8 @@ export interface ProviderResult {
    * Best-effort and informational; consumers must tolerate it being absent.
    */
   rateLimitWindows?: RateLimitWindowTelemetry;
+  providerAccount?: ProviderAccountTelemetry;
+  rateLimitReplacements?: RateLimitReplacement[];
   /**
    * A rejected model-scoped weekly window (`seven_day_opus`, `seven_day_sonnet`,
    * `seven_day_overage_included` — the Fable window) observed in this session.

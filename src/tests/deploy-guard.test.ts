@@ -1,10 +1,10 @@
 /**
- * Regression test for scripts/deploy-guard.sh, the "guard" step of
- * .github/workflows/docker-and-deploy.yml.
+ * Regression test for scripts/deploy-guard.sh, the "guard" step of the
+ * promote-main-tags job in .github/workflows/docker-and-deploy.yml.
  *
- * The guard used to skip deploy whenever main had moved past the running
- * commit. A newer docs-only commit starts no docker-and-deploy run, so that
- * stranded prod on an older deploy. Now the guard skips only when the newer
+ * The guard used to skip whenever main had moved past the running commit. A
+ * newer docs-only commit starts no docker-and-deploy run, so that stranded
+ * :latest on an older build. Now the guard skips only when the newer
  * commits touch on.push.paths, read from the real workflow file.
  *
  * Each case builds a bare "origin", a shallow runner clone (like
@@ -99,7 +99,7 @@ async function setup() {
 
 describe.skipIf(!hasYq && !process.env.CI)("deploy guard (scripts/deploy-guard.sh)", () => {
   test(
-    "deploys when the running commit is still main tip",
+    "promotes when the running commit is still main tip",
     async () => {
       const { runGuard } = await setup();
       expect((await runGuard()).isTip).toBe("true");
@@ -108,7 +108,7 @@ describe.skipIf(!hasYq && !process.env.CI)("deploy guard (scripts/deploy-guard.s
   );
 
   test(
-    "deploys when newer main commits are docs-only",
+    "promotes when newer main commits are docs-only",
     async () => {
       const { pushCommit, runGuard } = await setup();
       await pushCommit("README.md", "# repo\n\nmore docs\n");

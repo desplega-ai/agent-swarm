@@ -10,8 +10,9 @@ Before trusting the model on current code, each historical fix below was removed
 | C4 | #1669 fix(heartbeat): reboot sweep keeps tasks whose session heartbeat is recent | `G_REBOOT_HB_AGE=FALSE` (a pre-boot session heartbeat counts as dead) | `NoLiveKill` | `AutoAssign → PollStart → RegisterSession → ApiCrash → ApiBoot → RebootFail`: a live worker with a registered session is failed at boot. 7 states. Found with `liveKill` restricted to tasks that have a session row, because the shorter no-session trace below hits first; with the guard on, that restricted check passes. |
 | C5 | #1670 fix(heartbeat): create the missing resume for a task superseded without one | `G_ORPHAN_REPAIR=FALSE` (no `repairSupersededWithoutResume` sweep) | `SupersededGetsResume` | `ClaimRead → ClaimWrite → WorkerCrash → Age → WorkerRestart → HbRead → HbWrite → ApiCrash → ApiBoot → stutter`: the API dies between supersede and resume, and the task stays superseded with no resume forever. 10 states. With the sweep on, `SupersededGetsResume` and `EventuallyFinished` hold; the safety form `SupersededHasResume` still fails, because the two writes are still not one transaction. |
 | C6 | #1973 review P1: boot triage falls back when `gatherSystemStatus` rejects | `G_STATUS_FALLBACK=FALSE` (a rejected status read skips the Lead task) | `BootTriageGate` | `ApiCrash → ApiBoot → BootTriage`: the boot is dirty (the findings read rejects, or the still-offered root task counts as an orphan), but the status read also rejects and no Lead task is created. 4 states. |
+| C7 | #2892 fix(workflows): the orphan-resume repair skips a workflow-step cut once its retry is queued | `G_STEP_CUT_FILTER=FALSE` with `WORKFLOW_STEP=TRUE` (`getSupersededTasksWithoutResume` loses `AND failureReason IS NOT 'superseded_workflow_task'`) | `OneActive` | `AutoAssign → PollStart → DrainHandoff → StepRetryQueue → HbRepair → StepRetryTask`: the drain cuts a workflow-step task, the engine queues the step's retry and relabels the detached row `superseded`, the repair sweep takes it for a supersede that lost its resume and creates one, and the retry poller then starts the step's own fresh task. Two tasks run the same work. 7 states. With the filter on, `OneActive` holds for `WORKFLOW_STEP=TRUE MaxGen=1` (14,122,316 distinct states). |
 
-Result: **6 of 6 calibrations found**; the safety ones (C1 to C4, C6) at the shortest possible depth.
+Result: **7 of 7 calibrations found**; the safety ones (C1 to C4, C6, C7) at the shortest possible depth.
 
 ## Timing assumption
 
@@ -40,5 +41,6 @@ F="FIX_NO_REBOOT=TRUE"
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT NoLiveKill G_REBOOT_HB_AGE=FALSE
 ./trace.sh Heartbeat Heartbeat.cfg PROPERTY SupersededGetsResume G_ORPHAN_REPAIR=FALSE $F
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT BootTriageGate G_STATUS_FALLBACK=FALSE $F
+./trace.sh Heartbeat Heartbeat.cfg INVARIANT OneActive WORKFLOW_STEP=TRUE G_STEP_CUT_FILTER=FALSE $F
 ./trace.sh Heartbeat Heartbeat.cfg PROPERTY RebootFailReported TIMER_RACE=TRUE
 ```

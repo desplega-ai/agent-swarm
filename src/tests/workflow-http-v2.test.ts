@@ -39,6 +39,7 @@ import type {
 } from "../types";
 import { initWorkflows, stopRetryPoller, workflowEventBus } from "../workflows";
 import { listenOnFreePort } from "./test-net";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
 
@@ -1181,6 +1182,136 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(401);
     });
+
+    test("event not in the trigger's events allowlist returns 200 skipped", async () => {
+      const workflow = await createTestWorkflow({
+        triggers: [
+          { type: "webhook", hmacSecret: "example-test-secret", events: ["pull_request"] },
+        ],
+      });
+
+      const body = '{"zen":"ok"}';
+      const sig = `sha256=${crypto.createHmac("sha256", "example-test-secret").update(body).digest("hex")}`;
+
+      const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hub-Signature-256": sig,
+          "X-GitHub-Event": "ping",
+        },
+        body,
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        skipped: true,
+        reason: "event-not-allowed",
+        event: "ping",
+      });
+    });
+
+    test("header and body filter skips with 200 and writes no run", async () => {
+      const created = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `filter-wf-${crypto.randomUUID().slice(0, 8)}`,
+          definition: simpleDefinition(),
+          triggers: [
+            {
+              type: "webhook",
+              hmacSecret: "example-test-secret",
+              preset: "github",
+              filter: {
+                headers: { "x-github-event": ["pull_request"] },
+                body: {
+                  action: ["opened", "reopened", "ready_for_review", "synchronize"],
+                },
+              },
+            },
+          ],
+        }),
+      });
+      expect(created.status).toBe(201);
+      const workflow = (await created.json()) as Workflow;
+      expect(workflow.triggers[0]).toMatchObject({
+        preset: "github",
+        filter: {
+          headers: { "x-github-event": ["pull_request"] },
+          body: { action: ["opened", "reopened", "ready_for_review", "synchronize"] },
+        },
+      });
+
+      const body = JSON.stringify({ action: "closed" });
+      const sig = `sha256=${crypto.createHmac("sha256", "example-test-secret").update(body).digest("hex")}`;
+      const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hub-Signature-256": sig,
+          "X-GitHub-Event": "pull_request",
+        },
+        body,
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        skipped: true,
+        reason: "filter-not-matched",
+        match: { source: "body", path: "action" },
+      });
+      expect(await listWorkflowRuns(workflow.id)).toHaveLength(0);
+
+      const opened = JSON.stringify({ action: "opened" });
+      const openedSig = `sha256=${crypto.createHmac("sha256", "example-test-secret").update(opened).digest("hex")}`;
+      const allowed = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hub-Signature-256": openedSig,
+          "X-GitHub-Event": "pull_request",
+        },
+        body: opened,
+      });
+      expect(allowed.status).toBe(201);
+      expect(await listWorkflowRuns(workflow.id)).toHaveLength(1);
+    });
+
+    test("a bad signature is 401 before the delivery filter", async () => {
+      const workflow = await createTestWorkflow({
+        triggers: [
+          {
+            type: "webhook",
+            hmacSecret: "example-test-secret",
+            filter: { body: { action: ["opened"] } },
+          },
+        ],
+      });
+      const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hub-Signature-256": "sha256=invalid",
+        },
+        body: JSON.stringify({ action: "closed" }),
+      });
+      expect(res.status).toBe(401);
+      expect(await listWorkflowRuns(workflow.id)).toHaveLength(0);
+    });
+
+    test("an empty delivery filter is rejected on create", async () => {
+      const res = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `empty-filter-${crypto.randomUUID().slice(0, 8)}`,
+          definition: simpleDefinition(),
+          triggers: [{ type: "webhook", filter: {} }],
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("filter needs at least one header or body field");
+    });
   });
 
   // ─── VERSION HISTORY ──────────────────────────────────────
@@ -1309,8 +1440,7 @@ describe("Workflow HTTP API v2", () => {
       });
       const { runId } = (await triggerRes.json()) as { runId: string };
 
-      // Wait for run to complete
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRunStatus(runId, "completed");
 
       // Try to cancel — should fail
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {

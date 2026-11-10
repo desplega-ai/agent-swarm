@@ -1,5 +1,28 @@
 # Database retention runbook
 
+## Defaults on new installs
+
+A new install starts with retention on. On the boot that creates the database, the server stores these values as global config rows. They show in Settings → Configuration → Database and you edit them like any stored setting.
+
+| Key | Default | Permanently deleted |
+| --- | --- | --- |
+| `SESSION_LOG_RETENTION_DAYS` | 30 | Session transcripts older than 30 days |
+| `SCRIPT_RUNS_RETENTION_DAYS` | 30 | Finished script runs older than 30 days, with their journal |
+| `EVENTS_RETENTION_DAYS` | 90 | Telemetry events older than 90 days |
+| `AGENT_LOG_RETENTION_DAYS` | 90 | Task and agent history older than 90 days |
+| `CONTEXT_VERSIONS_KEEP_LATEST` | 100 | Profile versions beyond the newest 100 per agent and field |
+
+`WORKFLOW_RUNS_RETENTION_DAYS` is not in this table. Terminal workflow runs stay until an operator sets it, on a new install and on an existing one.
+
+These defaults delete for real: `DB_RETENTION_DRY_RUN` stays `false`. The sections below describe what each table loses.
+
+- **An existing install does not change.** A database that already exists when the server boots gets no row, on upgrade or on any later boot. A restored backup or a copied database file counts as existing. Retention there stays off until you set it.
+- **Turn a default off:** delete its key in Settings → Configuration (or `DELETE /api/config/{id}`). It stays off. The server stores the defaults once, when it creates the database, and never again.
+- **Change a default:** edit the key. The accepted range is 1 through 1,000,000.
+- **Start a new install without a default:** set the key in the deployment environment before the first boot. The server stores no row for a key the environment sets. `0` keeps that table's sweep off, and a value from 1 through 1,000,000 applies as is. Set `DB_RETENTION_DRY_RUN=true` there to make the stored defaults count rows without deleting them.
+- **A stored row wins over the environment.** Setting a key in the environment after the first boot does not change a stored default. Edit or delete the row.
+- **Import old data only after you choose the limits.** A new database holds no row old enough to delete. Rows you import with an old timestamp are deleted on the next hourly sweep.
+
 ## Permanent-loss warning
 
 Database retention permanently deletes rows. Unsetting a retention key stops future sweeps. It cannot restore deleted rows. Activate retention only when you have verified backups for the data you need.
@@ -9,6 +32,7 @@ Database retention permanently deletes rows. Unsetting a retention key stops fut
 - `events` deletion removes telemetry. Aggregate event counters become retention-window totals, not all-time totals. A newer event can retain a `parentEventId` for a deleted older event.
 - `context_versions` deletion removes older profile history (SOUL, IDENTITY, TOOLS, CLAUDE.md, setup script, HEARTBEAT). The oldest surviving version's `previousVersionId` becomes `NULL`, and `context-diff` on it reports `predecessorPruned` instead of a diff. Rolling a field back past the kept window is no longer possible.
 - `script_runs` deletion removes finished script runs: their stored source, args, output and error, plus their `script_run_journal` rows. Old run links and `get-script-run` return 404, list totals shrink, and audit scripts that read `script_runs` directly see only the kept window.
+- `workflow_runs` deletion removes terminal run history, steps, approvals and wait states. Old run links return 404, history totals shrink, and expired runs cannot be retried. Tasks survive with their run/step links cleared. Human-free classification updates in bounded batches; usage reports can lag until the reclassification queue drains. Accepted trigger keys still replay their original run ID; they never execute again, even when that ID now returns 404.
 
 ## Scope and safety boundary
 
@@ -21,13 +45,14 @@ The server sweeps only this closed code-reviewed list:
 | `events` | age | `EVENTS_RETENTION_DAYS` | Telemetry events |
 | `context_versions` | keep latest | `CONTEXT_VERSIONS_KEEP_LATEST` | Profile versions beyond the newest N per agent and field |
 | `script_runs` | age, finished runs only | `SCRIPT_RUNS_RETENTION_DAYS` | Finished script runs and their journal |
+| `workflow_runs` | age, expired terminal trees | `WORKFLOW_RUNS_RETENTION_DAYS` | Terminal runs, steps, approvals, waits and their unreferenced definition snapshots |
 
 Table and column names never come from configuration. An operator can set a retention value only. An unset key disables that table's sweep.
 
-Workflow runs and their definition snapshots are outside this list. Deleting a workflow
-cleans only snapshots referenced by its deleted runs, after checking that no other run
-still references them. This cleanup does not expire old runs or sweep unrelated orphan
-snapshots. Run retention and periodic snapshot reclamation require a separate policy.
+Workflow deletion and opt-in run retention both reclaim only snapshots referenced by
+the deleted runs, after checking that no other run still references them. Unrelated
+orphan snapshots are not swept. Snapshot age alone never makes a snapshot eligible.
+
 
 - **age**: the value is whole days from 1 through 1,000,000. Rows older than the horizon are deleted, oldest first. Use at least seven days unless you have verified that a shorter window is suitable for your deployment.
 - **keep latest**: the value is a count from 1 through 1,000,000. Within each `(agentId, field)`, only the newest N rows by `version` are kept. Age plays no part, so the only version of a rarely edited field is never deleted. The floor of 1 means the newest version of every field always survives, so the next edit still numbers itself from it. Each sweep deletes the deepest history first, so an interrupted sweep leaves every field's surviving versions contiguous. A version can be hundreds of KB, so this table's batches start at 50 rows and never exceed 100.
@@ -40,6 +65,60 @@ Not swept yet, opt-in candidate: `request_composition` (one 2–3 KB manifest pe
 To add a table, change the closed descriptor list in `src/be/db-retention.ts`, add a validator, catalog entry, metrics field, docs row, and parameterized tests in the same PR. Add a table only when its delete and its backlog `COUNT(*)` run on an index (the time column for an age table, the partition and rank columns for a keep-latest table), and its readers safely tolerate missing old rows. A new table also needs an `EXPLAIN QUERY PLAN` assertion in the retention tests, confirming the delete uses the index rather than a table scan.
 
 An incoming foreign key needs extra care. With `foreign_keys = ON`, SQLite looks up the referencing rows of every deleted row, and without an index on the referencing column that lookup is a full table scan per deleted row. `context_versions.previousVersionId` references the same table with `ON DELETE SET NULL`, so it carries `idx_cv_previous_version` and the retention tests assert that index is used. Add the equivalent index, and an assertion for it, before admitting any other table with an incoming foreign key. `rowsDeleted` counts only the rows the sweep deleted, not the referencing rows the foreign key set to `NULL`.
+
+### Workflow run policy
+
+`WORKFLOW_RUNS_RETENTION_DAYS` accepts 1 to 1,000,000 whole days and is disabled
+when unset. Age is measured from `finishedAt`, not start time: a long-running job
+gets the full window after it finishes. Only `completed`, `failed`, `skipped` and
+`cancelled` runs with a known finish time qualify. The cutoff uses SQLite's
+space-separated datetime format, so legacy timestamps compare correctly; an ISO
+timestamp on the cutoff day is kept conservatively until the following day.
+Start with 30 days, or a longer window that covers your retry and audit needs.
+
+A surviving parent step always retains every child attempt. A live, recent or
+unknown-age descendant retains all its ancestors. Entirely expired terminal trees
+are retired parent first, then their children in later batches. During an interrupted
+sweep, an expired child whose parent has gone cannot restart: the existing lineage
+guard rejects its retry. The next sweep finishes reclamation. Cycles and trees at
+the lineage depth limit are kept for operator inspection.
+
+The backlog and dry-run count report the **currently deletable frontier**: roots
+and runs with no surviving parent step whose descendants all qualify. Descendants
+become eligible after their parent leaves, so this is not a forecast of every row
+that a complete tree drain will delete. A protected tree contributes no backlog
+until it can be retired. Watch run-history growth as well as retention metrics.
+
+Each batch starts at 10 runs, can shrink to 1 and never exceeds 100. A single write transaction
+rechecks eligibility, unlinks surviving tasks, removes approvals and wait states,
+deletes steps then runs, reclassifies at most 500 tasks, and reclaims only the
+captured definition hashes that have no remaining run references. Snapshot deletion
+is bounded to at most 100 candidates and happens immediately in that transaction.
+Remaining task classification work is stored in `human_free_reclassify_queue`
+in the same transaction. A rollback restores all these rows and the queue together.
+No periodic global orphan sweep is introduced.
+The trigger idempotency ledger is retained indefinitely, including its original
+acceptance response; retention never frees an accepted key.
+
+Eligibility and counts seek `idx_workflow_runs_retention`; recursive child checks
+and incoming references use indexes. Task classification uses the existing bounded
+classifier: at most one 500-task batch runs inline, and the background drain
+processes the rest in separate transactions, yielding between batches. The queue
+survives a restart. Usage reports can temporarily retain old human-free flags for
+queued tasks; they converge once the queue is empty. Large task trees do not have
+to finish reclassification before the expired run deletion commits.
+The transaction shares the table's tick deadline and rolls back if it cannot commit
+in time, then retries with a smaller run batch during catch-up. Run-tree eligibility
+and unlinking directly linked tasks still require work proportional to those rows.
+For this policy the statement
+duration metric and adaptive sizer measure the batch transaction's work after lock
+acquisition, including its reads and inline classification, not later queue draining.
+
+There is no definition-switch history on the current schema. The proposed #2732
+history must protect retained `fromHash` and `toHash` references in
+`deleteOrphanedRunDefinitions` before it lands, and remove a deleted run's switch
+rows before releasing those references. Existing `workflow_versions` embeds its
+own snapshots and does not reference this content-addressed store.
 
 ## Activate retention
 
@@ -67,7 +146,7 @@ A failed sweep stores its error message on `lastError` in `GET /api/metrics`. Th
 
 An errored table counts as undrained, the same as a table pass 1 never reached. It retries in pass 2 of the same tick, and again every `DB_RETENTION_CATCHUP_INTERVAL_MS` until it succeeds — there is no backoff. A persistent error therefore produces about two `outcome:error` sweep points per minute and a DELETE attempt against the database every catch-up interval, for as long as the error lasts.
 
-An `outcome:error` point is not a zero-progress point. Every batch is its own autocommit `DELETE`, so a sweep that fails on a later batch has already deleted the rows of the batches before it. The error point reports exactly those rows and batches, and `cumulativeRowsDeleted` advances by them. `backlogRemaining` is the exception: it holds its previous value, because it is a gauge and zeroing it would read as drained.
+An `outcome:error` point is not a zero-progress point. Every batch commits independently (one transaction for workflow runs, one autocommit `DELETE` for other tables), so a sweep that fails on a later batch has already deleted the rows of the batches before it. The error point reports exactly those rows and batches, and `cumulativeRowsDeleted` advances by them. `backlogRemaining` is the exception: it holds its previous value, because it is a gauge and zeroing it would read as drained.
 
 Telemetry is best-effort. A broken OTLP exporter cannot fail a tick or turn a completed `DELETE` into a failed sweep: every span and metric call is wrapped, and a failure is logged once per tick and otherwise ignored.
 

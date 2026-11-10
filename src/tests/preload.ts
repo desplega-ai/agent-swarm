@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb, getDb, initDb } from "../be/db";
+import { DB_RETENTION_TABLES } from "../be/db-retention";
 // Populate the registry before hashing the template cache; runtime boot loads this lazily.
 import "../be/seed-prompt-templates";
 import { getAllTemplateDefinitions } from "../prompts/registry";
@@ -22,7 +23,7 @@ import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
 
-// Worker deployments configure Slack rendering, links, and organization defaults.
+// Worker deployments configure Slack rendering, links, organization, and provider defaults.
 // Start tests from the same unset defaults as CI; suites can still opt in by
 // setting their own values after the preload runs.
 for (const key of Object.keys(process.env)) {
@@ -30,6 +31,8 @@ for (const key of Object.keys(process.env)) {
     key.startsWith("SLACK_") ||
     [
       "COMB_ENABLED",
+      "SYSTEM_ONE_DEFAULT_PROVIDER",
+      "SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER",
       "APP_URL",
       "AGENT_FS_API_URL",
       "AGENT_FS_PROXY",
@@ -56,6 +59,26 @@ for (const key of Object.keys(process.env)) {
 // drain set API_DRAIN_MAX_MS for their own server.
 process.env.API_DRAIN_MAX_MS = "0";
 
+// A test file stops the `bun src/http.ts` server it spawned in `afterAll`. A run
+// that ends without teardown (SIGKILL, the hang watchdog, a dead `--parallel`
+// coordinator) skips that, and a worker's own process group hides the server from
+// a group kill, so it lived on under PID 1. This is the env form of Bun's
+// `--no-orphans`: every Bun child that inherits it exits when its parent dies.
+process.env.BUN_FEATURE_FLAG_NO_ORPHANS = "1";
+
+// A server spawned on a fresh database is a new install, so it would store the
+// default retention values and run live sweeps (src/be/db-retention-defaults.ts).
+// A key the env sets at first boot is left alone, and `0` is not a valid
+// horizon, so spawned servers inherit retention off. Suites that test the seed
+// or a sweep set their own values; the afterEach below puts `0` back, so the
+// guard also holds when files share one process.
+function turnRetentionOffForSpawnedServers(): void {
+  for (const { envKey } of DB_RETENTION_TABLES) {
+    process.env[envKey] = "0";
+  }
+}
+turnRetentionOffForSpawnedServers();
+
 // Credential and provider-routing tests assume no Anthropic credentials, as
 // on CI. A developer shell (or a repo .env, which Bun loads before this file)
 // often sets them, for example a Claude Code session behind a proxy. Then
@@ -79,6 +102,7 @@ const nativeResponse = globalThis.Response;
 const nativeRequest = globalThis.Request;
 afterEach(() => {
   clearVolatileSecretsForTesting();
+  turnRetentionOffForSpawnedServers();
   if (globalThis.Response !== nativeResponse) {
     globalThis.Response = nativeResponse;
   }

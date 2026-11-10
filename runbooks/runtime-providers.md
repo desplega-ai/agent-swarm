@@ -47,7 +47,7 @@ Commands carry an ID, operation, and payload. Results carry the same ID and succ
 Provision commands use `RUNTIME_PROVISION_TIMEOUT_SEC`, with a default of 300 seconds.
 Other commands have a 60-second timeout. A timeout fails only that command and preserves the socket.
 The remote protocol includes renewal, pause, and resume for E2B lease management.
-The CLI accepts static, Docker, E2B, and boxd providers. It rejects the reserved `k8s` kind.
+The remote controller CLI accepts static, Docker, E2B, and boxd providers. Kubernetes requires a built-in controller.
 The API pings every 15 seconds and checks token validity.
 The CLI client also pings every 15 seconds. It drops a socket that receives no frame (message, ping, or pong) for 45 seconds and reconnects, so a network cut is detected within 60 seconds.
 A new authenticated session replaces the previous session for that controller.
@@ -84,8 +84,9 @@ They do not increment provision failures, apply backoff, or change the pool circ
 | `docker` | `DockerRuntimeProvider` | Creates and starts worker containers through a local Unix socket. |
 | `e2b` | `E2BRuntimeProvider` | Creates worker sandboxes and starts `/docker-entrypoint.sh` as a tracked background process. |
 | `boxd` | `BoxdRuntimeProvider` | Creates isolated boxd microVMs and runs the worker image in each machine's Docker daemon. |
+| `k8s` | `KubernetesRuntimeProvider` | Creates worker pods through a built-in controller using the Kubernetes API. |
 
-The schema reserves another kind for a future adapter. The factory rejects that kind until the adapter exists.
+Kubernetes controllers require `placement: "builtin"`. Remote Kubernetes controllers remain unsupported.
 
 ## Supervisor
 
@@ -187,6 +188,143 @@ Listing requires both the runtime label and the matching owner label. Runtimes w
 Two swarms on one Docker host, E2B team, or boxd org must use different owner IDs.
 Termination and status use explicit handles. Controllers must obtain those handles from their own records or owner-filtered lists.
 
+## k8s
+
+The built-in Kubernetes provider calls the cluster API directly. It needs no `kubectl` binary or Kubernetes SDK.
+Create a controller with `kind: "k8s"` and `placement: "builtin"`.
+In the dashboard, open **Settings > Runtime pools > Controllers**, then choose **New controller**.
+Select **Kubernetes**. The form fixes placement to **Built in** and explains the cluster settings.
+Store bearer tokens under **Secrets**. Add the namespace and worker API URL under **Config**.
+After saving the controller, create a Kubernetes pool and select that controller.
+The pool detail page shows its runtimes, pod names under **External id**, and provision errors.
+Configure these keys on the controller:
+
+| Key | Purpose |
+| --- | --- |
+| `K8S_API_URL` | Kubernetes API origin. Requires HTTPS, except for loopback HTTP during local tests. |
+| `K8S_NAMESPACE` | Existing namespace for worker pods. Defaults to `default`. |
+| `K8S_TOKEN` | Bearer token. Store it in encrypted `secretConfig`. |
+| `K8S_CA_CERT` | Optional PEM certificate authority for the cluster. |
+| `K8S_SERVICE_ACCOUNT` | Optional service account for worker pods. Workers receive no Kubernetes API token. |
+| `K8S_IMAGE_PULL_SECRETS` | Optional comma-separated names of registry Secrets in the worker namespace. |
+| `K8S_STORAGE_CLASS` | Optional storage class for persistent workspace claims. Defaults to the cluster default. |
+
+These are controller settings, not deployment environment variables.
+When the API runs inside Kubernetes, omit `K8S_API_URL` and token settings.
+The adapter uses `https://kubernetes.default.svc` and the mounted service account token and CA.
+The adapter reads the projected token for each request to support token rotation.
+Controller settings cannot select host files. `K8S_TOKEN_FILE` and `K8S_CA_FILE` are rejected.
+Only the deployment environment can set `KUBERNETES_SERVICE_HOST` for cluster detection.
+External endpoints require an explicit token and cannot inherit the API's mounted credentials.
+TLS verification always remains enabled.
+Set `K8S_NAMESPACE` explicitly when workers must use a namespace other than `default`.
+The API service account needs `get`, `list`, `create`, and `delete` permissions on pods in that namespace.
+Pools with a persistent workspace also need `get` and `create` on `persistentvolumeclaims`.
+Use a dedicated namespace to limit the controller's authority.
+This configuration supports an API deployed inside a managed cluster such as GKE.
+An API outside the cluster must configure its HTTPS endpoint, token, and certificate authority explicitly.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: swarm-pool-controller
+  namespace: swarm-workers
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  # Only for pools with a persistent workspace. The swarm never deletes claims.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: swarm-pool-controller
+  namespace: swarm-workers
+subjects:
+  - kind: ServiceAccount
+    name: swarm-api
+    namespace: agent-swarm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: swarm-pool-controller
+```
+
+Each runtime uses one pod with `restartPolicy: Never`.
+The supervisor manages replacement and teardown. Pod restarts cannot bypass runtime credentials or task recovery.
+Pool CPU and memory become resource requests and limits. `ttlSec` sets `activeDeadlineSeconds` when configured.
+The pod uses the worker image's default entrypoint and receives the supervisor's worker environment.
+Set controller `WORKER_API_URL` to an API address reachable from worker pods.
+Persistent caches and pause/resume remain unsupported.
+
+The adapter stamps the four ownership labels and filters lists by owner and runtime ID.
+Handles include the pod namespace and UID. Deletion uses a UID precondition to preserve a replacement with the same name.
+Missing pods and UID conflicts permit repeated teardown.
+Kubernetes response bodies remain excluded from errors because validation responses can contain worker credentials.
+
+### CLI verification
+
+Run the repeatable lifecycle smoke against a disposable API deployed inside Kubernetes:
+
+```bash
+bun scripts/k8s-pool-smoke.ts --help
+bun scripts/k8s-pool-smoke.ts \
+  --api <test-api-url> --worker-api <worker-reachable-api-url> \
+  --namespace <test-worker-namespace> --context <kubectl-context>
+```
+
+Supply `AGENT_SWARM_API_KEY` through the environment and configure local `kubectl` access.
+The API needs both runtime flags and the namespace-scoped Role above.
+The script creates a controller, pool, and agent with a unique test name.
+It checks worker registration, scoped credentials, pod identity, resources, and pool capacity.
+It attempts to disable the pool, verify pod deletion, and delete its pool and controller after successful and failed tests.
+A failed cleanup step does not prevent later steps. Errors retain the test failure and every cleanup failure.
+The API retains the offline agent and runtime history. The script does not create cloud servers or inference tasks.
+No API keys, pod environment values, or cluster connection details appear in its output.
+Use `--image` to select a worker image and `--timeout-sec` to allow longer image pulls.
+
+For an API inside Kubernetes, create the namespace and RoleBinding above, then create a controller without cluster credentials:
+
+```bash
+CONTROLLER=$(curl -fsS "$API/api/runtime-controllers" -X POST \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"k8s-test","kind":"k8s","placement":"builtin","config":{"K8S_NAMESPACE":"swarm-workers","WORKER_API_URL":"<worker-reachable-api-url>"}}' \
+  | jq -r .controller.id)
+```
+
+For an API outside Kubernetes, configure explicit credentials instead:
+
+Use an existing test namespace and a service account with the Role above.
+Keep the token in a protected file. The API stores it encrypted.
+
+```bash
+kubectl create namespace swarm-workers
+kubectl -n swarm-workers create serviceaccount swarm-pool-controller
+kubectl -n swarm-workers create role swarm-pool-controller --verb=get,list,create,delete --resource=pods
+kubectl -n swarm-workers create rolebinding swarm-pool-controller \
+  --role=swarm-pool-controller --serviceaccount=swarm-workers:swarm-pool-controller
+umask 077
+kubectl -n swarm-workers create token swarm-pool-controller --duration=1h > /tmp/k8s-pool-token
+jq -n --rawfile token /tmp/k8s-pool-token --rawfile ca <cluster-ca.pem> \
+  --arg url <https://cluster-api:6443> \
+  '{name:"k8s-test",kind:"k8s",placement:"builtin",config:{K8S_API_URL:$url,K8S_NAMESPACE:"swarm-workers",K8S_CA_CERT:$ca,WORKER_API_URL:"<worker-reachable-api-url>"},secretConfig:{K8S_TOKEN:($token|rtrimstr("\n"))}}' \
+  > /tmp/k8s-pool-controller.json
+CONTROLLER=$(curl -fsS "$API/api/runtime-controllers" -X POST \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  --data-binary @/tmp/k8s-pool-controller.json | jq -r .controller.id)
+rm /tmp/k8s-pool-token /tmp/k8s-pool-controller.json
+```
+
+Create a pool with that controller ID using the operator guide's pool and agent commands.
+Use `kind: "k8s"`, enable both runtime flags, and configure worker credentials before assigning a test task.
+Inspect pods with `kubectl -n swarm-workers get pods -l swarm.runtime-id`.
+Disable the pool after the task. Wait for its pods to disappear before deleting the pool and controller.
+Delete the test namespace after the test.
+
 ## static
 
 Operators start and stop static workers. The adapter cannot provision, terminate, pause, or resume them.
@@ -203,6 +341,12 @@ On OrbStack Macs, set `DOCKER_HOST="unix://$HOME/.orbstack/run/docker.sock"`.
 `DOCKER_NETWORK` selects a network. `DOCKER_EXTRA_HOSTS` adds comma-separated `host:address` entries.
 The adapter always includes `host.docker.internal:host-gateway`.
 Requests can set memory in MiB and CPU count through `resources`.
+
+Three optional keys harden each runtime. `DOCKER_RUNTIME` names an OCI runtime (`runsc`, `kata`) and becomes `HostConfig.Runtime`. The name accepts letters, digits, `.`, `-`, and `_`.
+`DOCKER_HARDENED` set to `true` or `1` drops all capabilities, adds back `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, and `KILL` (the set the worker entrypoint needs), sets `no-new-privileges:true`, and sets `MemorySwap` equal to `Memory` when the request limits memory. Other values leave the profile off.
+`DOCKER_PIDS_LIMIT` is a positive integer and becomes `HostConfig.PidsLimit`.
+An invalid `DOCKER_RUNTIME` or `DOCKER_PIDS_LIMIT` makes `checkConfig` report that key and makes provisioning fail before any Docker call. Absent keys leave the create request unchanged.
+The API config guard validates the three keys with the same rules.
 
 When creation returns 404 with `No such image`, the adapter pulls the requested image and retries creation once.
 Untagged references use `tag=latest`. Registry ports do not count as tags, and digest references remain unchanged.
@@ -268,6 +412,34 @@ The remote protocol uses `release-cache` with `{ key, poolId, ownerId }`.
 Deferred errors are scrubbed in the job's `last_error` and API logs. Controller
 target, placement, and credential changes are blocked while caches or releases
 remain; controller deletion waits for its pending releases to finish.
+
+### Persistent workspace
+
+Pools accept `workspace: { sizeGb? }` or `null` (the default). Adapters that set
+`RuntimeProviderTraits.persistentWorkspace` mount `ProvisionRequest.workspace.key`
+at `WORKSPACE_MOUNT_PATH` (`/workspace/personal`); `validatePool` rejects every other
+kind. The key is `swarm-ws-<agentId>-<slot>`, with no pool id or generation, so it
+survives a rebind or re-enable. The supervisor allocates `runtime_instances.workspace_slot`
+(lowest free per agent) inside the provision transaction; a partial unique index on
+`(agent_id, workspace_slot)` for non-offline rows fences concurrent allocation.
+Because `terminateRuntime` marks a row offline even when infrastructure terminate
+failed, each adapter also refuses a volume a live container still mounts.
+
+Unlike the cache, the workspace fails closed and is never released. The adapter
+must echo `meta.workspaceKey` on the handle. A missing echo (an old remote
+controller drops the unknown `workspace` field) terminates the runtime, retires its
+row and revokes its token even if the worker already registered, and counts a
+provision failure with an upgrade message. Until the supervisor stores the verified
+handle, `touchRuntimeInstance` refuses a row with a `workspace_slot`, so an early
+registration gets no work. `list()` must report `meta.workspaceKey` from the real
+mount (Docker reads `Mounts`, never a label): reconnect adoption of a lost provision
+retires the row when the key is missing, and orphan reconciliation terminates it. Docker creates the volume with
+`swarm.owner`, `swarm.agent-id` and `swarm.workspace=true` labels, refuses foreign
+labels, and keeps the workspace mount when the cache mount fallback retries.
+Kubernetes gets or creates a `ReadWriteOncePod` claim with the same labels and no
+`ownerReferences`, refuses foreign labels, and mounts it in the pod spec; the access
+mode is its in-use fence. Terminate deletes only the pod.
+No code path deletes a workspace; operators remove volumes and claims by hand.
 
 ## e2b
 

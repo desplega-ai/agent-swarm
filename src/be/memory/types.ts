@@ -139,6 +139,17 @@ export interface MemoryCandidate extends AgentMemory {
   /** Beta-Binomial usefulness posterior. Default Beta(1,1) → reranker no-op. */
   alpha: number;
   beta: number;
+  /** Per-rater rating mass that gates demotion; set by attachDemotionEvidence(). */
+  demotionEvidence?: DemotionEvidence;
+}
+
+/** Weighted explicit-self and LLM rating mass for one memory, from memory_rating. */
+export interface DemotionEvidence {
+  selfAlpha: number;
+  selfBeta: number;
+  llmAlpha: number;
+  llmBeta: number;
+  llmCount: number;
 }
 
 export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback" | "graph";
@@ -150,6 +161,11 @@ export interface MemorySearchOptions {
   isLead?: boolean;
   includeExpired?: boolean;
   queryText?: string;
+  /**
+   * Leave out `task_completion` memories whose source task is a review task
+   * (`review-recall-filter.ts`). Set when the searching task is a review task.
+   */
+  excludeReviewTaskCompletions?: boolean;
   /**
    * Keep only memories whose `key` starts with this string. The vector arm
    * applies it after the sqlite-vec KNN (capped at 4096 rows), so a prefix

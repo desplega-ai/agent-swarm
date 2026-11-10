@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   cancelTask,
@@ -14,11 +23,13 @@ import {
   supersedeTask,
 } from "../be/db";
 import { installExtension, setExtensionState } from "../be/extensions/db";
+import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { listRegistered, registerLoaded, unregister } from "../extensions/dispatcher";
 import { ensureExtensionAgent } from "../extensions/identity";
 import { cleanExtensionTmpRoot, loadExtension } from "../extensions/loader";
 import { initExtensionPostBridge, teardownExtensionPostBridge } from "../extensions/post-bridge";
 import { splitChatMessage } from "../integrations/chat-sdk/limits";
+import * as outbound from "../integrations/chat-sdk/outbound";
 import {
   formatChatRelayMessages,
   formatChatRelayText,
@@ -31,6 +42,7 @@ import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { chatSdkContextKey } from "../tasks/context-key";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import type { Agent, AgentTask } from "../types";
+import type { TaskUiSpecDocument } from "../utils/task-ui-spec";
 import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
@@ -177,8 +189,28 @@ describe("chat relay text", () => {
     const words = Array.from({ length: 2000 }, (_, i) => `word${i}`).join(" ");
     const chunks = splitChatMessage(words, 4096);
     expect(chunks.every((chunk) => chunk.length <= 4096)).toBe(true);
-    expect(chunks.join(" ")).toBe(words);
+    expect(chunks.join("")).toBe(words);
     expect(splitChatMessage("short", 4096)).toEqual(["short"]);
+  });
+
+  test("splitChatMessage keeps a space that falls on a split boundary", () => {
+    const chunks = splitChatMessage("hello world", 6);
+    expect(chunks).toEqual(["hello ", "world"]);
+    expect(chunks.join("")).toBe("hello world");
+    // Every boundary kind (space, line break, repeated whitespace) joins back
+    // to the original text and stays within the limit.
+    const cases: Array<[string, number]> = [
+      ["one two three four five", 9],
+      ["line one\nline two\nline three", 10],
+      ["a \n b", 2],
+      ["word ".repeat(50), 17],
+      ["  leading and trailing  ", 5],
+    ];
+    for (const [text, limit] of cases) {
+      const parts = splitChatMessage(text, limit);
+      expect(parts.join("")).toBe(text);
+      expect(parts.every((part) => part.length <= limit)).toBe(true);
+    }
   });
 
   test("splitChatMessage does not loop on a surrogate pair at a tiny limit", () => {
@@ -191,6 +223,142 @@ describe("chat relay text", () => {
     expect(emojiChunks).toEqual(["😀", "😀", "😀"]);
     // A pair straddling the window edge moves the cut back, not to zero.
     expect(splitChatMessage("ab😀cd", 3)).toEqual(["ab", "😀c", "d"]);
+  });
+});
+
+describe("chat relay card from the task uiSpec", () => {
+  const savedFlag = process.env.UI_SPEC_ENABLED;
+  const FALLBACK = "Deploy report\nStatus: green";
+
+  function deploySpec(withButton = false): TaskUiSpecDocument {
+    return {
+      root: "card",
+      elements: {
+        card: {
+          type: "Card",
+          props: { title: "Deploy report" },
+          children: withButton ? ["fields", "actions"] : ["fields"],
+        },
+        fields: { type: "Fields", props: {}, children: ["status"] },
+        status: { type: "Field", props: { label: "Status", value: "green" }, children: [] },
+        ...(withButton
+          ? {
+              actions: { type: "Actions", props: {}, children: ["rerun", "open"] },
+              rerun: { type: "Button", props: { id: "rerun", label: "Rerun" }, children: [] },
+              open: {
+                type: "LinkButton",
+                props: { label: "Open run", url: "https://example.com/run" },
+                children: [],
+              },
+            }
+          : {}),
+      },
+    };
+  }
+
+  async function completedWithSpec(chatId: number, spec?: TaskUiSpecDocument): Promise<AgentTask> {
+    const task = await createChatTask(chatId);
+    if (spec) await upsertTaskUiSpec(task.id, { spec, fallbackText: FALLBACK });
+    await completeTask(task.id, "Deploy finished.");
+    return task;
+  }
+
+  /** Records every `postChatMessage` call; the real function still sends. */
+  function spyPosts(): ReturnType<typeof spyOn<typeof outbound, "postChatMessage">> {
+    return spyOn(outbound, "postChatMessage");
+  }
+
+  afterEach(() => {
+    if (savedFlag === undefined) delete process.env.UI_SPEC_ENABLED;
+    else process.env.UI_SPEC_ENABLED = savedFlag;
+  });
+
+  test("a spec gives one extra post whose payload is a card", async () => {
+    process.env.UI_SPEC_ENABLED = "true";
+    const chatId = nextChatId;
+    const spy = spyPosts();
+    try {
+      const task = await completedWithSpec(chatId, deploySpec());
+      await processPendingChatRelays();
+      const calls = spy.mock.calls.filter(([args]) => args.taskId === task.id);
+      expect(calls).toHaveLength(2);
+      const [answer, extra] = calls.map(([args]) => args);
+      expect(answer?.card).toBeUndefined();
+      expect(extra?.text).toEqual([]);
+      expect(extra?.card?.type).toBe("card");
+      expect(extra?.card?.title).toBe("Deploy report");
+      const sends = sendsTo(chatId);
+      expect(sends).toHaveLength(2);
+      expect(sentText(sends[0] ?? {})).toContain("Deploy finished.");
+      expect(sentText(sends[1] ?? {})).toContain("green");
+      expect((await obligation(task.id))?.delivered_at).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("a spec with a Button gives a card with no buttons", async () => {
+    process.env.UI_SPEC_ENABLED = "true";
+    const chatId = nextChatId;
+    const spy = spyPosts();
+    try {
+      const task = await completedWithSpec(chatId, deploySpec(true));
+      await processPendingChatRelays();
+      const card = spy.mock.calls.find(([args]) => args.taskId === task.id && args.card)?.[0].card;
+      expect(card).toBeDefined();
+      const elements = JSON.stringify(card);
+      expect(elements).not.toContain('"type":"button"');
+      expect(elements).not.toContain("Rerun");
+      // A LinkButton has no click handler to miss, so it stays.
+      expect(elements).toContain('"type":"link-button"');
+      const sent = sendsTo(chatId)[1] ?? {};
+      expect(JSON.stringify(sent)).not.toContain("callback_data");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("a throwing card post gives a markdown post with the fallback text", async () => {
+    process.env.UI_SPEC_ENABLED = "true";
+    const chatId = nextChatId;
+    const real = outbound.postChatMessage;
+    const spy = spyOn(outbound, "postChatMessage").mockImplementation(async (args) => {
+      if (args.card) throw new Error("card rejected");
+      return real(args);
+    });
+    try {
+      const task = await completedWithSpec(chatId, deploySpec());
+      await processPendingChatRelays();
+      const calls = spy.mock.calls.filter(([args]) => args.taskId === task.id);
+      expect(calls).toHaveLength(3);
+      expect(calls[2]?.[0].card).toBeUndefined();
+      expect(calls[2]?.[0].text).toBe(FALLBACK);
+      const sends = sendsTo(chatId);
+      expect(sends).toHaveLength(2);
+      expect(sentText(sends[1] ?? {})).toContain("Status: green");
+      // The answer landed, so the card failure does not fail the delivery.
+      const row = await obligation(task.id);
+      expect(row?.delivered_at).not.toBeNull();
+      expect(row?.attempt_count).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("flag off or no spec gives no extra post", async () => {
+    process.env.UI_SPEC_ENABLED = "false";
+    const offChat = nextChatId;
+    const off = await completedWithSpec(offChat, deploySpec());
+    await processPendingChatRelays();
+    expect(sendsTo(offChat)).toHaveLength(1);
+    expect((await obligation(off.id))?.delivered_at).not.toBeNull();
+
+    process.env.UI_SPEC_ENABLED = "true";
+    const noSpecChat = nextChatId + 1_000;
+    const noSpec = await completedWithSpec(noSpecChat);
+    await processPendingChatRelays();
+    expect(sendsTo(noSpecChat)).toHaveLength(1);
+    expect((await obligation(noSpec.id))?.delivered_at).not.toBeNull();
   });
 });
 

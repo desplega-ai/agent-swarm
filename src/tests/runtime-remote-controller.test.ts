@@ -78,6 +78,8 @@ class FakeProvider implements RuntimeProvider {
   owners: string[] = [];
   runtimes = new Map<string, { handle: RuntimeHandle; ownerId: string; status: RuntimeStatus }>();
   gate?: Promise<void>;
+  /** false simulates an old controller that drops the workspace field. */
+  mountsWorkspace = true;
   checkConfig() {
     return { ready: true, missing: [] };
   }
@@ -88,7 +90,10 @@ class FakeProvider implements RuntimeProvider {
     const handle: RuntimeHandle = {
       kind: this.kind,
       externalId: crypto.randomUUID(),
-      meta: req.labels,
+      meta: {
+        ...req.labels,
+        ...(req.workspace && this.mountsWorkspace ? { workspaceKey: req.workspace.key } : {}),
+      },
     };
     this.runtimes.set(handle.externalId, { handle, ownerId: req.ownerId, status: "running" });
     return handle;
@@ -244,6 +249,17 @@ test("hello sets online and all controller commands make round trips through the
   expect(fake.releasedCaches).toEqual([cache]);
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "exited" });
   expect(JSON.stringify(logSpy.mock.calls)).not.toContain(token);
+});
+
+test("the workspace field and trait survive the remote round trip", async () => {
+  fake.traits.persistentWorkspace = true;
+  await connect();
+  const commands = await getControllerCommands(controllerId);
+  expect(commands.traits.persistentWorkspace).toBe(true);
+  const req = request(await ensureRuntimeOwnerId());
+  req.workspace = { key: `swarm-ws-${req.agentId.toLowerCase()}-0`, sizeGb: 20 };
+  await commands.provision(req);
+  expect(fake.requests[0]?.workspace).toEqual(req.workspace);
 });
 
 test("a timed-out remote cache release cannot delete a re-enabled cache", async () => {
@@ -587,6 +603,53 @@ test("reconnect adopts a lost provision result and only reaps owner-filtered orp
   expect(fake.requests).toHaveLength(1);
   expect(fake.terminated).toEqual([orphan.externalId]);
   expect(fake.runtimes.has(foreign.externalId)).toBe(true);
+});
+
+async function loseWorkspaceProvision(mountsWorkspace: boolean) {
+  fake.traits.persistentWorkspace = true;
+  fake.mountsWorkspace = mountsWorkspace;
+  const client = await connect();
+  const pool = await createRuntimePool({
+    name: "lost-workspace-pool",
+    kind: "docker",
+    placements: [controllerId],
+    image: "worker:test",
+    maxRuntimes: 1,
+    workspace: {},
+  });
+  const agent = await createPoolAgent(pool.id, { name: "lost-workspace-agent" });
+  await createTaskExtended("work", { agentId: agent.id });
+  let release!: () => void;
+  fake.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tick = reconcileOnce();
+  await until(async () => fake.requests.length === 1);
+  client.stop();
+  await tick;
+  release();
+  await until(async () => fake.runtimes.size === 1);
+  const [externalId] = [...fake.runtimes.keys()];
+  await connect();
+  await reconcileOnce();
+  const runtime = (await getRuntimeInstanceById(fake.requests[0]!.env.SWARM_RUNTIME_INSTANCE_ID!))!;
+  return { externalId: externalId!, runtime };
+}
+
+test("reconnect terminates a lost workspace provision whose mount the controller does not report", async () => {
+  const { externalId, runtime } = await loseWorkspaceProvision(false);
+  expect(runtime.status).toBe("offline");
+  expect(runtime.provisionError).toContain("recovered runtime did not mount");
+  expect(fake.terminated).toContain(externalId);
+  expect(fake.runtimes.size).toBe(0);
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+});
+
+test("reconnect adopts a lost workspace provision whose mount the controller reports", async () => {
+  const { externalId, runtime } = await loseWorkspaceProvision(true);
+  expect(runtime.status).toBe("provisioning");
+  expect(runtime.externalHandle).toMatchObject({ externalId });
+  expect(fake.terminated).not.toContain(externalId);
 });
 
 test("disconnect recovery seam waits for grace, then recovers and fences each runtime once", async () => {

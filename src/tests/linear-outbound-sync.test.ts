@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, createTaskExtended, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import {
   formatLinearOutcomeBody,
   initLinearOutboundSync,
@@ -90,6 +91,34 @@ describe("Linear Outbound Sync", () => {
     // Verify sync record updated
     const updated = await getTrackerSync("linear", "task", "outbound-task-completed");
     expect(updated!.lastSyncOrigin).toBe("swarm");
+  });
+
+  test("task.completed appends the card text when the task has a stored uiSpec", async () => {
+    process.env.UI_SPEC_ENABLED = "true";
+    try {
+      const task = await createTaskExtended("Linear card", { source: "mcp" });
+      await upsertTaskUiSpec(task.id, {
+        spec: { root: "c", elements: {} },
+        fallbackText: "*Weekly deploys*\nDeploys: 1,284",
+      });
+      await createTrackerSync({
+        provider: "linear",
+        entityType: "task",
+        swarmId: task.id,
+        externalId: "LIN-OUT-UI-SPEC",
+        externalIdentifier: "ENG-210",
+        syncDirection: "bidirectional",
+      });
+
+      workflowEventBus.emit("task.completed", { taskId: task.id, output: "All done!" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(mockCreateComment).toHaveBeenCalledTimes(1);
+      const arg = (mockCreateComment.mock.calls[0] as unknown[])[0] as { body: string };
+      expect(arg.body).toBe("All done!\n\n*Weekly deploys*\nDeploys: 1,284");
+    } finally {
+      delete process.env.UI_SPEC_ENABLED;
+    }
   });
 
   test("task.failed posts failure comment to Linear", async () => {

@@ -425,6 +425,76 @@ Use `standard-webhooks` for any sender that follows the [Standard Webhooks](http
 }
 ```
 
+### Webhook delivery filter
+
+A sender that delivers every event (a GitHub org hook set to "Send me everything", a GitLab project hook, a Standard Webhooks endpoint) would otherwise create one workflow run per delivery. Set `filter` on the webhook trigger to start runs only when the request headers and the JSON body match.
+
+`filter` is an AND of allowlists. A string is a one-value list. Header names are case-insensitive. Header values, body paths, and body scalars are exact: `1` does not match `"1"`. A missing field does not match. Body paths are dot-separated, and a numeric segment indexes an array (`commits.0.id`).
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITHUB_WEBHOOK_SECRET",
+  "filter": {
+    "headers": { "x-github-event": ["pull_request"] },
+    "body": {
+      "action": ["opened", "reopened", "ready_for_review", "synchronize"]
+    }
+  }
+}
+```
+
+GitLab actions live on `object_attributes.action`. Standard Webhooks puts the event name in the JSON field `type`:
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITLAB_WEBHOOK_TOKEN",
+  "verification": { "format": "token-equality", "header": "X-Gitlab-Token" },
+  "filter": {
+    "headers": { "X-Gitlab-Event": ["Merge Request Hook"] },
+    "body": { "object_attributes.action": ["open", "reopen", "update"] }
+  }
+}
+```
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.STANDARD_WEBHOOK_SECRET",
+  "verification": { "format": "standard-webhooks" },
+  "filter": { "body": { "type": ["contact.created"] } }
+}
+```
+
+- The filter runs after signature verification and before a run or step is saved. A bad signature is still `401`.
+- A header or body miss returns `200` with `{ "skipped": true, "reason": "filter-not-matched", "match": { "source": "header" | "body", "path": "<field>" } }`. The received value is not included. GitHub counts a non-2xx reply as a failed delivery, so the skip stays 2xx.
+- The response names the first miss. Header clauses are checked in the order written, then body clauses.
+- Only the first value of a repeated header is read.
+- Omit `filter` to add no header or body clauses.
+
+`preset` is sugar for the older `events` allowlist. It does not filter by itself.
+
+| `preset` | Where `events` is read |
+|---|---|
+| `github` (also the default) | header `X-GitHub-Event` |
+| `gitlab` | header `X-Gitlab-Event` |
+| `standard-webhooks` | JSON body field `type` |
+
+`events` and `eventHeader` still work. They are a deprecated alias of one clause, AND-ed with `filter`. `eventHeader` overrides the preset and always reads a header. An events miss returns `200` with `{ "skipped": true, "reason": "event-not-allowed", "event": "<name or null>" }`. Omitting `events`, or setting it to `[]`, adds no event clause.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITHUB_WEBHOOK_SECRET",
+  "preset": "github",
+  "events": ["pull_request"],
+  "filter": {
+    "body": { "action": ["opened", "reopened", "ready_for_review", "synchronize"] }
+  }
+}
+```
+
 ### Cooldown
 
 Workflows support a cooldown period to prevent rapid re-triggering:

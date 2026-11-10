@@ -1,6 +1,6 @@
 # TLA+ model: heartbeat and task lifecycle
 
-- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
+- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045) and, behind `WORKFLOW_STEP`, the workflow engine's relabel of a superseded step task (#2892, #2932). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
 - `HeartbeatSimple.tla` / `HeartbeatSimple.cfg`: a proposed replacement with two heartbeat actions. Not implemented.
 - `ACTIONS.md`: every TLA+ action → file:line and the SQL guard it models.
 - `CALIBRATION.md`: historical bugs the model finds when their guard is removed, and one drift case.
@@ -11,14 +11,23 @@ TLC needs Java 21 and `tla2tools.jar` (no root: Temurin JRE tarball + the jar in
 
 ```bash
 export TLC_HOME=/path/with/jre-and-jar
-./run-props.sh Heartbeat Heartbeat.cfg                 # current code: one TLC run per property
+./run-props.sh Heartbeat Heartbeat.cfg                 # current code: invariants share one TLC run, properties another
 ./run-props.sh Heartbeat Heartbeat.cfg FIX_NO_REBOOT=TRUE
 ./run-props.sh Heartbeat Heartbeat.cfg RUNTIME_POOLS=TRUE   # runtime pools (#2045); liveness is slow at this size, NTasks=2 finishes in minutes
+./run-props.sh Heartbeat Heartbeat.cfg WORKFLOW_STEP=TRUE MaxGen=1   # the root task is a workflow agent-task step (#2892, #2932); MaxGen=1 is the one retry a supersede cut gets, MaxGen=2 does not finish
 ./run-props.sh HeartbeatSimple HeartbeatSimple.cfg
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT NoLiveKill   # action names of a counterexample
 ./long-run.sh                                          # larger constants + -simulate
 ```
 
-TLC defaults to 4 workers. Use `TLC_WORKERS=auto ./tlc.sh ...` to use all cores for a local run.
+TLC defaults to 4 workers, a 6 GiB JVM heap (`TLC_HEAP=6g`), and 4 GiB of direct memory (`TLC_DIRECT_MEMORY=4g`). These caps protect the shared host: three concurrent runs budget 30 GiB for heap and direct memory, leaving room for JVM/native overhead within roughly 40 GB. They are not a hard limit on total process RSS.
+
+`TLC_WORKERS=auto` also uses 4 workers. Set an explicit number (for example `TLC_WORKERS=2`) to override it. Override `TLC_HEAP` and `TLC_DIRECT_MEMORY` only when the host has enough capacity; larger models may exhaust the default memory budget.
+
+Run `bash ./test-tlc.sh` to check the launcher's caps and argument forwarding without starting Java.
+
+`run-props.sh` checks the invariants in one TLC run and the temporal properties in another. TLC stops at the first violation, so a violation it names is reported and the run repeats with the rest; an unnamed temporal violation or a TLC error re-checks that group one property per run. Each line still names one property. `TLC_SPLIT=1` runs one TLC per property, as before.
+
+Set `TLC_CACHE_DIR` to a directory that survives restarts to keep each verdict, keyed by a hash of the `.tla` modules, the root module name, the generated cfg, `tlc.sh` and `tla2tools.jar`. A re-run with the same inputs prints the stored line marked `cached` instead of running TLC, so a restart mid-run loses only the TLC run in flight. TLC errors are never stored. Run `bash ./test-run-props.sh` to check the grouping and the cache with a stub TLC.
 
 A green run proves the model, not the code. When a file named in `ACTIONS.md` changes, re-check that its row is still true.

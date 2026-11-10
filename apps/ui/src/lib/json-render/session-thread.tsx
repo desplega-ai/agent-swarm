@@ -308,7 +308,8 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
     <div
       className={cn(
         "flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background",
-        props.fill === true ? "h-full min-h-0" : "h-[420px]",
+        // A phone stacks a `fill` parent, which leaves the thread a sliver: keep it usable.
+        props.fill === true ? "h-full min-h-0 max-md:min-h-[420px]" : "h-[420px]",
       )}
       data-testid="json-render-session-thread"
     >

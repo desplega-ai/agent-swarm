@@ -101,7 +101,7 @@ When the swarm accepts a Slack message, it adds an :eyes: reaction after it has 
 
 Additive thread buffering uses a slightly richer vocabulary: :eyes: for the first captured message, :heavy_plus_sign: for later messages appended to that buffer, and :zap: when `!now` triggers an immediate flush.
 
-Each of the 7 reactions is configurable through a `swarm_config` key, scope `global`. An unset key keeps the default shown below.
+Each of the 7 reactions is configurable through a `swarm_config` key, scope `global`. With no saved row, deployment configuration applies, then the default shown below. A saved empty string disables the reaction.
 
 | Key | Event | Default |
 |---|---|---|
@@ -113,13 +113,15 @@ Each of the 7 reactions is configurable through a `swarm_config` key, scope `glo
 | `SLACK_REACTION_FAILED` | Any linked task reached `failed`, `cancelled` or `superseded`. | `x` |
 | `SLACK_REACTION_SKIPPED` | Every linked task ended `skipped` (the agent decided the message was not its to answer), or a `pre.task.create` extension blocked the task. | `mute` |
 
-A value is trimmed, has at most one leading and one trailing colon stripped, and is lowercased before Slack sees it — `:ThumbsUp:` and `thumbsup` both resolve to `thumbsup`. A value that is empty afterward, or contains anything outside lowercase letters, digits, `_`, `+`, `'` and `-`, is rejected at write time and falls back to the default at read time.
+A value is trimmed, has at most one leading and one trailing colon stripped, and is lowercased before Slack sees it — `:ThumbsUp:` and `thumbsup` both resolve to `thumbsup`. An empty or whitespace-only value disables the icon. Nonempty values must match the shortcode format (including an optional `::skin-tone-[2-6]` suffix); malformed values such as `:` or `::` are rejected at write time. Invalid legacy or deployment values retain the built-in fallback.
 
-If Slack rejects a configured name with `invalid_name` (the emoji does not exist in the workspace), the bot logs one error-level line, increments an OTel counter, and retries once with the default for that event before giving up on the reaction. Task state and the outcome card never depend on a reaction landing. A terminal reaction (`completed`, `failed` or `skipped`) is never removed once added.
+Disabled reactions make no addition or fallback API calls. If Slack rejects a configured name with `invalid_name` (the emoji does not exist in the workspace), the bot logs one error-level line, increments an OTel counter, and retries once with the default for that event before giving up on the reaction. Task state and the outcome card never depend on a reaction landing. A terminal reaction (`completed`, `failed` or `skipped`) is never removed once added.
 
-When a task finalizes, the bot removes the acceptance-stage reactions and adds the terminal reaction. The removal list is the configured name for each of the four acceptance-stage events (`SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`). With no configuration, that list is `eyes`, `heavy_plus_sign`, `zap` and `speech_balloon`, the same fixed list the bot removed before these keys existed. The bot keeps no record of which reaction it applied to which message, so an API restart between acceptance and finalization does not change the result. `reactions.remove` only removes the bot's own reaction, so a reaction that a person or another bot applied with the same name stays in place. If you change an acceptance-stage key while a task is active, the bot removes the new name at finalization and the old reaction stays on the message.
+When a task finalizes, the bot removes the currently enabled acceptance-stage reactions, even when the terminal reaction is disabled. It adds the terminal reaction only when enabled. The removal list is the configured name for each of the four acceptance-stage events (`SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`). With no configuration, that list is `eyes`, `heavy_plus_sign`, `zap` and `speech_balloon`, the same fixed list the bot removed before these keys existed. The bot keeps no record of which reaction it applied to which message, so an API restart between acceptance and finalization does not change the result. `reactions.remove` only removes the bot's own reaction, so a reaction that a person or another bot applied with the same name stays in place. If you change an acceptance-stage key while a task is active, the bot removes the new name at finalization and the old reaction stays on the message.
 
-`SLACK_STATUS_ICON_COMPLETED` sets the "done" glyph in thread text: the task tree line of a completed task, the `🧵 ✅ done` thread header, and completed outcome cards. It takes the same values as the reaction keys and renders as `:name:`. Unset or invalid keeps ✅. Text has no `invalid_name` fallback, so a name the workspace lacks shows as literal `:name:`. The failed, waiting and working glyphs are fixed.
+`SLACK_STATUS_ICON_COMPLETED` sets the "done" glyph in thread text: the task tree line of a completed task, the `🧵 ✅ done` thread header, and completed outcome cards. It takes the same values as the reaction keys and renders as `:name:`. An absent value uses ✅; an empty value omits the icon and its separator. Invalid legacy or deployment values keep ✅. Text has no `invalid_name` fallback, so a name the workspace lacks shows as literal `:name:`. The failed, waiting and working glyphs are fixed.
+
+In **Settings → Configuration**, choose **No icon** or clear the field and save to disable it. **Remove the saved value** restores the deployment setting or default. Global changes reload automatically. An explicitly empty deployment variable also disables the icon. Existing empty values now disable instead of falling back. `SLACK_REACTION_SKIPPED` also controls the skipped glyph in V2 text. Other task-state glyphs and agent avatars are unaffected.
 
 ### Terminal reply recovery
 
@@ -174,7 +176,7 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 ### Tree-Based Status Messages
 
-The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the legacy renderer. With v2, each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
+The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the legacy renderer. With v2 and task trees enabled, each Slack thread owns one task-tree message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
 🧵 worked for 44m
@@ -232,9 +234,27 @@ Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt i
 - **In-flight threads.** The first tick with the flag on stamps `delegation_activated_at`. An ask created before that stamp keeps the pre-delegation behavior: its own outcome card, no child cards, and the reaction gate keyed to its own completion. An ask created after the stamp gets the new lifecycle. One thread can carry both kinds of ask at once.
 - **Rollback.** Set `SLACK_RENDER_V2_DELEGATION=false`. The next tick reverts every closure to the pre-delegation gate; any ask that was deferred while the flag was on finalizes immediately under the old rule, so no thread is left stranded.
 
+### Hide task trees while keeping outcome cards
+
+Set `SLACK_RENDER_V2_TASK_TREE_ENABLED=false`, or turn off **Show task tree in Slack threads**
+in **Settings → Configuration**. It defaults to On and requires `SLACK_RENDER_V2=true`.
+Outcome cards, delegated results, completion reactions, native working status, and task
+processing continue independently of tree messages, including when tree delivery fails.
+
+The setting applies live. Existing trees remain as history and stop updating. Re-enabling
+resumes threads with unfinished task work and reuses their existing tree where possible.
+It does not create or update trees for threads that completed while hidden, even after a
+restart or while their outcome delivery is retried. A later ask reactivates its thread and
+can include earlier tasks in the tree. Tree writes already sent to Slack may finish after
+disabling takes effect; queued writes and retries are cancelled.
+
+The saved global setting overrides deployment env at boot and reload. Removing the saved
+value restores the deployment value or the On default. With V2 disabled, this preference
+has no effect on the legacy renderer and remains saved for when V2 is enabled again.
+
 ### Opt out of the renderer
 
-Set `SLACK_RENDER_V2=false` to use the legacy per-task assignment/progress/completion renderer. Leaving it unset enables the task tree and streamed outcome cards.
+Set `SLACK_RENDER_V2=false` to use the legacy per-task assignment/progress/completion renderer. Leaving it unset enables V2 streamed outcome cards; task trees have their own setting.
 
 ### Rich Block Kit Messages
 
@@ -265,7 +285,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 
 ### Progress Updates
 
-The engine reflects progress by updating the thread tree. Agents can choose to send a distinct message with `slack-reply`, but routine start, progress, completion, and failure receipts are not posted automatically.
+When task trees are enabled, the engine reflects progress by updating the thread tree. Agents can choose to send a distinct message with `slack-reply`, but routine start, progress, completion, and failure receipts are not posted automatically.
 
 ### Reading Messages
 

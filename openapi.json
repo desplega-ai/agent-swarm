@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.9.0",
+    "version": "2.10.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2252,6 +2252,18 @@
           "author": {
             "type": "string",
             "minLength": 1
+          },
+          "toolSources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mcp",
+                "native"
+              ]
+            },
+            "minItems": 1,
+            "description": "Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `\"mcp\"` for swarm MCP tools, `\"native\"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `[\"mcp\"]`."
           }
         },
         "required": [
@@ -3530,6 +3542,8 @@
               "task_follow_up_suppressed",
               "task_follow_up_gate_shadow",
               "task_citation_check_refused",
+              "task_ui_spec_check_refused",
+              "task_ui_script_action_failed",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -3986,7 +4000,8 @@
               "amp",
               "cursor",
               "grok",
-              "fx"
+              "fx",
+              "system-one"
             ]
           },
           "model": {
@@ -4466,6 +4481,39 @@
           "agentId": {
             "type": "string"
           },
+          "credentialKeyType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credentialKeySuffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
           "totalCostUsd": {
             "type": "number",
             "minimum": 0
@@ -4481,14 +4529,20 @@
             "default": 0
           },
           "cacheReadTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "cacheWriteTokens": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
-            "default": 0
+            "default": null
           },
           "reasoningOutputTokens": {
             "type": "integer",
@@ -4525,6 +4579,14 @@
               "pricing-table",
               "unpriced",
               "estimated"
+            ],
+            "default": "harness"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "harness",
+              "system-one"
             ],
             "default": "harness"
           },
@@ -5341,6 +5403,12 @@
             ],
             "default": "active"
           },
+          "mergedIntoUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5355,6 +5423,85 @@
           "name",
           "createdAt",
           "lastUpdatedAt"
+        ]
+      },
+      "UserMergeJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceUserId": {
+            "type": "string"
+          },
+          "targetUserId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ]
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "progress": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceUserId",
+          "targetUserId",
+          "status",
+          "phase",
+          "progress",
+          "error",
+          "attempts",
+          "nextAttemptAt",
+          "createdAt",
+          "startedAt",
+          "finishedAt"
         ]
       },
       "WorkflowDefinition": {
@@ -5648,6 +5795,101 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                    },
+                    "preset": {
+                      "type": "string",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "standard-webhooks"
+                      ],
+                      "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                    },
+                    "filter": {
+                      "type": "object",
+                      "properties": {
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                        },
+                        "body": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 512
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                     }
                   },
                   "required": [
@@ -6413,6 +6655,101 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                    },
+                    "preset": {
+                      "type": "string",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "standard-webhooks"
+                      ],
+                      "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                    },
+                    "filter": {
+                      "type": "object",
+                      "properties": {
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                        },
+                        "body": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 512
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                     }
                   },
                   "required": [
@@ -6674,6 +7011,21 @@
             ],
             "additionalProperties": false
           },
+          "workspace": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "sizeGb": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              }
+            },
+            "default": null,
+            "additionalProperties": false
+          },
           "ttlSec": {
             "type": [
               "integer",
@@ -6821,6 +7173,12 @@
           "taskId": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "workspaceSlot": {
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -12322,6 +12680,12 @@
                           "taskId": {
                             "type": [
                               "string",
+                              "null"
+                            ]
+                          },
+                          "workspaceSlot": {
+                            "type": [
+                              "integer",
                               "null"
                             ]
                           },
@@ -19851,6 +20215,11 @@
                   "plan": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "planRaw": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
                   }
                 },
                 "required": [
@@ -20236,6 +20605,7 @@
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
+        "description": "Reports accept up to 64 windows and 64 account limits within 256 KiB. Stored records have the same count limits.",
         "tags": [
           "API Keys"
         ],
@@ -20268,13 +20638,68 @@
                       "type": "object",
                       "properties": {
                         "status": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "utilization": {
                           "type": "number"
                         },
                         "resetsAt": {
                           "type": "number"
+                        },
+                        "fieldObservedAt": {
+                          "type": "object",
+                          "properties": {
+                            "durationMins": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "resetsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "label": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "normalModelSlug": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "durationMins": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 576000
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "claude",
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "normalModelSlug": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageStatus": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "overageDisabledReason": {
+                          "type": "string",
+                          "maxLength": 256
                         },
                         "isUsingOverage": {
                           "type": "boolean"
@@ -20292,6 +20717,252 @@
                         "lastSeenAt"
                       ]
                     }
+                  },
+                  "account": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "codex",
+                          "claude"
+                        ]
+                      },
+                      "observedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "fieldObservedAt": {
+                        "type": "object",
+                        "properties": {
+                          "ordinaryUsageAllowed": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resetCreditsAvailable": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      },
+                      "ordinaryUsageAllowed": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "resetCreditsAvailable": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "limits": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "properties": {
+                            "observedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "fieldObservedAt": {
+                              "type": "object",
+                              "properties": {
+                                "planRaw": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "credits": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spend": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "spendControlReached": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "reachedType": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            },
+                            "windowRemovedAt": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "secondary": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "planRaw": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "label": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "normalModelSlug": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            },
+                            "credits": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "hasCredits": {
+                                  "type": "boolean"
+                                },
+                                "unlimited": {
+                                  "type": "boolean"
+                                },
+                                "balance": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "maxLength": 256
+                                }
+                              },
+                              "required": [
+                                "hasCredits",
+                                "unlimited"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spend": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "limit": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "used": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "remainingPercent": {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8640000000000
+                                }
+                              },
+                              "required": [
+                                "limit",
+                                "used",
+                                "remainingPercent",
+                                "resetsAt"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "spendControlReached": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "reachedType": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "observedAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "observedAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "replace": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "codex"
+                          ]
+                        },
+                        "limitId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "observedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "slots": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "primary",
+                              "secondary"
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 2
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "limitId",
+                        "observedAt",
+                        "slots"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 128
                   },
                   "scope": {
                     "type": "string"
@@ -20348,6 +21019,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Telemetry report exceeds 256 KiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -20734,13 +21415,68 @@
                               "type": "object",
                               "properties": {
                                 "status": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "utilization": {
                                   "type": "number"
                                 },
                                 "resetsAt": {
                                   "type": "number"
+                                },
+                                "fieldObservedAt": {
+                                  "type": "object",
+                                  "properties": {
+                                    "durationMins": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "resetsAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "normalModelSlug": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    }
+                                  }
+                                },
+                                "durationMins": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 576000
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex"
+                                  ]
+                                },
+                                "limitId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "normalModelSlug": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageStatus": {
+                                  "type": "string",
+                                  "maxLength": 256
+                                },
+                                "overageDisabledReason": {
+                                  "type": "string",
+                                  "maxLength": 256
                                 },
                                 "isUsingOverage": {
                                   "type": "boolean"
@@ -20759,6 +21495,212 @@
                               ]
                             }
                           },
+                          "providerAccount": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "codex",
+                                  "claude"
+                                ]
+                              },
+                              "observedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "fieldObservedAt": {
+                                "type": "object",
+                                "properties": {
+                                  "ordinaryUsageAllowed": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "resetCreditsAvailable": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              },
+                              "ordinaryUsageAllowed": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "resetCreditsAvailable": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "limits": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "observedAt": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "fieldObservedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "planRaw": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "normalModelSlug": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "credits": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spend": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "spendControlReached": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "reachedType": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      }
+                                    },
+                                    "windowRemovedAt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "primary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        },
+                                        "secondary": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "planRaw": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "label": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "normalModelSlug": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    },
+                                    "credits": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "hasCredits": {
+                                          "type": "boolean"
+                                        },
+                                        "unlimited": {
+                                          "type": "boolean"
+                                        },
+                                        "balance": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ],
+                                          "maxLength": 256
+                                        }
+                                      },
+                                      "required": [
+                                        "hasCredits",
+                                        "unlimited"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spend": {
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ],
+                                      "properties": {
+                                        "limit": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "used": {
+                                          "type": "string",
+                                          "maxLength": 256
+                                        },
+                                        "remainingPercent": {
+                                          "type": "integer",
+                                          "minimum": -2147483648,
+                                          "maximum": 2147483647
+                                        },
+                                        "resetsAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 8640000000000
+                                        }
+                                      },
+                                      "required": [
+                                        "limit",
+                                        "used",
+                                        "remainingPercent",
+                                        "resetsAt"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "spendControlReached": {
+                                      "type": [
+                                        "boolean",
+                                        "null"
+                                      ]
+                                    },
+                                    "reachedType": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "maxLength": 256
+                                    }
+                                  },
+                                  "required": [
+                                    "observedAt"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "observedAt"
+                            ],
+                            "additionalProperties": false
+                          },
                           "plan": {
                             "type": [
                               "string",
@@ -20775,6 +21717,12 @@
                               "detected",
                               "estimated",
                               null
+                            ]
+                          },
+                          "detectedPlanRaw": {
+                            "type": [
+                              "string",
+                              "null"
                             ]
                           },
                           "lastSeatMismatchAt": {
@@ -20863,8 +21811,10 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "providerAccount",
                           "plan",
                           "planSource",
+                          "detectedPlanRaw",
                           "lastSeatMismatchAt",
                           "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
@@ -20888,6 +21838,419 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/window-usage": {
+      "get": {
+        "summary": "Get Swarm-observed usage within current provider windows",
+        "description": "Usage calculations support 256 windows, 16 distinct windows per credential, 90 days, and 100,000 session rows. Oversized requests fail without partial totals.",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "keyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10
+            },
+            "required": false,
+            "name": "keySuffix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Independent windows with receipt-time tokens and explicit measurement coverage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "asOf": {
+                      "type": "string"
+                    },
+                    "accounting": {
+                      "type": "string",
+                      "enum": [
+                        "session_cost_receipt_time"
+                      ]
+                    },
+                    "windows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statusId": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "keySuffix": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "scopeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "windowKey": {
+                            "type": "string"
+                          },
+                          "durationMins": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "startsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "endsAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "dataThrough": {
+                            "type": "string"
+                          },
+                          "observedAt": {
+                            "type": "string"
+                          },
+                          "observationAgeMs": {
+                            "type": "number"
+                          },
+                          "modelScope": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "account",
+                                  "family",
+                                  "unknown"
+                                ]
+                              },
+                              "model": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "model"
+                            ]
+                          },
+                          "unavailableReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "missing_reset",
+                              "unknown_duration",
+                              "unknown_model_scope",
+                              "window_not_started",
+                              null
+                            ]
+                          },
+                          "usage": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "sessions": {
+                                "type": "integer"
+                              },
+                              "errorSessions": {
+                                "type": "integer"
+                              },
+                              "completedTasks": {
+                                "type": "integer"
+                              },
+                              "tokens": {
+                                "type": "object",
+                                "properties": {
+                                  "uncachedInput": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "output": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheRead": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "cacheWrite": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "reasoning": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  },
+                                  "thinking": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": [
+                                          "number",
+                                          "null"
+                                        ]
+                                      },
+                                      "measuredSessions": {
+                                        "type": "integer"
+                                      },
+                                      "missingSessions": {
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "measuredSessions",
+                                      "missingSessions"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "uncachedInput",
+                                  "output",
+                                  "cacheRead",
+                                  "cacheWrite",
+                                  "reasoning",
+                                  "thinking"
+                                ]
+                              },
+                              "modelUnattributedSessions": {
+                                "type": "integer"
+                              },
+                              "swarmUnattributedSessions": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "sessions",
+                              "errorSessions",
+                              "completedTasks",
+                              "tokens",
+                              "modelUnattributedSessions",
+                              "swarmUnattributedSessions"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "statusId",
+                          "keyType",
+                          "keySuffix",
+                          "scope",
+                          "scopeId",
+                          "windowKey",
+                          "durationMins",
+                          "startsAt",
+                          "endsAt",
+                          "dataThrough",
+                          "observedAt",
+                          "observationAgeMs",
+                          "modelScope",
+                          "unavailableReason",
+                          "usage"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "asOf",
+                    "accounting",
+                    "windows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requested usage exceeds the aggregation bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Usage query budget exhausted. Retry after one second",
             "content": {
               "application/json": {
                 "schema": {
@@ -29469,6 +30832,633 @@
         }
       }
     },
+    "/api/model-groups": {
+      "get": {
+        "summary": "List model groups",
+        "description": "Every model group with its member profiles in order, by name.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "seededFrom": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "members": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description",
+                          "seededFrom",
+                          "members",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "groups"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a model group",
+        "description": "A group is an ordered list of model profiles that may span harnesses. Every member must be an existing profile, listed once. The name may not be a model profile's (groups and profiles share one name space; 409). Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 500
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "Profile names in preference order, first preferred. Any harness; no repeats."
+                  }
+                },
+                "required": [
+                  "name",
+                  "members"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Group created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A group or profile with that name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-groups/{name}": {
+      "get": {
+        "summary": "Get one model group",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The model group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update a model group",
+        "description": "Changes the description (`null` clears it). The name is fixed; reorder or replace members with `PUT /api/model-groups/{name}/members`. Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "description"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Group updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a model group",
+        "description": "Refused (409) for a shipped tier group (`smol`, `regular`, `smart`, `ultra`; edit it instead, it would come back at the next boot), and while a schedule names the group or a task holds it (unfinished, or superseded and still owed its resume). Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The group is a seed or still in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model-groups/{name}/members": {
+      "put": {
+        "summary": "Replace a model group's members",
+        "description": "Replaces the whole ordered member list in one transaction; send the full list to reorder. Every member must be an existing profile, listed once. Lead, operator or dashboard user.",
+        "tags": [
+          "Models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "Profile names in preference order, first preferred. Any harness; no repeats."
+                  }
+                },
+                "required": [
+                  "members"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "seededFrom": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "seededFrom",
+                    "members",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No group with that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model-profiles": {
       "get": {
         "summary": "List model profiles",
@@ -29630,7 +31620,7 @@
       },
       "post": {
         "summary": "Create a model profile",
-        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. Operator only (the shared API key).",
+        "description": "A profile runs on one harness. `model` must run on that harness and be in the model catalog unless `allowCustomModel` is true (a gateway id, a fresh launch); a `latest:` alias is accepted and resolves at claim. `effort` must be a level the harness and model support. `credentials` pins which pooled keys the profile uses: per credential var of the harness, the last 5 characters of each allowed key (`CODEX_OAUTH` is not supported). `fallbacks` lists profiles on the same harness, in order, that a task on this profile hops to when a provider error (rate limit, seat, overload, auth, empty key pool) ends it; no repeats, no self, no cycle. The name may not be a model group's (one name space; 409). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -29860,7 +31850,7 @@
             }
           },
           "409": {
-            "description": "A profile with that name exists",
+            "description": "A profile or model group with that name exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -30243,7 +32233,7 @@
       },
       "delete": {
         "summary": "Delete a model profile",
-        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
+        "description": "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default, a schedule names it, another profile lists it as a fallback, a model group lists it as a member, or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
         "tags": [
           "Models"
         ],
@@ -36210,7 +38200,7 @@
             }
           },
           "403": {
-            "description": "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+            "description": "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
             "content": {
               "application/json": {
                 "schema": {
@@ -37220,6 +39210,88 @@
                               "verified"
                             ]
                           }
+                        },
+                        "uiSpec": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "spec": {
+                              "type": "object",
+                              "properties": {
+                                "root": {
+                                  "type": "string"
+                                },
+                                "elements": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "state": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                }
+                              },
+                              "required": [
+                                "root",
+                                "elements"
+                              ]
+                            },
+                            "actions": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "follow_up"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "script"
+                                        ]
+                                      },
+                                      "script": {
+                                        "type": "string"
+                                      },
+                                      "args": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "script"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "fallbackText": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "spec",
+                            "fallbackText"
+                          ]
                         }
                       },
                       "required": [
@@ -37227,7 +39299,8 @@
                         "supportedSteerModes",
                         "logs",
                         "attachments",
-                        "citations"
+                        "citations",
+                        "uiSpec"
                       ]
                     }
                   ]
@@ -38169,10 +40242,199 @@
         }
       }
     },
+    "/api/tasks/{id}/ui-actions/{actionId}": {
+      "post": {
+        "summary": "Run the action a task card Button declares",
+        "description": "Runs a task card action. Only the task requester may run it: a user token, or the operator key with the requester in `X-Swarm-User-Id`. Agent callers, and operator calls with no picked user, get 403. Needs UI_SPEC_ACTIONS_ENABLED=true. A `follow_up` action runs once per task and action. A `script` action re-runs its allowlisted script (UI_SPEC_SCRIPT_ACTIONS) and returns the new card; it can run again after a 30 s cooldown.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "actionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The follow-up started or already ran, or the script action replaced the card (`refreshed`, with the new `uiSpec`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "started",
+                        "already_done",
+                        "refreshed"
+                      ]
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "uiSpec": {
+                      "type": "object",
+                      "properties": {
+                        "spec": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "elements": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "state": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "elements"
+                          ]
+                        },
+                        "actions": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "follow_up"
+                                    ]
+                                  },
+                                  "prompt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "prompt"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "script"
+                                    ]
+                                  },
+                                  "script": {
+                                    "type": "string"
+                                  },
+                                  "args": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "script"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "fallbackText": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "spec",
+                        "fallbackText"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the task requester may run the action, or the action's script is not allowlisted or changed since it was allowlisted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task or action not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Card actions are turned off (UI_SPEC_ACTIONS_ENABLED), or the script action is already running (with `Retry-After`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The script failed or returned an invalid card; the old card stays",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The script action ran recently; `Retry-After` says when it can run again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{id}/supersede": {
       "post": {
         "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
-        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent: on the same profile while a key-scoped error (`rate_limit`, `credits`) leaves another unbenched key in its pool, else on the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
         "tags": [
           "Tasks"
         ],
@@ -41471,7 +43733,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -41557,7 +43820,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -41676,7 +43940,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -41763,7 +44028,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -52416,6 +54682,42 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "credentialKeyType": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Z][A-Z0-9_]{0,79}$"
+                  },
+                  "credentialKeySuffix": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "harness": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok",
+                      "fx",
+                      null
+                    ]
+                  },
                   "totalCostUsd": {
                     "type": "number"
                   },
@@ -52434,7 +54736,10 @@
                     "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "minimum": 0
                   },
                   "cacheWriteTokens": {
@@ -52543,7 +54848,8 @@
                       "amp",
                       "cursor",
                       "grok",
-                      "fx"
+                      "fx",
+                      "system-one"
                     ]
                   },
                   "createdAt": {
@@ -52588,6 +54894,26 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted session attribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session identity conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -52784,6 +55110,12 @@
                         },
                         "subscriptionCostUsd": {
                           "type": "number"
+                        },
+                        "credentialUnattributedCostUsd": {
+                          "type": "number"
+                        },
+                        "credentialUnattributedSessions": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -52799,7 +55131,9 @@
                         "attributableCostUsd",
                         "excludedCostUsd",
                         "excludedTaskCount",
-                        "subscriptionCostUsd"
+                        "subscriptionCostUsd",
+                        "credentialUnattributedCostUsd",
+                        "credentialUnattributedSessions"
                       ]
                     },
                     "daily": {
@@ -52824,6 +55158,12 @@
                           },
                           "subscriptionCostUsd": {
                             "type": "number"
+                          },
+                          "credentialUnattributedCostUsd": {
+                            "type": "number"
+                          },
+                          "credentialUnattributedSessions": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -52832,7 +55172,9 @@
                           "inputTokens",
                           "outputTokens",
                           "sessions",
-                          "subscriptionCostUsd"
+                          "subscriptionCostUsd",
+                          "credentialUnattributedCostUsd",
+                          "credentialUnattributedSessions"
                         ]
                       }
                     },
@@ -56701,6 +59043,88 @@
                                 ]
                               }
                             },
+                            "uiSpec": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "spec": {
+                                  "type": "object",
+                                  "properties": {
+                                    "root": {
+                                      "type": "string"
+                                    },
+                                    "elements": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    "state": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "root",
+                                    "elements"
+                                  ]
+                                },
+                                "actions": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "follow_up"
+                                            ]
+                                          },
+                                          "prompt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "prompt"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "script"
+                                            ]
+                                          },
+                                          "script": {
+                                            "type": "string"
+                                          },
+                                          "args": {
+                                            "type": "object",
+                                            "additionalProperties": {}
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "script"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                },
+                                "fallbackText": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "spec",
+                                "fallbackText"
+                              ]
+                            },
                             "isLeadTask": {
                               "type": "boolean"
                             },
@@ -56717,6 +59141,7 @@
                           },
                           "required": [
                             "citations",
+                            "uiSpec",
                             "isLeadTask",
                             "supportedSteerModes"
                           ]
@@ -56798,6 +59223,88 @@
                                   ]
                                 }
                               },
+                              "uiSpec": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "spec": {
+                                    "type": "object",
+                                    "properties": {
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "elements": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      },
+                                      "state": {
+                                        "type": "object",
+                                        "additionalProperties": {}
+                                      }
+                                    },
+                                    "required": [
+                                      "root",
+                                      "elements"
+                                    ]
+                                  },
+                                  "actions": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "follow_up"
+                                              ]
+                                            },
+                                            "prompt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "prompt"
+                                          ]
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": [
+                                                "script"
+                                              ]
+                                            },
+                                            "script": {
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "object",
+                                              "additionalProperties": {}
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "script"
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "fallbackText": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "spec",
+                                  "fallbackText"
+                                ]
+                              },
                               "isLeadTask": {
                                 "type": "boolean"
                               },
@@ -56814,6 +59321,7 @@
                             },
                             "required": [
                               "citations",
+                              "uiSpec",
                               "isLeadTask",
                               "supportedSteerModes"
                             ]
@@ -63222,6 +65730,226 @@
         }
       }
     },
+    "/api/tool-hooks": {
+      "post": {
+        "summary": "Run extension tool hooks for a harness-native tool call",
+        "description": "A worker shim reports a harness built-in tool call (bash, read, write, edit). `phase: pre` runs `pre.tool.call` with `callOrigin: native` and returns the decision. `phase: post` runs `post.tool.call` observe-only and returns 202 at once. Only extensions whose manifest `toolSources` includes `\"native\"` receive these calls. The server runs the secret scrubber over the body before any handler sees it, so handlers read `[REDACTED:<name>]` in place of a secret. A `modify` whose args still carry that marker is rejected and the call continues unchanged. Shims must also scrub worker-side before sending.",
+        "tags": [
+          "Extensions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "pre"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "post"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "result": {},
+                      "isError": {
+                        "type": "boolean"
+                      },
+                      "durationMs": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool",
+                      "durationMs"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pre-call decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "continue"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "modify"
+                          ]
+                        },
+                        "args": {}
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "block"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "action",
+                        "reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Post-call event accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or missing X-Agent-ID header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/trackers/jira/authorize": {
       "get": {
         "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
@@ -67975,7 +70703,8 @@
     },
     "/api/users/{id}/merge": {
       "post": {
-        "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
+        "summary": "Merge another user into this one: moves identities + email aliases, queues the rest",
+        "description": "Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.",
         "tags": [
           "Users"
         ],
@@ -68013,137 +70742,19 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Merged user",
+          "202": {
+            "description": "The queued merge job",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "user": {
-                      "anyOf": [
-                        {
-                          "allOf": [
-                            {
-                              "$ref": "#/components/schemas/User"
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "identities": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string"
-                                      },
-                                      "externalId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "kind",
-                                      "externalId"
-                                    ]
-                                  }
-                                },
-                                "tokens": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "label": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "tokenPreview": {
-                                        "type": "string"
-                                      },
-                                      "createdAt": {
-                                        "type": "string"
-                                      },
-                                      "lastUsedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "revokedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "label",
-                                      "tokenPreview",
-                                      "createdAt",
-                                      "lastUsedAt",
-                                      "revokedAt"
-                                    ]
-                                  }
-                                },
-                                "recentEvents": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "eventType": {
-                                        "type": "string"
-                                      },
-                                      "actor": {
-                                        "type": "string"
-                                      },
-                                      "before": {},
-                                      "after": {},
-                                      "createdAt": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "eventType",
-                                      "actor",
-                                      "createdAt"
-                                    ]
-                                  }
-                                }
-                              },
-                              "required": [
-                                "identities",
-                                "tokens",
-                                "recentEvents"
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
                     }
                   },
                   "required": [
-                    "user"
+                    "job"
                   ]
                 }
               }
@@ -68190,7 +70801,142 @@
             }
           },
           "409": {
-            "description": "Source is the last active admin (last_admin)",
+            "description": "Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs": {
+      "get": {
+        "summary": "List background user merge jobs, newest first",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merge jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserMergeJob"
+                      }
+                    }
+                  },
+                  "required": [
+                    "jobs"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs/{jobId}": {
+      "get": {
+        "summary": "A background user merge job (poll until status is done or failed)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The merge job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
+                    }
+                  },
+                  "required": [
+                    "job"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -69610,6 +72356,101 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                            },
+                            "preset": {
+                              "type": "string",
+                              "enum": [
+                                "github",
+                                "gitlab",
+                                "standard-webhooks"
+                              ],
+                              "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                            },
+                            "filter": {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                                },
+                                "body": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 512
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                             }
                           },
                           "required": [
@@ -70031,6 +72872,101 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                            },
+                            "preset": {
+                              "type": "string",
+                              "enum": [
+                                "github",
+                                "gitlab",
+                                "standard-webhooks"
+                              ],
+                              "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                            },
+                            "filter": {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                                },
+                                "body": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 512
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                             }
                           },
                           "required": [
@@ -71273,6 +74209,86 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "skipped": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "event-not-allowed"
+                          ]
+                        },
+                        "event": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "skipped",
+                        "reason",
+                        "event"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "skipped": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "filter-not-matched"
+                          ]
+                        },
+                        "match": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "header",
+                                "body"
+                              ]
+                            },
+                            "path": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "path"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "skipped",
+                        "reason",
+                        "match"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "201": {
             "description": "Webhook processed",
             "content": {
@@ -71776,6 +74792,21 @@
                     ],
                     "additionalProperties": false
                   },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
+                    "default": null,
+                    "additionalProperties": false
+                  },
                   "ttlSec": {
                     "type": [
                       "integer",
@@ -72072,6 +75103,20 @@
                     "required": [
                       "mountPath"
                     ],
+                    "additionalProperties": false
+                  },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
                     "additionalProperties": false
                   },
                   "ttlSec": {

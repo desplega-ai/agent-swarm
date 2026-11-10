@@ -2,6 +2,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getActiveConnection, getConfig } from "@/lib/config";
 import type { CompositionManifest } from "@/lib/request-composition";
 import { reportedUseCase, reportedUserFunction } from "../../../../src/utils/company-profile";
+import type { TaskUiSpec } from "../../../../src/utils/task-ui-spec";
 import { allUsersScopeEnabled, SESSION_SCOPE_HEADER } from "../lib/all-users-scope";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import { withAddressSpace } from "../lib/local-network";
@@ -203,6 +204,8 @@ import type {
   UsedByConsentInput,
   User,
   UserIdentity,
+  UserMergeJob,
+  UserMergeJobResponse,
   UserResponse,
   UsersResponse,
   WhoamiResponse,
@@ -894,6 +897,27 @@ class ApiClient {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to pause task" }));
       throw new Error(error.error || `Failed to pause task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Runs the action a task card Button declares. Throws with the server's error text. */
+  async runTaskUiAction(
+    id: string,
+    actionId: string,
+  ): Promise<{
+    status: "started" | "already_done" | "refreshed";
+    taskId?: string;
+    uiSpec?: TaskUiSpec;
+  }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/ui-actions/${encodeURIComponent(actionId)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to run the card action" }));
+      throw new Error(error.error || `Failed to run the card action: ${res.status}`);
     }
     return res.json();
   }
@@ -3115,6 +3139,17 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchKeyWindowUsage(filter: {
+    keyType: string;
+    keySuffix: string;
+  }): Promise<import("./types").KeyWindowUsageResponse> {
+    const params = new URLSearchParams(filter);
+    const url = `${this.getBaseUrl()}/api/keys/window-usage?${params.toString()}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch window usage: ${res.status}`);
+    return res.json();
+  }
+
   async fetchApiKeyCosts(keyType?: string): Promise<import("./types").KeyCostResponse> {
     const params = new URLSearchParams();
     if (keyType) params.set("keyType", keyType);
@@ -3644,7 +3679,8 @@ class ApiClient {
     return body.events;
   }
 
-  async mergeUsers(targetId: string, sourceUserId: string): Promise<User> {
+  /** Queues the merge (202). Poll `getUserMergeJob` until `status` is done or failed. */
+  async mergeUsers(targetId: string, sourceUserId: string): Promise<UserMergeJob> {
     const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(targetId)}/merge`;
     const res = await fetch(url, {
       method: "POST",
@@ -3655,8 +3691,16 @@ class ApiClient {
       const err = await res.json().catch(() => ({ error: "Failed to merge users" }));
       throw new Error(err.error || `Failed to merge users: ${res.status}`);
     }
-    const body = (await res.json()) as UserResponse;
-    return body.user;
+    const body = (await res.json()) as UserMergeJobResponse;
+    return body.job;
+  }
+
+  async getUserMergeJob(jobId: string): Promise<UserMergeJob> {
+    const url = `${this.getBaseUrl()}/api/users/merge-jobs/${encodeURIComponent(jobId)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch merge job: ${res.status}`);
+    const body = (await res.json()) as UserMergeJobResponse;
+    return body.job;
   }
 
   async listUnmapped(opts?: { kind?: string; limit?: number }): Promise<UnmappedIdentity[]> {

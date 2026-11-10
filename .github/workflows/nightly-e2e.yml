@@ -20,9 +20,7 @@
 name: Nightly E2E
 
 on:
-  schedule:
-    # Off the hour: on-the-hour schedules queue for a long time on GitHub.
-    - cron: "23 3 * * *"
+  # An external scheduler dispatches this on main daily at 03:23 UTC.
   workflow_dispatch:
 
 concurrency:

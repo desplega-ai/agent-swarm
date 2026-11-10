@@ -15,7 +15,11 @@ import {
   recordSlackMessage,
   updateSlackMessageRecord,
 } from "../be/db";
-import { closeSlackTreeIfSettled } from "../be/db/slack-trees";
+import {
+  closeSlackTreeIfSettled,
+  getSlackProcessingThreads,
+  SLACK_RECONCILE_PAGE_SIZE,
+} from "../be/db/slack-trees";
 import { getSlackTasksMissingTree } from "../be/db/tasks/read";
 import { completeTask, startTask } from "../be/db/tasks/write";
 
@@ -118,6 +122,95 @@ describe("slack render-v2 watcher queries", () => {
     } finally {
       copy.close();
     }
+  });
+
+  test("recovery pages old active work fairly, excludes backlog, and survives reopening the DB", async () => {
+    const insert = getDb().query(`INSERT INTO agent_tasks
+      (id, task, status, source, slackChannelId, slackThreadTs, createdAt, lastUpdatedAt)
+      VALUES (?, 'old ask', ?, 'slack', 'C_PAGED', ?, '2001-01-01', '2001-01-01')`);
+    getDb()
+      .transaction(() => {
+        for (let i = 0; i < 1001; i++) {
+          insert.run(`active-${String(i).padStart(4, "0")}`, "in_progress", `active-${i}`);
+          insert.run(`backlog-${i}`, "backlog", `backlog-${i}`);
+          insert.run(`unassigned-${i}`, "unassigned", `unassigned-${i}`);
+        }
+      })
+      .immediate();
+    const seen = new Set<string>();
+    for (let tick = 0; tick < 21; tick++) {
+      const rows = await getSlackProcessingThreads(false);
+      expect(rows.length).toBeLessThanOrEqual(SLACK_RECONCILE_PAGE_SIZE);
+      for (const row of rows) {
+        expect(row.threadTs.startsWith("active-")).toBe(true);
+        expect(seen.has(row.threadTs)).toBe(false);
+        seen.add(row.threadTs);
+      }
+      if (tick === 0) {
+        const globals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
+        const original = globals.__testMigrationTemplate;
+        globals.__testMigrationTemplate = getDb().serialize();
+        closeDb();
+        try {
+          initDb(":memory:");
+        } finally {
+          globals.__testMigrationTemplate = original;
+        }
+      }
+    }
+    expect(seen.size).toBe(1001);
+    expect((await getSlackProcessingThreads(false))[0]?.threadTs).toBe("active-0");
+  });
+
+  test("each recovery source seeks its keyset before filtering a bounded page", async () => {
+    const client = getDbClient();
+    const original = client.query.bind(client);
+    const seen: { sql: string; params: unknown[] }[] = [];
+    const spy = spyOn(client, "query").mockImplementation(((sql: string, params?: unknown[]) => {
+      seen.push({ sql, params: params ?? [] });
+      return original(sql, params);
+    }) as typeof client.query);
+    try {
+      await getSlackProcessingThreads(true, true);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(seen).toHaveLength(4);
+    for (const { sql, params } of seen) {
+      expect(sql).toContain("ORDER BY id LIMIT ?");
+      expect(params[1]).toBe(SLACK_RECONCILE_PAGE_SIZE);
+      expect(plan(sql, params)).toMatch(/SEARCH .* USING INDEX idx_slack_reconcile_.* \(id>\?\)/);
+    }
+  });
+
+  test("settled terminal history advances the cursor without starving pending outcomes", async () => {
+    const lead = await createAgent({ name: "history lead", isLead: true, status: "idle" });
+    const old = await settledThread("SETTLED_PAGE", lead.id);
+    // Clone finalized tasks; an existing shared settled card makes each ineligible.
+    for (let i = 0; i < 105; i++) {
+      const id = `history-${String(i).padStart(4, "0")}`;
+      getDb().run(
+        `INSERT INTO agent_tasks (id,task,status,source,slackChannelId,slackThreadTs,createdAt,lastUpdatedAt)
+        VALUES (?, 'finished', 'completed', 'slack', 'C_HISTORY', ?, '2001-01-01', '2001-01-01')`,
+        [id, id],
+      );
+      await recordSlackMessage({
+        contextKey: `slack:C_HISTORY:${id}`,
+        channelId: "C_HISTORY",
+        threadTs: id,
+        ts: id,
+        kind: "outcome",
+        taskId: id,
+        finalized: true,
+      });
+    }
+    getDb().run(`INSERT INTO agent_tasks (id,task,status,source,slackChannelId,slackThreadTs,createdAt,lastUpdatedAt)
+      VALUES ('zz-pending', 'pending outcome', 'completed', 'slack', 'C_PENDING', 'pending', '2001-01-01', '2001-01-01')`);
+    const found = [];
+    for (let tick = 0; tick < 3; tick++) found.push(...(await getSlackProcessingThreads(false)));
+    expect(found).toContainEqual({ channelId: "C_PENDING", threadTs: "pending" });
+    expect(found.some((row) => row.channelId === "C_HISTORY")).toBe(false);
+    expect(found.some((row) => row.threadTs === old.threadTs)).toBe(false);
   });
 
   test("deferral resolution drives from the chain, not from every task", async () => {

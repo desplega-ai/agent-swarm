@@ -1,4 +1,4 @@
-name: Docker Build + Publish + Deploy
+name: Docker Build + Publish
 
 on:
   push:
@@ -80,8 +80,9 @@ jobs:
   # Supersede: the merge queue lands each PR of a group as its own main commit, a
   # few seconds apart, and each push starts this workflow. All six build jobs sit
   # in a per-ref concurrency group with cancel-in-progress, so a newer run cancels
-  # an older run's builds, and with them its merge, deploy and notify jobs. Only
-  # the newest run builds and deploys. A run that bumps package.json's version is
+  # an older run's builds, and with them its merge, promote and notify jobs.
+  # Only the newest run moves :latest and :slim. Prod runs :prod, which only
+  # deploy.yml moves, on a schedule. A run that bumps package.json's version is
   # the only one that sees the bump (detect-version-change diffs against
   # github.event.before), so it gets a group of its own and is never cancelled:
   # its :VERSION images, git tag, npm, E2B and GitHub release all still publish.
@@ -615,36 +616,29 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    name: Promote images and deploy
+  promote-main-tags:
+    name: Promote :latest and :slim
     runs-on: ubuntu-latest
-    # All moving-tag writes and the complete deploy share this lock. Builds and
-    # SHA/version publication stay parallel; stale runs cannot roll these tags back.
+    # Moves the main-tip tags on every merge. No deploy: prod runs :prod, which
+    # only deploy.yml moves. All writes to these tags share this lock, so a stale
+    # run cannot roll them back.
     if: github.ref == 'refs/heads/main'
     permissions:
-      # actions: read lets the Slack step read the run start time.
-      actions: read
       contents: read
       packages: write
     concurrency:
-      group: agent-swarm-deploy
-      # A late stale build must not evict a queued main-tip deployment.
+      group: agent-swarm-main-tags
+      # A late stale build must not evict a queued main-tip promotion.
       queue: max
       cancel-in-progress: false
 
     needs:
-      - detect-version-change
       - merge-server
       - merge-worker
       - merge-worker-slim
 
     steps:
-      - name: Record start time
-        id: start
-        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
-        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
@@ -658,28 +652,14 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Skip only when a newer main commit touches on.push.paths, so it starts its
-      # own run and deploy. A newer docs-only commit starts no run; skipping for it
-      # would leave prod on an older deploy. is_tip=true means "this run deploys".
-      # Logic and regression test: scripts/deploy-guard.sh, src/tests/deploy-guard.test.ts.
+      # own run and promotion. A newer docs-only commit starts no run; skipping for
+      # it would leave :latest on an older build. is_tip=true means "this run
+      # promotes". Logic and regression test: scripts/deploy-guard.sh,
+      # src/tests/deploy-guard.test.ts.
       - name: Check running commit is main tip
         id: guard
         shell: bash
         run: bash scripts/deploy-guard.sh
-
-      # Read before promotion: the commit :latest points at now is the previous
-      # deploy, which bounds the change list in the Slack notification.
-      - name: Read previous deployed revision
-        id: prev
-        if: steps.guard.outputs.is_tip == 'true'
-        continue-on-error: true
-        env:
-          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        run: |
-          set -euo pipefail
-          sha="$(docker buildx imagetools inspect "${API_IMAGE}:latest" --format '{{json .Image}}' \
-            | jq -r '(.["linux/amd64"] // .) | .config.Labels["org.opencontainers.image.revision"] // empty')"
-          echo "Previous :latest revision: ${sha:-unknown}"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Promote moving tags
         if: steps.guard.outputs.is_tip == 'true'
@@ -697,89 +677,35 @@ jobs:
           docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
           docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
 
-      - name: Setup Bun
-        if: steps.guard.outputs.is_tip == 'true'
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-
-      # Dokploy queues the deploy and only creates the deployment record when its worker
-      # picks the job up, which can take minutes. The script waits for that record,
-      # re-triggers if none appears, and fails only on a real error. See its header.
-      - name: Deploy Agent Swarm
-        if: steps.guard.outputs.is_tip == 'true'
-        env:
-          DOKPLOY_URL: https://app.dokploy.com
-          DOKPLOY_COMPOSE_ID: u-iCRBK0Ta-pOedSaTjqc
-          DOKPLOY_TOKEN: ${{ secrets.DOKPLOY_TOKEN }}
-        run: bun scripts/dokploy-deploy.ts
-
-      # Posts the deploy outcome to the deploys channel through a Slack incoming
-      # webhook (bound to its channel when the webhook is created). Runs on success,
-      # failure and cancel, but not when the guard skipped the deploy. No secret means
-      # no post, so this never blocks a deploy; a failed post only logs a warning.
-      - name: Notify Slack
-        if: always() && steps.guard.outputs.is_tip != 'false'
+  # A version bump (the nightly release PR) also deploys prod, instead of waiting
+  # for the next deploy.yml window. Runs after this run's api and worker images and
+  # the :latest promotion, so deploy.yml's selection (newest main commit with both
+  # images) finds the release commit. GITHUB_TOKEN may dispatch workflow_dispatch
+  # (as create-release does for publish-mcp-registry.yml). A failed dispatch only
+  # warns: the release stands and the next window deploys it.
+  deploy-release:
+    name: Deploy release to prod
+    runs-on: ubuntu-latest
+    needs:
+      - detect-version-change
+      - merge-server
+      - merge-worker
+      - promote-main-tags
+    if: github.ref == 'refs/heads/main' && needs.detect-version-change.outputs.version_changed == 'true'
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch deploy.yml
         continue-on-error: true
         env:
-          WEBHOOK: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
           GH_TOKEN: ${{ github.token }}
-          STATUS: ${{ job.status }}
           VERSION: ${{ needs.detect-version-change.outputs.version }}
-          PREV_SHA: ${{ steps.prev.outputs.sha }}
-          STARTED: ${{ steps.start.outputs.epoch }}
         run: |
-          set -uo pipefail
-
-          if [ -z "$WEBHOOK" ]; then
-            echo "::notice::DEPLOY_SLACK_WEBHOOK_URL is not set; skipping the Slack deploy notification"
-            exit 0
-          fi
-
-          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
-          case "$STATUS" in
-            success) headline=":white_check_mark: *agent-swarm deploy succeeded*" ;;
-            cancelled) headline=":heavy_minus_sign: *agent-swarm deploy cancelled*" ;;
-            *) headline=":x: *agent-swarm deploy failed*" ;;
-          esac
-
-          fmt() { if [ "$1" -ge 60 ]; then echo "$(($1 / 60))m $(($1 % 60))s"; else echo "$1s"; fi; }
-          now="$(date +%s)"
-          durations="deploy job $(fmt $((now - ${STARTED:-$now})))"
-          run_started="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .run_started_at 2>/dev/null || true)"
-          if [ -n "$run_started" ]; then
-            durations="${durations}, whole run $(fmt $((now - $(date -d "$run_started" +%s))))"
-          fi
-
-          # Commits between the image :latest pointed at before this deploy and this
-          # one, newest first, with "(#123)" turned into PR links.
-          changes=""
-          if [[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$PREV_SHA" != "$GITHUB_SHA" ]; then
-            changes="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_SHA}...${GITHUB_SHA}" | jq -r --arg url "$repo_url" '
-              def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
-              select(.status == "ahead")
-              | "Changes since <\($url)/commit/\(.base_commit.sha)|\(.base_commit.sha[0:7])> (\(.total_commits)):",
-                ((.commits | reverse)[:15][]
-                  | "• <\($url)/commit/\(.sha)|\(.sha[0:7])> "
-                    + (.commit.message | split("\n")[0] | esc
-                       | gsub("\\(#(?<n>[0-9]+)\\)"; "(<\($url)/pull/\(.n)|#\(.n)>)"))),
-                (if .total_commits > 15 then "…and \(.total_commits - 15) more" else empty end)
-            ' 2>/dev/null || true)"
-          fi
-
-          text="${headline}: v${VERSION} <${repo_url}/commit/${GITHUB_SHA}|${GITHUB_SHA:0:7}>"
-          text="${text}"$'\n'"Duration: ${durations} · <${run_url}|workflow run>"
-          if [ -n "$changes" ]; then
-            text="${text}"$'\n'"${changes}"
-          fi
-
-          payload="$(jq -n --arg text "$text" '{text: $text, unfurl_links: false, unfurl_media: false}')"
-          if curl -sS --fail-with-body --max-time 20 -H 'content-type: application/json' --data "$payload" "$WEBHOOK"; then
-            echo
-            echo "::notice::Posted the deploy outcome (${STATUS}) to Slack"
+          if gh workflow run deploy.yml -R "$GITHUB_REPOSITORY" --ref main; then
+            echo "::notice::Dispatched deploy.yml for release v${VERSION}"
           else
-            echo "::warning::Slack deploy notification failed; the deploy result is unaffected"
+            echo "::warning::Could not dispatch deploy.yml for v${VERSION}; the next deploy window ships it"
+            exit 1
           fi
 
   notify-image-release:

@@ -1,6 +1,7 @@
 import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { getAgentById, markTaskSlackReplySent } from "../be/db";
 import type { Agent, AgentTask } from "../types";
+import { withUiSpecFallback } from "../ui-spec/fallback";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,
@@ -15,7 +16,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
-import { completedStatusIcon } from "./reaction-shortcode";
+import { completedStatusIcon, iconPrefix } from "./reaction-shortcode";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
 
@@ -68,7 +69,7 @@ export function formatInlineCompletionOutputChunks(opts: {
   taskId: string;
   output: string;
 }): string[] {
-  const header = `${completedStatusIcon()} *${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
+  const header = `${iconPrefix(completedStatusIcon())}*${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
   const slackOutput = markdownToSlack(opts.output.trim());
   return splitSlackSectionText(header + slackOutput);
 }
@@ -88,7 +89,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
   const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
-    output: slackTaskOutput(task) ?? "",
+    output: await withUiSpecFallback(task.id, slackTaskOutput(task) ?? ""),
   });
 
   try {
@@ -139,7 +140,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 
   try {
     if (task.status === "completed") {
-      const output = slackTaskOutput(task) || "Task completed.";
+      const output = await withUiSpecFallback(task.id, slackTaskOutput(task) || "Task completed.");
       const slackOutput = markdownToSlack(output);
       const attachmentsBlock = formatAttachmentsBlockForSlack(
         await getSlackOutputAttachments(task.id),
@@ -170,7 +171,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
           thread_ts: task.slackThreadTs,
           text:
             task.slackReplySent || i > 0
-              ? `${completedStatusIcon()} ${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
+              ? `${iconPrefix(completedStatusIcon())}${agentName} completed${i > 0 ? ` (continued ${i + 1}/${blockBatches.length})` : ""}`
               : body,
           username: getAgentDisplayName(agent),
           icon: getAgentSlackIcon(agent),
@@ -325,7 +326,9 @@ export async function updateToFinal(
     };
     completionBlockBatches = buildCompletedBlockBatches(completionOpts);
     blocks = completionBlockBatches[0] ?? buildCompletedBlocks(completionOpts);
-    text = task.slackReplySent ? `${completedStatusIcon()} ${agentName} completed` : body;
+    text = task.slackReplySent
+      ? `${iconPrefix(completedStatusIcon())}${agentName} completed`
+      : body;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
     text = "Task cancelled";
@@ -352,7 +355,7 @@ export async function updateToFinal(
         await sendWithPersona(app.client, {
           channel: task.slackChannelId,
           thread_ts: task.slackThreadTs ?? messageTs,
-          text: `${completedStatusIcon()} ${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
+          text: `${iconPrefix(completedStatusIcon())}${agentName} completed (continued ${i + 1}/${completionBlockBatches.length})`,
           username: getAgentDisplayName(agent),
           icon: getAgentSlackIcon(agent),
           blocks: completionBlockBatches[i],

@@ -1,4 +1,5 @@
 import { redactWithEnv } from "../e2b/env";
+import { parseEnvFlag } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ConfigStatus,
@@ -9,6 +10,8 @@ import {
   type RuntimeProvider,
   type RuntimeStatus,
   type RuntimeTargetConfig,
+  WORKSPACE_LABEL,
+  WORKSPACE_MOUNT_PATH,
 } from "./types";
 
 /**
@@ -19,8 +22,55 @@ import {
  * - DOCKER_HOST: `unix:///path/to/docker.sock` (default /var/run/docker.sock)
  * - DOCKER_NETWORK: optional network to attach runtimes to
  * - DOCKER_EXTRA_HOSTS: comma-separated host:address entries
+ * - DOCKER_RUNTIME: optional OCI runtime name (`runsc`, `kata`) -> HostConfig.Runtime
+ * - DOCKER_HARDENED: `true` or `1` (parseEnvFlag) drops all capabilities except the
+ *   entrypoint set, forbids privilege escalation, and disables swap when memory is limited
+ * - DOCKER_PIDS_LIMIT: optional positive integer -> HostConfig.PidsLimit
  */
 const MAX_API_VERSION = 47;
+const OCI_RUNTIME_NAME = /^[A-Za-z0-9._-]+$/;
+const PIDS_LIMIT = /^[1-9]\d*$/;
+
+/**
+ * Capabilities the worker entrypoint still needs after `CapDrop: ["ALL"]`, verified against
+ * `agent-swarm-worker:slim` with `--security-opt no-new-privileges`:
+ * - CHOWN + DAC_OVERRIDE: root chowns and writes into the 750 `/home/worker` tree.
+ * - FOWNER: `chmod` after `chown` on the codex `auth.json`.
+ * - SETUID + SETGID: the entrypoint drops from root to the `worker` user.
+ * - KILL: tini forwards signals to the worker process.
+ */
+const HARDENED_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"];
+
+class DockerConfigError extends Error {
+  constructor(
+    readonly key: string,
+    message: string,
+  ) {
+    super(scrubSecrets(message));
+  }
+}
+
+type IsolationOptions = { runtime?: string; pidsLimit?: number; hardened: boolean };
+
+function isolationOptions(target: RuntimeTargetConfig): IsolationOptions {
+  const runtime = target.DOCKER_RUNTIME?.trim();
+  if (runtime && !OCI_RUNTIME_NAME.test(runtime))
+    throw new DockerConfigError(
+      "DOCKER_RUNTIME",
+      `DOCKER_RUNTIME must be an OCI runtime name (letters, digits, ".", "-", "_"), got ${runtime}`,
+    );
+  const pids = target.DOCKER_PIDS_LIMIT?.trim();
+  if (pids && (!PIDS_LIMIT.test(pids) || !Number.isSafeInteger(Number(pids))))
+    throw new DockerConfigError(
+      "DOCKER_PIDS_LIMIT",
+      `DOCKER_PIDS_LIMIT must be a positive integer, got ${pids}`,
+    );
+  return {
+    runtime: runtime || undefined,
+    pidsLimit: pids ? Number(pids) : undefined,
+    hardened: parseEnvFlag(target.DOCKER_HARDENED, false),
+  };
+}
 const apiVersions = new Map<string, Promise<string>>();
 
 async function apiVersion(socket: string): Promise<string> {
@@ -75,9 +125,50 @@ function assertCacheOwner(volume: CacheVolume, cache: RuntimeCacheReference): vo
     volume.Name !== cache.key ||
     volume.Labels?.[RUNTIME_LABELS.owner] !== cache.ownerId ||
     volume.Labels?.[RUNTIME_LABELS.poolId] !== cache.poolId ||
-    volume.Labels?.["swarm.cache"] !== "true"
+    volume.Labels?.["swarm.cache"] !== "true" ||
+    volume.Labels?.[WORKSPACE_LABEL] === "true"
   )
     throw new Error(`Cache volume ${cache.key} is not owned by this swarm and pool`);
+}
+
+function assertWorkspaceOwner(volume: CacheVolume, req: ProvisionRequest, key: string): void {
+  if (
+    volume.Name !== key ||
+    volume.Labels?.[RUNTIME_LABELS.owner] !== req.ownerId ||
+    volume.Labels?.[RUNTIME_LABELS.agentId] !== req.agentId ||
+    volume.Labels?.[WORKSPACE_LABEL] !== "true"
+  )
+    throw new Error(`Workspace volume ${key} is not owned by this swarm and agent`);
+}
+
+/** Creates or reuses the agent's workspace volume and refuses one a live container mounts. */
+async function prepareWorkspaceMount(
+  target: RuntimeTargetConfig,
+  req: ProvisionRequest,
+  key: string,
+): Promise<{ Type: "volume"; Source: string; Target: string }> {
+  // No pool label: the volume outlives the pool and is never removed by the swarm.
+  const volume = await dockerApi<CacheVolume>(target, "POST", "/volumes/create", {
+    Name: key,
+    Labels: {
+      [RUNTIME_LABELS.owner]: req.ownerId,
+      [RUNTIME_LABELS.agentId]: req.agentId,
+      [WORKSPACE_LABEL]: "true",
+    },
+  });
+  assertWorkspaceOwner(volume, req, key);
+  const filters = encodeURIComponent(JSON.stringify({ volume: [key] }));
+  const users = await dockerApi<Array<{ Id: string; State?: string }>>(
+    target,
+    "GET",
+    `/containers/json?all=true&filters=${filters}`,
+  );
+  // Terminate marks a row offline before the container is gone; this is the infra fence.
+  const live = users.find((c) =>
+    ["running", "restarting", "paused", "created"].includes(c.State ?? ""),
+  );
+  if (live) throw new Error(`workspace ${key} is in use by ${live.Id}`);
+  return { Type: "volume", Source: key, Target: WORKSPACE_MOUNT_PATH };
 }
 
 async function dockerApi<T>(
@@ -141,19 +232,23 @@ export class DockerRuntimeProvider implements RuntimeProvider {
     ephemeralDisk: true,
     supportsPause: false,
     persistentCache: true,
+    persistentWorkspace: true,
   };
 
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
     try {
       socketPath(target);
+      isolationOptions(target);
       return { ready: true, missing: [] };
     } catch (err) {
-      return { ready: false, missing: ["DOCKER_HOST"], hint: (err as Error).message };
+      const key = err instanceof DockerConfigError ? err.key : "DOCKER_HOST";
+      return { ready: false, missing: [key], hint: (err as Error).message };
     }
   }
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
     try {
+      const isolation = isolationOptions(target);
       let cacheWarning: string | undefined;
       let cacheMount: { Type: "volume"; Source: string; Target: string } | undefined;
       if (req.cache) {
@@ -177,6 +272,11 @@ export class DockerRuntimeProvider implements RuntimeProvider {
           cacheWarning = redactWithEnv(scrubSecrets(String(error)), req.env);
         }
       }
+      // Fail closed: a runtime never starts without its workspace.
+      const workspaceMount = req.workspace
+        ? await prepareWorkspaceMount(target, req, req.workspace.key)
+        : undefined;
+      const mounts = [cacheMount, workspaceMount].filter((mount) => mount !== undefined);
       const path = `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`;
       const body = {
         Image: req.image,
@@ -199,7 +299,20 @@ export class DockerRuntimeProvider implements RuntimeProvider {
           NetworkMode: target.DOCKER_NETWORK,
           Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
           NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
-          ...(cacheMount ? { Mounts: [cacheMount] } : {}),
+          ...(mounts.length ? { Mounts: mounts } : {}),
+          ...(isolation.runtime ? { Runtime: isolation.runtime } : {}),
+          ...(isolation.pidsLimit ? { PidsLimit: isolation.pidsLimit } : {}),
+          ...(isolation.hardened
+            ? {
+                CapDrop: ["ALL"],
+                CapAdd: HARDENED_CAP_ADD,
+                SecurityOpt: ["no-new-privileges:true"],
+                // MemorySwap == Memory means no swap on top of the memory limit.
+                ...(req.resources?.memoryMb
+                  ? { MemorySwap: req.resources.memoryMb * 1024 * 1024 }
+                  : {}),
+              }
+            : {}),
         },
       };
       const createAndStart = async (): Promise<string> => {
@@ -248,13 +361,19 @@ export class DockerRuntimeProvider implements RuntimeProvider {
       } catch (err) {
         if (!cacheMount || !isCacheMountError(err)) throw err;
         cacheWarning = redactWithEnv(scrubSecrets(String(err)), req.env);
-        delete body.HostConfig.Mounts;
+        // Drop only the cache; a workspace mount error fails the retry and the provision.
+        if (workspaceMount) body.HostConfig.Mounts = [workspaceMount];
+        else delete body.HostConfig.Mounts;
         externalId = await createAndStart();
       }
+      const meta = {
+        ...(cacheWarning ? { cacheWarning } : {}),
+        ...(req.workspace ? { workspaceKey: req.workspace.key } : {}),
+      };
       return {
         kind: "docker",
         externalId,
-        ...(cacheWarning ? { meta: { cacheWarning } } : {}),
+        ...(Object.keys(meta).length ? { meta } : {}),
       };
     } catch (err) {
       throw new Error(redactWithEnv(String(err), req.env));
@@ -276,7 +395,7 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
     try {
       // v=true also removes the container's anonymous volumes (the worker image declares
-      // VOLUME /logs); named volumes are never removed by it.
+      // VOLUME /logs); named volumes (caches, workspaces) are never removed by it.
       await dockerApi(target, "DELETE", `/containers/${handle.externalId}?force=true&v=true`);
     } catch (err) {
       if (!(err instanceof DockerApiError) || err.statusCode !== 404) throw err;
@@ -312,13 +431,26 @@ export class DockerRuntimeProvider implements RuntimeProvider {
       JSON.stringify({ label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${ownerId}`] }),
     );
     const rows = await dockerApi<
-      Array<{ Id: string; Created?: number; Labels: Record<string, string> }>
+      Array<{
+        Id: string;
+        Created?: number;
+        Labels: Record<string, string>;
+        Mounts?: Array<{ Type?: string; Name?: string; Destination?: string }>;
+      }>
     >(target, "GET", `/containers/json?all=true&filters=${filters}`);
-    return rows.map((row) => ({
-      kind: "docker",
-      externalId: row.Id,
-      createdAt: row.Created === undefined ? undefined : new Date(row.Created * 1000).toISOString(),
-      meta: row.Labels,
-    }));
+    return rows.map((row) => {
+      // Recovery trusts only the real mount as workspace evidence, never a label.
+      const { workspaceKey: _label, ...meta } = row.Labels ?? {};
+      const workspace = row.Mounts?.find(
+        (mount) => mount.Type === "volume" && mount.Destination === WORKSPACE_MOUNT_PATH,
+      );
+      return {
+        kind: "docker",
+        externalId: row.Id,
+        createdAt:
+          row.Created === undefined ? undefined : new Date(row.Created * 1000).toISOString(),
+        meta: workspace?.Name ? { ...meta, workspaceKey: workspace.Name } : meta,
+      };
+    });
   }
 }

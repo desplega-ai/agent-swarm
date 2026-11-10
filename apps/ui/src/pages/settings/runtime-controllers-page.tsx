@@ -57,7 +57,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useIsMobile } from "@/hooks/use-mobile";
 import { formatRelative } from "@/lib/relative-time";
 import {
-  COMING_SOON_KINDS,
   CONTROLLER_STATUS_BADGE,
   RUNTIME_KIND_LABEL,
   RUNTIME_PROVIDER_KINDS,
@@ -162,7 +161,8 @@ function ControllerDialog({
   const update = useUpdateRuntimeController();
   const [name, setName] = useState(controller?.name ?? "");
   const [kind, setKind] = useState<RuntimeProviderKind>(controller?.kind ?? "docker");
-  const [placement, setPlacement] = useState<Placement>(controller?.placement ?? "remote");
+  const [selectedPlacement, setPlacement] = useState<Placement>(controller?.placement ?? "remote");
+  const placement = kind === "k8s" ? "builtin" : selectedPlacement;
   const [config, setConfig] = useState<KeyValueRow[]>(() =>
     rowsFromRecord(controller?.config ?? {}),
   );
@@ -266,13 +266,8 @@ function ControllerDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {RUNTIME_PROVIDER_KINDS.map((option) => (
-                    <SelectItem
-                      key={option}
-                      value={option}
-                      disabled={COMING_SOON_KINDS.has(option)}
-                    >
+                    <SelectItem key={option} value={option}>
                       {RUNTIME_KIND_LABEL[option]}
-                      {COMING_SOON_KINDS.has(option) ? " (coming soon)" : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -281,9 +276,17 @@ function ControllerDialog({
             <SettingsRow
               label="Placement"
               htmlFor="controller-placement"
-              helper="Built in runs inside the API. Remote runs on your own host."
+              helper={
+                kind === "k8s"
+                  ? "Kubernetes requires a built-in controller inside the swarm API."
+                  : "Built in runs inside the API. Remote runs on your own host."
+              }
             >
-              <Select value={placement} onValueChange={(v) => setPlacement(v as Placement)}>
+              <Select
+                value={placement}
+                onValueChange={(v) => setPlacement(v as Placement)}
+                disabled={kind === "k8s"}
+              >
                 <SelectTrigger id="controller-placement" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -294,7 +297,31 @@ function ControllerDialog({
               </Select>
             </SettingsRow>
           </div>
-          <SettingsRow label="Config" helper="Plain settings for the provider. Not secret.">
+          {kind === "k8s" ? (
+            <Alert>
+              <AlertDescription className="space-y-2">
+                <p>
+                  Inside Kubernetes, the swarm API uses its service account. Grant it permission to
+                  get, list, create, and delete pods in the worker namespace.
+                </p>
+                <p>
+                  For another cluster, add <code>K8S_API_URL</code> and optional{" "}
+                  <code>K8S_CA_CERT</code> to Config. Add <code>K8S_TOKEN</code> to Secrets.
+                </p>
+                <p>
+                  Set <code>WORKER_API_URL</code> to a swarm API address reachable from worker pods.
+                </p>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <SettingsRow
+            label="Config"
+            helper={
+              kind === "k8s"
+                ? "Set K8S_NAMESPACE (default: default). K8S_IMAGE_PULL_SECRETS accepts comma-separated registry Secret names."
+                : "Plain settings for the provider. Not secret."
+            }
+          >
             <KeyValueEditor
               rows={config}
               onChange={setConfig}
@@ -368,7 +395,7 @@ function ControllerDialog({
             </AlertCallout>
           ) : null}
           <DialogFooter>
-            {onMintToken ? (
+            {onMintToken && placement === "remote" ? (
               <Button type="button" variant="outline" className="sm:mr-auto" onClick={onMintToken}>
                 <KeyRound className="h-4 w-4" />
                 Mint token

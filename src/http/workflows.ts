@@ -487,6 +487,25 @@ const webhookTriggerRoute = route({
   params: z.object({ workflowId: z.string() }),
   auth: { apiKey: false },
   responses: {
+    200: {
+      description:
+        "Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss.",
+      schema: z.discriminatedUnion("reason", [
+        z.object({
+          skipped: z.literal(true),
+          reason: z.literal("event-not-allowed"),
+          event: z.string().nullable(),
+        }),
+        z.object({
+          skipped: z.literal(true),
+          reason: z.literal("filter-not-matched"),
+          match: z.object({
+            source: z.enum(["header", "body"]),
+            path: z.string(),
+          }),
+        }),
+      ]),
+    },
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
@@ -585,7 +604,24 @@ export async function handleWorkflows(
     // Egress stays OUTSIDE the try: `respond()` runtime-validates in dev/test
     // and must fail loudly rather than be reported as a webhook failure for a
     // run that already started.
-    webhookTriggerRoute.respond(res, 201, result);
+    if (result.skipped) {
+      // 2xx, not 4xx: GitHub and similar senders count non-2xx as a failed delivery.
+      if (result.reason === "event-not-allowed") {
+        webhookTriggerRoute.respond(res, 200, {
+          skipped: true,
+          reason: result.reason,
+          event: result.event,
+        });
+      } else {
+        webhookTriggerRoute.respond(res, 200, {
+          skipped: true,
+          reason: result.reason,
+          match: result.match,
+        });
+      }
+    } else {
+      webhookTriggerRoute.respond(res, 201, { runId: result.runId });
+    }
     return true;
   }
 

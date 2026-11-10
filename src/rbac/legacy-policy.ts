@@ -328,6 +328,7 @@ export const LEGACY_POLICY = {
   "models.catalog.write": leadOrOperator,
   "models.harness-support.write": agentOrOperator,
   "models.profiles.write": operatorOnly,
+  "models.groups.write": leadOrOperatorOrUser,
   "skill.create.swarm": leadOnly,
   "skill.install.any": leadOnly,
   "skill.install.global": leadOnly,

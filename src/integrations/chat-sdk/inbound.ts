@@ -494,7 +494,7 @@ export async function flushChatThread(
     try {
       // The adapter verified the platform signature, and the workflow id comes
       // from an operator mapping or an extension, never from the message.
-      const { runId } = await handleWebhookTrigger(
+      const result = await handleWebhookTrigger(
         target.workflowId,
         {
           adapter,
@@ -510,7 +510,13 @@ export async function flushChatThread(
         getExecutorRegistry(),
         { alreadyAuthenticated: true },
       );
-      console.log(`[chat-sdk] ${threadId}: started workflow run ${runId}`);
+      if (result.skipped) {
+        // Header or body filter, or the events allowlist, dropped the delivery.
+        // Chat dispatch sends no HTTP headers, so a header clause skips it.
+        console.warn(`[chat-sdk] ${threadId}: workflow webhook trigger skipped (${result.reason})`);
+        return;
+      }
+      console.log(`[chat-sdk] ${threadId}: started workflow run ${result.runId}`);
       await subscribe(thread);
     } catch (error) {
       console.error(`[chat-sdk] ${threadId}: workflow dispatch failed: ${errorMessage(error)}`);

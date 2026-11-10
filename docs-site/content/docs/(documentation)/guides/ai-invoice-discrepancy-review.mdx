@@ -1,0 +1,90 @@
+---
+title: 'Reviewing supplier invoice and purchase order discrepancies with AI agents'
+description: "Agent Swarm gathers the records for a flagged supplier invoice, compares them with the purchase order and hands finance a source-linked pack. People decide."
+agent:
+  when: "Someone wants finance and purchasing to review a supplier invoice that does not match its purchase order"
+---
+
+Agent Swarm can gather the authorized records for a flagged supplier invoice, run deterministic comparisons against the purchase order and the goods receipt, and hand the finance owner a source-linked evidence pack, while approval, vendor contact, changes to financial records and payment stay with people. What it takes off the team is the assembly: finding the invoice across systems and comparing it line by line, with the missing records named.
+
+The scope is one exception: a supplier invoice that does not match its purchase order, caught before payment. A failed customer payment, a renewal decision or a booking mismatch is a different handoff with a different owner.
+
+## When another tool fits better
+
+Two established options already cover most of this ground.
+
+**Your accounting or ERP system's three-way match.** If the mismatch is routine, with records in systems you already compare on configured fields, the existing control closes it. Wrapping that in an agent workflow moves an exception a rule can settle into a queue that needs a person.
+
+**A specialist accounts payable product.** If the volume is high and the bottleneck is capture and matching at scale, a product built for invoice processing fits better. It brings its own matching engine and review screens, and the right purchase when throughput is the problem.
+
+Agent Swarm fits a different shape: cross-team exceptions. The invoice sits in one system, the purchase order in another, the delivery confirmation in a third, and the person who knows whether the goods arrived is somewhere else. That work means gathering evidence from several systems and people and putting it in front of the owner who decides. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in accounts payable feature or a customer result. It needs integrations, data access and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative invoice exception flow, from a flagged invoice to a human decision." chart={`flowchart LR
+  A["Invoice flagged<br/>(mismatch with PO)"] --> B["Gather authorized records<br/>(invoice, PO, receipt)"]
+  B --> C["Deterministic comparison<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked evidence"]
+  D --> G{{"human-in-the-loop<br/>finance owner"}}
+  G -- "approve" --> R["Resolve with<br/>purchasing owner"]
+  G -- "reject" --> S["Return, archive<br/>or escalate"]
+`} />
+
+**1. Finance receives a flagged invoice.** The trigger is an exception the team already catches: an invoice aged past its match or a blocked payment entry.
+
+**2. The swarm gathers the authorized records.** Configured connections pull the invoice, the purchase order and the goods receipt, plus any receiving note the team allows. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**3. Deterministic steps do the comparison.** A `swarm-script` node compares invoice lines with the purchase order and receipt and emits JSON, so the arithmetic runs the same way every time and no model does a subtraction. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that pattern.
+
+**4. An agent assembles the evidence.** The Researcher turns the JSON and the source records into one document: what differs, by how much, which record each claim comes from, and what is still missing. Every line links its source.
+
+**5. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only on a human response, with a short summary and a link to the full pack. On approve, the finance owner and the purchasing owner resolve the exception together. On reject, the pack is archived with the reason and the run stops.
+
+Two questions it answers plainly.
+
+**How can AI agents help finance investigate invoice and purchase order mismatches?** By doing the collection and the comparison, where context is lost between systems and people, and by presenting differences with their sources rather than a verdict.
+
+**How can finance and purchasing teams review invoice exceptions with AI agents?** One named finance owner receives the evidence pack and brings in the purchasing owner who holds the commercial terms. The agent prepares the case, the two people decide from the same document.
+
+## Discrepancy examples
+
+Every example below is illustrative. No company or vendor is named, and none of it is a customer case.
+
+| Discrepancy | What the deterministic check compares | Evidence the agent attaches | Question, and to whom |
+| --- | --- | --- | --- |
+| Quantity mismatch | Invoiced quantity per line against ordered quantity on the purchase order and received quantity on the receipt | The three line sets, the per-line difference, the receipt date | "Did more arrive than the receipt records?" to receiving. "Was the order amended?" to purchasing |
+| Price mismatch | Invoice unit price against the purchase order unit price | Both prices, the line totals, any captured reference to a corrected or renegotiated price | "Is this the agreed term?" to purchasing. "Is the difference payable?" to finance |
+| Currency mismatch | Invoice currency and settlement terms against the purchase order currency | Both currency fields, the amount in each, the date each record was created | "Which currency did we agree to settle in?" to finance. "What does the order say?" to purchasing |
+| Missing receipt | Purchase order lines with no matching receipt, including lines past their delivery window | The unmatched lines, the last receipt on the order, who could confirm delivery | "Did the goods arrive?" to receiving, before finance decides whether to hold |
+
+## Conflicting records, access limits and escalation
+
+**Sources that disagree.** When the invoice and the receipt contradict each other, or two records of the same order differ, the agent reports both with links and does not pick one. The pack names the two records and the owners who must settle which is right.
+
+**Missing access.** When a record sits behind a system the swarm is not connected to, the pack names the record and the owner who can grant access. It does not work around the gap by asking someone to paste the record into a chat, and it does not estimate a value to fill it. Access belongs in the workflow's [governance](/docs/guides/ai-operations-governance) record: who may read the invoice and the records behind it, and who grants that.
+
+**Escalation when the owner does not answer.** The gate carries a timeout and a fallback path, which the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends for every blocking approval. A reasonable shape is a reminder before the timeout, then a named backup owner, then an explicit hold so the exception appears on the aged list. The reject branch needs its own definition: archive with the reason, return to the requester, or escalate. The workflow must never proceed on silence.
+
+## What stays human-owned
+
+Four decisions stay with people in every version of this workflow.
+
+- **Approval.** Whether a discrepancy is accepted, credited, corrected or disputed is a person's call, as is paying part of an invoice or holding it.
+- **Vendor communication.** The agent does not message the vendor in this workflow. A discrepancy conversation carries commercial weight and belongs to the person who owns the relationship.
+- **Changes to financial records.** The agent does not edit the ledger, the purchase order or the vendor master. It prepares the case for someone who can, inside the system that owns the record.
+- **Payment.** The agent never pays. The workflow has no path to a payment instruction, and it ends at a decision a person recorded.
+
+The pattern is the one the HITL guide states: gate the irreversible steps, let the reversible ones run. Gathering records and writing the pack are reversible. Sending money is not.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at an invoice exception is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how scripts reach external systems with the raw secret out of script source.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow, approval thresholds and source-of-truth rules.
+- [Team collaboration](/docs/features/team-collaboration): shared context across the people and teams who inherit the case.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): how to choose between the matching control, a specialist accounts payable product and a shared agent platform.

@@ -393,5 +393,7 @@ test("the thread has a fixed height, or fills a fill-aware parent", async () => 
   const filled = await mount({ fill: true }, () => ({}));
   const fillBox = filled.host.querySelector('[data-testid="json-render-session-thread"]');
   expect(fillBox?.className).toContain("h-full");
+  // A phone stacks the fill parent: the thread keeps a usable height there.
+  expect(fillBox?.className).toContain("max-md:min-h-[420px]");
   await filled.unmount();
 });

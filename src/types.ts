@@ -500,6 +500,24 @@ export const ModelProfileSchema = z.object({
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 
 /**
+ * A model group: a named, ordered list of profiles that may span harnesses
+ * (runbooks/model-tiers.md § Model groups). Groups and profiles share one name
+ * space.
+ */
+export const ModelGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  /** `tier:<tier>` for a boot seed, null otherwise. */
+  seededFrom: z.string().nullable(),
+  /** Profile names, first preferred. */
+  members: z.array(z.string()),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type ModelGroup = z.infer<typeof ModelGroupSchema>;
+
+/**
  * Why a provider session ended in a way another profile may survive. Set by
  * the worker's classifier (`src/commands/provider-error-class.ts`); never a
  * task failure, tool error, context overflow, cancellation or budget refusal.
@@ -1231,12 +1249,47 @@ export const UserSchema = z
     dailyBudgetUsd: z.number().nullable().optional(),
     // Lifecycle (Phase 064). CHECK constraint enforces these three values.
     status: z.enum(["invited", "active", "suspended"]).default("active"),
+    // Set while a merge job (POST /api/users/{id}/merge) still rewrites this
+    // user's rows into the target. Such a user cannot authenticate, and
+    // identity lookups resolve to the target. Absent once the job deletes it.
+    mergedIntoUserId: z.string().nullable().optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
   .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
+
+export const UserMergeJobStatusSchema = z.enum(["pending", "running", "done", "failed"]);
+export type UserMergeJobStatus = z.infer<typeof UserMergeJobStatusSchema>;
+
+/**
+ * Background merge of one user into another (`user_merge_jobs`). The route
+ * moves identities and aliases synchronously and queues the attribution
+ * rewrite; `src/be/user-merge-jobs.ts` runs it in batches and deletes the
+ * source when done. `progress` counts rewritten rows per step, keyed like
+ * `phase` (`workflow-context`, `<table>.<column>`, `delete-user`). A failed
+ * attempt keeps the job `pending` with `error` set and `nextAttemptAt` in the
+ * future until the attempt cap, then the job is `failed`.
+ */
+export const UserMergeJobSchema = z
+  .object({
+    id: z.string(),
+    sourceUserId: z.string(),
+    targetUserId: z.string(),
+    status: UserMergeJobStatusSchema,
+    phase: z.string().nullable(),
+    progress: z.record(z.string(), z.number()),
+    error: z.string().nullable(),
+    attempts: z.number(),
+    nextAttemptAt: z.string().nullable(),
+    createdAt: z.string(),
+    startedAt: z.string().nullable(),
+    finishedAt: z.string().nullable(),
+  })
+  .openapi("UserMergeJob");
+
+export type UserMergeJob = z.infer<typeof UserMergeJobSchema>;
 
 export const RbacRoleSchema = z
   .object({
@@ -1916,6 +1969,10 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_follow_up_gate_shadow",
   // store-progress refused a completion once because its citations were inaccurate
   "task_citation_check_refused",
+  // store-progress refused a completion once because its uiSpec was invalid
+  "task_ui_spec_check_refused",
+  // A card `script` action ran and failed; the old card stays
+  "task_ui_script_action_failed",
   "channel_message",
   // Service registry events
   "service_registered",
@@ -1987,6 +2044,11 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+// Migration 320: what incurred the row. 'harness' is a worker session;
+// 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
+export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
+export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;
+
 export const SessionCostModelBreakdownSchema = z
   .object({
     model: z.string(),
@@ -2007,11 +2069,14 @@ export const SessionCostSchema = z
     sessionId: z.string(),
     taskId: z.uuid().optional(),
     agentId: z.string(),
+    credentialKeyType: z.string().nullable().optional(),
+    credentialKeySuffix: z.string().nullable().optional(),
+    harness: ProviderNameSchema.nullable().optional(),
     totalCostUsd: z.number().min(0),
     inputTokens: z.number().int().min(0).default(0),
     outputTokens: z.number().int().min(0).default(0),
-    cacheReadTokens: z.number().int().min(0).default(0),
-    cacheWriteTokens: z.number().int().min(0).default(0),
+    cacheReadTokens: z.number().int().min(0).nullable().default(null),
+    cacheWriteTokens: z.number().int().min(0).nullable().default(null),
     // Migration 063: reasoning_output_tokens from codex turn.completed events.
     reasoningOutputTokens: z.number().int().min(0).default(0),
     // Migration 063: thinking_input_tokens from claude extended-thinking flows.
@@ -2031,6 +2096,7 @@ export const SessionCostSchema = z
     //   'estimated'      — the API priced fallback token counts at an assumed
     //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
+    kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
     cacheWrite5mTokens: z.number().int().nullable().optional(),
@@ -2390,8 +2456,7 @@ export type WorkerNudge = z.infer<typeof WorkerNudgeSchema>;
 export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisioning"]);
 
 /**
- * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
- * paths reject it until its adapter exists.
+ * Infrastructure kind a runtime pool provisions on.
  */
 export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "boxd", "k8s"]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
@@ -2469,6 +2534,11 @@ export const RuntimePoolCacheSchema = z
   })
   .strict();
 
+/** Persistent `/workspace/personal` per (agent, slot). `sizeGb` applies to k8s only. */
+export const RuntimePoolWorkspaceSchema = z
+  .object({ sizeGb: z.number().int().min(1).max(1024).optional() })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2484,6 +2554,7 @@ export const RuntimePoolCreateSchema = z
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
     cache: RuntimePoolCacheSchema.nullable().default(null),
+    workspace: RuntimePoolWorkspaceSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2498,6 +2569,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
   cache: RuntimePoolCacheSchema.nullable().optional(),
+  workspace: RuntimePoolWorkspaceSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -2547,6 +2619,8 @@ export const RuntimeInstanceSchema = z
     idleSince: z.string().nullable().optional(),
     leaseExpiresAt: z.string().nullable().optional(),
     taskId: z.string().nullable().optional(),
+    /** Persistent workspace slot (lowest free per agent); null without a pool workspace. */
+    workspaceSlot: z.number().int().nullable().optional(),
     /** Runtime-local concurrent task capacity, self-reported at registration. */
     reportedSlots: z.number().int(),
     /** Process-local credential readiness; null when never reported. */
@@ -2833,6 +2907,131 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
 ]);
 export type WebhookVerification = z.infer<typeof WebhookVerificationSchema>;
 
+const WEBHOOK_FILTER_MAX_FIELDS = 32;
+const WEBHOOK_FILTER_MAX_VALUES = 64;
+const WEBHOOK_FILTER_MAX_STRING = 512;
+const WEBHOOK_FILTER_MAX_HEADER_NAME = 128;
+const WEBHOOK_FILTER_MAX_PATH = 256;
+const WEBHOOK_FILTER_MAX_SEGMENTS = 12;
+const WEBHOOK_FILTER_MAX_SEGMENT = 128;
+/** HTTP token (RFC 9110 tchar), so header names cannot carry spaces or control characters. */
+const WEBHOOK_FILTER_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+export const WEBHOOK_FILTER_PRESETS = ["github", "gitlab", "standard-webhooks"] as const;
+export const WebhookFilterPresetSchema = z.enum(WEBHOOK_FILTER_PRESETS);
+
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function webhookBodyPathIssue(path: string): string | null {
+  if (path.length > WEBHOOK_FILTER_MAX_PATH) {
+    return `body path is longer than ${WEBHOOK_FILTER_MAX_PATH} characters`;
+  }
+  const segments = path.split(".");
+  if (segments.length > WEBHOOK_FILTER_MAX_SEGMENTS) {
+    return `body path has more than ${WEBHOOK_FILTER_MAX_SEGMENTS} segments`;
+  }
+  for (const segment of segments) {
+    if (segment.length === 0) return "body path has an empty segment";
+    if (segment.length > WEBHOOK_FILTER_MAX_SEGMENT) {
+      return `body path segment is longer than ${WEBHOOK_FILTER_MAX_SEGMENT} characters`;
+    }
+    if (hasControlCharacter(segment)) return "body path segment has a control character";
+  }
+  return null;
+}
+
+const webhookFilterHeaderValueSchema = z.union([
+  z.string().min(1).max(WEBHOOK_FILTER_MAX_STRING),
+  z.array(z.string().min(1).max(WEBHOOK_FILTER_MAX_STRING)).min(1).max(WEBHOOK_FILTER_MAX_VALUES),
+]);
+
+const webhookFilterBodyScalarSchema = z.union([
+  z.string().max(WEBHOOK_FILTER_MAX_STRING),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+
+const webhookFilterBodyValueSchema = z.union([
+  webhookFilterBodyScalarSchema,
+  z.array(webhookFilterBodyScalarSchema).min(1).max(WEBHOOK_FILTER_MAX_VALUES),
+]);
+
+export const WebhookDeliveryFilterSchema = z
+  .strictObject({
+    headers: z
+      .record(z.string().min(1).max(WEBHOOK_FILTER_MAX_HEADER_NAME), webhookFilterHeaderValueSchema)
+      .optional()
+      .describe(
+        "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match.",
+      ),
+    body: z
+      .record(z.string().min(1).max(WEBHOOK_FILTER_MAX_PATH), webhookFilterBodyValueSchema)
+      .optional()
+      .describe(
+        "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match.",
+      ),
+  })
+  .superRefine((filter, ctx) => {
+    const headerNames = filter.headers ? Object.keys(filter.headers) : [];
+    const bodyPaths = filter.body ? Object.keys(filter.body) : [];
+    if (headerNames.length + bodyPaths.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "filter needs at least one header or body field",
+      });
+    }
+    if (headerNames.length > WEBHOOK_FILTER_MAX_FIELDS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `filter has more than ${WEBHOOK_FILTER_MAX_FIELDS} headers`,
+        path: ["headers"],
+      });
+    }
+    if (bodyPaths.length > WEBHOOK_FILTER_MAX_FIELDS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `filter has more than ${WEBHOOK_FILTER_MAX_FIELDS} body fields`,
+        path: ["body"],
+      });
+    }
+    const seenHeaders = new Set<string>();
+    for (const name of headerNames) {
+      if (!WEBHOOK_FILTER_HEADER_NAME.test(name)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "header name must be an HTTP token",
+          path: ["headers", name],
+        });
+      }
+      const folded = name.toLowerCase();
+      if (seenHeaders.has(folded)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "duplicate header name",
+          path: ["headers", name],
+        });
+      }
+      seenHeaders.add(folded);
+    }
+    for (const path of bodyPaths) {
+      const issue = webhookBodyPathIssue(path);
+      if (issue) {
+        ctx.addIssue({ code: "custom", message: issue, path: ["body", path] });
+      }
+    }
+  })
+  .describe(
+    "AND of header and JSON body allowlists. A delivery that misses is acknowledged with 200 and creates no run.",
+  );
+export type WebhookDeliveryFilter = z.infer<typeof WebhookDeliveryFilterSchema>;
+
 export const TriggerConfigSchema = z
   .discriminatedUnion("type", [
     z.object({
@@ -2846,6 +3045,25 @@ export const TriggerConfigSchema = z
         ),
       verification: WebhookVerificationSchema.optional().describe(
         "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
+      ),
+      events: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause.",
+        ),
+      eventHeader: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted.",
+        ),
+      preset: WebhookFilterPresetSchema.optional().describe(
+        "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.",
+      ),
+      filter: WebhookDeliveryFilterSchema.optional().describe(
+        "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run.",
       ),
     }),
     z.object({
@@ -3725,6 +3943,14 @@ export const ExtensionManifestSchema = z
       .strict(),
     homepage: z.string().url().optional(),
     author: z.string().min(1).optional(),
+    toolSources: z
+      .array(z.enum(["mcp", "native"]))
+      .min(1)
+      .readonly()
+      .optional()
+      .describe(
+        'Which tool calls reach this extension\'s `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`.',
+      ),
   })
   .strict()
   .superRefine((manifest, ctx) => {
@@ -4218,6 +4444,9 @@ export const PricingProviderSchema = z.enum([
   "cursor",
   "grok",
   "fx",
+  // SystemOne decisions recorded on a task; model keys are `<host>/<model>`
+  // (e.g. `cloudflare/clef`). No seeded rows: unpriced until an operator adds one.
+  "system-one",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

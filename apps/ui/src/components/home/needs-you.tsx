@@ -225,20 +225,25 @@ export function NeedsYouView({
     !isUnavailable(sessions) &&
     !isUnavailable(failed);
 
-  // All good: one quiet line, so the space goes to the activity below.
+  // All good: one quiet line, so the space goes to the activity below. On a
+  // phone the header has no room for it next to the title and the link (both
+  // truncated to one word), so the line drops under the header instead.
   if (nothing) {
     return (
       <HomeWidget
         className={className}
+        bodyClassName="md:hidden"
         title="Needs you"
         icon={<Check className="size-4 shrink-0 text-status-success-strong" aria-hidden />}
         meta={
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground max-md:hidden">
             All good. Nothing waits on you.
           </span>
         }
         action={<HomeWidgetLink to="/sessions">All sessions</HomeWidgetLink>}
-      />
+      >
+        <p className="px-4 py-2.5 text-xs text-muted-foreground">All good. Nothing waits on you.</p>
+      </HomeWidget>
     );
   }
 

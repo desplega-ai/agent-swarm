@@ -23,6 +23,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import * as idempotencyDb from "../be/db/workflow-idempotency";
+import { resetDbRetentionForTests, runDbRetentionTick } from "../be/db-retention";
 import { mintToken, revokeToken } from "../be/users";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -527,6 +528,46 @@ describe("POST /api/workflows with Idempotency-Key", () => {
 // ─── Trigger ─────────────────────────────────────────────────────────────────
 
 describe("POST /api/workflows/{id}/trigger with Idempotency-Key", () => {
+  test("accepted triggers still replay after retention removes the run and the database restarts", async () => {
+    const workflow = await makeWorkflow();
+    const key = newKey();
+    const body = { triggerData: { retention: true } };
+    const first = await triggerCall(workflow.id, body, { key });
+    expect(first.status).toBe(201);
+    await waitForTerminalRun(first.body.runId);
+    await getDbClient().run(
+      "UPDATE workflow_runs SET finishedAt = '2020-01-01T00:00:00.000Z' WHERE id = ?",
+      [first.body.runId],
+    );
+    const previous = process.env.WORKFLOW_RUNS_RETENTION_DAYS;
+    process.env.WORKFLOW_RUNS_RETENTION_DAYS = "30";
+    try {
+      await runDbRetentionTick({ now: new Date("2026-11-06T12:00:00.000Z") });
+      expect(await getWorkflowRun(first.body.runId)).toBeNull();
+      expect((await call("GET", `/api/workflow-runs/${first.body.runId}`)).status).toBe(404);
+      await restartDb();
+      const retries = await Promise.all([
+        triggerCall(workflow.id, body, { key }),
+        triggerCall(workflow.id, body, { key }),
+      ]);
+      for (const retry of retries) {
+        expect(retry.status).toBe(201);
+        expect(retry.replayed).toBe(true);
+        expect(retry.body).toEqual(first.body);
+      }
+      expect(await listWorkflowRuns(workflow.id)).toHaveLength(0);
+      expect(await countSteps(workflow.id)).toBe(0);
+      expect(await countRecords(workflow.id)).toBe(1);
+      expect(
+        (await triggerCall(workflow.id, { triggerData: { retention: false } }, { key })).status,
+      ).toBe(409);
+    } finally {
+      if (previous === undefined) delete process.env.WORKFLOW_RUNS_RETENTION_DAYS;
+      else process.env.WORKFLOW_RUNS_RETENTION_DAYS = previous;
+      await resetDbRetentionForTests();
+    }
+  });
+
   test("a retry returns the original run and dispatches nothing", async () => {
     const workflow = await makeWorkflow();
     const key = newKey();

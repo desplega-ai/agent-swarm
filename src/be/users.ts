@@ -19,11 +19,12 @@
  *   * Q16  — `fingerprintApiKey` returns `op:<sha256-16>` for operator audit
  */
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
+import { randomChars } from "../utils/short-id";
 import { getDbClient } from "./db";
 import type { DbExecutor } from "./db-client";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
@@ -65,6 +66,7 @@ type UserRow = {
   metadata: string | null;
   dailyBudgetUsd: number | null;
   status: string;
+  mergedIntoUserId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -82,6 +84,7 @@ function rowToUser(row: UserRow): User {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
+    ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -98,6 +101,21 @@ export async function findUserById(id: string): Promise<User | null> {
 }
 
 /**
+ * A user whose merge job still runs (`users.mergedIntoUserId` set) is the
+ * target for every identity lookup: the merge route already moved its
+ * identities and aliases, and the background job only rewrites attribution
+ * before it deletes the row. Lookups by id are left alone so the People page
+ * and the job itself still see the source row.
+ */
+async function followMergedUser(row: UserRow): Promise<User | null> {
+  if (!row.mergedIntoUserId) return rowToUser(row);
+  const target = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [
+    row.mergedIntoUserId,
+  ]);
+  return target ? rowToUser(target) : null;
+}
+
+/**
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
@@ -108,7 +126,7 @@ export async function findUserByExternalId(kind: string, externalId: string): Pr
        WHERE x.kind = ? AND x.externalId = ?`,
     [kind, externalId],
   );
-  return row ? rowToUser(row) : null;
+  return row ? followMergedUser(row) : null;
 }
 
 /**
@@ -123,15 +141,19 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
   const db = getDbClient();
 
-  // Primary email (case-insensitive)
-  const primary = await db.get<UserRow>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [
-    email,
-  ]);
+  // Primary email (case-insensitive). A merge source keeps its primary email
+  // until the job deletes it, while the target already holds it as an alias,
+  // so the source row must not win here.
+  const primary = await db.get<UserRow>(
+    "SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND mergedIntoUserId IS NULL",
+    [email],
+  );
   if (primary) return rowToUser(primary);
 
   // Alias array
   const aliasRows = await db.query<UserRow>(
-    "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
+    `SELECT * FROM users
+     WHERE emailAliases IS NOT NULL AND emailAliases != '[]' AND mergedIntoUserId IS NULL`,
   );
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
@@ -154,14 +176,17 @@ export async function findUsersByName(name: string): Promise<User[]> {
   if (!trimmed) return [];
   const client = getDbClient();
 
-  const exact = await client.query<UserRow>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)", [
-    trimmed,
-  ]);
+  // A merge source (mergedIntoUserId set) is on its way out; its target is
+  // found by its own name.
+  const exact = await client.query<UserRow>(
+    "SELECT * FROM users WHERE LOWER(name) = LOWER(?) AND mergedIntoUserId IS NULL",
+    [trimmed],
+  );
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
   const prefixed = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'",
+    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%' AND mergedIntoUserId IS NULL",
     [firstToken],
   );
   return prefixed.map(rowToUser);
@@ -442,15 +467,8 @@ export async function unlinkIdentity(
 
 const TOKEN_PREFIX = "aswt_"; // agent-swarm-token
 
-function base62(bytes: Uint8Array): string {
-  // Map random bytes into base62 alphabet for URL-safe, unambiguous tokens.
-  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let out = "";
-  for (const b of bytes) {
-    out += alphabet[b % 62];
-  }
-  return out;
-}
+// base62 alphabet for URL-safe, unambiguous tokens.
+const TOKEN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
@@ -469,8 +487,8 @@ export async function mintToken(
   actor: IdentityActor,
   options: { source?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
-  // 24 base62 chars from 24 random bytes (~143 bits of entropy).
-  const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
+  // 24 uniformly random base62 chars (~143 bits of entropy).
+  const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);
@@ -731,7 +749,7 @@ export async function insertSessionToken(
   parentTokenId: string | null = null,
   scriptRun = false,
 ): Promise<{ tokenId: string; plaintext: string }> {
-  const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
+  const plaintext = `${SESSION_TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);

@@ -3,12 +3,44 @@ import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { runTaskUiAction, type TaskUiActionResult } from "../ui-spec/actions";
+import { UI_SPEC_ACTION_PREFIX } from "../utils/task-ui-spec";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
-import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
+
+/** The ephemeral reply to a card click, or `null` when the click needs none. */
+function uiActionReply(result: TaskUiActionResult, renderV2: boolean): string | null {
+  switch (result.status) {
+    case "started":
+      return null;
+    // v2 edits the outcome card in place; v1 keeps no record of the message.
+    case "refreshed":
+      return renderV2 ? null : "Card refreshed in the dashboard.";
+    case "forbidden":
+      return "Only the person who asked for this task can use its buttons.";
+    case "already_done":
+      return "This button already ran.";
+    case "disabled":
+      return "Card buttons are turned off on this swarm.";
+    case "unknown_action":
+      return "This button has no action.";
+    case "not_allowlisted":
+      return "This button's script is not allowlisted for card buttons.";
+    case "script_changed":
+      return "This button's script changed since it was allowlisted. An admin must re-pin it.";
+    case "running":
+      return "This button is already running. Try again in a moment.";
+    case "rate_limited":
+      return `This button ran recently. Try again in ${result.retryAfterSec}s.`;
+    case "script_failed":
+    case "invalid_output":
+      return `Refresh failed: ${result.error}`;
+  }
+}
 
 type ChatUpdatePayload = ChatUpdateArguments & {
   unfurl_links: false;
@@ -141,7 +173,7 @@ export function registerActionHandlers(app: App): void {
     );
 
     if (isSlackRenderV2Enabled()) {
-      await ensureSlackThreadTree([followUpTask.id]);
+      await ensureSlackThreadPresentation([followUpTask.id]);
       return;
     }
 
@@ -158,6 +190,53 @@ export function registerActionHandlers(app: App): void {
       });
     } catch (error) {
       console.error("[Slack] Failed to post follow-up confirmation:", error);
+    }
+  });
+
+  // A task card Button: run its declared action once, for the task requester.
+  app.action(new RegExp(`^${UI_SPEC_ACTION_PREFIX}`), async ({ ack, action, body, client }) => {
+    await ack();
+
+    // Block Kit buttons only; a legacy attachment ButtonClick has no action_id.
+    if (action.type !== "button" || !("action_id" in action)) return;
+    const taskId = action.value;
+    const actionId = action.action_id.slice(UI_SPEC_ACTION_PREFIX.length);
+    if (!taskId || !actionId) return ignoreSlackInbound("ui_action_malformed");
+
+    const channelId = "channel" in body ? body.channel?.id : undefined;
+    if (channelId && (await shouldBlockChannel(client, channelId))) {
+      await postExternalChannelNotice(client, channelId, body.user.id);
+      return ignoreSlackInbound("external_channel");
+    }
+
+    const actorUserId = await resolveSlackUserId(client, body.user.id, {
+      sampleEventType: "block_actions",
+      sampleContext: action.action_id,
+      userTeam: body.user.team_id,
+    });
+    noteSlackInboundSideEffect("ui_action");
+    const result = await runTaskUiAction({
+      taskId,
+      actionId,
+      surface: "slack",
+      actorUserId,
+      slackUserId: body.user.id,
+    });
+
+    if (result.status === "started") {
+      if (isSlackRenderV2Enabled()) await ensureSlackThreadPresentation([result.taskId]);
+      return;
+    }
+    const reply = uiActionReply(result, isSlackRenderV2Enabled());
+    if (!channelId || !reply) return;
+    try {
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: body.user.id,
+        text: reply,
+      });
+    } catch (error) {
+      console.error("[Slack] Failed to post card button reply:", error);
     }
   });
 

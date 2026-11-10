@@ -62,6 +62,8 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 
 - [Choosing an AI operating model](https://docs.agent-swarm.dev/docs/guides/choosing-an-ai-operating-model). Reference.
 - [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
+- [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
+- [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
@@ -80,6 +82,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
+- [MCP Events on the User MCP](https://docs.agent-swarm.dev/docs/guides/mcp-events). Reference.
 - [Claude Code Mod](https://docs.agent-swarm.dev/docs/guides/claude-code-mod). Reference.
 - [Observability with OpenTelemetry](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry). When: Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend.
 - [Host Requirements & Disk Cleanup](https://docs.agent-swarm.dev/docs/guides/host-requirements). When: Someone asks how big a host their self-hosted swarm needs, or their disk is filling up with Docker images.
@@ -110,6 +113,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Multi-runtime agents](https://docs.agent-swarm.dev/docs/guides/multi-runtime-agents). Reference.
 - [Runtime pools (beta)](https://docs.agent-swarm.dev/docs/guides/runtime-pools). Reference.
 - [boxd runtime provider](https://docs.agent-swarm.dev/docs/guides/boxd-runtime-provider). Reference.
+- [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/guides/support-knowledge-conflict-review). Reference.
 
 ## Other docs
 

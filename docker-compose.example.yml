@@ -118,7 +118,7 @@ services:
       "
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.18.23
+    image: ghcr.io/desplega-ai/agent-fs:0.18.24
     platform: linux/amd64
     pull_policy: always
     depends_on:
@@ -242,7 +242,7 @@ services:
       - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}
       - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}
       - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}
-      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}
+      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-0.5}
 
       # Optional: Business-Use instrumentation
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}

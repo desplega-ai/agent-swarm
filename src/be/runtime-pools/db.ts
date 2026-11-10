@@ -31,11 +31,15 @@ type ControllerRow = Omit<
   config: string;
   secretConfig: string | null;
 };
-type PoolRow = Omit<RuntimePool, "placements" | "env" | "resources" | "cache" | "enabled"> & {
+type PoolRow = Omit<
+  RuntimePool,
+  "placements" | "env" | "resources" | "cache" | "workspace" | "enabled"
+> & {
   placements: string;
   env: string;
   resources: string | null;
   cache: string | null;
+  workspace: string | null;
   enabled: number;
 };
 const controllerColumns = `id, name, kind, placement, config, secret_config AS secretConfig,
@@ -43,7 +47,7 @@ const controllerColumns = `id, name, kind, placement, config, secret_config AS s
   created_by AS createdBy, updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
 const poolColumns = `id, name, kind, placements, image, lifecycle, idle_minutes AS idleMinutes,
   slots_per_runtime AS slotsPerRuntime, max_runtimes AS maxRuntimes, min_runtimes AS minRuntimes,
-  delivery, env, resources, cache, ttl_sec AS ttlSec, resolved_image AS resolvedImage, enabled,
+  delivery, env, resources, cache, workspace, ttl_sec AS ttlSec, resolved_image AS resolvedImage, enabled,
   consecutive_failures AS consecutiveFailures, circuit_open_until AS circuitOpenUntil,
   last_error AS lastError, last_error_at AS lastErrorAt, created_by AS createdBy,
   updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
@@ -75,6 +79,7 @@ function rowToPool(row: PoolRow): RuntimePool {
     env: JSON.parse(row.env),
     resources: row.resources ? JSON.parse(row.resources) : null,
     cache: cache ? { mountPath: cache.mountPath } : null,
+    workspace: row.workspace ? JSON.parse(row.workspace) : null,
     enabled: row.enabled === 1,
   };
 }
@@ -84,8 +89,23 @@ function parseInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S>
     throw new RuntimePoolError(result.error.issues.map((issue) => issue.message).join(". "));
   return result.data;
 }
-function supportedKind(kind: string): void {
-  if (kind === "k8s") throw new RuntimePoolError("k8s provider not implemented");
+function validateRuntimeController(controller: {
+  kind: string;
+  placement: string;
+  config: Record<string, string>;
+  secretConfig?: Record<string, string | null>;
+}): void {
+  if (controller.kind !== "k8s") return;
+  if (controller.placement !== "builtin")
+    throw new RuntimePoolError("Kubernetes controllers require builtin placement");
+  for (const key of ["K8S_TOKEN_FILE", "K8S_CA_FILE"])
+    if (key in controller.config || typeof controller.secretConfig?.[key] === "string")
+      throw new RuntimePoolError("Kubernetes controller file paths are not supported.");
+  if (
+    "KUBERNETES_SERVICE_HOST" in controller.config ||
+    typeof controller.secretConfig?.KUBERNETES_SERVICE_HOST === "string"
+  )
+    throw new RuntimePoolError("Kubernetes deployment detection overrides are not supported.");
 }
 
 export async function listRuntimeControllers(): Promise<RuntimeController[]> {
@@ -122,6 +142,9 @@ export async function getRuntimeControllerTarget(
     DOCKER_HOST: env.DOCKER_HOST,
     DOCKER_NETWORK: env.DOCKER_NETWORK,
     DOCKER_EXTRA_HOSTS: env.DOCKER_EXTRA_HOSTS,
+    DOCKER_RUNTIME: env.DOCKER_RUNTIME,
+    DOCKER_HARDENED: env.DOCKER_HARDENED,
+    DOCKER_PIDS_LIMIT: env.DOCKER_PIDS_LIMIT,
     E2B_API_BASE: env.E2B_API_BASE,
     E2B_MAX_CONTINUOUS_SEC: env.E2B_MAX_CONTINUOUS_SEC,
     RUNTIME_WORKER_API_URL: env.RUNTIME_WORKER_API_URL,
@@ -139,6 +162,7 @@ export async function getRuntimeControllerTarget(
       : {}),
     ...controller.config,
     ...secrets,
+    KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,
   };
 }
 
@@ -197,7 +221,7 @@ export async function createRuntimeController(
   id: string = crypto.randomUUID(),
 ): Promise<RuntimeController> {
   const data = parseInput(RuntimeControllerCreateSchema, input);
-  supportedKind(data.kind);
+  validateRuntimeController(data);
   return await getDbClient().transaction(async (tx) => {
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? OR id = ?", [data.name, id])
@@ -244,7 +268,7 @@ export async function updateRuntimeController(
     );
     if (!row) throw new RuntimePoolError("Controller not found", 404);
     const data = { ...rowToController(row), ...patch };
-    supportedKind(data.kind);
+    validateRuntimeController(data);
     if (
       await tx.get("SELECT id FROM runtime_controllers WHERE name = ? AND id != ?", [data.name, id])
     )
@@ -329,9 +353,11 @@ export async function getRuntimePool(id: string): Promise<RuntimePool | null> {
   return row ? rowToPool(row) : null;
 }
 async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Promise<void> {
-  supportedKind(data.kind);
   if (data.cache && !(await createRuntimeProvider(data.kind)).traits.persistentCache) {
     throw new RuntimePoolError(`${data.kind} does not support persistent pool caches`);
+  }
+  if (data.workspace && !(await createRuntimeProvider(data.kind)).traits.persistentWorkspace) {
+    throw new RuntimePoolError(`${data.kind} does not support persistent workspaces`);
   }
   const controller = await getRuntimeController(data.placements[0]!);
   if (!controller) throw new RuntimePoolError("Controller not found");
@@ -358,7 +384,7 @@ export async function createRuntimePool(
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? OR id = ?", [data.name, id]))
       throw new RuntimePoolError("Pool already exists", 409);
     await tx.run(
-      `INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes, slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, cache, ttl_sec, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes, slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, cache, workspace, ttl_sec, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         data.name,
@@ -376,6 +402,7 @@ export async function createRuntimePool(
         data.cache
           ? JSON.stringify({ ...data.cache, key: poolCacheKey(id, crypto.randomUUID()) })
           : null,
+        data.workspace ? JSON.stringify(data.workspace) : null,
         data.ttlSec,
         Number(data.enabled),
         actor,
@@ -421,7 +448,7 @@ export async function updateRuntimePool(
     if (existing.cache && (!data.cache || data.placements[0] !== existing.placements[0]))
       await queuePoolCacheRelease(existing, actor);
     await tx.run(
-      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, cache = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
+      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, cache = ?, workspace = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
       [
         data.name,
         data.kind,
@@ -441,6 +468,7 @@ export async function updateRuntimePool(
         JSON.stringify(data.env),
         data.resources ? JSON.stringify(data.resources) : null,
         cache ? JSON.stringify(cache) : null,
+        data.workspace ? JSON.stringify(data.workspace) : null,
         data.ttlSec,
         Number(data.enabled),
         actor,
@@ -478,6 +506,7 @@ export async function deleteRuntimePool(
       );
     }
     await queuePoolCacheRelease(pool, actor);
+    // Workspace volumes are keyed by agent, not pool, and are never released here.
     await tx.run("DELETE FROM runtime_pools WHERE id = ?", [id]);
   });
 }

@@ -56,7 +56,7 @@ config:
     MEMORY_HYBRID_SEARCH: "1"
     MEMORY_GRAPH_EXPANSION: "1"
     MEMORY_RATERS: "implicit-citation,explicit-self"
-    MEMORY_DEMOTION_FLOOR: "1.0"
+    MEMORY_DEMOTION_FLOOR: "0.5"
 
 # ---------------------------------------------------------------------------
 # API control plane (single replica, SQLite)
@@ -257,7 +257,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.18.23
+    tag: 0.18.24
   port: 7433
   storageProvider: local          # objects live on the agent-fs PVC at /data/storage; no S3 needed
   apiKey: ""                      # blank = API boot seeder mints and stores the bootstrap key

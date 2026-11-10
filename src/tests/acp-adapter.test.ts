@@ -121,6 +121,32 @@ describe("ACPAdapter", () => {
     );
   });
 
+  test.each([
+    "gemini",
+    "Gemini",
+    " gemini ",
+    "GEMINI",
+  ])("normalizes ACP target %j before selecting a preset", (target) => {
+    const config = baseConfig({ env: { ACP_TARGET: target } });
+    const profile = resolveAcpTarget(config);
+    expect(profile.target).toBe("gemini");
+    expect(profile.command(config)).toEqual(["gemini", "--acp"]);
+  });
+
+  test.each(["", " \t "])("defaults blank ACP target %j to custom", (target) => {
+    const config = baseConfig({
+      env: { ACP_TARGET: target, ACP_TARGET_COMMAND: "custom-acp --stdio" },
+    });
+    const profile = resolveAcpTarget(config);
+    expect(profile.target).toBe("custom");
+    expect(profile.command(config)).toEqual(["custom-acp", "--stdio"]);
+  });
+
+  test.each(["nope", " NOPE "])("rejects unknown ACP target %j", (target) => {
+    const config = baseConfig({ env: { ACP_TARGET: target } });
+    expect(() => resolveAcpTarget(config)).toThrow('Unsupported ACP target "nope"');
+  });
+
   test.each<{ name: string; usage?: Usage | null }>([
     { name: "absent", usage: undefined },
     { name: "null", usage: null },
@@ -144,9 +170,7 @@ describe("ACPAdapter", () => {
         cachedWriteTokens: 15,
       },
     },
-  ])("persists $name ACP usage with deliberate zero-coalescing of missing session-cost counters", async ({
-    usage,
-  }) => {
+  ])("persists $name ACP usage while preserving missing cache measurements", async ({ usage }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     await Bun.write(
@@ -404,7 +428,7 @@ ${serveFakeAcpAgent("FakeAgent")}
         expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
         expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
         // Match saveCostData's JSON transport: undefined counters disappear on the wire.
-        // The existing API deliberately coalesces them to zero; only raw logs retain absence.
+        // Input and output retain legacy zeros. Missing cache measurements stay null.
         const agent = await createAgent({ name: "ACP cost test", isLead: false, status: "idle" });
         const server = createServer(async (req, res) => {
           const handled = await handleSessionData(
@@ -443,8 +467,8 @@ ${serveFakeAcpAgent("FakeAgent")}
           expect(cost).toMatchObject({
             inputTokens: usage?.inputTokens ?? 0,
             outputTokens: usage?.outputTokens ?? 0,
-            cacheReadTokens: usage?.cachedReadTokens ?? 0,
-            cacheWriteTokens: usage?.cachedWriteTokens ?? 0,
+            cacheReadTokens: usage?.cachedReadTokens ?? null,
+            cacheWriteTokens: usage?.cachedWriteTokens ?? null,
             costSource: "unpriced",
           });
           const readback = await fetch(`${endpoint}?taskId=${task.id}`);
