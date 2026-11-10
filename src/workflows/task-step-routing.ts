@@ -23,7 +23,7 @@ import { getSuccessors } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveStepNode } from "./foreach-body";
 import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
-import { oweSuccessorWalk, type SuccessorWalkDebt } from "./successor-routing";
+import { claimAndOweWalk, type SuccessorWalkDebt } from "./successor-routing";
 
 export interface TaskStepRoutingResult {
   /**
@@ -127,37 +127,6 @@ function toRoutingResult(settle: ForeachSettleResult): TaskStepRoutingResult {
     successors: settle.successors,
     runFailed: settle.runFailed,
   };
-}
-
-/**
- * Run a claim that completes a step and hands its successors to the caller.
- * The successors have no step row until the caller's walk claims them, so the
- * claim holds the run against finalizers from inside its own transaction.
- * Callers pass a claimed result with successors straight to `walkGraph`, with
- * `successorDebt` in its options.
- */
-async function claimAndOweWalk(
-  runId: string,
-  claim: () => Promise<TaskStepRoutingResult>,
-): Promise<TaskStepRoutingResult> {
-  let debt: SuccessorWalkDebt | undefined;
-  try {
-    return await getDbClient().transaction(async () => {
-      const result = await claim();
-      if (result.claimed && !result.runFailed && result.successors.length > 0) {
-        debt = oweSuccessorWalk(runId);
-        return { ...result, successorDebt: debt };
-      }
-      return result;
-    });
-  } catch (err) {
-    // shortcut: only this transaction's rollback cancels the hold. A caller's
-    // outer transaction failing at COMMIT leaves the run held until restart,
-    // where boot recovery settles it. Upgrade to a rollback hook on the db
-    // client if that ever shows up.
-    debt?.release();
-    throw err;
-  }
 }
 
 /**

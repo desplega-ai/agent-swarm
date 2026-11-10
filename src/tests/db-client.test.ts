@@ -194,6 +194,28 @@ describe("db-client transactions", () => {
     expect(await names()).toEqual([]);
   });
 
+  test("afterRollback runs when the outer transaction rolls back, not when it commits", async () => {
+    const fired: string[] = [];
+    await client.transaction(async () => {
+      await client.transaction(async (tx) => {
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["kept"]);
+        client.afterRollback(() => fired.push("committed"));
+      });
+    });
+    await expect(
+      client.transaction(async () => {
+        await client.transaction(async (tx) => {
+          await tx.run("INSERT INTO items (name) VALUES (?)", ["doomed"]);
+          client.afterRollback(() => fired.push("rolled back"));
+        });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    client.afterRollback(() => fired.push("no transaction"));
+    expect(fired).toEqual(["rolled back"]);
+    expect(await names()).toEqual(["kept"]);
+  });
+
   test("a throwing getDatabase does not wedge the lock", async () => {
     let boom = true;
     const flaky = createBunSqliteClient(() => {
