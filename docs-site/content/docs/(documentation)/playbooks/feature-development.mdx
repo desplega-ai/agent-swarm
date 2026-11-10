@@ -81,3 +81,4 @@ A request arrives in Slack or as a [Linear](https://linear.app) ticket. The [lea
 - **One reviewer per PR** — a single reviewer can (and should) review multiple times across revisions. What you want to avoid is *multiple different* reviewers on the same PR, which creates conflicting requests.
 - Pin code-implementing schedules to a specific code-capable agent (`targetAgentId`). Pool dispatch can land on a worker without the right harness.
 - Stacked PRs are great for breaking a big ticket into reviewable chunks — but the drain/merge loop only works if each PR is independently mergeable.
+- The same intake-and-triage shape works for work that needs a person's approval rather than a merge: [routing employee access requests](https://www.agent-swarm.dev/blog/omnia/ai-employee-access-request-handoffs) shows the lead agent preparing the record, both named approvers deciding, and IT provisioning outside the workflow.

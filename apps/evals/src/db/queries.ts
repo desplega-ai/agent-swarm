@@ -1,5 +1,6 @@
 import type { Client, Row } from "@libsql/client";
 import type {
+  ApiExtensionPlan,
   ArtifactRow,
   AttemptExclusion,
   AttemptRow,
@@ -27,6 +28,7 @@ function rowToRun(r: Row): EvalRunRow {
     concurrency: Number(r.concurrency),
     judgeModel: (r.judge_model as string) ?? null,
     efforts: parseJsonColumn<Record<string, ReasoningEffortLevel>>(r.efforts_json),
+    apiExtension: parseJsonColumn<ApiExtensionPlan>(r.api_extension_json),
     maxMeteredUsd: r.max_metered_usd == null ? null : Number(r.max_metered_usd),
     preset: (r.preset as string) ?? null,
     rerunOf: (r.rerun_of as string) ?? null,
@@ -120,6 +122,8 @@ export async function createRun(
     efforts?: Record<string, ReasoningEffortLevel>;
     /** Hard cap on metered spend in USD; omit for no cap. */
     maxMeteredUsd?: number;
+    /** Opt-in api extension installed in each attempt's sandbox API. */
+    apiExtension?: ApiExtensionPlan;
     /** Preset the run was started from (POST /api/runs `preset`); scheduled presets get a summary. */
     preset?: string;
     /** The scheduled run this run is an automatic rerun of. */
@@ -128,8 +132,8 @@ export async function createRun(
 ): Promise<void> {
   await db.execute({
     sql: `INSERT INTO eval_runs
-            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd, preset, rerun_of)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd, preset, rerun_of, api_extension_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -142,6 +146,7 @@ export async function createRun(
       run.maxMeteredUsd ?? null,
       run.preset ?? null,
       run.rerunOf ?? null,
+      run.apiExtension ? JSON.stringify(run.apiExtension) : null,
     ],
   });
 }

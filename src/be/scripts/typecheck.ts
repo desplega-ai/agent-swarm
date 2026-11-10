@@ -480,6 +480,8 @@ export interface SwarmSdk {
     questions: Record<string, Record<string, unknown>>;
     timeoutMs?: number;
     maxRetries?: number;
+    /** Task whose session costs record this decision (default: the run's X-Source-Task-Id). */
+    taskId?: string;
   }): Promise<unknown>;
 }
 

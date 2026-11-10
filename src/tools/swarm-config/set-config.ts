@@ -3,7 +3,9 @@ import * as z from "zod";
 import { getAgentById, maskSecrets } from "@/be/db";
 import { upsertSwarmConfigWithPolicyMirror } from "@/be/multi-runtime";
 import {
+  humanOnlyConfigKeyError,
   internalConfigKeyError,
+  isHumanOnlyConfigKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -96,6 +98,12 @@ export const registerSetConfigTool = (server: McpServer) => {
         if (isReservedConfigKey(key)) {
           const message = reservedKeyError(key).message;
           return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
+        }
+
+        if (isHumanOnlyConfigKey(key)) {
+          return toolErr(humanOnlyConfigKeyError(key), {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if (isInternalConfigKey(key)) {

@@ -1,13 +1,88 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { getActivePricingRow, getTaskById, insertSessionCost } from "@/be/db";
+import { recomputeSessionCost } from "@/http/session-cost-recompute";
+import {
+  createToolRegistrar,
+  type RequestInfo,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
+import type { AgentTask } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import {
   SYSTEM_ONE_DECISION_NODE_TYPE,
   SystemOneDecisionConfigSchema,
   SystemOneDecisionExecutor,
 } from "@/workflows/executors/system-one-decision";
-import { SYSTEM_ONE_PROVIDER_IDS } from "@/workflows/executors/system-one-providers";
+import {
+  SYSTEM_ONE_PROVIDER_IDS,
+  type SystemOneProviderId,
+} from "@/workflows/executors/system-one-providers";
+
+/**
+ * The task a decision's cost lands on: the explicit `taskId`, else the caller's
+ * X-Source-Task-Id. A caller may charge only its own task; an extension (its
+ * origin is token-verified) may charge the task whose event it is handling.
+ */
+async function costTask(
+  taskId: string | undefined,
+  requestInfo: RequestInfo,
+): Promise<{ task?: AgentTask; error?: string }> {
+  const id = taskId ?? requestInfo.sourceTaskId;
+  if (!id) return {};
+  const task = await getTaskById(id);
+  const allowed =
+    !!task && (requestInfo.callOrigin === "extension" || task.agentId === requestInfo.agentId);
+  if (allowed) return { task };
+  // A header-derived id with no matching task (a taskless trigger) records nothing.
+  return taskId ? { error: `taskId ${taskId} is not a task this caller can charge` } : {};
+}
+
+/**
+ * One `session_costs` row of kind `system-one` on the task, priced from the
+ * `pricing` table under provider `system-one`, model `<host>/<model>`. With no
+ * rate row it is recorded `unpriced` at $0, tokens kept.
+ */
+async function recordDecisionCost(
+  task: AgentTask,
+  callerAgentId: string,
+  provider: SystemOneProviderId,
+  output: { model: string; usage: { input_tokens: number; output_tokens: number } },
+  durationMs: number,
+) {
+  const model = `${provider}/${output.model}`;
+  const priced = await recomputeSessionCost(
+    {
+      provider: "system-one",
+      model,
+      harnessCostUsd: 0,
+      inputTokens: output.usage.input_tokens,
+      outputTokens: output.usage.output_tokens,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      atEpochMs: Date.now(),
+    },
+    async (pricingProvider, lookupModel, tokenClass, atEpochMs) =>
+      (await getActivePricingRow(pricingProvider, lookupModel, tokenClass, atEpochMs))
+        ?.pricePerMillionUsd ?? null,
+  );
+  const { cost } = await insertSessionCost({
+    sessionId: `system-one:${crypto.randomUUID()}`,
+    taskId: task.id,
+    agentId: task.agentId ?? callerAgentId,
+    totalCostUsd: priced.totalCostUsd,
+    inputTokens: output.usage.input_tokens,
+    outputTokens: output.usage.output_tokens,
+    durationMs,
+    numTurns: null,
+    model,
+    costSource: priced.costSource,
+    kind: "system-one",
+  });
+  return { taskId: task.id, costUsd: cost.totalCostUsd, costSource: cost.costSource };
+}
 
 /**
  * One typed decision (Jev, Clef and the other SystemOne hosts) made in the API
@@ -51,12 +126,26 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
           .int()
           .optional()
           .describe("Retries on transient failures inside the time budget (default 2)"),
+        taskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "Task this decision serves; its cost is recorded on that task's session costs (default: the caller's X-Source-Task-Id). Must be the caller's own task, or, from an extension, the task of the event it handles",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         model: z.string().optional(),
         answers: z.record(z.string(), z.unknown()).optional(),
         usage: z.record(z.string(), z.unknown()).optional(),
         requestId: z.string().optional(),
+        cost: z
+          .looseObject({
+            taskId: z.string().optional(),
+            costUsd: z.number().optional(),
+            costSource: z.string().optional(),
+          })
+          .optional()
+          .describe("The session-cost row recorded on the task, when a task was in scope"),
         providerUnavailable: z
           .boolean()
           .optional()
@@ -65,10 +154,12 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
           ),
       }),
     },
-    async ({ provider, model, state, questions, timeoutMs, maxRetries }, requestInfo) => {
+    async ({ provider, model, state, questions, timeoutMs, maxRetries, taskId }, requestInfo) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
+      const scope = await costTask(taskId, requestInfo);
+      if (scope.error) return toolErr(scope.error);
 
       // `returns` mirrors the questions: the caller reads answers directly, so
       // there is no downstream port to declare.
@@ -95,6 +186,7 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
       if (!(executor instanceof SystemOneDecisionExecutor)) {
         return toolErr("The system-one-decision executor is not available");
       }
+      const startedAt = Date.now();
       const decided = await executor.decide(parsed.data);
       if (!decided.ok) {
         return toolErr(
@@ -104,12 +196,30 @@ export const registerSystemOneDecideTool = (server: McpServer) => {
       }
 
       const { output } = decided;
+      let cost: Awaited<ReturnType<typeof recordDecisionCost>> | undefined;
+      if (scope.task) {
+        try {
+          cost = await recordDecisionCost(
+            scope.task,
+            requestInfo.agentId,
+            decided.provider,
+            output,
+            Date.now() - startedAt,
+          );
+        } catch (err) {
+          // The decision was made and paid for; a failed cost write must not hide it.
+          console.warn(
+            `[system-one-decide] cost not recorded on task ${scope.task.id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
       return toolOk(`Decision from ${output.model}`, {
         data: {
           model: output.model,
           answers: output.answers,
           usage: output.usage,
           requestId: output.requestId,
+          ...(cost ? { cost } : {}),
         },
       });
     },

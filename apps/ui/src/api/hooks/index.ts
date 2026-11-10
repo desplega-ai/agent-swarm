@@ -197,6 +197,7 @@ export {
   useUpdateUser,
   useUser,
   useUserEvents,
+  useUserMergeJob,
   useUsers,
 } from "./use-users";
 export {

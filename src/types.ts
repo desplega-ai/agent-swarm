@@ -500,6 +500,24 @@ export const ModelProfileSchema = z.object({
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 
 /**
+ * A model group: a named, ordered list of profiles that may span harnesses
+ * (runbooks/model-tiers.md § Model groups). Groups and profiles share one name
+ * space.
+ */
+export const ModelGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  /** `tier:<tier>` for a boot seed, null otherwise. */
+  seededFrom: z.string().nullable(),
+  /** Profile names, first preferred. */
+  members: z.array(z.string()),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type ModelGroup = z.infer<typeof ModelGroupSchema>;
+
+/**
  * Why a provider session ended in a way another profile may survive. Set by
  * the worker's classifier (`src/commands/provider-error-class.ts`); never a
  * task failure, tool error, context overflow, cancellation or budget refusal.
@@ -1231,12 +1249,47 @@ export const UserSchema = z
     dailyBudgetUsd: z.number().nullable().optional(),
     // Lifecycle (Phase 064). CHECK constraint enforces these three values.
     status: z.enum(["invited", "active", "suspended"]).default("active"),
+    // Set while a merge job (POST /api/users/{id}/merge) still rewrites this
+    // user's rows into the target. Such a user cannot authenticate, and
+    // identity lookups resolve to the target. Absent once the job deletes it.
+    mergedIntoUserId: z.string().nullable().optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
   .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
+
+export const UserMergeJobStatusSchema = z.enum(["pending", "running", "done", "failed"]);
+export type UserMergeJobStatus = z.infer<typeof UserMergeJobStatusSchema>;
+
+/**
+ * Background merge of one user into another (`user_merge_jobs`). The route
+ * moves identities and aliases synchronously and queues the attribution
+ * rewrite; `src/be/user-merge-jobs.ts` runs it in batches and deletes the
+ * source when done. `progress` counts rewritten rows per step, keyed like
+ * `phase` (`workflow-context`, `<table>.<column>`, `delete-user`). A failed
+ * attempt keeps the job `pending` with `error` set and `nextAttemptAt` in the
+ * future until the attempt cap, then the job is `failed`.
+ */
+export const UserMergeJobSchema = z
+  .object({
+    id: z.string(),
+    sourceUserId: z.string(),
+    targetUserId: z.string(),
+    status: UserMergeJobStatusSchema,
+    phase: z.string().nullable(),
+    progress: z.record(z.string(), z.number()),
+    error: z.string().nullable(),
+    attempts: z.number(),
+    nextAttemptAt: z.string().nullable(),
+    createdAt: z.string(),
+    startedAt: z.string().nullable(),
+    finishedAt: z.string().nullable(),
+  })
+  .openapi("UserMergeJob");
+
+export type UserMergeJob = z.infer<typeof UserMergeJobSchema>;
 
 export const RbacRoleSchema = z
   .object({
@@ -1918,6 +1971,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_citation_check_refused",
   // store-progress refused a completion once because its uiSpec was invalid
   "task_ui_spec_check_refused",
+  // A card `script` action ran and failed; the old card stays
+  "task_ui_script_action_failed",
   "channel_message",
   // Service registry events
   "service_registered",
@@ -1989,6 +2044,11 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+// Migration 320: what incurred the row. 'harness' is a worker session;
+// 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
+export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
+export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;
+
 export const SessionCostModelBreakdownSchema = z
   .object({
     model: z.string(),
@@ -2036,6 +2096,7 @@ export const SessionCostSchema = z
     //   'estimated'      — the API priced fallback token counts at an assumed
     //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
+    kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
     cacheWrite5mTokens: z.number().int().nullable().optional(),
@@ -2395,8 +2456,7 @@ export type WorkerNudge = z.infer<typeof WorkerNudgeSchema>;
 export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisioning"]);
 
 /**
- * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
- * paths reject it until its adapter exists.
+ * Infrastructure kind a runtime pool provisions on.
  */
 export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "boxd", "k8s"]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
@@ -2852,6 +2912,19 @@ export const TriggerConfigSchema = z
       verification: WebhookVerificationSchema.optional().describe(
         "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
       ),
+      events: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event.",
+        ),
+      eventHeader: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event.",
+        ),
     }),
     z.object({
       type: z.literal("schedule"),
@@ -3730,6 +3803,14 @@ export const ExtensionManifestSchema = z
       .strict(),
     homepage: z.string().url().optional(),
     author: z.string().min(1).optional(),
+    toolSources: z
+      .array(z.enum(["mcp", "native"]))
+      .min(1)
+      .readonly()
+      .optional()
+      .describe(
+        'Which tool calls reach this extension\'s `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`.',
+      ),
   })
   .strict()
   .superRefine((manifest, ctx) => {
@@ -4165,6 +4246,9 @@ export const PricingProviderSchema = z.enum([
   "cursor",
   "grok",
   "fx",
+  // SystemOne decisions recorded on a task; model keys are `<host>/<model>`
+  // (e.g. `cloudflare/clef`). No seeded rows: unpriced until an operator adds one.
+  "system-one",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

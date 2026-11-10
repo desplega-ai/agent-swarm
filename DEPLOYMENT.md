@@ -521,7 +521,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 ## Memory defaults
 
-API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
+API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
 The bundled agent-fs service uses version 0.18.23. Provisioning seeds agent display names for readable file ownership.
 

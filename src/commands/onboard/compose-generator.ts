@@ -249,7 +249,7 @@ export function generateCompose(state: OnboardState): string {
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
   lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}");
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
-  lines.push("      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}");
+  lines.push("      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-0.5}");
   appendProviderEnvironment(lines, state, false);
   lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
   lines.push(`      - APP_URL=${APP_URL}`);
