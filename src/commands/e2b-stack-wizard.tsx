@@ -232,10 +232,12 @@ export function StackWizard({ defaults, skips, onComplete }: StackWizardProps) {
               defaultValue={String(result.workers)}
               onSubmit={(raw) => {
                 const trimmed = raw.trim();
-                const parsed = trimmed ? Number.parseInt(trimmed, 10) : result.workers;
-                // Keep this in lock-step with the headless `integerFlag("workers")`
-                // contract, which requires a positive integer.
-                if (!Number.isFinite(parsed) || parsed < 1) {
+                const parsed = trimmed ? Number(trimmed) : result.workers;
+                if (
+                  (trimmed && !/^\d+$/.test(trimmed)) ||
+                  !Number.isSafeInteger(parsed) ||
+                  parsed < 1
+                ) {
                   setError("Enter a positive integer (at least 1 worker).");
                   return;
                 }
@@ -271,8 +273,12 @@ export function StackWizard({ defaults, skips, onComplete }: StackWizardProps) {
               defaultValue={String(result.timeoutSec)}
               onSubmit={(raw) => {
                 const trimmed = raw.trim();
-                const parsed = trimmed ? Number.parseInt(trimmed, 10) : result.timeoutSec;
-                if (!Number.isFinite(parsed) || parsed <= 0) {
+                const parsed = trimmed ? Number(trimmed) : result.timeoutSec;
+                if (
+                  (trimmed && !/^\d+$/.test(trimmed)) ||
+                  !Number.isSafeInteger(parsed) ||
+                  parsed <= 0
+                ) {
                   setError("Enter a positive integer (seconds).");
                   return;
                 }
