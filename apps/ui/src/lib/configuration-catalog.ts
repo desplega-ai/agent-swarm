@@ -1005,6 +1005,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
+        key: "WORKFLOW_RUNS_RETENTION_DAYS",
+        label: "Workflow run retention",
+        description:
+          "Delete terminal workflow runs this many days after completion, with their steps and unused definition snapshots. Active runs and trees with a live or recent descendant are kept. Tasks and trigger deduplication survive. Leave unset to disable; deleted run links return 404.",
+        kind: "number",
+        unit: "days",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
         key: "DB_RETENTION_DRY_RUN",
         label: "Database retention dry run",
         description:

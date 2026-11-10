@@ -140,13 +140,14 @@ afterEach(async () => {
 });
 
 describe("DB retention", () => {
-  test("keeps the closed allowlist limited to the five approved tables", () => {
+  test("keeps the closed allowlist limited to the six approved tables", () => {
     expect(DB_RETENTION_TABLES.map((table) => table.table)).toEqual([
       "session_logs",
       "agent_log",
       "events",
       "context_versions",
       "script_runs",
+      "workflow_runs",
     ]);
   });
 
