@@ -1,0 +1,80 @@
+---
+title: Customer renewal review
+description: "How an account team prepares a source-linked renewal brief from approved notes, product usage and open support questions, with the call left to the owner."
+---
+
+Agent Swarm fits a customer-facing team that already keeps account notes, product usage and support history in sources the swarm can read, and wants a source-linked renewal brief prepared before each renewal. It does not fit a team that wants an agent to set price, terms or the renew, expand or churn call, because that decision stays with a person and nothing in this design moves it.
+
+## Limits
+
+This page describes an illustrative design. It is not a customer story and not a measured result. It has not been run for a named customer, and no customer is named here. Integrations, access controls and approval steps depend on your deployment, and each one is something your team configures and tests.
+
+Two boundaries hold in every version of the design. The agent never sends anything to the customer, never changes a contract and never quotes a price. The brief it prepares is an internal document that informs a decision a person makes.
+
+## What the agent prepares
+
+A renewal brief in the account's per-customer working directory in agent-fs, at `customers/<account>/`. The directory is the account's long-lived record, so the brief sits next to the transcripts and notes it was built from rather than in a separate reporting tool.
+
+Three inputs go into it.
+
+- **Approved account notes and meeting transcripts** already in that directory. A post-call transcript appended after each meeting is the usual source, and the notes carry the commitments the team recorded at the time.
+- **Product usage and behavior**, pulled into the directory by the Researcher. The sources are the product database and the analytics the team already runs, not a new pipeline.
+- **Unresolved support questions.** Threads still open, answers still missing, and commitments that were made and not yet closed.
+
+Every claim in the brief links the source file or the query that produced it. A reader who doubts a sentence follows its link to the source file or the query.
+
+Keep internal notes separate from anything customer-facing. The directory holds both, and a short redaction pass only stays short if the two never share a file. Append to the directory rather than overwriting: the folder is the record of what the team knew at the time.
+
+## What the account owner decides
+
+The commercial call stays with the named account owner. Renew, expand, discount, escalate or change terms, the owner decides, and the brief's job is to leave them better prepared for that decision rather than to make it.
+
+So the brief states what the evidence supports and where the evidence stops. It names the usage trend, the open support questions and the commitments on record, and it makes no recommendation on price. A team that wants a price recommendation should put that in a person's hands, not in a generated paragraph.
+
+A human-in-the-loop node pauses the workflow before the brief moves on, and the owner approves or rejects it in Slack. The gate message carries the summary and a link to the full brief in agent-fs, so the owner decides without digging through files. On approve the brief becomes the account team's working document. On reject the draft is archived and the run stops there.
+
+## Missing, stale or conflicting information
+
+Three cases take the exception path rather than a best guess.
+
+- **A missing input.** No transcript inside the window, or no usage data for the period, is a stated gap in the brief.
+- **A source older than the team's freshness window.** A note from well outside the window is evidence of what the team believed then, not of the account today, and it is marked as old.
+- **Two records that disagree.** A note that records a commitment the support thread says never happened is a conflict for the owner to resolve.
+
+Each of those goes to the owner with the draft attached and is flagged inside the brief. The agent never resolves one silently, because a quietly reconciled conflict is the one error nobody reviews.
+
+## How it maps to documented mechanics
+
+Four pieces ship with agent-swarm and need no custom code.
+
+- **agent-fs per-customer directories** give each account a persistent folder that every later session reads before acting ([Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)).
+- **swarm-script nodes** call each source over HTTP or SQL and return one JSON payload, so fetching stays deterministic and the model is not doing arithmetic ([Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)).
+- **Workflows with a human-in-the-loop node** pause the run, post the request and resume on approve or end on reject ([HITL Gates](/docs/playbooks/patterns/hitl-gates)). Agents can also ask a person directly with the `request-human-input` tool, which is a different mechanism from the workflow node.
+- **Pages** render a chart report as a hosted HTML page when the brief needs charts rather than a table.
+
+The rest is custom, and your team builds it. None of it ships with the product.
+
+- `customer-value-report` is the two-stage shape worth copying: an internal usage breakdown first, then a version stripped of internal jargon and framed in the account's terms.
+- `granola-api` ingests meeting transcripts from Granola after each call.
+- `posthog-interaction`, `clerk-analytics` and `turso-interaction` read behavior, account state and side state from their respective systems.
+
+Four third-party dependencies sit under those skills, and each needs its own account and its own configuration: Granola for transcripts, PostHog for product behavior, Clerk for account state, and AgentMail where a team later adds a send step of its own. This design stops before that step.
+
+## Before you start
+
+Write these five things down before the first run, because each one turns an argument later into a decision now.
+
+1. **The account owner.** One named person who makes the commercial call and answers the gate, plus a backup for when they are away.
+2. **The sources of truth.** Which system wins for usage, which for account history, and which folder holds the approved notes. A field with two owners has no owner.
+3. **The freshness window.** How old a source can be before the brief must flag it, stated in days rather than left to judgment.
+4. **The renewal trigger.** A calendar event, a per-account schedule, or a Slack ping. The playbook notes that per-account work tends to be on demand rather than on one shared cadence ([Proactive Customer Support](/docs/playbooks/proactive-customer-support)).
+5. **The actions that never happen without approval.** Sending to the customer, changing a contract, quoting a price, and anything else that leaves your company.
+
+## Related
+
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support) for per-account directories, transcripts and reviewed reports.
+- [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories) for the folder shape this brief reads and lands in.
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources) for deterministic multi-source collection.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates) for the approval node and its two branches.
+- [Small-Company Workflows](/docs/playbooks/small-company-workflows) for the same shape as a cross-team handoff.
+- [Small tech team operating model](/docs/guides/small-tech-team-operating-model) for who owns the layer and who owns the decision.
