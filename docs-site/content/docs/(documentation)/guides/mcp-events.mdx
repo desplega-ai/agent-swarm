@@ -45,6 +45,8 @@ A non-`2xx` response is retried up to 5 attempts in about 14 minutes, with the s
 - `MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS=true` lifts the `https` and public-address rules, for local development and the e2e suite only. It is off by default.
 - Signing secrets are encrypted at rest with the [secrets encryption key](/docs/guides/secrets-encryption).
 - A subscription only matches tasks whose requester is the subscribing user, and a deactivated user receives nothing.
+- A subscription is bound to the `aswt_` token of the session that created it. Revoking that token (for example disconnecting the client) stops its deliveries immediately.
+- Each user can trigger at most 30 verification challenges per hour (1,000 across the API), so subscribe and unsubscribe churn cannot turn the server into a POST relay.
 - Error categories such as `http_5xx` or `challenge_failed` are reported back; raw endpoint responses never are.
 
 ## Turn it off

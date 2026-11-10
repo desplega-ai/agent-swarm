@@ -19,12 +19,16 @@
 -- written. A row exists only after verification succeeded, and a subscribe to
 -- the same (userId, url) inside the verification window skips the challenge.
 --
+-- tokenId is the aswt_ token whose session subscribed. Delivery checks it is
+-- still unrevoked, so revoking a connection stops its events at once.
+--
 -- expiresAt is the granted lease (refreshBefore). Expired rows are never
 -- delivered to and are deleted lazily.
 
 CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
   id TEXT PRIMARY KEY,
   userId TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tokenId TEXT NOT NULL REFERENCES user_tokens(id) ON DELETE CASCADE,
   eventName TEXT NOT NULL,
   argumentsJson TEXT NOT NULL,
   url TEXT NOT NULL,

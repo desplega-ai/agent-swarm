@@ -4281,6 +4281,7 @@
   "mcp_event_subscriptions": {
     "id": { "exempt": "identifier" },
     "userId": { "exempt": "identifier" },
+    "tokenId": { "exempt": "identifier" },
     "eventName": { "exempt": "enum or fixed-format value" },
     "argumentsJson": { "exempt": "canonical JSON of validated subscription arguments (an optional task id)" },
     "url": { "exempt": "client-supplied callback URL, must round-trip byte-exact for delivery" },

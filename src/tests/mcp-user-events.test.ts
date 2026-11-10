@@ -23,13 +23,16 @@ import {
   initMcpEventsDispatcher,
   stopMcpEventsDispatcher,
 } from "../be/mcp-events/dispatcher";
-import { MAX_SUBSCRIPTIONS_PER_USER } from "../be/mcp-events/protocol";
+import {
+  MAX_SUBSCRIPTIONS_PER_USER,
+  VERIFICATIONS_PER_USER_PER_HOUR,
+} from "../be/mcp-events/protocol";
 import {
   __setWebhookTestOverrides,
   callbackUrlProblem,
   parseWebhookSecret,
 } from "../be/mcp-events/webhook";
-import { type IdentityActor, mintToken } from "../be/users";
+import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleMcpUser } from "../http/mcp-user";
 import { listenOnFreePort } from "./test-net";
 
@@ -256,9 +259,10 @@ afterEach(() => {
   initMcpEventsDispatcher();
 });
 
-async function newUser(name: string): Promise<{ id: string; token: string }> {
+async function newUser(name: string): Promise<{ id: string; token: string; tokenId: string }> {
   const user = await createUser({ name });
-  return { id: user.id, token: (await mintToken(user.id, name, ACTOR)).plaintext };
+  const minted = await mintToken(user.id, name, ACTOR);
+  return { id: user.id, token: minted.plaintext, tokenId: minted.tokenId };
 }
 
 async function subscribe(
@@ -486,6 +490,29 @@ describe("events/subscribe", () => {
     expect(received.length).toBe(challengesBefore);
   });
 
+  test("subscribe/unsubscribe churn cannot exceed the hourly verification budget", async () => {
+    const user = await newUser("Churner");
+    const { sessionId } = await openSession(user.token);
+    for (let i = 0; i < VERIFICATIONS_PER_USER_PER_HOUR; i++) {
+      const url = hookUrl(`/churn/${i}`);
+      const ok = await subscribe(user.token, sessionId, {
+        delivery: { mode: "webhook", url, secret: newSecret() },
+      });
+      expect(ok.result?.id).toBeDefined();
+      await rpc(user.token, sessionId, "events/unsubscribe", {
+        name: "task.completed",
+        arguments: {},
+        delivery: { url },
+      });
+    }
+    const sent = received.length;
+    const over = await subscribe(user.token, sessionId, {
+      delivery: { mode: "webhook", url: hookUrl("/churn/over"), secret: newSecret() },
+    });
+    expect(over.error).toMatchObject({ code: -32025, data: { limit: "verifications" } });
+    expect(received.length).toBe(sent);
+  });
+
   test("seals the signing secret at rest", async () => {
     const user = await newUser("Sealed");
     const { sessionId } = await openSession(user.token);
@@ -636,6 +663,16 @@ describe("delivery", () => {
     );
     expect(row?.lastError).toBe("http_5xx");
     expect(row?.failedSince).toBeTruthy();
+  });
+
+  test("revoking the subscribing token stops delivery", async () => {
+    const user = await newUser("Revoked");
+    const { sessionId } = await openSession(user.token);
+    expect((await subscribe(user.token, sessionId)).result?.id).toBeDefined();
+    await revokeToken(user.tokenId, ACTOR);
+    await finishTask(user.id, "completed");
+    await Bun.sleep(150);
+    expect(eventDeliveries()).toHaveLength(0);
   });
 
   test("events/unsubscribe stops delivery and is idempotent", async () => {

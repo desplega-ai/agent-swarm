@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { resolveUserByToken } from "@/be/users";
+import { resolveUserToken } from "@/be/users";
 import { createUserServer } from "@/server-user";
 import type { User } from "@/types";
 import { setRequestAuth } from "@/utils/request-auth-context";
@@ -27,12 +27,14 @@ function extractBearer(req: IncomingMessage): string | null {
   return token.startsWith("aswt_") ? token : null;
 }
 
-async function resolveActiveUser(req: IncomingMessage): Promise<User | null> {
+async function resolveActiveUser(
+  req: IncomingMessage,
+): Promise<{ user: User; tokenId: string } | null> {
   const token = extractBearer(req);
   if (!token) return null;
-  const user = await resolveUserByToken(token);
-  if (!user || user.status !== "active") return null;
-  return user;
+  const resolved = await resolveUserToken(token);
+  if (!resolved?.user || resolved.user.status !== "active") return null;
+  return { user: resolved.user, tokenId: resolved.tokenId };
 }
 
 export async function handleMcpUser(
@@ -48,8 +50,9 @@ export async function handleMcpUser(
     return false;
   }
 
-  const user = await resolveActiveUser(req);
-  if (!user) return unauthorized(res);
+  const resolved = await resolveActiveUser(req);
+  if (!resolved) return unauthorized(res);
+  const { user, tokenId } = resolved;
   // Install the resolved user as the request's ambient auth so DB audit
   // columns (created_by on tasks made through the user MCP) attribute to the
   // human behind the token instead of NULL.
@@ -91,7 +94,7 @@ export async function handleMcpUser(
         }
       };
 
-      const server = createUserServer(user);
+      const server = createUserServer(user, tokenId);
       await server.connect(transport);
     } else {
       return respondNoMcpSession(res, sessionId);

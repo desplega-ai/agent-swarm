@@ -128,7 +128,33 @@ export function grantTtlMs(raw: unknown): number {
 
 export type EventsAuthorizer = (method: string) => Promise<boolean>;
 
-async function handleSubscribe(user: User, authorize: EventsAuthorizer, rawParams: unknown) {
+/** Verification POSTs allowed per user, and in total, per rolling hour. */
+export const VERIFICATIONS_PER_USER_PER_HOUR = 30;
+export const VERIFICATIONS_PER_HOUR = 1000;
+const HOUR_MS = 60 * 60 * 1000;
+// shortcut: in-memory and per API process, upgrade if the API runs several replicas.
+const verificationLog = new Map<string, number[]>();
+
+/** Records one verification POST unless the user or global hourly budget is spent. */
+function takeVerificationBudget(userId: string, now: number): boolean {
+  const recent = (key: string) =>
+    (verificationLog.get(key) ?? []).filter((at) => at > now - HOUR_MS);
+  const mine = recent(userId);
+  const all = recent("*");
+  if (mine.length >= VERIFICATIONS_PER_USER_PER_HOUR || all.length >= VERIFICATIONS_PER_HOUR) {
+    return false;
+  }
+  verificationLog.set(userId, [...mine, now]);
+  verificationLog.set("*", [...all, now]);
+  return true;
+}
+
+async function handleSubscribe(
+  user: User,
+  tokenId: string,
+  authorize: EventsAuthorizer,
+  rawParams: unknown,
+) {
   const key = parseKey(rawParams);
   const secretText = key.delivery.secret;
   const secret = parseWebhookSecret(secretText);
@@ -169,6 +195,14 @@ async function handleSubscribe(user: User, authorize: EventsAuthorizer, rawParam
     nowIso,
   );
   if (!verifiedAt) {
+    // Unsubscribe or expiry frees a live slot, so the live cap alone does not
+    // bound challenge POSTs; this budget does.
+    if (!takeVerificationBudget(user.id, now)) {
+      throw new EventsRpcError(EventsErrorCode.ResourceExhausted, "Too many verifications", {
+        limit: "verifications",
+        max: VERIFICATIONS_PER_USER_PER_HOUR,
+      });
+    }
     const failure = await verifyCallbackEndpoint({ url: key.url, subscriptionId: id, secret });
     if (failure) {
       throw new EventsRpcError(
@@ -183,6 +217,7 @@ async function handleSubscribe(user: User, authorize: EventsAuthorizer, rawParam
   const row = await upsertSubscription({
     id,
     userId: user.id,
+    tokenId,
     eventName: key.name,
     argumentsJson: key.argumentsJson,
     url: key.url,
@@ -240,6 +275,7 @@ async function handleUnsubscribe(user: User, authorize: EventsAuthorizer, rawPar
 export function registerUserEvents(
   server: McpServer,
   user: User,
+  tokenId: string,
   authorize: EventsAuthorizer,
 ): void {
   server.server.registerCapabilities({
@@ -252,7 +288,7 @@ export function registerUserEvents(
     events: EVENT_DESCRIPTORS,
   }));
   server.server.setRequestHandler(EventsSubscribeRequestSchema, async (request) =>
-    handleSubscribe(user, authorize, request.params),
+    handleSubscribe(user, tokenId, authorize, request.params),
   );
   server.server.setRequestHandler(EventsUnsubscribeRequestSchema, async (request) =>
     handleUnsubscribe(user, authorize, request.params),

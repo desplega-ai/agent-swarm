@@ -11,6 +11,7 @@ import type { DeliveryErrorCategory } from "./webhook";
 export type SubscriptionRow = {
   id: string;
   userId: string;
+  tokenId: string;
   eventName: string;
   argumentsJson: string;
   url: string;
@@ -101,6 +102,7 @@ export async function deleteExpiredSubscriptions(nowIso: string): Promise<number
 export async function upsertSubscription(input: {
   id: string;
   userId: string;
+  tokenId: string;
   eventName: string;
   argumentsJson: string;
   url: string;
@@ -130,12 +132,13 @@ export async function upsertSubscription(input: {
     if (!existing) {
       await tx.run(
         `INSERT INTO mcp_event_subscriptions
-           (id, userId, eventName, argumentsJson, url, secretSealed, verifiedAt, expiresAt,
-            createdAt, updatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, userId, tokenId, eventName, argumentsJson, url, secretSealed, verifiedAt,
+            expiresAt, createdAt, updatedAt, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.id,
           input.userId,
+          input.tokenId,
           input.eventName,
           input.argumentsJson,
           input.url,
@@ -153,7 +156,8 @@ export async function upsertSubscription(input: {
       const rotated = unsealSecret(existing.secretSealed) !== input.secret;
       await tx.run(
         `UPDATE mcp_event_subscriptions
-         SET secretSealed = ?,
+         SET tokenId = ?,
+             secretSealed = ?,
              previousSecretSealed = ?,
              previousSecretUntil = ?,
              verifiedAt = ?,
@@ -162,6 +166,7 @@ export async function upsertSubscription(input: {
              updated_by = ?
          WHERE id = ?`,
         [
+          input.tokenId,
           sealed,
           rotated ? existing.secretSealed : existing.previousSecretSealed,
           rotated ? input.rotationGraceUntil : existing.previousSecretUntil,

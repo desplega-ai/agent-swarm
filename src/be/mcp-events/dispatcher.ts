@@ -8,13 +8,12 @@
  * retries run past a restart, is lost. get-task-details stays the source of
  * truth.
  *
- * shortcut: no durable outbox and no per-token binding (a revoked aswt_ token's
- * subscriptions run until their lease, at most 24 h), upgrade when a client
- * needs at-least-once delivery or per-connection revocation.
+ * shortcut: no durable outbox, upgrade when a client needs at-least-once delivery.
  */
 
 import { createHash } from "node:crypto";
 import { getDbClient, getTaskById, getUserById } from "@/be/db";
+import { isLiveUserToken } from "@/be/users";
 import { getAppUrl } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
@@ -81,6 +80,8 @@ async function attemptDelivery(
   // Re-read each attempt: an unsubscribe or expiry mid-retry stops delivery.
   const row = await getSubscription(subscriptionId);
   if (!row || row.expiresAt <= nowIso) return;
+  // A revoked connection token stops its subscriptions' deliveries at once.
+  if (!(await isLiveUserToken(row.tokenId, row.userId))) return;
   const result = await postSignedWebhook({
     url: row.url,
     subscriptionId: row.id,

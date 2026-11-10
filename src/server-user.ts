@@ -99,7 +99,11 @@ async function maybeDenyUserToolAdmission(
   return toolErr(`Forbidden: ${decision.reason}`);
 }
 
-export function createUserServer(user: User): McpServer {
+/**
+ * `tokenId` is the aswt_ token that opened the session. Without it the session
+ * offers no MCP Events: a subscription must be bound to a revocable token.
+ */
+export function createUserServer(user: User, tokenId?: string): McpServer {
   const server = new McpServer(
     {
       name: `${pkg.name}-user`,
@@ -116,10 +120,10 @@ export function createUserServer(user: User): McpServer {
 
   const registerTool = createToolRegistrar(server);
 
-  if (isMcpUserEventsEnabled()) {
+  if (tokenId && isMcpUserEventsEnabled()) {
     // Subscribing is a read on the user's own tasks.
     const eventsAdmission = { annotations: { readOnlyHint: true } };
-    registerUserEvents(server, user, async (method) => {
+    registerUserEvents(server, user, tokenId, async (method) => {
       const denied = await maybeDenyUserToolAdmission(user, method, eventsAdmission);
       return denied === undefined;
     });
