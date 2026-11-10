@@ -57,6 +57,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
         "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
         "verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }.\n" +
+        "- WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, " +
+        "before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event).\n" +
         "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
         "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
       inputSchema: z.object({

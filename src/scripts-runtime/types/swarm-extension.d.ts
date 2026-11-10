@@ -353,7 +353,8 @@ declare module "swarm-extension" {
     sourceTaskId: string | undefined;
     auditSourceTaskId: string | undefined;
     contextKey: string | undefined;
-    callOrigin: "mcp" | "extension" | "script-sdk";
+    callOrigin: "mcp" | "native" | "extension" | "script-sdk";
+    harness?: string | undefined;
   };
 
   import type { SwarmSdk } from "swarm-sdk";
@@ -395,7 +396,11 @@ declare module "swarm-extension" {
     };
     homepage?: string;
     author?: string;
+    /** Tool-call sources this extension's tool handlers receive. Default `["mcp"]`. */
+    toolSources?: readonly ToolSource[];
   }
+  /** `mcp`: swarm MCP tools. `native`: harness built-ins reported by a worker shim. */
+  export type ToolSource = "mcp" | "native";
   export interface HooksModule {
     default: SwarmExtension;
     config?: z.ZodTypeAny;
@@ -667,8 +672,16 @@ declare module "swarm-extension" {
   }
   export interface ToolCallEvent {
     tool: string;
+    /** Secret-scrubbed on native calls: a secret reads as `[REDACTED:<name>]`. */
     args: unknown;
     requestInfo: RequestInfo;
+    /** Native calls only: the harness's own tool name, such as `Bash`. */
+    nativeTool?: string;
+    /** Native calls only: the harness's own argument shape, secret-scrubbed. */
+    rawArgs?: unknown;
+    /** Native calls only: the harness's call id, and its parent for a nested call. */
+    toolCallId?: string;
+    parentToolCallId?: string;
   }
   export interface ToolCallModify {
     args: unknown;
@@ -798,6 +811,8 @@ declare module "swarm-extension" {
   export interface ToolCallCompletedEvent extends ToolCallEvent {
     result: unknown;
     durationMs: number;
+    /** Native calls only: the harness reported the call as failed. */
+    isError?: boolean;
   }
   export interface SwarmEventMap {
     "pre.task.create": {

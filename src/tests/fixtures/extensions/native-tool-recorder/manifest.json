@@ -1,0 +1,10 @@
+{
+  "name": "native-tool-recorder",
+  "description": "Records native tool events and echoes their args back as a modify",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  },
+  "toolSources": ["mcp", "native"]
+}

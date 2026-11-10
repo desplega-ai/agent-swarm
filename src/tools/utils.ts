@@ -58,7 +58,10 @@ export type RequestInfo = {
    */
   auditSourceTaskId: string | undefined;
   contextKey: string | undefined;
-  callOrigin: "mcp" | "script-sdk" | "extension";
+  /** `native`: a harness built-in tool call reported through `POST /api/tool-hooks`. */
+  callOrigin: "mcp" | "script-sdk" | "extension" | "native";
+  /** The worker harness (`claude`, `codex`, `opencode`, `pi`); set on native calls. */
+  harness?: string;
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
