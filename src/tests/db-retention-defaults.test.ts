@@ -95,7 +95,7 @@ describe("retention defaults across real boots", () => {
   const BOOT_TEST_TIMEOUT_MS = 300_000;
   const headers = { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" };
 
-  type Api = { proc: Subprocess<"ignore", "pipe", "pipe">; base: string; stdout: Promise<string> };
+  type Api = { proc: Subprocess<"ignore", "pipe", "pipe">; base: string; stdout: { text: string } };
   const booted: Api[] = [];
   const dbPaths: string[] = [];
 
@@ -127,7 +127,11 @@ describe("retention defaults across real boots", () => {
       stderr: "pipe",
     });
     // Drain both pipes from the start so a full buffer cannot stall the server.
-    const stdout = new Response(proc.stdout).text();
+    const stdout = { text: "" };
+    void (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of proc.stdout) stdout.text += decoder.decode(chunk, { stream: true });
+    })();
     void new Response(proc.stderr).text();
     const api: Api = { proc, base: `http://127.0.0.1:${port}`, stdout };
     booted.push(api);
@@ -136,14 +140,19 @@ describe("retention defaults across real boots", () => {
     return api;
   }
 
-  /** Stop the server and return the line that reports what the sweep will apply. */
+  /**
+   * Wait for the line that reports what the sweep will apply, then stop the
+   * server. The sweep starts after `/health` answers, so a loaded host can
+   * reach SIGTERM before the line prints unless the test waits for it.
+   */
   async function stopAndReadSweepConfig(api: Api): Promise<string> {
+    const findLine = () =>
+      api.stdout.text.split("\n").find((entry) => entry.includes("[db-retention] starting"));
+    const deadline = Date.now() + 120_000;
+    while (!findLine() && api.proc.exitCode === null && Date.now() < deadline) await Bun.sleep(100);
     api.proc.kill("SIGTERM");
     await api.proc.exited;
-    const line = (await api.stdout)
-      .split("\n")
-      .find((entry) => entry.includes("[db-retention] starting"));
-    return line ?? "";
+    return findLine() ?? "";
   }
 
   async function storedRetention(api: Api): Promise<Record<string, { id: string; value: string }>> {
