@@ -135,14 +135,18 @@ class ResumeTrackingBus extends InProcessEventBus {
     super.on(event, (data) => {
       const result = handler(data) as undefined | Promise<unknown>;
       if (!result || typeof (result as Promise<unknown>).then !== "function") return;
-      const tracked = Promise.resolve(result).then(
-        () => undefined,
-        () => undefined,
-      );
+      // Keep the rejection on `tracked` so Promise.all in settleHandlers fails
+      // the test. The second chain only removes it from the set.
+      const tracked = Promise.resolve(result).then(() => undefined);
       this.pending.add(tracked);
-      void tracked.finally(() => {
-        this.pending.delete(tracked);
-      });
+      void tracked.then(
+        () => {
+          this.pending.delete(tracked);
+        },
+        () => {
+          this.pending.delete(tracked);
+        },
+      );
     });
   }
 
@@ -250,6 +254,17 @@ async function runHITLWorkflow(
 }
 
 // ─── Tests ────────────────────────────────────────────────────
+
+describe("ResumeTrackingBus", () => {
+  test("settleHandlers rejects when a listener rejects", async () => {
+    const bus = new ResumeTrackingBus();
+    bus.on("approval.resolved", async () => {
+      throw new Error("resume failed");
+    });
+    bus.emit("approval.resolved", { requestId: "r1" });
+    await expect(bus.settleHandlers()).rejects.toThrow("resume failed");
+  });
+});
 
 describe("HITL port-based routing", () => {
   beforeAll(async () => {
