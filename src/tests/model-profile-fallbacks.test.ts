@@ -424,6 +424,18 @@ describe("same-profile key retry", () => {
     expect((await nextFallback(task, "rate_limit")).kind).toBe("none");
   });
 
+  test("a task with a key type but no recorded key never retries on a key", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-c"), "aaaaa");
+    // Without the suffix the pick cannot exclude the key that failed.
+    const noSuffix = { ...task, credentialKeySuffix: undefined };
+    expect(noSuffix.credentialKeyType).toBe(KEY_TYPE);
+    expect(await nextFallback(noSuffix, "rate_limit")).toEqual({ kind: "none", message: null });
+    // Control: the same task with its suffix retries.
+    expect((await nextFallback(task, "rate_limit")).kind).toBe("picked");
+  });
+
   test("all keys benched gives no pick and a reason that names the exhausted keys", async () => {
     await seedChain();
     await seedPool(["aaaaa", "bbbbb"]);

@@ -7,6 +7,9 @@
  * run to the walk that owes them: that walk's own finalizer settles the run.
  */
 
+import { getDbClient } from "../be/db";
+import type { WorkflowNode } from "../types";
+
 /** Open holds per run: claims waiting for their walk plus walks still routing. */
 const owed = new Map<string, number>();
 
@@ -64,4 +67,42 @@ export function holdSuccessorRouting(runId: string, debt?: SuccessorWalkDebt): (
     return () => debt.release();
   }
   return oweSuccessorWalk(runId).release;
+}
+
+/** The fields of a claim result that decide whether it owes a walk. */
+interface SuccessorClaim {
+  claimed: boolean;
+  runFailed: boolean;
+  successors: WorkflowNode[];
+}
+
+/**
+ * Run a claim that completes a step and hands its successors to the caller.
+ * The successors have no step row until the caller's walk claims them, so the
+ * claim holds the run against finalizers from inside its own transaction.
+ * Callers pass a claimed result with successors straight to `walkGraph`, with
+ * `successorDebt` in its options, or release the debt.
+ */
+export async function claimAndOweWalk<T extends SuccessorClaim>(
+  runId: string,
+  claim: () => Promise<T>,
+): Promise<T & { successorDebt?: SuccessorWalkDebt }> {
+  let debt: SuccessorWalkDebt | undefined;
+  try {
+    return await getDbClient().transaction(async () => {
+      const result = await claim();
+      if (result.claimed && !result.runFailed && result.successors.length > 0) {
+        debt = oweSuccessorWalk(runId);
+        // Inside a caller's transaction the claim publishes only at its
+        // COMMIT; a rollback there (or a failed COMMIT) must drop the hold too.
+        getDbClient().afterRollback(debt.release);
+        return { ...result, successorDebt: debt };
+      }
+      return result;
+    });
+  } catch (err) {
+    // This claim's own savepoint rolled back while the outer transaction lives on.
+    debt?.release();
+    throw err;
+  }
 }

@@ -169,6 +169,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                   drive.successors,
                   registry,
                   workflow.id,
+                  undefined,
+                  { successorDebt: drive.successorDebt },
                 );
               } else {
                 await completeRunIfSettled(run.id, ctx);
