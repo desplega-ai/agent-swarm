@@ -2,7 +2,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, setSystemTime, test }
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, getDbClient, initDb } from "../be/db";
-import { SEARCH_HEALTH_TTL_MS, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import {
+  SEARCH_HEALTH_TTL_MS,
+  SqliteMemoryStore,
+  waitForFtsBackfillsForTesting,
+} from "../be/memory/providers/sqlite-store";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import type { AgentMemory } from "../types";
 
@@ -238,5 +242,124 @@ describe("a review task's recall excludes review completions in the store query"
     const store = new SqliteMemoryStore();
     const rows = await store.search(queryEmbedding, reviewAgent, { limit: LIMIT });
     expect(rows.map((row) => row.name)).toEqual([0, 1, 2, 3, 4].map((i) => `review-${i}`));
+  });
+});
+
+// The two remaining full scans on hot memory paths, measured at 57k memories:
+// the health count's agent_memory -> memory_vec anti-join (about 1.1 s of the
+// 1.3 s getHealth()) and store()'s DELETE FROM memory_fts per stored chunk
+// (memory_id is UNINDEXED, so each delete reads the whole index).
+describe("health counts and the FTS sync avoid full scans", () => {
+  const scanAgent = randomUUID();
+  const FTS_DELETE_SQL = "DELETE FROM memory_fts WHERE memory_id = ?";
+
+  beforeAll(async () => {
+    await createAgent({ id: scanAgent, name: "Scan Agent", isLead: false, status: "idle" });
+  });
+
+  function watchFtsDeletes(): { deletes: number; stop: () => void } {
+    const db = getDb();
+    const realQuery = db.query;
+    const seen = {
+      deletes: 0,
+      stop: () => {
+        db.query = realQuery;
+      },
+    };
+    db.query = ((sql: string, ...rest: unknown[]) => {
+      if (sql === FTS_DELETE_SQL) seen.deletes++;
+      return (realQuery as (...args: unknown[]) => unknown).call(db, sql, ...rest);
+    }) as typeof db.query;
+    return seen;
+  }
+
+  async function ftsRowCount(memoryId: string): Promise<number> {
+    const row = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM memory_fts WHERE memory_id = ?",
+      [memoryId],
+    );
+    return row?.n ?? 0;
+  }
+
+  test("missingFromVec equals the agent_memory anti-join it replaced", async () => {
+    const store = new SqliteMemoryStore();
+    if (!store.getHealth().sqliteVec.initialized) return; // no vec0: the count is validEmbedding
+    for (let i = 0; i < 3; i++) await remember(store, scanAgent, `vec-${i}`, "manual", null, 0.5);
+    const dropped = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-dropped",
+      content: "vec-dropped",
+      source: "manual",
+    });
+    await store.updateEmbedding(dropped.id, mix(0.5, 5), "test");
+    await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [dropped.id]);
+    // Wrong dimensions: counted in neither side of the difference.
+    const invalid = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-invalid",
+      content: "vec-invalid",
+      source: "manual",
+    });
+    await store.updateEmbedding(invalid.id, new Float32Array(7), "test");
+
+    const oracle = getDb()
+      .prepare<{ n: number }, []>(
+        `SELECT COUNT(*) AS n FROM agent_memory m
+         LEFT JOIN memory_vec v ON v.memory_id = m.id
+         WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${512 * 4}
+           AND v.memory_id IS NULL`,
+      )
+      .get()?.n;
+    expect(oracle).toBeGreaterThanOrEqual(1);
+    expect(store.getHealth().counts.missingFromVec).toBe(oracle as number);
+  });
+
+  test("store() runs no memory_fts delete once the backfill is done", async () => {
+    const store = new SqliteMemoryStore();
+    // Every store built in this file starts its own backfill.
+    await waitForFtsBackfillsForTesting();
+    const watch = watchFtsDeletes();
+    try {
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const row = await store.store({
+          agentId: scanAgent,
+          scope: "agent",
+          name: `chunk-${i}`,
+          content: `fts sync probe chunk ${i}`,
+          source: "task_completion",
+        });
+        ids.push(row.id);
+      }
+      expect(watch.deletes).toBe(0);
+      for (const id of ids) expect(await ftsRowCount(id)).toBe(1);
+
+      // An edit rewrites an existing id: it still deletes before it inserts.
+      await store.edit({
+        id: ids[0],
+        mode: "replace",
+        content: "fts sync probe edited",
+        intent: "test",
+      });
+      expect(watch.deletes).toBe(1);
+      expect(await ftsRowCount(ids[0] as string)).toBe(1);
+    } finally {
+      watch.stop();
+    }
+  });
+
+  test("a store() racing the boot backfill leaves one memory_fts row", async () => {
+    const store = new SqliteMemoryStore(); // starts a backfill
+    const row = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "racing",
+      content: "fts sync probe racing",
+      source: "manual",
+    });
+    await store.whenFtsPopulated();
+    expect(await ftsRowCount(row.id)).toBe(1);
   });
 });

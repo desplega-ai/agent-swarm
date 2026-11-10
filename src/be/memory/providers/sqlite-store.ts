@@ -65,6 +65,20 @@ export const SEARCH_HEALTH_TTL_MS = 60_000;
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
+/**
+ * FTS backfills running in this process, across store instances. While one
+ * runs it can index a just-committed memory before store() does, so store()
+ * must delete before it inserts. With none running, a fresh id has no FTS row,
+ * and the delete is skipped: it is a full memory_fts scan (memory_id is
+ * UNINDEXED), about 90 ms at 57k memories, once per stored chunk.
+ */
+const ftsBackfillsInFlight = new Set<Promise<void>>();
+
+/** Resolves once every FTS backfill started so far has settled. */
+export async function waitForFtsBackfillsForTesting(): Promise<void> {
+  while (ftsBackfillsInFlight.size > 0) await Promise.all(ftsBackfillsInFlight);
+}
+
 export type AgentMemoryRow = {
   id: string;
   agentId: string | null;
@@ -229,9 +243,15 @@ export class SqliteMemoryStore implements MemoryStore {
         )
       `);
       this.ftsInitialized = true;
-      this.ftsPopulate = this.populateFtsTable().catch((err) => {
-        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
-      });
+      const backfill: Promise<void> = this.populateFtsTable()
+        .catch((err) => {
+          console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
+        })
+        .finally(() => {
+          ftsBackfillsInFlight.delete(backfill);
+        });
+      ftsBackfillsInFlight.add(backfill);
+      this.ftsPopulate = backfill;
     } catch (err) {
       this.ftsInitialized = false;
       console.error("[memory-fts] Failed to initialize memory_fts:", (err as Error).message);
@@ -324,10 +344,21 @@ export class SqliteMemoryStore implements MemoryStore {
     return this.ftsPopulate ?? Promise.resolve();
   }
 
-  private async syncFtsRow(memoryId: string, name: string, content: string): Promise<void> {
+  /**
+   * `freshId`: the memory row was just inserted under a new random id, so only
+   * a concurrent backfill can have indexed it (see ftsBackfillsInFlight).
+   */
+  private async syncFtsRow(
+    memoryId: string,
+    name: string,
+    content: string,
+    freshId = false,
+  ): Promise<void> {
     if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
     try {
-      await getDbClient().run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+      if (!freshId || ftsBackfillsInFlight.size > 0) {
+        await getDbClient().run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+      }
       await getDbClient().run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
         memoryId,
         name,
@@ -555,7 +586,7 @@ export class SqliteMemoryStore implements MemoryStore {
       return inserted;
     });
 
-    await this.syncFtsRow(row.id, row.name, row.content);
+    await this.syncFtsRow(row.id, row.name, row.content, true);
     return rowToAgentMemory(row);
   }
 
@@ -1683,15 +1714,16 @@ export class SqliteMemoryStore implements MemoryStore {
     const tableExists = this.getVecTableSchema() !== null;
     const tableUsable = tableExists && isSqliteVecAvailable();
     const count = (sql: string) => db.prepare<{ count: number }, []>(sql).get()?.count ?? 0;
+    const validEmbedding = count(
+      `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
+    );
 
     return {
       total: count("SELECT COUNT(*) as count FROM agent_memory"),
       withEmbedding: count(
         "SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL",
       ),
-      validEmbedding: count(
-        `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
-      ),
+      validEmbedding,
       invalidEmbedding: count(
         `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
       ),
@@ -1702,18 +1734,21 @@ export class SqliteMemoryStore implements MemoryStore {
            AND (expiresAt IS NULL OR expiresAt > datetime('now'))`,
       ),
       memoryVec: tableUsable ? count("SELECT COUNT(*) as count FROM memory_vec") : 0,
+      // Valid rows minus the valid rows memory_vec holds. memory_vec.memory_id
+      // is its primary key, so the join counts each memory at most once. The
+      // CROSS JOIN pins memory_vec as the outer loop: an agent_memory-driven
+      // anti-join probes vec0 once per memory, which held the event loop for
+      // seconds at 57k memories; this side is a primary-key lookup per vec row.
       missingFromVec: tableUsable
-        ? count(
+        ? validEmbedding -
+          count(
             `SELECT COUNT(*) as count
-             FROM agent_memory m
-             LEFT JOIN memory_vec v ON v.memory_id = m.id
+             FROM memory_vec v
+             CROSS JOIN agent_memory m ON m.id = v.memory_id
              WHERE m.embedding IS NOT NULL
-               AND length(m.embedding) = ${VECTOR_BYTES}
-               AND v.memory_id IS NULL`,
+               AND length(m.embedding) = ${VECTOR_BYTES}`,
           )
-        : count(
-            `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
-          ),
+        : validEmbedding,
       extraInVec: tableUsable
         ? count(
             `SELECT COUNT(*) as count
