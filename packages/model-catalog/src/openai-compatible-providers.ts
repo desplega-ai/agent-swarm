@@ -183,8 +183,9 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
     // GPT, Gemini on prepaid credit) are out of scope.
     models: [
       {
+        // Helmcode serves V4.1 under the v4 id: https://helmcode.com/docs/models
         id: "deepseek-v4-flash",
-        name: "DeepSeek V4 Flash",
+        name: "DeepSeek V4.1 Flash",
         contextWindow: 1048576,
         maxOutputTokens: 32768,
         input: TEXT_IMAGE,

@@ -23,6 +23,7 @@ import { getSuccessors } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveStepNode } from "./foreach-body";
 import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
+import { claimAndOweWalk, type SuccessorWalkDebt } from "./successor-routing";
 
 export interface TaskStepRoutingResult {
   /**
@@ -37,6 +38,8 @@ export interface TaskStepRoutingResult {
   successors: WorkflowNode[];
   /** True when this call failed the run: nothing may route or re-park it. */
   runFailed: boolean;
+  /** This claim's hold on the run; pass it to the `walkGraph` that routes `successors`. */
+  successorDebt?: SuccessorWalkDebt;
 }
 
 const UNCLAIMED: TaskStepRoutingResult = {
@@ -143,7 +146,7 @@ export async function checkpointPortStepAndResolveSuccessors(
   ctx: Record<string, unknown>,
   registry?: ExecutorRegistry,
 ): Promise<PortStepRoutingResult> {
-  return await getDbClient().transaction(async (): Promise<PortStepRoutingResult> => {
+  return await claimAndOweWalk(runId, async () => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return UNCLAIMED;
     const run = await getWorkflowRun(runId);
@@ -301,7 +304,7 @@ export async function completeTaskStepAndResolveSuccessors(
   // The task step, optional foreach join checkpoint, workflow context, and
   // running status must commit together. A crash after this transaction is
   // recoverable through the running-run graph re-walk.
-  return await getDbClient().transaction(async (): Promise<TaskStepRoutingResult> => {
+  return await claimAndOweWalk(runId, async () => {
     // Re-read inside the transaction: callers checked `waiting` before their
     // own awaits, so the claim is only authoritative here.
     const current = await getWorkflowRunStep(step.id);

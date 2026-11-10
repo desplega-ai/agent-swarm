@@ -39,6 +39,7 @@ import type {
 } from "../types";
 import { initWorkflows, stopRetryPoller, workflowEventBus } from "../workflows";
 import { listenOnFreePort } from "./test-net";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
 
@@ -1439,8 +1440,7 @@ describe("Workflow HTTP API v2", () => {
       });
       const { runId } = (await triggerRes.json()) as { runId: string };
 
-      // Wait for run to complete
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRunStatus(runId, "completed");
 
       // Try to cancel — should fail
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {

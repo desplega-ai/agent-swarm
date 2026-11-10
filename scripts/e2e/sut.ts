@@ -80,7 +80,9 @@ function drain(stream: ReadableStream<Uint8Array>, writer: Bun.FileSink) {
 
 function spawnSutProcess(logPath: string, env: Record<string, string>) {
   const writer = Bun.file(logPath).writer();
-  const child = Bun.spawn(["bun", "run", "src/http.ts"], {
+  // --no-orphans: the SUT env is built from scratch, so the flag cannot be inherited.
+  // A runner that is SIGKILLed never reaches stopSut; the server then exits on its own.
+  const child = Bun.spawn(["bun", "--no-orphans", "run", "src/http.ts"], {
     cwd: repoRoot,
     env,
     stdout: "pipe",

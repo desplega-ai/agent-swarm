@@ -37,6 +37,7 @@ Conventions:
 - Each test file uses an **isolated SQLite DB**: `./test-<name>.sqlite`. Call `initDb()` in `beforeAll`, `closeDb()` in `afterAll`. `src/tests/preload.ts` restores a pre-migrated template (cached under `$TMPDIR/agent-swarm-test-template/`, keyed by migrations + prompt registry + Bun version) so `initDb()` costs a file read, not 130 migrations. `AGENT_SWARM_TEST_TEMPLATE_CACHE=0` bypasses the cache for a run (no read, no write); entries untouched for a day are pruned.
 - Tests that need an HTTP surface use a **minimal `node:http` handler** — not the full `src/http.ts` server. Keeps startup cheap and isolates what's under test.
 - **Never hard-code a port.** Helpers live in `src/tests/test-net.ts`: in-process `node:http` servers use `const port = await listenOnFreePort(server)`; `Bun.serve({ port: 0 })` servers read `server.port`; spawned `src/http.ts` children take `await getFreePort()` in `beforeAll` and wait with `waitForServer(url)` inside a hook given `SERVER_BOOT_HOOK_TIMEOUT_MS`. Under `--parallel` two files with the same literal collide and one of them hits "Server did not start within 60000ms".
+- **A spawned Bun child must not outlive its run.** `afterAll` does not run when the run is killed. The preload sets `BUN_FEATURE_FLAG_NO_ORPHANS=1`, so a Bun child that inherits `process.env` exits when its parent dies. A spawn that builds its env from scratch passes `--no-orphans` itself, as `scripts/e2e/sut.ts` does.
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 - **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
 - The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
@@ -342,8 +343,8 @@ The workflow maps its trigger to the tracker's trigger field:
 |---|---|
 | `pull_request` | `pr` |
 | `push` to `main` | `main` |
-| `schedule` (nightly cron) | `nightly` |
-| `workflow_dispatch` | `manual`. The open PR for the branch is resolved, if one exists. |
+| `workflow_dispatch` on `main` (the nightly run an external scheduler dispatches) | `nightly` |
+| `workflow_dispatch` on any other ref | `manual`. The open PR for the branch is resolved, if one exists. |
 
 Local install of the tracker: the template lives at `desplega-ai/agent-work`, `workflows/ui-e2e-tracker/`. Follow its README for the install steps. Boot a local API with `MCP_BASE_URL` on its own port, since the scripts runtime calls back through that variable. `--no-env-file` stops a repo `.env` from overriding `PORT`.
 

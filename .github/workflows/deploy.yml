@@ -1,15 +1,16 @@
 name: Deploy
 
 # Prod deploys three times a day, not on every merge: each deploy restarts the
-# API and cuts in-flight tasks. docker-and-deploy.yml builds sha-<short> images
+# API and cuts in-flight tasks. An external scheduler dispatches this workflow on
+# main with no inputs at 09:00, 14:00 and 19:00 Europe/Madrid, and the
+# deploy-release job in docker-and-deploy.yml dispatches it after a release
+# (package.json version bump) builds its images.
+# docker-and-deploy.yml builds sha-<short> images
 # and moves :latest/:slim on every main push; prod runs :prod instead. This
 # workflow promotes the newest built commit to api and worker :prod and deploys
 # it, or skips when :prod already runs it.
 # Hotfix: gh workflow run deploy.yml -R desplega-ai/agent-swarm [-f sha=<main sha>]
 on:
-  schedule:
-    - cron: "0 9,14,19 * * *"
-      timezone: "Europe/Madrid"
   workflow_dispatch:
     inputs:
       sha:

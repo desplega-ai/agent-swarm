@@ -1,6 +1,6 @@
 # TLA+ model: heartbeat and task lifecycle
 
-- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
+- `Heartbeat.tla` / `Heartbeat.cfg`: the server heartbeat (`src/heartbeat/heartbeat.ts`) and the lifecycle writes it races with, as on `main`, plus the boot-triage gate that decides whether a boot creates a Lead task (#1973) and, behind `RUNTIME_POOLS`, the runtime-pool routing and recovery writes (#2045) and, behind `WORKFLOW_STEP`, the workflow engine's relabel of a superseded step task (#2892, #2932). `G_*` constants remove historical guards (see `CALIBRATION.md`); `FIX_*` constants switch on proposed fixes.
 - `HeartbeatSimple.tla` / `HeartbeatSimple.cfg`: a proposed replacement with two heartbeat actions. Not implemented.
 - `ACTIONS.md`: every TLA+ action → file:line and the SQL guard it models.
 - `CALIBRATION.md`: historical bugs the model finds when their guard is removed, and one drift case.
@@ -14,6 +14,7 @@ export TLC_HOME=/path/with/jre-and-jar
 ./run-props.sh Heartbeat Heartbeat.cfg                 # current code: invariants share one TLC run, properties another
 ./run-props.sh Heartbeat Heartbeat.cfg FIX_NO_REBOOT=TRUE
 ./run-props.sh Heartbeat Heartbeat.cfg RUNTIME_POOLS=TRUE   # runtime pools (#2045); liveness is slow at this size, NTasks=2 finishes in minutes
+./run-props.sh Heartbeat Heartbeat.cfg WORKFLOW_STEP=TRUE MaxGen=1   # the root task is a workflow agent-task step (#2892, #2932); MaxGen=1 is the one retry a supersede cut gets, MaxGen=2 does not finish
 ./run-props.sh HeartbeatSimple HeartbeatSimple.cfg
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT NoLiveKill   # action names of a counterexample
 ./long-run.sh                                          # larger constants + -simulate

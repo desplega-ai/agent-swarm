@@ -91,7 +91,7 @@ export async function vcsRepoId(vcsRepo: string | null | undefined): Promise<str
 }
 
 /** Pooled credential values the worker would get, by var: exported config rows only. */
-async function configPools(
+export async function configPools(
   agentId: string,
   { vcsRepo, includeRepoSecrets = true }: ProfileCheckOptions,
 ): Promise<Map<string, string>> {

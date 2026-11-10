@@ -10,7 +10,7 @@ import {
   initDb,
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import { isWorkflowRunActive, startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
@@ -19,6 +19,7 @@ import {
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { setupWorkflowResumeListener } from "../workflows/resume";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-hitl-routing.sqlite";
 
@@ -122,59 +123,6 @@ class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoE
 
 import * as db from "../be/db";
 
-/**
- * Resume listeners are async and the bus does not await them. A fixed sleep
- * samples the run while walkGraph is still in flight (CI saw `waiting` /
- * `running` instead of the terminal status). This bus records those handler
- * promises so tests can wait until the walk finishes.
- */
-class ResumeTrackingBus extends InProcessEventBus {
-  private readonly pending = new Set<Promise<void>>();
-
-  override on(event: string, handler: (data: unknown) => void): void {
-    super.on(event, (data) => {
-      const result = handler(data) as undefined | Promise<unknown>;
-      if (!result || typeof (result as Promise<unknown>).then !== "function") return;
-      // Keep the rejection on `tracked` so Promise.all in settleHandlers fails
-      // the test. The second chain only removes it from the set.
-      const tracked = Promise.resolve(result).then(() => undefined);
-      this.pending.add(tracked);
-      void tracked.then(
-        () => {
-          this.pending.delete(tracked);
-        },
-        () => {
-          this.pending.delete(tracked);
-        },
-      );
-    });
-  }
-
-  async settleHandlers(): Promise<void> {
-    const deadline = Date.now() + 2000;
-    while (this.pending.size > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        throw new Error(`resume handler still running after 2000ms (${this.pending.size} pending)`);
-      }
-      const batch = [...this.pending];
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new Error(`resume handler still running after 2000ms (${this.pending.size} pending)`),
-          );
-        }, remaining);
-      });
-      try {
-        await Promise.race([Promise.all(batch), timeout]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    }
-  }
-}
-
 const mockDeps: ExecutorDependencies = {
   db: db as typeof import("../be/db"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
@@ -194,6 +142,14 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
   return workflow;
 }
 
+/** True once the walk has parked on a waiting `nodeId` step other than `notStepId`. */
+async function stepIsWaiting(runId: string, nodeId: string, notStepId?: string): Promise<boolean> {
+  if (isWorkflowRunActive(runId)) return false;
+  return (await getWorkflowRunStepsByRunId(runId)).some(
+    (s) => s.nodeId === nodeId && s.status === "waiting" && s.id !== notStepId,
+  );
+}
+
 /**
  * Helper: creates a workflow with a HITL node that has port-based routing,
  * starts it, waits for it to go async, then emits an approval event.
@@ -201,7 +157,7 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
  */
 async function runHITLWorkflow(
   approvalStatus: "approved" | "rejected" | "timeout" | "cancelled",
-  eventBus: ResumeTrackingBus,
+  eventBus: InProcessEventBus,
   registry: ExecutorRegistry,
 ) {
   const def: WorkflowDefinition = {
@@ -240,7 +196,7 @@ async function runHITLWorkflow(
   const requestId = hitlExecutor.lastRequestId!;
   expect(requestId).toBeTruthy();
 
-  // resumeFromApprovalResolution runs on the bus and is not awaited by emit.
+  // Emit approval.resolved event — this triggers resumeFromApprovalResolution
   eventBus.emit("approval.resolved", {
     requestId,
     status: approvalStatus,
@@ -248,23 +204,16 @@ async function runHITLWorkflow(
     workflowRunId: runId,
     workflowRunStepId: reviewStep!.id,
   });
-  await eventBus.settleHandlers();
+
+  // The handler walks the graph fire-and-forget. A cancelled approval routes
+  // nowhere, so there is no state to poll: give it a fixed window to (wrongly) act.
+  if (approvalStatus === "cancelled") await Bun.sleep(10);
+  else await waitForRunStatus(runId, "completed");
 
   return { runId, workflow };
 }
 
 // ─── Tests ────────────────────────────────────────────────────
-
-describe("ResumeTrackingBus", () => {
-  test("settleHandlers rejects when a listener rejects", async () => {
-    const bus = new ResumeTrackingBus();
-    bus.on("approval.resolved", async () => {
-      throw new Error("resume failed");
-    });
-    bus.emit("approval.resolved", { requestId: "r1" });
-    await expect(bus.settleHandlers()).rejects.toThrow("resume failed");
-  });
-});
 
 describe("HITL port-based routing", () => {
   beforeAll(async () => {
@@ -295,7 +244,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("approved → routes to 'approved' port successor (deploy)", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -320,7 +269,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("rejected → routes to 'rejected' port successor (generate-question), NOT 'deploy'", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -345,7 +294,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("cancelled → routes to no port; the step stays waiting", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -366,7 +315,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("timeout → routes to 'timeout' port successor (notify-timeout)", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -391,7 +340,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("loop: rejected → loops back to generate-question → review again → approved → deploy", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
     registry.register(hitlExecutor);
@@ -445,7 +394,9 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "review-question", reviewStep1!.id),
+    );
 
     // After rejection: generate-question should have re-executed (2nd time),
     // and review-question should be waiting again (2nd time)
@@ -476,7 +427,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "completed");
 
     // Final state: completed with all steps
     run = await getWorkflowRun(runId);
@@ -492,7 +443,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("loop with async generate: rejected → async generate → HITL pauses again on 2nd iteration", async () => {
-    const eventBus = new ResumeTrackingBus();
+    const eventBus = new InProcessEventBus();
     const registry = new ExecutorRegistry();
     const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
     const asyncTaskExecutor = new MockAsyncTaskExecutor({ ...mockDeps, eventBus });
@@ -540,7 +491,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: genMeta1.stepId,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "waiting", () => stepIsWaiting(runId, "review-question"));
 
     // Now review-question should be waiting for HITL approval
     run = await getWorkflowRun(runId);
@@ -560,7 +511,9 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "generate-question", genMeta1.stepId),
+    );
 
     // After rejection: generate-question should be waiting again (2nd async task)
     run = await getWorkflowRun(runId);
@@ -576,7 +529,9 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: genMeta2.stepId,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "review-question", reviewStep1!.id),
+    );
 
     // KEY ASSERTION: review-question should be WAITING again (not auto-completed)
     // This is the bug: without the fix, findReadyNodes would skip review-question
@@ -603,7 +558,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await eventBus.settleHandlers();
+    await waitForRunStatus(runId, "completed");
 
     // Final state: completed
     run = await getWorkflowRun(runId);

@@ -22,6 +22,7 @@ import {
   initWaitBusSubscriptions,
   resumeWaitState,
 } from "../workflows/resume";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-wait-event.sqlite";
 
@@ -139,7 +140,8 @@ describe("WaitExecutor — event mode end-to-end", () => {
     // Fire matching signal — must include _runId for run-scope filter.
     workflowEventBus.emit("demo.signal", { ok: true, _runId: runId });
 
-    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
+    // The wait state flips to fired before the walk completes the steps.
+    await waitForRunStatus(runId, "completed");
 
     const fired = await getWaitStateByStepId(w1!.id);
     expect(fired?.status).toBe("fired");
@@ -476,6 +478,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
 
     // Both runs advanced via the `event` port and the downstream notify ran.
     for (const runId of [runIdA, runIdB]) {
+      await waitForRunStatus(runId, "completed");
       const finalSteps = await getWorkflowRunStepsByRunId(runId);
       const w1After = finalSteps.find((s) => s.nodeId === "w1");
       expect(w1After?.status).toBe("completed");

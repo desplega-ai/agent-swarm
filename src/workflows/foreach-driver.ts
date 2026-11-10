@@ -49,6 +49,7 @@ import {
 import { getSecretInputKeys } from "./input";
 import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { rebuildNodeExecutionInput } from "./step-input";
+import { claimAndOweWalk, type SuccessorWalkDebt } from "./successor-routing";
 
 export { FOREACH_ITEMS_WAIT_FOR };
 
@@ -69,6 +70,12 @@ export interface ForeachDriveResult {
   successors: WorkflowNode[];
   /** How many children this drive claimed (queued or orphaned). */
   claimed: number;
+  /**
+   * The join's hold on the run, taken in the transaction that closed it, when
+   * `successors` is nonempty. Pass it to the `walkGraph` that routes them, or
+   * release it.
+   */
+  successorDebt?: SuccessorWalkDebt;
 }
 
 const NOT_JOINED: ForeachDriveResult = { joined: false, successors: [], claimed: 0 };
@@ -126,6 +133,23 @@ export async function driveForeach(
   registry: ExecutorRegistry,
   options: { ctx?: Record<string, unknown> } = {},
 ): Promise<ForeachDriveResult> {
+  const owed: { debt?: SuccessorWalkDebt } = {};
+  try {
+    return await driveForeachOwed(runId, parentNodeId, registry, options, owed);
+  } catch (err) {
+    // The join closed, then the drive's cleanup threw: no walk takes the hold.
+    owed.debt?.release();
+    throw err;
+  }
+}
+
+async function driveForeachOwed(
+  runId: string,
+  parentNodeId: string,
+  registry: ExecutorRegistry,
+  options: { ctx?: Record<string, unknown> },
+  owed: { debt?: SuccessorWalkDebt },
+): Promise<ForeachDriveResult> {
   const run = await getWorkflowRun(runId);
   if (!run || (run.status !== "running" && run.status !== "waiting")) return NOT_JOINED;
   const workflow = await getRenderedWorkflow(run);
@@ -176,12 +200,20 @@ export async function driveForeach(
           item: items.find((candidate) => candidate[itemKeyField] === childItemKey(child)),
         });
         if (!outcome) continue;
-        const settled = await settleForeachChild(def, runId, child.id, outcome, ctx, {
-          from: ["running"],
-        });
+        // The join's successors have no step row until a walk starts them:
+        // owe that walk from the commit that closes the join.
+        const settled = await claimAndOweWalk(runId, () =>
+          settleForeachChild(def, runId, child.id, outcome, ctx, { from: ["running"] }),
+        );
         ownedChildren.delete(child.id);
         if (settled.joined) {
-          return { joined: true, successors: settled.successors, claimed: claimedTotal };
+          owed.debt = settled.successorDebt;
+          return {
+            joined: true,
+            successors: settled.successors,
+            claimed: claimedTotal,
+            successorDebt: settled.successorDebt,
+          };
         }
         if (settled.runFailed) {
           failedFast = child.nodeId;
@@ -270,12 +302,16 @@ export async function runForeachDrive(
   registry: ExecutorRegistry,
 ): Promise<ForeachDriveResult> {
   const release = holdWorkflowRun(runId);
+  let debt: SuccessorWalkDebt | undefined;
   try {
     const drive = await driveForeach(runId, parentNodeId, registry);
     if (!drive.joined) {
       await parkRunIfRunning(runId);
       return drive;
     }
+    // The join's debt keeps other finalizers off the run until the walk below
+    // takes it over.
+    debt = drive.successorDebt;
     const run = await getWorkflowRun(runId);
     const workflow = run ? await getRenderedWorkflow(run) : null;
     if (!run || !workflow) return drive;
@@ -289,6 +325,7 @@ export async function runForeachDrive(
         registry,
         workflow.id,
         getSecretInputKeys(workflow.input),
+        { successorDebt: debt },
       );
     } else {
       const { finalizeOrWait } = await import("./resume");
@@ -296,6 +333,7 @@ export async function runForeachDrive(
     }
     return drive;
   } finally {
+    debt?.release();
     release();
   }
 }

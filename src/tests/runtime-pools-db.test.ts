@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  workspaceFormFromPool,
+  workspaceInput,
+} from "../../apps/ui/src/lib/runtime-pool-workspace";
 import { encryptSecret } from "../be/crypto";
 import {
   closeDb,
@@ -146,6 +150,82 @@ describe("runtime pools persistence", () => {
       ).rejects.toThrow("does not support persistent pool caches");
     }
     expect(await getDbClient().query("SELECT id FROM runtime_pools")).toEqual([]);
+  });
+
+  test("workspace pools are accepted on Docker and k8s, rejected elsewhere, and kept on update", async () => {
+    for (const kind of ["static", "e2b", "boxd"] as const) {
+      const controller = await createRuntimeController({ name: `${kind}-ws-validation`, kind });
+      await expect(
+        createRuntimePool({
+          name: `unsupported-workspace-${kind}`,
+          kind,
+          placements: [controller.id],
+          image: "worker:test",
+          workspace: {},
+        }),
+      ).rejects.toThrow(`${kind} does not support persistent workspaces`);
+    }
+    const k8s = await createRuntimeController({
+      name: "k8s-ws-validation",
+      kind: "k8s",
+      placement: "builtin",
+    });
+    const k8sPool = await createRuntimePool({
+      name: "k8s-workspace",
+      kind: "k8s",
+      placements: [k8s.id],
+      image: "worker:test",
+      workspace: { sizeGb: 10 },
+    });
+    expect(k8sPool.workspace).toEqual({ sizeGb: 10 });
+    const docker = await createRuntimeController({ name: "docker-ws-validation", kind: "docker" });
+    await expect(
+      createRuntimePool({
+        name: "bad-size",
+        kind: "docker",
+        placements: [docker.id],
+        image: "worker:test",
+        workspace: { sizeGb: 0 },
+      }),
+    ).rejects.toThrow();
+    const plain = await createRuntimePool({
+      name: "plain",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+    });
+    expect(plain.workspace).toBeNull();
+    const pool = await createRuntimePool({
+      name: "workspace",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+      workspace: { sizeGb: 40 },
+    });
+    expect(pool.workspace).toEqual({ sizeGb: 40 });
+    expect((await updateRuntimePool(pool.id, { minRuntimes: 1 })).workspace).toEqual({
+      sizeGb: 40,
+    });
+    expect((await updateRuntimePool(pool.id, { workspace: null })).workspace).toBeNull();
+  });
+
+  test("a dashboard save that leaves the workspace control alone keeps the stored workspace", async () => {
+    const docker = await createRuntimeController({ name: "docker-ws-untouched", kind: "docker" });
+    const pool = await createRuntimePool({
+      name: "workspace-untouched",
+      kind: "docker",
+      placements: [docker.id],
+      image: "worker:test",
+      workspace: { sizeGb: 40 },
+    });
+    const form = workspaceFormFromPool(pool);
+    const untouched = workspaceInput(pool.kind, form).input;
+    expect("workspace" in untouched).toBe(false);
+    expect((await updateRuntimePool(pool.id, { name: "renamed", ...untouched })).workspace).toEqual(
+      { sizeGb: 40 },
+    );
+    const off = workspaceInput(pool.kind, { ...form, workspace: false, workspaceTouched: true });
+    expect((await updateRuntimePool(pool.id, off.input)).workspace).toBeNull();
   });
 
   test("cache mount validation accepts isolated cache subdirectories", async () => {

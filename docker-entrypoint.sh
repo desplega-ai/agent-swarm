@@ -307,9 +307,22 @@ git config --system --add safe.directory '*' 2>/dev/null || true
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
+# BEGIN chown_no_follow
+# A persistent workspace keeps worker-written files across boots, so a worker can
+# leave a symlink where root chowns next boot. Chown only a path with no symlink
+# in it, and never dereference.
+chown_no_follow() {
+    local path="$1"
+    if [ "$(realpath -m -- "$path" 2>/dev/null)" != "$path" ]; then
+        echo "  Warning: not chowning ${path}: it resolves through a symlink"
+        return 0
+    fi
+    chown -h worker:worker "$path" 2>/dev/null || true
+}
+# END chown_no_follow
 # chown individual dirs (not -R) to avoid EPERM on mount-managed system files
-chown worker:worker /workspace/personal 2>/dev/null || true
-chown worker:worker /workspace/personal/memory 2>/dev/null || true
+chown_no_follow /workspace/personal
+chown_no_follow /workspace/personal/memory
 # A reused named volume keeps the owner from its first mount, which may be root.
 chown worker:worker /logs 2>/dev/null || true
 
@@ -658,6 +671,25 @@ fi
 echo "=============================="
 
 # ---- Auto-clone registered repos ----
+# BEGIN prepare_clone_target
+# A clone killed mid-way on a persistent workspace leaves a non-empty dir with no
+# .git, and `git clone` into it fails on every boot. Move it aside (never delete:
+# it may hold someone's work) so the clone can run. The repo parent is
+# worker-writable across boots, so refuse a path that resolves through a
+# symlink and move as worker: root never relocates anything a worker could
+# point it at.
+prepare_clone_target() {
+    local dir="$1"
+    if [ "$(realpath -m -- "$dir" 2>/dev/null)" != "$dir" ]; then
+        echo "  Warning: not recovering ${dir}: it resolves through a symlink"
+        return 0
+    fi
+    if [ -d "$dir" ] && [ ! -e "$dir/.git" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+        local aside="${dir}.incomplete-$(date +%s)"
+        gosu worker mv -T -- "$dir" "$aside" && echo "  Moved incomplete clone ${dir} to ${aside}"
+    fi
+}
+# END prepare_clone_target
 echo ""
 echo "=== Repo Auto-Clone ==="
 if [ -n "$AGENT_ID" ]; then
@@ -682,7 +714,7 @@ if [ -n "$AGENT_ID" ]; then
                 # gosu-dropped clone/pull below can write into it. Lenient chown
                 # mirrors the pattern used for /workspace/personal subdirs above.
                 mkdir -p "$(dirname "$REPO_DIR")"
-                chown worker:worker "$(dirname "$REPO_DIR")" 2>/dev/null || true
+                chown_no_follow "$(dirname "$REPO_DIR")"
 
                 # Run clone/pull as the worker user so .git ends up worker-owned
                 # — otherwise the runner (post-gosu) hits "dubious ownership".
@@ -706,6 +738,7 @@ if [ -n "$AGENT_ID" ]; then
                         git fetch origin '$REPO_BRANCH' --prune && \
                         git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
+                    prepare_clone_target "$REPO_DIR"
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
                     # gh only speaks GitHub: it cannot parse Azure Repos URLs (…/_git/…)
                     # or Bitbucket URLs, and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the

@@ -3972,6 +3972,9 @@
     "cache": {
       "exempt": "JSON cache mount path and server-owned generation key"
     },
+    "workspace": {
+      "exempt": "JSON workspace mount path, slot count and size"
+    },
     "resolved_image": {
       "exempt": "provider artifact reference"
     },

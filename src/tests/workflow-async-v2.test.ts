@@ -24,6 +24,7 @@ import {
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { setupWorkflowResumeListener } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-async-v2.sqlite";
 
@@ -246,11 +247,8 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      // Give the async handler time to process
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
       // Workflow should be completed now
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRunStatus(runId, "completed");
       expect(updatedRun!.status).toBe("completed");
 
       // Both steps should be completed (task1 + done)
@@ -292,7 +290,10 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: firstStep.id,
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForRunStatus(runId, "waiting", async () => {
+        const step = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === "task2");
+        return !!step && !!(await getTaskByWorkflowRunStepId(step.id));
+      });
 
       const secondStep = (await getWorkflowRunStepsByRunId(runId)).find(
         (step) => step.nodeId === "task2",
@@ -333,9 +334,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRunStatus(runId, "failed");
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("Agent could not complete");
     });
@@ -364,9 +363,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRunStatus(runId, "failed");
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("cancelled");
     });
@@ -528,7 +525,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-a")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRunStatus(runId, "waiting", async () =>
+        (await getWorkflowRunStepsByRunId(runId)).some(
+          (step) => step.nodeId === "review-a" && step.status === "completed",
+        ),
+      );
 
       // After A completes — merge should NOT have been created yet (B, C still pending)
       steps = await getWorkflowRunStepsByRunId(runId);
@@ -545,7 +546,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-b")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRunStatus(runId, "waiting", async () =>
+        (await getWorkflowRunStepsByRunId(runId)).some(
+          (step) => step.nodeId === "review-b" && step.status === "completed",
+        ),
+      );
 
       // After B completes — merge STILL should not exist (C still pending)
       steps = await getWorkflowRunStepsByRunId(runId);
@@ -562,11 +567,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-c")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRunStatus(runId, "completed");
 
       // Now ALL 3 are done — merge should execute exactly ONCE
-      // Allow extra time for serialized queue processing
-      await new Promise((r) => setTimeout(r, 10));
 
       steps = await getWorkflowRunStepsByRunId(runId);
       const mergeSteps = steps.filter((s) => s.nodeId === "merge");
