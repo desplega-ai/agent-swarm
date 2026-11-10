@@ -706,6 +706,8 @@ describe("workflow foreach", () => {
     try {
       startRetryPoller(registry, 10);
       await waitFor(async () => (await foreachChildren(runId)).length === 2);
+      // Child rows land before their tasks, and the tick is still in flight.
+      await waitFor(async () => (await taskCountForForeachChildren(runId)) === 2);
     } finally {
       stopRetryPoller();
     }

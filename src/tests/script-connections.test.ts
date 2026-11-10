@@ -712,6 +712,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "319_user_fk_indexes.sql");
       // 320 alters session_costs, which this fixture lacks.
       markMigrationApplied(database, "320_session_costs_kind.sql");
+      // 322 alters runtime_pools and runtime_instances, which this fixture lacks.
+      markMigrationApplied(database, "322_runtime_pool_workspace.sql");
       // 323 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
       markMigrationApplied(database, "323_audit_agent_columns.sql");
 

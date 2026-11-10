@@ -7,7 +7,7 @@ import type {
 import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome";
 import { reportSeatMismatchOutcome } from "./seat-mismatch-report";
 
-/** Report a rate-limited key to the API (fire-and-forget) */
+/** Report a rate-limited key to the API. Bounded, never throws. */
 async function reportKeyRateLimit(
   apiUrl: string,
   apiKey: string,
@@ -17,7 +17,7 @@ async function reportKeyRateLimit(
   rateLimitedUntil: string,
 ): Promise<void> {
   try {
-    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
+    const response = await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -29,12 +29,22 @@ async function reportKeyRateLimit(
         keyIndex,
         rateLimitedUntil,
       }),
+      // Awaited on a key-wide outcome: a hung API must not hold the task open.
+      signal: AbortSignal.timeout(10_000),
     });
+    if (!response.ok) {
+      console.warn(
+        `[credentials] Failed to report key ...${keySuffix} as rate-limited: HTTP ${response.status}`,
+      );
+      return;
+    }
     console.log(
       `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
     );
-  } catch {
-    // Non-blocking
+  } catch (err) {
+    console.warn(
+      `[credentials] Failed to report key ...${keySuffix} as rate-limited: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -100,7 +110,10 @@ export interface CredentialOutcomeInput {
   failureReason: string | undefined;
   model: string | undefined;
   codexCreditsExhaustedCooldownMs: number;
-  /** Runner-local model window guard, keyed `keyType:keyIndex:window`. */
+  /**
+   * Runner-local guard, keyed `keyType:keyIndex:window`. A key-wide rejection
+   * is recorded under the window `key`, whether or not its report landed.
+   */
   modelWindowBlocks: Map<string, number>;
 }
 
@@ -121,9 +134,10 @@ export interface CredentialOutcomeInput {
  * classified model rejection go out as ONE payload, so an older `allowed`
  * snapshot never overwrites the terminal rejection.
  *
- * Reports that gate admission on other workers (a seat mismatch, a model
- * window rejection) land before `finish` runs. Plain telemetry and the
- * key-wide report stay fire-and-forget.
+ * Reports that gate admission (a seat mismatch, a model window rejection, a
+ * key-wide rejection that ended the session) land before `finish` runs.
+ * Plain telemetry, and a key-wide report next to a seat or model outcome,
+ * stay fire-and-forget.
  */
 export async function reportCredentialOutcomeThenFinish(
   input: CredentialOutcomeInput,
@@ -153,7 +167,14 @@ export async function reportCredentialOutcomeThenFinish(
           : undefined;
     if (keyRateLimitedUntil) {
       console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
-      reportKeyRateLimit(
+      // The resume of a key retry draws on this worker next. If the report below is lost,
+      // this entry still keeps the failed key out of that draw. shortcut: lives in this
+      // worker process only; upgrade to a server-side bench if a restart in between matters.
+      input.modelWindowBlocks.set(
+        `${credentialInfo.keyType}:${credentialInfo.keyIndex}:key`,
+        Date.parse(keyRateLimitedUntil),
+      );
+      const report = reportKeyRateLimit(
         apiUrl,
         apiKey,
         credentialInfo.keyType,
@@ -161,6 +182,9 @@ export async function reportCredentialOutcomeThenFinish(
         credentialInfo.keyIndex,
         keyRateLimitedUntil,
       ).catch(() => {});
+      // `finish` may resume the task on another key of the pool: the bench
+      // lands first, so the resume's claim cannot draw this key again.
+      if (outcome.kind === "key") await report;
     }
     if (outcome.kind === "model") {
       const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();

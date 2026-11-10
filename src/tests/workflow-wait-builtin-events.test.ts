@@ -39,6 +39,7 @@ import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
 import { _resetWaitBusSubscriptionsForTests, initWaitBusSubscriptions } from "../workflows/resume";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-wait-builtin-events.sqlite";
 
@@ -168,7 +169,8 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
       workflowRunStepId: "fake-step-id-on-some-other-run",
     });
 
-    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
+    // The wait state flips to fired before the walk completes the steps.
+    await waitForRunStatus(runId, "completed");
 
     const fired = await getWaitStateByStepId(w1!.id);
     expect(fired?.status).toBe("fired");

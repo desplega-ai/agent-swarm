@@ -49,6 +49,7 @@ import {
 import { getSecretInputKeys } from "./input";
 import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { rebuildNodeExecutionInput } from "./step-input";
+import { holdSuccessorRouting } from "./successor-routing";
 
 export { FOREACH_ITEMS_WAIT_FOR };
 
@@ -270,16 +271,21 @@ export async function runForeachDrive(
   registry: ExecutorRegistry,
 ): Promise<ForeachDriveResult> {
   const release = holdWorkflowRun(runId);
+  let routed: (() => void) | undefined;
   try {
     const drive = await driveForeach(runId, parentNodeId, registry);
     if (!drive.joined) {
       await parkRunIfRunning(runId);
       return drive;
     }
+    // The join closed: the parent's successors have no step row until the walk
+    // below starts them, so keep other finalizers off the run across the reads.
+    routed = holdSuccessorRouting(runId);
     const run = await getWorkflowRun(runId);
     const workflow = run ? await getRenderedWorkflow(run) : null;
     if (!run || !workflow) return drive;
     const ctx = (run.context ?? {}) as Record<string, unknown>;
+    routed();
     if (drive.successors.length > 0) {
       await walkGraph(
         workflow.definition,
@@ -296,6 +302,7 @@ export async function runForeachDrive(
     }
     return drive;
   } finally {
+    routed?.();
     release();
   }
 }

@@ -1,6 +1,7 @@
 // Model profile fallbacks (runbooks/model-tiers.md § Fallbacks on provider
 // errors): the save rule, the delete guard, the check rows, the server-side
-// pick, and the supersede route that resumes the work on the next profile.
+// pick (another key of the same profile first, then the next profile), and
+// the supersede route that resumes the work.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -12,6 +13,8 @@ import {
   getDbClient,
   getTaskById,
   initDb,
+  markKeyRateLimited,
+  recordKeyUsage,
   startTask,
   upsertSwarmConfig,
 } from "../be/db";
@@ -21,7 +24,11 @@ import { checkProfileForAgent } from "../be/model-profile-check";
 import { recordClaimModelResolution } from "../be/model-tier-resolution";
 import { handleModelProfiles } from "../http/model-profiles";
 import { handleTasks } from "../http/tasks";
-import { nextFallback } from "../tasks/worker-follow-up";
+import {
+  getNextResumeGeneration,
+  nextFallback,
+  RESUME_GENERATION_TAG_PREFIX,
+} from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
@@ -86,6 +93,7 @@ beforeEach(async () => {
     "DELETE FROM swarm_config WHERE key IN ('MODEL_PROFILE', 'CLAUDE_CODE_OAUTH_TOKEN')",
   );
   await getDbClient().run("DELETE FROM model_profiles");
+  await getDbClient().run("DELETE FROM api_key_status");
   // Agent heartbeat: the resume pin reads it.
   await getDbClient().run("UPDATE agents SET status = 'idle', lastActivityAt = ? WHERE id = ?", [
     new Date().toISOString(),
@@ -141,6 +149,29 @@ async function runningTask(profile: string, extra: { workflow?: boolean } = {}) 
     await getDbClient().run("PRAGMA foreign_keys = ON");
   }
   return (await getTaskById(task.id)) as AgentTask;
+}
+
+const KEY_TYPE = "CLAUDE_CODE_OAUTH_TOKEN";
+
+/** The claude agent's pool: one key per 5-character suffix, in order. */
+async function seedPool(suffixes: string[]): Promise<void> {
+  await upsertSwarmConfig({
+    scope: "agent",
+    scopeId: CLAUDE_ID,
+    key: KEY_TYPE,
+    value: suffixes.map((suffix) => `token-${suffix}`).join(","),
+  });
+}
+
+/** Stamp the key the run drew on the task, as the worker's usage report does. */
+async function onKey(task: AgentTask, suffix: string): Promise<AgentTask> {
+  await recordKeyUsage(KEY_TYPE, suffix, 0, task.id);
+  return (await getTaskById(task.id)) as AgentTask;
+}
+
+/** Bench a key, as the worker's key-wide rate-limit report does. */
+async function bench(suffix: string): Promise<void> {
+  await markKeyRateLimited(KEY_TYPE, suffix, 0, new Date(Date.now() + 3_600_000).toISOString());
 }
 
 function supersede(taskId: string, body: Record<string, unknown>): Promise<Response> {
@@ -344,6 +375,163 @@ describe("nextFallback", () => {
   });
 });
 
+describe("same-profile key retry", () => {
+  test("rate_limit with no fallbacks retries the profile while another key is unbenched", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-c"), "aaaaa");
+    await bench("aaaaa");
+    const pick = await nextFallback(task, "rate_limit");
+    expect(pick).toMatchObject({
+      kind: "picked",
+      profile: "claude-c",
+      hop: { from: "claude-c", profile: "claude-c", errorClass: "rate_limit" },
+    });
+    // `credits` benches the key the same way; `auth` does not, so it never retries.
+    expect(await nextFallback(task, "credits")).toMatchObject({
+      kind: "picked",
+      profile: "claude-c",
+    });
+    expect(await nextFallback(task, "auth")).toEqual({ kind: "none", message: null });
+
+    // Through the route: the resume runs the same profile on the same agent.
+    const res = await supersede(task.id, { reason: "provider_fallback", errorClass: "rate_limit" });
+    expect(((await res.json()) as { kind: string }).kind).toBe("resumed");
+    const resume = await resumeOf(task.id);
+    expect(resume?.agentId).toBe(CLAUDE_ID);
+    expect(resume?.profile).toBe("claude-c");
+    expect(resume?.fallbackHops?.map((h) => [h.from, h.profile, h.errorClass])).toEqual([
+      ["claude-c", "claude-c", "rate_limit"],
+    ]);
+
+    // Control: a workflow step still fails back to the engine.
+    const step = await onKey(await runningTask("claude-c", { workflow: true }), "aaaaa");
+    const stepRes = await supersede(step.id, {
+      reason: "provider_fallback",
+      errorClass: "rate_limit",
+    });
+    expect(await stepRes.json()).toMatchObject({ kind: "noFallback", failureReason: null });
+  });
+
+  test("the key that just failed never counts, even before its bench lands", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-c"), "aaaaa");
+    // Nothing benched yet: the other key is free.
+    expect((await nextFallback(task, "rate_limit")).kind).toBe("picked");
+    // Only the failed key is unbenched: nothing to retry on.
+    await bench("bbbbb");
+    expect((await nextFallback(task, "rate_limit")).kind).toBe("none");
+  });
+
+  test("all keys benched gives no pick and a reason that names the exhausted keys", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-c"), "aaaaa");
+    await bench("aaaaa");
+    await bench("bbbbb");
+    expect(await nextFallback(task, "rate_limit")).toEqual({
+      kind: "none",
+      message:
+        "rate_limit on claude-c; no key left (all 2 CLAUDE_CODE_OAUTH_TOKEN keys are rate-limited or just failed); no fallback configured",
+    });
+    // Control: a one-key pool has nothing to rotate to, so the text is unchanged.
+    await seedPool(["aaaaa"]);
+    expect(await nextFallback(task, "rate_limit")).toEqual({ kind: "none", message: null });
+  });
+
+  test("retries stop at the pool size, even when no bench ever lands", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    // No key is ever benched, so the other key always reads free.
+    let task = await onKey(await runningTask("claude-c"), "aaaaa");
+    for (const nextKey of ["bbbbb", "aaaaa"]) {
+      const res = await supersede(task.id, {
+        reason: "provider_fallback",
+        errorClass: "rate_limit",
+      });
+      expect(((await res.json()) as { kind: string }).kind).toBe("resumed");
+      const resume = (await resumeOf(task.id))!;
+      await recordClaimModelResolution(
+        { id: resume.id, profile: resume.profile },
+        { id: CLAUDE_ID, harnessProvider: "claude" },
+      );
+      await startTask(resume.id);
+      task = await onKey((await getTaskById(resume.id)) as AgentTask, nextKey);
+    }
+    expect(task.fallbackHops).toHaveLength(2);
+    const last = await supersede(task.id, {
+      reason: "provider_fallback",
+      errorClass: "rate_limit",
+    });
+    expect(await last.json()).toMatchObject({
+      kind: "noFallback",
+      failureReason:
+        "rate_limit on claude-c; no key retry left (2 retries on a pool of 2 CLAUDE_CODE_OAUTH_TOKEN keys); no fallback configured",
+    });
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  });
+
+  test("another key comes before a fallback profile; exhausted keys take the fallback", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-a"), "aaaaa");
+    await bench("aaaaa");
+    expect(await nextFallback(task, "rate_limit")).toMatchObject({
+      kind: "picked",
+      profile: "claude-a",
+    });
+    await bench("bbbbb");
+    const retried = {
+      ...task,
+      fallbackHops: [
+        { from: "claude-a", profile: "claude-a", errorClass: "rate_limit" as const, at: "t1" },
+      ],
+    };
+    const pick = await nextFallback(retried, "rate_limit");
+    expect(pick).toMatchObject({
+      kind: "picked",
+      profile: "claude-b",
+      hop: { from: "claude-a", profile: "claude-b" },
+    });
+    // A key retry is not a step of the chain: the tried path names each profile once.
+    const ended = await nextFallback(
+      {
+        ...task,
+        resolvedProfile: "claude-c",
+        fallbackHops: [
+          ...retried.fallbackHops,
+          { from: "claude-a", profile: "claude-b", errorClass: "rate_limit" as const, at: "t2" },
+          { from: "claude-b", profile: "claude-c", errorClass: "overloaded" as const, at: "t3" },
+          { from: "claude-c", profile: "claude-c", errorClass: "rate_limit" as const, at: "t4" },
+        ],
+      },
+      "overloaded",
+    );
+    expect(ended.kind === "none" && ended.message).toContain(
+      "(tried: claude-a → claude-b → claude-c)",
+    );
+  });
+
+  test("model_window, seat and lead-only work never try another key", async () => {
+    await seedChain();
+    await seedPool(["aaaaa", "bbbbb"]);
+    const task = await onKey(await runningTask("claude-a"), "aaaaa");
+    for (const errorClass of ["model_window", "seat"] as const) {
+      expect(await nextFallback(task, errorClass)).toMatchObject({
+        kind: "picked",
+        profile: "claude-b",
+        hop: { from: "claude-a", profile: "claude-b", errorClass },
+      });
+    }
+    const leadOnly = await nextFallback(
+      { ...task, routingAffinity: { capabilities: [], leadOnly: true } },
+      "rate_limit",
+    );
+    expect(leadOnly.kind === "none" && leadOnly.message).toContain("lead-only");
+  });
+});
+
 describe("supersede with provider_fallback", () => {
   test("errorClass is required with provider_fallback and refused without it", async () => {
     await seedChain();
@@ -408,6 +596,40 @@ describe("supersede with provider_fallback", () => {
     // The worker fails it itself: the task is untouched and has no resume.
     expect((await getTaskById(third!.id))?.status).toBe("in_progress");
     expect(await resumeOf(third!.id)).toBeNull();
+  });
+
+  test("a fallback resume does not spend the crash-recovery budget", async () => {
+    await seedChain();
+    // A fresh task: two fallback hops leave it at generation 0.
+    const first = await runningTask("claude-a");
+    await supersede(first.id, { reason: "provider_fallback", errorClass: "rate_limit" });
+    const second = await resumeOf(first.id);
+    expect(second?.tags.some((t) => t.startsWith("resume-generation:"))).toBe(false);
+    await recordClaimModelResolution(
+      { id: second!.id, profile: second!.profile },
+      { id: CLAUDE_ID, harnessProvider: "claude" },
+    );
+    await startTask(second!.id);
+    await supersede(second!.id, { reason: "provider_fallback", errorClass: "overloaded" });
+    const third = await resumeOf(second!.id);
+    expect(getNextResumeGeneration(third!)).toBe(1);
+
+    // A task already one crash deep: the hop keeps its generation, so the
+    // crash after it is generation 2, not 3.
+    const crashed = await createTaskExtended("crashed work", {
+      agentId: CLAUDE_ID,
+      profile: "claude-a",
+      tags: [`${RESUME_GENERATION_TAG_PREFIX}1`],
+    });
+    await recordClaimModelResolution(
+      { id: crashed.id, profile: "claude-a" },
+      { id: CLAUDE_ID, harnessProvider: "claude" },
+    );
+    await startTask(crashed.id);
+    await supersede(crashed.id, { reason: "provider_fallback", errorClass: "rate_limit" });
+    const hopped = await resumeOf(crashed.id);
+    expect(hopped?.tags).toContain(`${RESUME_GENERATION_TAG_PREFIX}1`);
+    expect(getNextResumeGeneration(hopped!)).toBe(2);
   });
 
   test("the resume stays on the agent when a competing claim fills the freed slot", async () => {

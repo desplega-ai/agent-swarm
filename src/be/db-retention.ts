@@ -39,6 +39,7 @@ export const DB_RETENTION_TABLES = [
     policy: "age",
     timeColumn: "createdAt",
     envKey: "SESSION_LOG_RETENTION_DAYS",
+    newInstallDefault: 30,
     metricsKey: "sessionLogs",
   },
   {
@@ -46,6 +47,7 @@ export const DB_RETENTION_TABLES = [
     policy: "age",
     timeColumn: "createdAt",
     envKey: "AGENT_LOG_RETENTION_DAYS",
+    newInstallDefault: 90,
     metricsKey: "agentLog",
   },
   {
@@ -53,6 +55,7 @@ export const DB_RETENTION_TABLES = [
     policy: "age",
     timeColumn: "createdAt",
     envKey: "EVENTS_RETENTION_DAYS",
+    newInstallDefault: 90,
     metricsKey: "events",
   },
   {
@@ -66,6 +69,7 @@ export const DB_RETENTION_TABLES = [
     partitionBy: "agentId, field",
     rankBy: "version",
     envKey: "CONTEXT_VERSIONS_KEEP_LATEST",
+    newInstallDefault: 100,
     metricsKey: "contextVersions",
     initialBatchSize: 50,
     maxBatchSize: 100,
@@ -89,6 +93,7 @@ export const DB_RETENTION_TABLES = [
     terminalStatuses: TERMINAL_SCRIPT_RUN_STATUSES,
     keepWhenSet: "idempotencyKey",
     envKey: "SCRIPT_RUNS_RETENTION_DAYS",
+    newInstallDefault: 30,
     metricsKey: "scriptRuns",
     initialBatchSize: 100,
     maxBatchSize: 500,
@@ -97,6 +102,8 @@ export const DB_RETENTION_TABLES = [
   {
     table: string;
     envKey: string;
+    /** Stored once as a global config row when the database is created; see db-retention-defaults.ts. */
+    newInstallDefault?: number;
     metricsKey: string;
     initialBatchSize?: number;
     maxBatchSize?: number;

@@ -70,6 +70,7 @@ import {
 import { getSecretInputKeys } from "./input";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
+import { hasOwedSuccessors } from "./successor-routing";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -297,6 +298,7 @@ async function resumeFromTaskCompletionUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -318,9 +320,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
     if (status !== "running" && status !== "waiting") return;
     if (await getRunLineageBlock(runId)) return;
     const steps = await getWorkflowRunStepsByRunId(runId);
-    // A branch still executing belongs to a live walk, which finalizes the
-    // run itself; its finalizer only acts on a `running` run.
-    if (hasRunningStep(steps)) {
+    // A branch still executing, or a completed step whose successors have no
+    // row yet, belongs to a live walk, which finalizes the run itself; its
+    // finalizer only acts on a `running` run.
+    if (hasRunningStep(steps) || hasOwedSuccessors(runId)) {
       if (status === "waiting") await updateWorkflowRun(runId, { status: "running" });
       return;
     }
@@ -439,6 +442,7 @@ async function handleTaskFailureUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -960,6 +964,7 @@ async function resumeFromApprovalResolutionUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -1088,6 +1093,7 @@ async function resumeClaimedWait(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -1184,6 +1190,7 @@ export async function resumeFromChildRun(
         registry,
         workflow.id,
         secretKeys,
+        { successorDebt: routing.successorDebt },
       );
     } else {
       await finalizeOrWait(run.id);
@@ -1196,6 +1203,7 @@ const CHILD_RETRY_SCHEDULED = {
   claimed: true,
   runFailed: false,
   successors: [] as WorkflowNode[],
+  successorDebt: undefined,
 } as const;
 
 /** The `node.retry` of a top-level `sub-workflow` node; foreach items retry through their parent. */

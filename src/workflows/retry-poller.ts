@@ -8,7 +8,12 @@ import {
 } from "../be/db";
 import { disarmWorkflowTreeRetries, getRunLineageBlock } from "../be/db/workflow-runs";
 import type { RetryPolicy } from "../types";
-import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
+import {
+  adoptStoredContext,
+  checkpointStep,
+  checkpointStepFailure,
+  checkpointStepWaiting,
+} from "./checkpoint";
 import { getSuccessors, resolveValidationPort } from "./definition";
 import {
   failRunOnUnreadableReplay,
@@ -21,9 +26,12 @@ import type { ExecutorRegistry } from "./executors/registry";
 import { FOREACH_ITEMS_WAIT_FOR, parkAndDriveForeach, runForeachDrive } from "./foreach-driver";
 import { resolveForeachParent } from "./foreach-join";
 import { rebuildNodeExecutionInput } from "./step-input";
+import { hasOwedSuccessors } from "./successor-routing";
 import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
+/** Bumped by every stop, so a tick in flight can tell that its poller was stopped. */
+let pollerGeneration = 0;
 
 /**
  * Start the retry poller.
@@ -33,6 +41,7 @@ let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
  */
 export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000): void {
   if (pollerTimeout !== null) return; // Already running
+  const generation = pollerGeneration;
 
   async function poll(): Promise<void> {
     try {
@@ -268,8 +277,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
       console.error("[workflows] Retry poller error:", err);
     }
 
-    // Schedule next tick after completion
-    pollerTimeout = setTimeout(poll, intervalMs);
+    // Schedule next tick after completion, unless the poller was stopped mid-tick
+    if (generation === pollerGeneration) pollerTimeout = setTimeout(poll, intervalMs);
   }
 
   // Start the first tick
@@ -346,7 +355,8 @@ async function completeRunIfSettled(runId: string, ctx: Record<string, unknown>)
         s.status === "waiting" ||
         (s.status === "failed" && s.nextRetryAt != null),
     );
-    if (live) return;
+    if (live || hasOwedSuccessors(runId)) return;
+    await adoptStoredContext(runId, ctx);
     await updateWorkflowRun(runId, {
       status: "completed",
       context: ctx,
@@ -361,6 +371,7 @@ const RETRYABLE_RUN_STATUSES = new Set(["running", "waiting", "failed"]);
  * Stop the retry poller (for clean shutdown).
  */
 export function stopRetryPoller(): void {
+  pollerGeneration++;
   if (pollerTimeout !== null) {
     clearTimeout(pollerTimeout);
     pollerTimeout = null;

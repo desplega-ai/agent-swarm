@@ -14,9 +14,8 @@ on:
       - scripts/gitleaks.sh
       - scripts/gitleaks-selftest.sh
       - .github/workflows/gitleaks-cache.yml
-  # GitHub evicts an entry nobody reads for 7 days.
-  schedule:
-    - cron: "29 3 * * *"
+  # GitHub evicts an entry nobody reads for 7 days, so an external scheduler
+  # dispatches this on main daily at 03:29 UTC.
   workflow_dispatch:
 
 permissions:

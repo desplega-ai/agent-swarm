@@ -189,7 +189,8 @@ describe("an admin token cannot reach an auditor's grant", () => {
       bearer: adminToken,
       body: { sourceUserId: donor },
     });
-    expect(control.status).toBe(200);
+    // The merge is queued (202); the source row goes with the background job.
+    expect(control.status).toBe(202);
   });
 
   test("an invite code an admin made stops working once the operator adds auditor", async () => {

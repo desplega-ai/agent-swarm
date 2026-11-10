@@ -2770,6 +2770,7 @@ export interface paths {
                                 idleSince?: string | null;
                                 leaseExpiresAt?: string | null;
                                 taskId?: string | null;
+                                workspaceSlot?: number | null;
                                 reportedSlots: number;
                                 credentialReady?: boolean | null;
                                 /** Format: date-time */
@@ -16751,7 +16752,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent: on the same profile while a key-scoped error (`rate_limit`, `credits`) leaves another unbenched key in its pool, else on the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -28535,7 +28536,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Merge another user into this one — moves identities + email aliases, deletes source */
+        /**
+         * Merge another user into this one: moves identities + email aliases, queues the rest
+         * @description Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -28553,37 +28557,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Merged user */
-                200: {
+                /** @description The queued merge job */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            user: (components["schemas"]["User"] & {
-                                identities: {
-                                    kind: string;
-                                    externalId: string;
-                                }[];
-                                tokens: {
-                                    id: string;
-                                    userId: string;
-                                    label: string | null;
-                                    tokenPreview: string;
-                                    createdAt: string;
-                                    lastUsedAt: string | null;
-                                    revokedAt: string | null;
-                                }[];
-                                recentEvents: {
-                                    id: string;
-                                    userId: string;
-                                    eventType: string;
-                                    actor: string;
-                                    before?: unknown;
-                                    after?: unknown;
-                                    createdAt: string;
-                                }[];
-                            }) | null;
+                            job: components["schemas"]["UserMergeJob"];
                         };
                     };
                 };
@@ -28623,7 +28604,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Source is the last active admin (last_admin) */
+                /** @description Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -28634,6 +28615,114 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List background user merge jobs, newest first */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "running" | "done" | "failed";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Merge jobs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            jobs: components["schemas"]["UserMergeJob"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A background user merge job (poll until status is done or failed) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The merge job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            job: components["schemas"]["UserMergeJob"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Job not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -32307,10 +32396,28 @@ export interface components {
              * @enum {string}
              */
             status: "invited" | "active" | "suspended";
+            mergedIntoUserId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        UserMergeJob: {
+            id: string;
+            sourceUserId: string;
+            targetUserId: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "done" | "failed";
+            phase: string | null;
+            progress: {
+                [key: string]: number;
+            };
+            error: string | null;
+            attempts: number;
+            nextAttemptAt: string | null;
+            createdAt: string;
+            startedAt: string | null;
+            finishedAt: string | null;
         };
         WorkflowDefinition: {
             nodes: components["schemas"]["WorkflowNode"][];
@@ -32766,6 +32873,10 @@ export interface components {
                 mountPath: string;
             } | null;
             /** @default null */
+            workspace: {
+                sizeGb?: number;
+            } | null;
+            /** @default null */
             ttlSec: number | null;
             /** @default true */
             enabled: boolean;
@@ -32797,6 +32908,7 @@ export interface components {
             idleSince?: string | null;
             leaseExpiresAt?: string | null;
             taskId?: string | null;
+            workspaceSlot?: number | null;
             reportedSlots: number;
             credentialReady?: boolean | null;
             metadata: {
@@ -36849,6 +36961,10 @@ export interface operations {
                         mountPath: string;
                     } | null;
                     /** @default null */
+                    workspace?: {
+                        sizeGb?: number;
+                    } | null;
+                    /** @default null */
                     ttlSec?: number | null;
                     /** @default true */
                     enabled?: boolean;
@@ -37054,6 +37170,9 @@ export interface operations {
                     } | null;
                     cache?: {
                         mountPath: string;
+                    } | null;
+                    workspace?: {
+                        sizeGb?: number;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;
