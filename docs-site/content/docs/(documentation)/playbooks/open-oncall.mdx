@@ -185,3 +185,7 @@ The app is built with the [Apps](/docs/apps) feature. Ask your Lead to restyle i
 - **Failover fires on any failed attempt**, not only provider errors. Each provider record says which kind it was.
 - **A fully offline harness does not fail its task.** If a worker never claims the task, failover does not fire. There is no per-step timeout yet.
 - **Every human message in an alert channel starts a run** that stops at `gate`. Filter runs on `intake.result.accept = true`.
+
+## Related
+
+Related guide: [post-incident business impact review](https://www.agent-swarm.dev/blog/omnia/ai-incident-business-impact-review) covers what operations and engineering collect once the fix has shipped, and what stays a person's call.

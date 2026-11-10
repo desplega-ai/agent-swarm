@@ -2682,6 +2682,9 @@
     "costSource": {
       "exempt": "enum or fixed-format value"
     },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
     "createdAt": {
       "exempt": "timestamp"
     },

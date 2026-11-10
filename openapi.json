@@ -4000,7 +4000,8 @@
               "amp",
               "cursor",
               "grok",
-              "fx"
+              "fx",
+              "system-one"
             ]
           },
           "model": {
@@ -4458,6 +4459,14 @@
               "pricing-table",
               "unpriced",
               "estimated"
+            ],
+            "default": "harness"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "harness",
+              "system-one"
             ],
             "default": "harness"
           },
@@ -43323,7 +43332,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43409,7 +43419,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43528,7 +43539,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43615,7 +43627,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -54172,7 +54185,8 @@
                       "amp",
                       "cursor",
                       "grok",
-                      "fx"
+                      "fx",
+                      "system-one"
                     ]
                   },
                   "createdAt": {
