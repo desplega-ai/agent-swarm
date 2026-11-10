@@ -2770,6 +2770,7 @@ export interface paths {
                                 idleSince?: string | null;
                                 leaseExpiresAt?: string | null;
                                 taskId?: string | null;
+                                workspaceSlot?: number | null;
                                 reportedSlots: number;
                                 credentialReady?: boolean | null;
                                 /** Format: date-time */
@@ -16751,7 +16752,7 @@ export interface paths {
         put?: never;
         /**
          * Supersede an in-progress task (terminate + spawn resume follow-up)
-         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
+         * @description Marks the original task `superseded` (terminal) and creates a fresh `taskType="resume"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent: on the same profile while a key-scoped error (`rate_limit`, `credits`) leaves another unbenched key in its pool, else on the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.
          */
         post: {
             parameters: {
@@ -32853,6 +32854,10 @@ export interface components {
                 mountPath: string;
             } | null;
             /** @default null */
+            workspace: {
+                sizeGb?: number;
+            } | null;
+            /** @default null */
             ttlSec: number | null;
             /** @default true */
             enabled: boolean;
@@ -32884,6 +32889,7 @@ export interface components {
             idleSince?: string | null;
             leaseExpiresAt?: string | null;
             taskId?: string | null;
+            workspaceSlot?: number | null;
             reportedSlots: number;
             credentialReady?: boolean | null;
             metadata: {
@@ -36924,6 +36930,10 @@ export interface operations {
                         mountPath: string;
                     } | null;
                     /** @default null */
+                    workspace?: {
+                        sizeGb?: number;
+                    } | null;
+                    /** @default null */
                     ttlSec?: number | null;
                     /** @default true */
                     enabled?: boolean;
@@ -37129,6 +37139,9 @@ export interface operations {
                     } | null;
                     cache?: {
                         mountPath: string;
+                    } | null;
+                    workspace?: {
+                        sizeGb?: number;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;
