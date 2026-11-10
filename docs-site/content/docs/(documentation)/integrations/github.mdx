@@ -141,6 +141,27 @@ GITHUB_EMAIL=worker@example.com    # Git commit email
 GITHUB_NAME=Worker Agent           # Git commit name
 ```
 
+### Worker auth with the GitHub App
+
+Workers can use short-lived App installation tokens instead of a static PAT. Set these on the **API server**:
+
+```bash
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY=base64-encoded-key
+GITHUB_APP_INSTALLATION_ID=12345678   # the installation on your org (Settings > GitHub Apps > Configure; the id is in the URL)
+```
+
+The App needs **Contents: Read & Write** to push, **Pull requests: Read & Write** for `gh pr`, and **Workflows: Read & Write** if agents edit `.github/workflows/`. `GITHUB_WEBHOOK_SECRET` is not required for worker auth.
+
+At boot each worker asks `POST /api/github/installation-token` (swarm API key plus `X-Agent-ID`; only registered agents get a token). When the API answers with a token, the worker:
+
+- sets `swarm-github-token git-credential` as the git credential helper for the GitHub host, and
+- links a `gh` wrapper that passes the current token to `gh` on each call.
+
+Tokens are cached in a worker-private file and refreshed 5 minutes before their 1-hour expiry. The token never goes into a URL, a git remote or `~/.gitconfig`. When the API cannot mint a token, git and `gh` fall back to `GITHUB_TOKEN`, so keep a PAT on workers if you want a fallback. Without `GITHUB_APP_INSTALLATION_ID` the API answers 404 and workers use `GITHUB_TOKEN` exactly as before. Boot logs `GitHub App worker auth configured` in App mode.
+
+Only one installation is supported: workers can reach the repos that installation can see. Commits still use `GITHUB_EMAIL` / `GITHUB_NAME`.
+
 ## GitHub Enterprise Server
 
 One deployment can target a single GitHub Enterprise Server (GHES) instance instead of github.com. Set the same `GITHUB_URL` on the API server **and every worker**:
@@ -166,6 +187,8 @@ Setup on GHES:
 1. Create the GitHub App at `https://<host>/settings/apps/new` with the permissions and events above, and the webhook URL `https://<swarm-api>/api/github/webhook`. The GHES instance must reach that URL.
 2. Create a PAT (or bot-user token) on the GHES host with `repo` scope for `GITHUB_TOKEN`.
 3. Workers export `GH_HOST` and `GH_ENTERPRISE_TOKEN` for `gh`, and add a git credential helper for the GHES host. The PAT moves out of `GITHUB_TOKEN` and `GH_TOKEN` in the worker and session env, because `gh` sends those to github.com. GHES mode needs `gh` 2.93.0 or later; an older `gh` stops the boot. Boot logs `GitHub Enterprise auth configured (host: <host>)`.
+
+App worker auth works the same on GHES: create the App on the GHES host, set `GITHUB_APP_INSTALLATION_ID` on the API, and keep `GITHUB_URL` on the API and every worker. The API mints tokens on `<GITHUB_URL>/api/v3`, workers scope the credential helper to the GHES host and hand `gh` the token as `GH_ENTERPRISE_TOKEN`. The `gh` 2.93.0 minimum applies. A GHES PAT is optional and stays the fallback.
 
 Not supported: github.com and GHES in one deployment, the `claude-managed` harness (it refuses to start a repo task when `GITHUB_URL` is set), and remote skill install, which still reads public github.com repos.
 

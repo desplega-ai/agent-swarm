@@ -30,6 +30,7 @@ import "./extensions";
 import "./favorites";
 import "./checklist";
 import "./fs";
+import "./github-token";
 import "./heartbeat";
 import "./inbox-state";
 import "./integrations";

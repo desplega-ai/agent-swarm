@@ -9226,6 +9226,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/installation-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a GitHub App installation token for worker git and gh
+         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent may call it; user and guest tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Installation token and its expiry (ISO 8601) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            token: string;
+                            expiresAt: string;
+                        };
+                    };
+                };
+                /** @description Caller is not a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description GitHub App worker auth is not configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description GitHub refused or failed to mint the token */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/heartbeat/sweep": {
         parameters: {
             query?: never;

@@ -375,6 +375,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_SKIP_NOOP_APPROVALS` | Set to `false` to notify the lead on every PR approval, including ones with no body and no open review items (default: `true`) |
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
+| `GITHUB_APP_INSTALLATION_ID` | API server. Installation whose tokens workers use for `git` and `gh` instead of `GITHUB_TOKEN` (needs `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`). Unset: workers use `GITHUB_TOKEN` |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
 | `GITHUB_URL` | GitHub Enterprise Server web base, e.g. `https://ghe.example.com` (default `https://github.com`). Set on the API and every worker. Deployment env only. See [GitHub Enterprise Server](/docs/integrations/github#github-enterprise-server) |
 | `GITHUB_API_URL` | GitHub REST base override (default derived from `GITHUB_URL`, `<GITHUB_URL>/api/v3` on GHES). Deployment env only |

@@ -9,6 +9,13 @@ let privateKey: string | null = null;
 // Token cache: installationId -> { token, expiresAt }
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
+/** Raw PEM (with literal `\\n` escapes) or base64-encoded PEM. */
+function decodePrivateKey(raw: string): string {
+  return raw.startsWith("-----BEGIN")
+    ? raw.replace(/\\n/g, "\n")
+    : Buffer.from(raw, "base64").toString("utf-8");
+}
+
 export function isGitHubEnabled(): boolean {
   // Check if GitHub is explicitly disabled
   if (isEnvFlagEnabled("GITHUB_DISABLE", false)) {
@@ -60,13 +67,7 @@ export function initGitHub(): boolean {
   const rawPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY ?? null;
 
   if (appId && rawPrivateKey) {
-    if (rawPrivateKey.startsWith("-----BEGIN")) {
-      // Raw PEM format - convert \n escape sequences to actual newlines
-      privateKey = rawPrivateKey.replace(/\\n/g, "\n");
-    } else {
-      // Base64 encoded - decode it
-      privateKey = Buffer.from(rawPrivateKey, "base64").toString("utf-8");
-    }
+    privateKey = decodePrivateKey(rawPrivateKey);
     console.log("[GitHub] App credentials loaded for bot reactions");
   } else {
     console.log("[GitHub] No App credentials, bot reactions disabled");
@@ -151,7 +152,10 @@ export async function verifyWebhookSignature(
  * Generate a JWT for GitHub App authentication
  * JWTs are valid for up to 10 minutes
  */
-async function generateAppJWT(): Promise<string | null> {
+async function generateAppJWT(
+  creds: { appId: string | null; privateKey: string | null } = { appId, privateKey },
+): Promise<string | null> {
+  const { appId, privateKey } = creds;
   if (!appId || !privateKey) {
     return null;
   }
@@ -196,14 +200,23 @@ async function generateAppJWT(): Promise<string | null> {
  * Tokens are cached until they expire (typically 1 hour)
  */
 export async function getInstallationToken(installationId: number): Promise<string | null> {
+  return (
+    (await mintInstallationToken(installationId, { appId, privateKey }, 60_000))?.token ?? null
+  );
+}
+
+async function mintInstallationToken(
+  installationId: number,
+  creds: { appId: string | null; privateKey: string | null },
+  minValidityMs: number,
+): Promise<{ token: string; expiresAt: number } | null> {
   // Check cache first
   const cached = tokenCache.get(installationId);
-  if (cached && cached.expiresAt > Date.now() + 60_000) {
-    // Still valid for at least 1 minute
-    return cached.token;
+  if (cached && cached.expiresAt > Date.now() + minValidityMs) {
+    return cached;
   }
 
-  const jwt = await generateAppJWT();
+  const jwt = await generateAppJWT(creds);
   if (!jwt) {
     console.log("[GitHub] No JWT available, cannot get installation token");
     return null;
@@ -235,14 +248,46 @@ export async function getInstallationToken(installationId: number): Promise<stri
     const expiresAt = new Date(data.expires_at).getTime();
 
     // Cache the token
-    tokenCache.set(installationId, { token: data.token, expiresAt });
+    const minted = { token: data.token, expiresAt };
+    tokenCache.set(installationId, minted);
 
     console.log(
       `[GitHub] Got installation token for ${installationId}, expires at ${data.expires_at}`,
     );
-    return data.token;
+    return minted;
   } catch (error) {
     console.error("[GitHub] Error getting installation token:", error);
     return null;
   }
+}
+
+export type WorkerInstallationToken =
+  | { status: "ok"; token: string; expiresAt: string }
+  | { status: "unconfigured" }
+  | { status: "error" };
+
+/**
+ * Installation token for worker `git` / `gh`, minted for the one installation
+ * named by `GITHUB_APP_INSTALLATION_ID`. Callers never pick the installation, so
+ * no request can get a token for an installation the swarm is not configured for.
+ * Reads env on each call: it works without the webhook (`initGitHub` loads App
+ * credentials only when `GITHUB_WEBHOOK_SECRET` is set).
+ */
+export async function getWorkerInstallationToken(): Promise<WorkerInstallationToken> {
+  if (isEnvFlagEnabled("GITHUB_DISABLE", false)) return { status: "unconfigured" };
+  const workerAppId = process.env.GITHUB_APP_ID?.trim();
+  const rawKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
+  const rawInstallation = process.env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
+  if (!workerAppId || !rawKey || !/^[1-9][0-9]{0,15}$/.test(rawInstallation)) {
+    return { status: "unconfigured" };
+  }
+  if (!resolveGitHubHost().ok) return { status: "error" };
+  // Hand out a token with at least 10 minutes left, so a worker can cache it.
+  const minted = await mintInstallationToken(
+    Number(rawInstallation),
+    { appId: workerAppId, privateKey: decodePrivateKey(rawKey) },
+    10 * 60_000,
+  );
+  if (!minted) return { status: "error" };
+  return { status: "ok", token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
 }

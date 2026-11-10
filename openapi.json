@@ -25797,6 +25797,84 @@
         }
       }
     },
+    "/api/github/installation-token": {
+      "post": {
+        "summary": "Mint a GitHub App installation token for worker git and gh",
+        "description": "Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent may call it; user and guest tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.",
+        "tags": [
+          "GitHub"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Installation token and its expiry (ISO 8601)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "expiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "GitHub App worker auth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub refused or failed to mint the token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/heartbeat/sweep": {
       "post": {
         "summary": "Trigger an immediate heartbeat sweep",
