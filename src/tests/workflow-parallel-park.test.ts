@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import * as db from "../be/db";
@@ -12,6 +12,7 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
+import { isInTransaction } from "../be/db-client";
 import type { WorkflowDefinition, WorkflowNode } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
@@ -232,6 +233,43 @@ describe("a node parks next to a completed sibling in one batch", () => {
     await waitFor(async () => (await runStatus(runId)) === "completed");
     expect(executions(runId, "after")).toBe(1);
     expect((await stepsOf(runId, "after")).map((step) => step.status)).toEqual(["completed"]);
+  });
+
+  test("the task completing before the successor has a step row still runs the successor once", async () => {
+    const h = harness();
+    const readSteps = db.getWorkflowRunStepsByRunId;
+    let interleaved = false;
+    // Complete the parked task inside the walk's read between the batch and
+    // `after`: `quick` is done, `park` waits, `after` has no step row yet.
+    const spy = spyOn(db, "getWorkflowRunStepsByRunId").mockImplementation(async (runId) => {
+      const steps = await readSteps(runId);
+      const status = (nodeId: string) => steps.find((step) => step.nodeId === nodeId)?.status;
+      if (
+        !interleaved &&
+        !isInTransaction() &&
+        status("quick") === "completed" &&
+        status("park") === "waiting" &&
+        !status("after")
+      ) {
+        interleaved = true;
+        expect(await completeDispatchedTasks(runId, h.bus)).toBe(1);
+        await waitFor(async () => (await readSteps(runId)).every((s) => s.status === "completed"));
+        // The resume has no successor to route: let its finalizer settle.
+        await Bun.sleep(50);
+      }
+      return steps;
+    });
+    try {
+      const { runId } = await start(definition("agent-task", false), [{ id: agentId }], h);
+      expect(interleaved).toBe(true);
+
+      await waitFor(async () => (await runStatus(runId)) === "completed");
+      expect(executions(runId, "after")).toBe(1);
+      expect((await stepsOf(runId, "after")).map((step) => step.status)).toEqual(["completed"]);
+      expect((await stepsOf(runId, "park")).map((step) => step.status)).toEqual(["completed"]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("control: with no item the foreach does not park and the run completes in one walk", async () => {
