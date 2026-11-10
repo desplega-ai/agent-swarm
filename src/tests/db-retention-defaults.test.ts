@@ -75,6 +75,19 @@ describe("seedDbRetentionDefaults", () => {
       SCRIPT_RUNS_RETENTION_DAYS: "365",
     });
   });
+
+  test("an empty or blank env value at first boot is the operator's off, not a gap to fill", async () => {
+    process.env.SESSION_LOG_RETENTION_DAYS = "";
+    process.env.AGENT_LOG_RETENTION_DAYS = "   ";
+
+    await seedDbRetentionDefaults(true);
+
+    expect(await storedRetention()).toEqual({
+      EVENTS_RETENTION_DAYS: "90",
+      CONTEXT_VERSIONS_KEEP_LATEST: "100",
+      SCRIPT_RUNS_RETENTION_DAYS: "30",
+    });
+  });
 });
 
 describe("retention defaults across real boots", () => {
@@ -183,6 +196,19 @@ describe("retention defaults across real boots", () => {
       expect(values(await storedRetention(second))).toEqual(kept);
       expect(await stopAndReadSweepConfig(second)).toContain(
         "session_logs=disabled, agent_log=90, events=disabled, context_versions=100, script_runs=30",
+      );
+    },
+    BOOT_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a new install booted with empty or blank env values stores nothing and sweeps nothing",
+    async () => {
+      const blank = Object.fromEntries(KEYS.map((key, i) => [key, i % 2 === 0 ? "" : "  "]));
+      const api = await bootApi(newDbPath(), blank);
+      expect(await storedRetention(api)).toEqual({});
+      expect(await stopAndReadSweepConfig(api)).toContain(
+        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled",
       );
     },
     BOOT_TEST_TIMEOUT_MS,

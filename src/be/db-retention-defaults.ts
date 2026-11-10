@@ -9,7 +9,7 @@ import { DB_RETENTION_TABLES } from "./db-retention";
  *
  * Only the boot that creates the database writes rows. An upgraded install
  * keeps retention exactly as it was, and a row the operator deletes is never
- * written again. A key the deployment env already sets is left to the env
+ * written again. A key present in the deployment env, even empty, is left to the env
  * (a stored row would override it), and so is a key that already has a row.
  *
  * Call before `loadGlobalConfigsIntoEnv`, while `process.env` still holds the
@@ -23,7 +23,9 @@ export async function seedDbRetentionDefaults(
   // One transaction: a failure must not leave a partial set that no later boot completes.
   await getDbClient().transaction(async () => {
     for (const table of DB_RETENTION_TABLES) {
-      if (!("newInstallDefault" in table) || process.env[table.envKey]?.trim()) continue;
+      // Presence, not truthiness: an empty or blank env value is the operator's
+      // explicit "off" and must not be replaced by a deleting default.
+      if (!("newInstallDefault" in table) || process.env[table.envKey] !== undefined) continue;
       const existing = await getSwarmConfigs({ scope: "global", key: table.envKey });
       if (existing.length > 0) continue;
       await upsertSwarmConfig({
