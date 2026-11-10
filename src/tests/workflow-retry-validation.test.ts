@@ -19,6 +19,7 @@ import {
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 import { interpolate } from "../workflows/template";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-retry-validation.sqlite";
 
@@ -208,19 +209,16 @@ describe("Retry Poller — Validation on Retry", () => {
 
     const validationCountAfterInitial = validateCallCount;
 
-    // Wait for nextRetryAt to pass, then run the poller
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
+    // Run the poller until the run fails (validation always fails, retries exhausted)
     startRetryPoller(registry, 10);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    stopRetryPoller();
+    try {
+      await waitForRunStatus(runId, "failed");
+    } finally {
+      stopRetryPoller();
+    }
 
     // Validation should have been called again during the retry
     expect(validateCallCount).toBeGreaterThan(validationCountAfterInitial);
-
-    // Run should be failed (validation always fails, retries exhausted)
-    const finalRun = await getWorkflowRun(runId);
-    expect(finalRun!.status).toBe("failed");
   });
 
   test("retry succeeds and validation passes → step checkpointed, run completes", async () => {
@@ -292,11 +290,13 @@ describe("Retry Poller — Validation on Retry", () => {
     expect(initial.nextRetryAt).toBeTruthy();
 
     validateAlwaysPass = true;
-    await new Promise((resolve) => setTimeout(resolve, 10));
     startRetryPoller(registry, 10);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    stopRetryPoller();
-    validateAlwaysPass = false;
+    try {
+      await waitForRunStatus(runId, "completed");
+    } finally {
+      stopRetryPoller();
+      validateAlwaysPass = false;
+    }
 
     const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);

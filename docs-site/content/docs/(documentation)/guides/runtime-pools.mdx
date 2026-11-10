@@ -20,7 +20,7 @@ With pools disabled, existing workers keep their registration and poll behavior.
 
 An agent binds to one pool. A pool has one controller placement in this release.
 Several runtimes can serve the same agent. Pool workers use the [multi-runtime rules](/docs/guides/multi-runtime-agents).
-Workspace files remain local to each runtime. Save durable results in Git, shared storage, or attachments before a runtime exits.
+Workspace files remain local to each runtime unless the pool sets a [persistent workspace](#persistent-workspaces). Otherwise, save durable results in Git, shared storage, or attachments before a runtime exits.
 
 ## Recommended topology
 
@@ -129,6 +129,60 @@ A mount failure during container creation or start retries once without the
 cache, after removing any failed-start container. Other failures still fail the
 provision.
 The API never adopts a volume labeled for another swarm or pool.
+
+## Persistent workspaces
+
+A pool can keep each agent's `/workspace/personal` across runtimes: Git clones,
+`node_modules`, worktrees and setup state stay warm between tasks. It is off by default.
+
+```bash
+curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"workspace":{}}'
+```
+
+| Kind | Support |
+| --- | --- |
+| `docker` | Yes, a named volume per workspace. `sizeGb` is ignored: the `local` driver has no quota. |
+| `k8s` | Yes, a `ReadWriteOncePod` PersistentVolumeClaim per workspace, `sizeGb` (default 20) Gi. Needs Kubernetes 1.29+ and a CSI driver that supports the access mode. Set `K8S_STORAGE_CLASS` on the controller to pick the storage class, and grant the API `get` and `create` on `persistentvolumeclaims`. |
+| `e2b` | No. E2B volumes are in private beta and E2B advises against Git and package installs on them. Pause and resume already keep the sandbox disk. |
+| `boxd` | Not yet. |
+| `static` | Not applicable. The operator owns the worker's disk. |
+
+The API rejects a workspace on an unsupported kind.
+
+**Slots.** Each runtime takes the lowest workspace slot no other live runtime of
+the same agent holds, and mounts the volume `swarm-ws-<agentId>-<slot>`. An agent
+with one runtime always uses slot 0. With several concurrent runtimes (for example
+`lifecycle: "per-task"` and `maxTasks` above 1), each slot has its own copy of the
+workspace: files outside Git, such as `todos.md` or `memory/`, differ by slot. Two
+live runtimes never share a volume. For coding agents, prefer `lifecycle: "idle"`
+with one runtime per agent.
+
+**Fail closed.** Unlike the cache, a runtime never starts without its workspace.
+A volume error, a volume another container still uses, or a controller that does
+not confirm the mount fails the provision and counts toward the pool's failure
+backoff. A runtime gets no work until its mount is confirmed, and a runtime that
+a reconnecting controller cannot show mounting its workspace is terminated.
+Upgrade remote controllers before enabling workspaces.
+
+**Retention.** The swarm never deletes a workspace. Terminating a runtime,
+disabling the setting, deleting the pool, changing its placement or image, and
+recovery all keep the volume. A placement change gives the agent fresh, empty
+volumes on the new controller; the old ones stay where they were. Remove a
+workspace yourself once no runtime uses it:
+
+```bash
+docker volume ls --filter label=swarm.workspace=true
+docker volume rm swarm-ws-<agentId>-<slot>
+# Kubernetes
+kubectl -n <namespace> get pvc -l swarm.workspace=true
+kubectl -n <namespace> delete pvc swarm-ws-<agentId>-<slot>
+```
+
+On boot, the worker fetches and resets clean default-branch checkouts it finds in
+the workspace instead of cloning again. A clone interrupted mid-way is moved aside
+to `<repo>.incomplete-<timestamp>` and cloned again.
 
 ## Push and poll delivery
 
