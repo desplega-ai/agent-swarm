@@ -1128,6 +1128,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Plug,
     entries: [
       {
+        key: "MCP_USER_EVENTS_ENABLED",
+        label: "User MCP events",
+        description:
+          "Offer MCP Events webhooks (task.completed, task.failed) on /mcp-user. Enabled by default; turn off to stop advertising the capability, answer events/* with method not found, and stop deliveries.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/mcp-events`,
+      },
+      {
         key: "SLACK_MODE",
         label: "Slack transport",
         description:

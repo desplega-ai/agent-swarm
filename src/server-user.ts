@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import pkg from "../package.json";
+import { isMcpUserEventsEnabled } from "./be/mcp-events/catalog";
+import { registerUserEvents } from "./be/mcp-events/protocol";
 import { enqueueAdmissionRow } from "./be/rbac-audit";
 import { getUserGrant } from "./be/rbac-roles";
 import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
@@ -113,6 +115,15 @@ export function createUserServer(user: User): McpServer {
   );
 
   const registerTool = createToolRegistrar(server);
+
+  if (isMcpUserEventsEnabled()) {
+    // Subscribing is a read on the user's own tasks.
+    const eventsAdmission = { annotations: { readOnlyHint: true } };
+    registerUserEvents(server, user, async (method) => {
+      const denied = await maybeDenyUserToolAdmission(user, method, eventsAdmission);
+      return denied === undefined;
+    });
+  }
 
   const sendTaskConfig = {
     title: "Send a task",

@@ -23,6 +23,7 @@
     "provider-capability-matrix",
     "harness-providers",
     "task-steering",
+    "mcp-events",
     "claude-code-mod",
     "observability-opentelemetry",
     "host-requirements",

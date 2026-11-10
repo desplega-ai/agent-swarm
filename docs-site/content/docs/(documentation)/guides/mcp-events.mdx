@@ -1,0 +1,51 @@
+---
+title: MCP Events on the User MCP
+description: Get a signed webhook when a task you sent through /mcp-user completes or fails
+---
+
+The user MCP (`/mcp-user`) supports webhook delivery from the draft [MCP Events extension](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415) (`io.modelcontextprotocol/events`). A client that supports it subscribes once and receives a signed POST when one of your tasks finishes, instead of polling `get-task-details`.
+
+The extension is a draft. Method names, fields and error codes can change before it is accepted.
+
+## Which clients use it
+
+ChatGPT documents MCP Events support in Work chats, webhook delivery only. Clients that do not call `events/*` see no change: the same tools, the same results, and no extra notifications. The only difference is two added keys in the `initialize` capabilities.
+
+Claude Code, Claude Desktop, Cursor and Codex CLI do not document MCP Events today. Keep using `get-task-details` or `get-tasks` from those clients.
+
+## Events
+
+| Event | Fires when | Payload `data` |
+|---|---|---|
+| `task.completed` | A task you requested completes | `taskId`, `parentTaskId`, `status`, `task`, `output`, `url`, `truncated` |
+| `task.failed` | A task you requested fails | `taskId`, `parentTaskId`, `status`, `task`, `failureReason`, `url`, `truncated` |
+
+Both events accept one optional argument, `taskId`. With it, only that task and the tasks created under it match. Without it, every task you requested matches, including tasks the Lead created for your request. `output` and `failureReason` are cut at 16,000 characters; read the full record with `get-task-details`.
+
+## Protocol surface
+
+- **Capability.** The `initialize` result carries `capabilities.events: {}` (the form ChatGPT reads) and `capabilities.extensions["io.modelcontextprotocol/events"]: {}` (the form in SEP-3415).
+- **`events/list`** returns both event types with `delivery: ["webhook"]`.
+- **`events/subscribe`** takes `name`, `arguments`, `delivery: { mode: "webhook", url, secret }` and an optional `ttlMs`. The URL must be `https`. The secret must be `whsec_` followed by base64 of 24 to 64 bytes. The response carries a stable `id` (`sub_…`), `refreshBefore`, `cursor: null` and `truncated: false`. Calling it again with the same name, arguments and URL refreshes the lease and returns `deliveryStatus`.
+- **`events/unsubscribe`** takes `name`, `arguments` and `delivery.url`, and returns an empty result, also when no subscription matched.
+
+Leases default to 1 hour and are clamped between 1 minute and 24 hours. A request for no expiry (`ttlMs: null`) gets 24 hours. Each user can hold 25 live subscriptions.
+
+## Delivery
+
+Before the first delivery to a new URL, the server POSTs a signed `{"type":"verification","challenge":"…"}` envelope and requires the endpoint to echo the challenge in a `2xx` body. A passed check covers that user's subscriptions to that URL for 24 hours.
+
+Each delivery is one `EventOccurrence` (`eventId`, `name`, `timestamp`, `data`, `cursor: null`), signed with [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md): `webhook-id` (equal to `eventId`), `webhook-timestamp`, `webhook-signature`, plus `X-MCP-Subscription-Id`. After a secret rotation, deliveries carry both signatures for 10 minutes.
+
+A non-`2xx` response is retried up to 5 attempts in about 14 minutes, with the same `webhook-id` and a fresh signature. `410` and `413` are not retried. Retries run in the API process: an event emitted during a restart is not delivered.
+
+## Security
+
+- Every POST, including the verification challenge, goes through the API's egress guard: the hostname is resolved at send time, private and loopback addresses are refused, the request connects to the checked address, and redirects are not followed.
+- Signing secrets are encrypted at rest with the [secrets encryption key](/docs/guides/secrets-encryption).
+- A subscription only matches tasks whose requester is the subscribing user, and a deactivated user receives nothing.
+- Error categories such as `http_5xx` or `challenge_failed` are reported back; raw endpoint responses never are.
+
+## Turn it off
+
+Set `MCP_USER_EVENTS_ENABLED=false` (Settings → Configuration → Integrations, or the environment). New sessions stop advertising the capability, `events/*` returns `-32601` (method not found), and no further deliveries are sent. Stored subscriptions stay until they expire.
