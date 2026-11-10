@@ -829,7 +829,25 @@ export interface SandboxInfo {
   apiStartedAt: string | null;
   /** Swarm API version from the sandbox /health response. Null = not captured. */
   apiVersion: string | null;
+  /** The api extension installed in the sandbox API (opt-in run option); absent when none. */
+  apiExtension?: { id: string; name: string; version: number | null; sha256: string };
   workers: SandboxWorkerInfo[];
+}
+
+/**
+ * Opt-in run option: install one extension bundle into every attempt's sandbox API
+ * before the workers boot. Default off. Stored on the run so a resume repeats it.
+ */
+export interface ApiExtensionPlan {
+  /** Bundle directory (manifest.json + hooks, or install-payload.json) or a payload JSON file. */
+  path: string;
+  /** Merged over the bundle's own extension config, for example `{"mode":"enforce"}`. */
+  config?: Record<string, unknown>;
+  /**
+   * Env var names copied into the sandbox API as global swarm_config rows of the same
+   * name (never exported to worker env). For a decision-model credential an extension reads.
+   */
+  configFromEnv?: string[];
 }
 
 /** Per-phase wall-clock timings in ms. All nullable (phase may not have run). */
@@ -990,6 +1008,8 @@ export interface EvalRunRow {
   preset?: string | null;
   /** Set on the automatic reruns of a flagged cell: the scheduled run they confirm. */
   rerunOf?: string | null;
+  /** Opt-in api extension installed in each attempt's sandbox API; null = none. */
+  apiExtension?: ApiExtensionPlan | null;
   /** When the run's Slack summary was posted; null until then (dedupe for resume). */
   summaryPostedAt?: string | null;
   /** Times boot resumed the run after a restart cut it (capped by MAX_AUTO_RESUMES). */

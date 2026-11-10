@@ -74,6 +74,7 @@ import "./status";
 import "./tasks";
 import "./task-templates";
 import "./telemetry-ui";
+import "./tool-hooks";
 import "./trackers/jira";
 import "./trackers/linear";
 import "./ranking";

@@ -952,7 +952,7 @@ describe("checkOpencodeCredentials", () => {
 });
 
 describe("ACP readiness", () => {
-  test.each(["typo", "", " \t "])("rejects unsupported target %j", async (target) => {
+  test.each(["typo", "nope", " NOPE "])("rejects unsupported target %j", async (target) => {
     const status = await checkProviderCredentials("acp", {
       ACP_TARGET: target,
       ACP_TARGET_COMMAND: "custom-acp --stdio",
@@ -963,7 +963,12 @@ describe("ACP readiness", () => {
     for (const supported of ACP_TARGET_IDS) expect(status.hint).toContain(supported);
   });
 
-  test.each([undefined, "custom"])("requires a command for target %s", async (target) => {
+  test.each([
+    undefined,
+    "custom",
+    "",
+    " \t ",
+  ])("requires a command for target %j", async (target) => {
     const status = await CREDENTIAL_PROVIDER_CHECKERS.acp({ ACP_TARGET: target });
     expect(status.ready).toBe(false);
     expect(status.missing).toEqual(["ACP_TARGET_COMMAND"]);
@@ -982,7 +987,7 @@ describe("ACP readiness", () => {
   });
 
   test.each(["ACP_TARGET_COMMAND", "ACP_COMMAND"])("accepts a command from %s", async (key) => {
-    for (const target of [undefined, "custom"]) {
+    for (const target of [undefined, "custom", "", " \t "]) {
       const status = await checkProviderCredentials("acp", {
         ACP_TARGET: target,
         [key]: "custom-acp --stdio",
@@ -991,9 +996,12 @@ describe("ACP readiness", () => {
     }
   });
 
-  test.each(
-    ACP_TARGET_IDS.filter((target) => target !== "custom"),
-  )("keeps preset %s ready without a custom command", async (target) => {
+  test.each([
+    ...ACP_TARGET_IDS.filter((target) => target !== "custom"),
+    "Gemini",
+    " gemini ",
+    "GEMINI",
+  ])("keeps preset %s ready without a custom command", async (target) => {
     const status = await checkProviderCredentials("acp", { ACP_TARGET: target });
     expect(status).toEqual({ ready: true, missing: [], satisfiedBy: "sdk-delegated" });
   });

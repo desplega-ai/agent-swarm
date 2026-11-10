@@ -27,7 +27,18 @@ import {
 } from "../../../../src/e2b/dispatch";
 import { redactWithEnv } from "../../../../src/e2b/env";
 import type { Billing } from "../cost/billing.ts";
-import { defaultMemberIdentity, type HarnessConfig, type WorkerSpec } from "../types.ts";
+import {
+  type ApiExtensionPlan,
+  defaultMemberIdentity,
+  type HarnessConfig,
+  type WorkerSpec,
+} from "../types.ts";
+import {
+  type InstalledApiExtension,
+  installApiExtension,
+  loadApiExtension,
+  resolveApiConfigFromEnv,
+} from "./api-extension.ts";
 import {
   type CodexSubscriptionAuth,
   codexOAuthSource,
@@ -104,6 +115,8 @@ export interface StackHandle {
   apiVersion: string | null;
   /** Non-null when the scenario seeded the API DB via seed.sqlDump (v6 §1). */
   sqlSeed: SqlSeedResult | null;
+  /** The api extension installed after the API came up (opt-in run option); null when none. */
+  apiExtension?: InstalledApiExtension | null;
   /** Redact sandbox/env secrets from text before persisting it. */
   redact: (text: string) => string;
   /** Idempotent teardown of the API + ALL worker sandboxes. */
@@ -213,8 +226,13 @@ export function memberBilling(
 }
 
 /** Exported for tests. */
-export function apiRuntimeEnv(swarmKey: string): Record<string, string> {
+export function apiRuntimeEnv(
+  swarmKey: string,
+  opts: { allowInlineExtensions?: boolean } = {},
+): Record<string, string> {
   return {
+    // Inline extension bundles are off by default in the API; the opt-in run option turns them on.
+    ...(opts.allowInlineExtensions ? { EXTENSION_ALLOW_INLINE_INSTALL: "true" } : {}),
     API_KEY: swarmKey,
     AGENT_SWARM_API_KEY: swarmKey,
     PORT: String(API_PORT),
@@ -387,6 +405,8 @@ export async function bootStack(opts: {
   swarmSlug: string;
   /** SQL text dump imported into /app/data/agent-swarm-db.sqlite BEFORE the API entrypoint starts. */
   preBootSql?: { fixture: string; text: string };
+  /** Opt-in: install this extension bundle into the API once it is healthy, before workers boot. */
+  apiExtension?: ApiExtensionPlan;
   /** Sandbox TTL. Default 1800s. */
   timeoutSec?: number;
   /** Per-service readiness wait. Default 120s API / 180s worker. */
@@ -425,10 +445,16 @@ export async function bootStack(opts: {
     }
   };
 
+  // Read the bundle and the credentials before any sandbox exists: a bad path or a
+  // missing variable costs no E2B time.
+  const extensionPlan = opts.apiExtension;
+  const loadedExtension = extensionPlan ? await loadApiExtension(extensionPlan) : null;
+  const extensionConfigRows = extensionPlan ? resolveApiConfigFromEnv(extensionPlan) : {};
+
   try {
     opts.signal?.throwIfAborted();
     log(`creating API sandbox (template ${API_TEMPLATE})`);
-    const apiEnv = apiRuntimeEnv(swarmKey);
+    const apiEnv = apiRuntimeEnv(swarmKey, { allowInlineExtensions: extensionPlan !== undefined });
     const apiSandbox = await createSandbox({
       apiKey: e2bKey,
       apiBase,
@@ -548,6 +574,20 @@ export async function bootStack(opts: {
     }
     opts.signal?.throwIfAborted();
 
+    let apiExtension: InstalledApiExtension | null = null;
+    if (loadedExtension) {
+      apiExtension = await installApiExtension({
+        apiUrl,
+        swarmKey,
+        loaded: loadedExtension,
+        configRows: extensionConfigRows,
+      });
+      log(
+        `api extension ${apiExtension.name} v${apiExtension.version ?? "?"} enabled (bundle ${apiExtension.sha256.slice(0, 12)})`,
+      );
+    }
+    opts.signal?.throwIfAborted();
+
     // Boot all members in parallel — sequential boots add ~1–3 min each
     // (registration + idle waits). Promise.all rejects on the first failure;
     // the catch below kills everything created so far (sandboxes are pushed
@@ -664,7 +704,9 @@ export async function bootStack(opts: {
     opts.signal?.throwIfAborted();
 
     // Every worker's env joins the secret set — any of them can leak into logs.
-    const secretEnv = Object.assign({}, ...allWorkerEnvs, apiEnv, { E2B_API_KEY: e2bKey });
+    const secretEnv = Object.assign({}, ...allWorkerEnvs, apiEnv, extensionConfigRows, {
+      E2B_API_KEY: e2bKey,
+    });
     return {
       apiSandbox,
       workers,
@@ -672,6 +714,7 @@ export async function bootStack(opts: {
       swarmKey,
       apiVersion,
       sqlSeed,
+      apiExtension,
       redact: (text: string) => redactWithEnv(text, secretEnv),
       kill,
     };

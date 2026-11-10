@@ -169,6 +169,56 @@ describe("parseToolUses — Codex raw_log ThreadEvents", () => {
     });
   });
 
+  describe("started + completed events of one call count once", () => {
+    const ev = (
+      type: string,
+      id: string,
+      extra: Record<string, unknown> = {},
+      o: Partial<SessionLogRow> = {},
+    ) =>
+      row(
+        JSON.stringify({
+          type,
+          item: { type: "mcp_tool_call", id, server: "s", tool: "send-task", ...extra },
+        }),
+        { cli: "codex", ...o },
+      );
+
+    it("one ToolUse per call, carrying the completed state", () => {
+      const uses = parseToolUses([
+        ev("item.started", "i0", { status: "in_progress" }),
+        ev("item.completed", "i0", { status: "failed" }),
+      ]);
+      expect(uses).toHaveLength(1);
+      expect(uses[0]?.isError).toBe(true);
+    });
+
+    it("keeps calls apart across ids, tasks and sessions that reuse an item id", () => {
+      const uses = parseToolUses([
+        ev("item.started", "item_0", {}, { taskId: "t1" }),
+        ev("item.started", "item_0", {}, { taskId: "t2" }),
+        ev("item.started", "item_0", {}, { taskId: "t1", sessionId: "s2" }),
+        ev("item.completed", "item_0", {}, { taskId: "t1" }),
+        ev("item.completed", "item_0", {}, { taskId: "t2" }),
+        ev("item.completed", "item_0", {}, { taskId: "t1", sessionId: "s2" }),
+        ev("item.started", "item_1", {}, { taskId: "t1" }),
+      ]);
+      expect(uses).toHaveLength(4);
+    });
+
+    it("a repeated start, a completed-only call and a reused id after completion", () => {
+      const uses = parseToolUses([
+        ev("item.started", "a"),
+        ev("item.started", "a"),
+        ev("item.completed", "a"),
+        ev("item.completed", "b"),
+        ev("item.started", "a"),
+        ev("item.completed", "a"),
+      ]);
+      expect(uses).toHaveLength(3);
+    });
+  });
+
   it("ignores non-tool codex items (agent_message, reasoning)", () => {
     const uses = parseToolUses([
       row(

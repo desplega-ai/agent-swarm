@@ -237,8 +237,8 @@ export async function updateModelProfile(
  * later write than the supersede (HTTP supersede, heartbeat remediation), and
  * after a restart the heartbeat's orphan repair makes it, inside the same
  * window (`SUPERSEDED_RESUME_REPAIR_WINDOW_MS`). Binds one parameter: the
- * oldest `finishedAt` the repair still covers. A workflow-step task superseded
- * by a queued retry gets no resume, so it never holds its profile.
+ * oldest `finishedAt` the repair still covers. A superseded workflow-step cut
+ * gets no resume, so it never holds its profile.
  */
 export const TASK_HOLDS_PROFILE_SQL = `(
   t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')

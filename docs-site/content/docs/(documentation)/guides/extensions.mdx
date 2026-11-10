@@ -209,7 +209,7 @@ The Slack post event fires after authorization and before routing.
 | `pre.slack.route` | Slack message handler | `{ channelId, userId, text, threadTs?, botMentioned, threadContext? }` | `{ target }` for an agent, lead, or broadcast | The message creates no task or reply. |
 | `pre.chat.route` | Chat SDK thread buffer flush, before task creation | `{ adapter, channelId, threadId, userId, userName?, text, botMentioned, isDirectMessage, chatType?, isForum?, replyToBot, threadContext? }` | `{ target }` for an agent, lead, broadcast, or workflow (`{ kind: "workflow", workflowId }`) | The buffered messages create no task, workflow run, or reply. |
 | `pre.heartbeat.remediate` | Stalled-task remediation | `{ task, session?, classification, proposedAction, reason, taskAgeMs, sessionHeartbeatAgeMs? }` | `{ proposedAction }` | The sweep records the finding but performs no remediation. |
-| `pre.tool.call` | Agent-facing MCP call | `{ tool, args, requestInfo }` | `{ args }` | The tool returns an error and does not run. |
+| `pre.tool.call` | Agent-facing MCP call, or a native harness call reported to `POST /api/tool-hooks` (manifest `toolSources` includes `"native"`) | `{ tool, args, requestInfo, nativeTool?, rawArgs?, toolCallId?, parentToolCallId? }` | `{ args }` | The tool returns an error and does not run. |
 | `post.task.created` | Task event bus after commit | `{ task }` | None | None |
 | `post.task.blocked` | A `pre.task.create` block or rejected model/agent rewrite | `{ extension, reason, origin, source?, requester, context?, description }` | None | None |
 | `post.task.completed` | Task event bus after commit | `{ task, output }` | None | None |
@@ -219,7 +219,7 @@ The Slack post event fires after authorization and before routing.
 | `post.task.progress` | Task event bus after commit | `{ task, progress }` | None | None |
 | `post.slack.message` | Slack message handler after authorization, before routing | `{ channelId, userId, text, threadTs?, taskId? }` | None | None |
 | `post.chat.message` | Chat SDK message received (before buffering) or sent | `{ adapter, channelId, threadId, userId?, text, direction, taskId?, messageId? }` | None | None |
-| `post.tool.call` | Agent-facing MCP call after finalization | `{ tool, args, result, requestInfo, durationMs }` | None | None |
+| `post.tool.call` | Agent-facing MCP call after finalization, or a reported native call | `{ tool, args, result, requestInfo, durationMs, isError? }` plus the native fields | None | None |
 | `post.approval.resolved` | Approval respond route, after the answer commits | `{ requestId, status, responses, workflowRunId?, workflowRunStepId?, sourceTaskId? }` | None | None |
 | `post.task.budgetRefused` | A task refused by a daily spend budget | `{ task, agentId, cause, agentSpendUsd?, agentBudgetUsd?, globalSpendUsd?, globalBudgetUsd?, userSpendUsd?, userBudgetUsd?, resetAt }` | None | None |
 | `post.email.received` | AgentMail webhook, before routing | `{ inboxId, from, subject, body, threadId, messageId }` | None | None |

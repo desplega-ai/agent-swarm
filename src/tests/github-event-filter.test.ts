@@ -56,6 +56,7 @@ const BASE_PR = {
   body: null as string | null,
   html_url: "https://github.com/test/repo/pull/1",
   user: { login: "testuser" },
+  author_association: "COLLABORATOR",
   head: { ref: "feature", sha: "abc1234567890" },
   base: { ref: "main" },
   merged: false,
@@ -81,6 +82,7 @@ function makeIssueEvent(overrides: Partial<IssueEvent> = {}): IssueEvent {
       body: null,
       html_url: "https://github.com/test/repo/issues/10",
       user: { login: "testuser" },
+      author_association: "COLLABORATOR",
     },
     repository: BASE_REPO,
     sender: BASE_SENDER,
@@ -110,6 +112,7 @@ describe("suppressed cascade events", () => {
         state: "approved",
         html_url: "https://github.com/test/repo/pull/1#pullrequestreview-1",
         user: { login: "reviewer" },
+        author_association: "COLLABORATOR",
         submitted_at: "2026-01-01T00:00:00Z",
       },
       pull_request: {
@@ -137,6 +140,7 @@ describe("suppressed cascade events", () => {
         state: "approved",
         html_url: "https://github.com/test/repo/pull/99#pullrequestreview-2",
         user: { login: "reviewer" },
+        author_association: "COLLABORATOR",
         submitted_at: "2026-01-01T00:00:00Z",
       },
       pull_request: {
@@ -165,6 +169,7 @@ describe("suppressed cascade events", () => {
         state: "approved",
         html_url: "https://github.com/test/repo/pull/99#pullrequestreview-3",
         user: { login: "reviewer" },
+        author_association: "COLLABORATOR",
         submitted_at: "2026-01-01T00:00:00Z",
       },
       pull_request: {
@@ -192,6 +197,7 @@ describe("suppressed cascade events", () => {
         state: "commented",
         html_url: "https://github.com/test/repo/pull/99#pullrequestreview-4",
         user: { login: "reviewer" },
+        author_association: "COLLABORATOR",
         submitted_at: "2026-01-01T00:00:00Z",
       },
       pull_request: {
@@ -286,6 +292,7 @@ describe("explicit actions create tasks", () => {
         body: `@${GITHUB_BOT_NAME} please review this`,
         html_url: "https://github.com/test/repo/issues/10#issuecomment-100",
         user: { login: "testuser" },
+        author_association: "COLLABORATOR",
       },
       issue: {
         number: 10,
@@ -361,6 +368,7 @@ describe("explicit actions create tasks", () => {
         body: null,
         html_url: "https://github.com/test/repo/issues/11",
         user: { login: "testuser" },
+        author_association: "COLLABORATOR",
       },
       label: { id: 2, name: "enhancement", color: "a2eeef" },
     });

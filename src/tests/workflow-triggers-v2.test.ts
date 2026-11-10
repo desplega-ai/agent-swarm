@@ -4,7 +4,9 @@ import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import {
   closeDb,
+  countWorkflowRuns,
   createWorkflow,
+  getDb,
   getWorkflowRun,
   initDb,
   updateWorkflow,
@@ -658,6 +660,132 @@ describe("handleWebhookTrigger — custom hmacHeader", () => {
       expect(err).toBeInstanceOf(WebhookError);
       expect((err as WebhookError).statusCode).toBe(401);
     }
+  });
+});
+
+describe("handleWebhookTrigger — events allowlist", () => {
+  const secret = "example-github-org-secret";
+  const body = '{"action":"opened"}';
+  const sig = `sha256=${crypto.createHmac("sha256", secret).update(body).digest("hex")}`;
+
+  function countStepRows(): number {
+    return (getDb().prepare("SELECT COUNT(*) AS n FROM workflow_run_steps").get() as { n: number })
+      .n;
+  }
+
+  test("allowed event starts a run", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, events: ["pull_request"] }],
+    });
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig, "X-GitHub-Event": "pull_request" },
+      registry,
+    );
+
+    expect(result.skipped).toBeUndefined();
+    expect(await getWorkflowRun(result.runId!)).not.toBeNull();
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  test("non-allowed event returns skipped and writes no run or step rows", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, events: ["pull_request"] }],
+    });
+    const stepsBefore = countStepRows();
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig, "x-github-event": "workflow_job" },
+      registry,
+    );
+
+    expect(result).toEqual({ skipped: true, reason: "event-not-allowed", event: "workflow_job" });
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+    expect(countStepRows()).toBe(stepsBefore);
+  });
+
+  test("missing event header is dropped when events is set", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, events: ["pull_request"] }],
+    });
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig },
+      registry,
+    );
+
+    expect(result).toEqual({ skipped: true, reason: "event-not-allowed", event: null });
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+  });
+
+  test("no events field (or an empty one) keeps every event", async () => {
+    for (const trigger of [
+      { type: "webhook" as const, hmacSecret: secret },
+      { type: "webhook" as const, hmacSecret: secret, events: [] },
+    ]) {
+      const workflow = await makeWorkflow({ triggers: [trigger] });
+      const result = await handleWebhookTrigger(
+        workflow.id,
+        body,
+        { "x-hub-signature-256": sig, "x-github-event": "workflow_job" },
+        registry,
+      );
+      expect(result.skipped).toBeUndefined();
+      expect(await countWorkflowRuns(workflow.id)).toBe(1);
+    }
+  });
+
+  test("custom eventHeader is read case-insensitively", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          hmacSecret: secret,
+          events: ["Merge Request Hook"],
+          eventHeader: "X-Gitlab-Event",
+        },
+      ],
+    });
+
+    const allowed = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig, "x-gitlab-event": "Merge Request Hook" },
+      registry,
+    );
+    expect(allowed.skipped).toBeUndefined();
+
+    // The default GitHub header is not consulted once eventHeader is set.
+    const dropped = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sig, "x-github-event": "Merge Request Hook" },
+      registry,
+    );
+    expect(dropped.skipped).toBe(true);
+  });
+
+  test("bad signature on a non-allowed event is still 401", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", hmacSecret: secret, events: ["pull_request"] }],
+    });
+
+    const err = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": "sha256=invalid", "x-github-event": "workflow_job" },
+      registry,
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(WebhookError);
+    expect((err as WebhookError).statusCode).toBe(401);
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
   });
 });
 

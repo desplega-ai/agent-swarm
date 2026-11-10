@@ -191,7 +191,7 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
     };
   },
   acp: (env) => {
-    const target = env.ACP_TARGET ?? "custom";
+    const target = env.ACP_TARGET?.trim().toLowerCase() || "custom";
     if (!isAcpTarget(target)) {
       return {
         ready: false,

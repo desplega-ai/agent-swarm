@@ -2676,6 +2676,9 @@
     "costSource": {
       "exempt": "enum or fixed-format value"
     },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
     "createdAt": {
       "exempt": "timestamp"
     },
@@ -3658,6 +3661,7 @@
     "status": {
       "exempt": "enum or fixed-format value"
     },
+    "mergedIntoUserId": { "exempt": "identifier" },
     "createdAt": {
       "exempt": "timestamp"
     },
@@ -4284,5 +4288,20 @@
     "instructionsHash": { "exempt": "hash or digest" },
     "skillKeys": { "exempt": "JSON array of import item keys" },
     "createdAt": { "exempt": "timestamp" }
+  },
+  "user_merge_jobs": {
+    "id": { "exempt": "identifier" },
+    "sourceUserId": { "exempt": "identifier" },
+    "targetUserId": { "exempt": "identifier" },
+    "status": { "exempt": "enum or fixed-format value" },
+    "phase": { "exempt": "enum or fixed-format value" },
+    "progress": { "exempt": "JSON object of row counts keyed by phase" },
+    "error": "scrubbed",
+    "nextAttemptAt": { "exempt": "timestamp" },
+    "createdAt": { "exempt": "timestamp" },
+    "startedAt": { "exempt": "timestamp" },
+    "finishedAt": { "exempt": "timestamp" },
+    "created_by": { "exempt": "identifier" },
+    "updated_by": { "exempt": "identifier" }
   }
 }
