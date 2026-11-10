@@ -151,6 +151,7 @@ import { handleStatus } from "./status";
 import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTelemetryUi } from "./telemetry-ui";
+import { handleToolHooks } from "./tool-hooks";
 import { handleTrackers } from "./trackers";
 import { handleUsedBy } from "./used-by";
 import { handleUserRoles } from "./user-roles";
@@ -426,6 +427,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
         () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleToolHooks(req, res, pathSegments, queryParams, myAgentId),
         () => handleChecklist(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUserRoles(req, res, pathSegments, queryParams),
@@ -971,6 +973,15 @@ httpServer
       .then(({ runBootScrubSweep }) => runBootScrubSweep())
       .catch((err) => {
         console.error("[boot-scrub-sweep] startup scrub failed (non-fatal):", err);
+      });
+
+    // User merges queued by POST /api/users/{id}/merge run in batches off the
+    // request. A job the previous process left running or failed is re-queued
+    // and continues from its last committed batch. See src/be/user-merge-jobs.ts.
+    import("../be/user-merge-jobs")
+      .then(({ resumeUserMergeJobs }) => resumeUserMergeJobs())
+      .catch((err) => {
+        console.error("[user-merge] startup resume failed (non-fatal):", err);
       });
 
     // Source key backfill is idempotent, resumable, and non-fatal.

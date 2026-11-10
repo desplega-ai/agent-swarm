@@ -22,7 +22,9 @@
  *   POST   /api/connector/exchange                   (public: the code is the credential)
  *   POST   /api/invites
  *   POST   /api/invites/exchange                     (public: the code is the credential)
- *   POST   /api/users/:id/merge
+ *   POST   /api/users/:id/merge                     (202: queues a user_merge_jobs row)
+ *   GET    /api/users/merge-jobs                     (must precede /:id)
+ *   GET    /api/users/merge-jobs/:jobId
  *   GET    /api/users/:id/events
  *   POST   /api/users/:id/identities
  *   DELETE /api/users/:id/identities/:kind/:externalId
@@ -43,7 +45,6 @@ import {
   createUser,
   deleteBudget,
   deleteKv,
-  deleteUser,
   getAllUsers,
   getDbClient,
   getUserById,
@@ -61,6 +62,15 @@ import {
   setUserRoles,
 } from "../be/rbac-roles";
 import {
+  createUserMergeJob,
+  findActiveUserMergeJob,
+  findFailedUserMergeJob,
+  getUserMergeJob,
+  listUserMergeJobs,
+  requeueUserMergeJob,
+  runUserMergeJobs,
+} from "../be/user-merge-jobs";
+import {
   findUserByEmail,
   getUserIdentities,
   type IdentityActor,
@@ -70,11 +80,17 @@ import {
   listUserTokens,
   mintToken,
   recordIdentityEvent,
+  revokeAllUserCredentials,
   revokeToken,
   unlinkIdentity,
 } from "../be/users";
 import { isRbacEnabled } from "../rbac";
-import { UserCommsPrefsSchema, UserSchema } from "../types";
+import {
+  UserCommsPrefsSchema,
+  UserMergeJobSchema,
+  UserMergeJobStatusSchema,
+  UserSchema,
+} from "../types";
 import { DEFAULT_APP_URL } from "../utils/constants";
 import { assertUrlSafe } from "../utils/egress-guard";
 import { authUser, getRequestAuth } from "../utils/request-auth-context";
@@ -600,14 +616,16 @@ const mergeUsersRoute = route({
   method: "post",
   path: "/api/users/{id}/merge",
   pattern: ["api", "users", null, "merge"],
-  summary: "Merge another user into this one — moves identities + email aliases, deletes source",
+  summary: "Merge another user into this one: moves identities + email aliases, queues the rest",
+  description:
+    "Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.",
   tags: ["Users"],
   params: z.object({ id: z.string() }),
   body: z.object({ sourceUserId: z.string().min(1) }),
   responses: {
-    200: {
-      description: "Merged user",
-      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    202: {
+      description: "The queued merge job",
+      schema: z.object({ job: UserMergeJobSchema }),
     },
     400: { description: "Validation error (e.g. target == source)" },
     401: { description: "Unauthorized" },
@@ -616,7 +634,48 @@ const mergeUsersRoute = route({
         "Target holds an operator-granted role (auditor) and the caller is not the operator key",
     },
     404: { description: "Target or source user not found" },
-    409: { description: "Source is the last active admin (last_admin)" },
+    409: {
+      description:
+        "Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress)",
+    },
+  },
+  auth: { apiKey: true },
+});
+
+const listMergeJobsRoute = route({
+  method: "get",
+  path: "/api/users/merge-jobs",
+  pattern: ["api", "users", "merge-jobs"],
+  summary: "List background user merge jobs, newest first",
+  tags: ["Users"],
+  query: z.object({
+    status: UserMergeJobStatusSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  }),
+  responses: {
+    200: {
+      description: "Merge jobs",
+      schema: z.object({ jobs: z.array(UserMergeJobSchema) }),
+    },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
+const getMergeJobRoute = route({
+  method: "get",
+  path: "/api/users/merge-jobs/{jobId}",
+  pattern: ["api", "users", "merge-jobs", null],
+  summary: "A background user merge job (poll until status is done or failed)",
+  tags: ["Users"],
+  params: z.object({ jobId: z.string() }),
+  responses: {
+    200: {
+      description: "The merge job",
+      schema: z.object({ job: UserMergeJobSchema }),
+    },
+    401: { description: "Unauthorized" },
+    404: { description: "Job not found" },
   },
   auth: { apiKey: true },
 });
@@ -1394,6 +1453,31 @@ export async function handleUsers(
     return true;
   }
 
+  // ─── GET /api/users/merge-jobs ─────────────────────────────────────────────
+  if (listMergeJobsRoute.match(req.method, pathSegments)) {
+    const parsed = await listMergeJobsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const jobs = await listUserMergeJobs({
+      status: parsed.query.status,
+      limit: parsed.query.limit,
+    });
+    listMergeJobsRoute.respond(res, 200, { jobs });
+    return true;
+  }
+
+  // ─── GET /api/users/merge-jobs/:jobId ──────────────────────────────────────
+  if (getMergeJobRoute.match(req.method, pathSegments)) {
+    const parsed = await getMergeJobRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const job = await getUserMergeJob(parsed.params.jobId);
+    if (!job) {
+      jsonError(res, "Merge job not found", 404);
+      return true;
+    }
+    getMergeJobRoute.respond(res, 200, { job });
+    return true;
+  }
+
   // ─── POST /api/users/:id/merge ─────────────────────────────────────────────
   if (mergeUsersRoute.match(req.method, pathSegments)) {
     const parsed = await mergeUsersRoute.parse(req, res, pathSegments, queryParams);
@@ -1417,9 +1501,37 @@ export async function handleUsers(
       jsonError(res, "Source user not found", 404);
       return true;
     }
+    // A user still being merged (either way) cannot take part in another merge:
+    // the running job would race the rewrite. A target that is itself a merge
+    // source is on its way out and cannot receive anything.
+    if (
+      targetBefore.mergedIntoUserId ||
+      (await findActiveUserMergeJob(sourceId)) ||
+      (await findActiveUserMergeJob(targetId))
+    ) {
+      jsonError(res, "merge_in_progress", 409);
+      return true;
+    }
+    // A source marked by an earlier merge whose job failed for good: the same
+    // pair re-queues that job (identities and aliases already moved); a new
+    // target goes through the short phase again, so the mark moves with it.
+    if (sourceBefore.mergedIntoUserId) {
+      const failed = await findFailedUserMergeJob(sourceId, targetId);
+      if (failed) {
+        const requeued = await requeueUserMergeJob(failed.id);
+        if (requeued) {
+          void runUserMergeJobs();
+          mergeUsersRoute.respond(res, 202, { job: requeued });
+          return true;
+        }
+      }
+    }
     try {
-      const mergedUser = await getDbClient().transaction(async () => {
-        // The source's identities and email aliases move to the target.
+      // Phase A, one short transaction: the parts a reader must see at once.
+      // The long attribution rewrite and the source row's deletion run as a
+      // background job (src/be/user-merge-jobs.ts): on a large database
+      // they held the event loop for minutes (incident 2026-11-09).
+      const job = await getDbClient().transaction(async () => {
         await assertMayActOnOperatorGrantedTarget(actor, targetId);
         // Move every identity from source → target.
         for (const ident of sourceBefore.identities) {
@@ -1457,13 +1569,17 @@ export async function handleUsers(
         // The source's roles go with it; never leave the swarm without an admin.
         await assertNotLastAdmin(sourceId);
 
-        // Delete source — CASCADE cleans up any leftover external_ids row that
-        // we may have missed. Retained user references move to the target.
-        await deleteUser(sourceId, targetId);
+        // From here the source is the target for every lookup and can no
+        // longer authenticate (auth.ts isActiveUser, users.ts lookups).
+        await revokeAllUserCredentials(sourceId, actor);
+        await getDbClient().run(
+          "UPDATE users SET mergedIntoUserId = ?, lastUpdatedAt = ? WHERE id = ?",
+          [targetId, new Date().toISOString(), sourceId],
+        );
 
         // Single manual_merge event on target capturing the before/after rows.
-        // The source row is deleted above, so carry a minimal snapshot of the
-        // source user ({id, name, email}) inside the `after` payload under
+        // The source row is deleted by the job, so carry a minimal snapshot of
+        // the source user ({id, name, email}) inside the `after` payload under
         // `source` — this lets the UI render "Merged manually from X → Y".
         const targetAfter = await composeUser(targetId);
         await recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
@@ -1475,11 +1591,18 @@ export async function handleUsers(
           },
         });
 
-        // Re-compose AFTER the event so the response surfaces the merge event in
-        // recentEvents (otherwise the timeline is missing the event we just wrote).
-        return await composeUser(targetId);
+        const queued = await createUserMergeJob({
+          sourceUserId: sourceId,
+          targetUserId: targetId,
+          createdBy: authUser(getRequestAuth(req))?.id ?? null,
+        });
+        // Start the runner once the job row is visible to it.
+        getDbClient().afterCommit(() => {
+          void runUserMergeJobs();
+        });
+        return queued;
       });
-      mergeUsersRoute.respond(res, 200, { user: mergedUser });
+      mergeUsersRoute.respond(res, 202, { job });
     } catch (err) {
       if (respondOperatorGrantedRefusal(res, err)) return true;
       if (err instanceof LastAdminError) {

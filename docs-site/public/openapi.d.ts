@@ -18661,7 +18661,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -18689,7 +18689,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -18752,7 +18752,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -18804,7 +18804,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                     effectiveFrom: string;
@@ -21350,7 +21350,7 @@ export interface paths {
                         }[];
                         isError?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
                         createdAt?: number;
                     };
                 };
@@ -25819,6 +25819,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tool-hooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run extension tool hooks for a harness-native tool call
+         * @description A worker shim reports a harness built-in tool call (bash, read, write, edit). `phase: pre` runs `pre.tool.call` with `callOrigin: native` and returns the decision. `phase: post` runs `post.tool.call` observe-only and returns 202 at once. Only extensions whose manifest `toolSources` includes `"native"` receive these calls. The server runs the secret scrubber over the body before any handler sees it, so handlers read `[REDACTED:<name>]` in place of a secret. A `modify` whose args still carry that marker is rejected and the call continues unchanged. Shims must also scrub worker-side before sending.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        phase: "pre";
+                        /** @description Worker harness, such as `claude` or `pi`. */
+                        harness: string;
+                        /** @description Canonical tool name, such as `bash` or `edit`. */
+                        tool: string;
+                        /** @description The harness's own tool name. */
+                        nativeTool?: string;
+                        /** @description Canonical tool arguments. */
+                        args?: unknown;
+                        /** @description The harness's own argument shape. */
+                        rawArgs?: unknown;
+                        toolCallId?: string;
+                        parentToolCallId?: string;
+                    } | {
+                        /** @enum {string} */
+                        phase: "post";
+                        /** @description Worker harness, such as `claude` or `pi`. */
+                        harness: string;
+                        /** @description Canonical tool name, such as `bash` or `edit`. */
+                        tool: string;
+                        /** @description The harness's own tool name. */
+                        nativeTool?: string;
+                        /** @description Canonical tool arguments. */
+                        args?: unknown;
+                        /** @description The harness's own argument shape. */
+                        rawArgs?: unknown;
+                        toolCallId?: string;
+                        parentToolCallId?: string;
+                        result?: unknown;
+                        isError?: boolean;
+                        durationMs: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Pre-call decision */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            action: "continue";
+                        } | {
+                            /** @enum {string} */
+                            action: "modify";
+                            args?: unknown;
+                        } | {
+                            /** @enum {string} */
+                            action: "block";
+                            reason: string;
+                        };
+                    };
+                };
+                /** @description Post-call event accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            accepted: true;
+                        };
+                    };
+                };
+                /** @description Invalid body or missing X-Agent-ID header */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trackers/jira/authorize": {
         parameters: {
             query?: never;
@@ -28418,7 +28526,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Merge another user into this one — moves identities + email aliases, deletes source */
+        /**
+         * Merge another user into this one: moves identities + email aliases, queues the rest
+         * @description Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -28436,37 +28547,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Merged user */
-                200: {
+                /** @description The queued merge job */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            user: (components["schemas"]["User"] & {
-                                identities: {
-                                    kind: string;
-                                    externalId: string;
-                                }[];
-                                tokens: {
-                                    id: string;
-                                    userId: string;
-                                    label: string | null;
-                                    tokenPreview: string;
-                                    createdAt: string;
-                                    lastUsedAt: string | null;
-                                    revokedAt: string | null;
-                                }[];
-                                recentEvents: {
-                                    id: string;
-                                    userId: string;
-                                    eventType: string;
-                                    actor: string;
-                                    before?: unknown;
-                                    after?: unknown;
-                                    createdAt: string;
-                                }[];
-                            }) | null;
+                            job: components["schemas"]["UserMergeJob"];
                         };
                     };
                 };
@@ -28506,7 +28594,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Source is the last active admin (last_admin) */
+                /** @description Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -28517,6 +28605,114 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List background user merge jobs, newest first */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "running" | "done" | "failed";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Merge jobs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            jobs: components["schemas"]["UserMergeJob"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A background user merge job (poll until status is done or failed) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The merge job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            job: components["schemas"]["UserMergeJob"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Job not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -29482,6 +29678,10 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
+                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            events?: string[];
+                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            eventHeader?: string;
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -29674,6 +29874,10 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
+                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            events?: string[];
+                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            eventHeader?: string;
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -30492,6 +30696,21 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            skipped: true;
+                            /** @enum {string} */
+                            reason: "event-not-allowed";
+                            event: string | null;
+                        };
+                    };
+                };
                 /** @description Webhook processed */
                 201: {
                     headers: {
@@ -31410,6 +31629,8 @@ export interface components {
             /** Format: uri */
             homepage?: string;
             author?: string;
+            /** @description Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`. */
+            toolSources?: ("mcp" | "native")[];
         };
         ExtensionInstallBody: {
             /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
@@ -31829,7 +32050,7 @@ export interface components {
         };
         PricingRow: {
             /** @enum {string} */
-            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | "system-one";
             model: string;
             /** @enum {string} */
             tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
@@ -31959,6 +32180,11 @@ export interface components {
              * @enum {string}
              */
             costSource: "harness" | "pricing-table" | "unpriced" | "estimated";
+            /**
+             * @default harness
+             * @enum {string}
+             */
+            kind: "harness" | "system-one";
             harnessCostUsd?: number | null;
             cacheWrite5mTokens?: number | null;
             cacheWrite1hTokens?: number | null;
@@ -32151,10 +32377,28 @@ export interface components {
              * @enum {string}
              */
             status: "invited" | "active" | "suspended";
+            mergedIntoUserId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        UserMergeJob: {
+            id: string;
+            sourceUserId: string;
+            targetUserId: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "done" | "failed";
+            phase: string | null;
+            progress: {
+                [key: string]: number;
+            };
+            error: string | null;
+            attempts: number;
+            nextAttemptAt: string | null;
+            createdAt: string;
+            startedAt: string | null;
+            finishedAt: string | null;
         };
         WorkflowDefinition: {
             nodes: components["schemas"]["WorkflowNode"][];
@@ -32280,6 +32524,10 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
+                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                events?: string[];
+                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                eventHeader?: string;
             } | {
                 /** @enum {string} */
                 type: "schedule";
@@ -32530,6 +32778,10 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
+                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                events?: string[];
+                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                eventHeader?: string;
             } | {
                 /** @enum {string} */
                 type: "schedule";

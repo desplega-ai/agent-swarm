@@ -1181,6 +1181,33 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(401);
     });
+
+    test("event not in the trigger's events allowlist returns 200 skipped", async () => {
+      const workflow = await createTestWorkflow({
+        triggers: [
+          { type: "webhook", hmacSecret: "example-test-secret", events: ["pull_request"] },
+        ],
+      });
+
+      const body = '{"zen":"ok"}';
+      const sig = `sha256=${crypto.createHmac("sha256", "example-test-secret").update(body).digest("hex")}`;
+
+      const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hub-Signature-256": sig,
+          "X-GitHub-Event": "ping",
+        },
+        body,
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        skipped: true,
+        reason: "event-not-allowed",
+        event: "ping",
+      });
+    });
   });
 
   // ─── VERSION HISTORY ──────────────────────────────────────

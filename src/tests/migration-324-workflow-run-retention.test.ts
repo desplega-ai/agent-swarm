@@ -10,7 +10,7 @@ test("retention indexes migrate existing rows without changing history", async (
       INSERT INTO workflow_runs VALUES ('old', 'completed', '2020-01-01'), ('live', 'waiting', NULL);
       INSERT INTO approval_requests VALUES ('approval', 'step');
     `);
-    const sql = await Bun.file("src/be/migrations/320_workflow_run_retention.sql").text();
+    const sql = await Bun.file("src/be/migrations/324_workflow_run_retention.sql").text();
     db.exec(sql);
     db.exec(sql);
     expect(db.query("SELECT * FROM workflow_runs ORDER BY id").all()).toEqual([
