@@ -70,6 +70,7 @@ import {
 import { getSecretInputKeys } from "./input";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
+import { hasOwedSuccessors } from "./successor-routing";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -318,9 +319,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
     if (status !== "running" && status !== "waiting") return;
     if (await getRunLineageBlock(runId)) return;
     const steps = await getWorkflowRunStepsByRunId(runId);
-    // A branch still executing belongs to a live walk, which finalizes the
-    // run itself; its finalizer only acts on a `running` run.
-    if (hasRunningStep(steps)) {
+    // A branch still executing, or a completed step whose successors have no
+    // row yet, belongs to a live walk, which finalizes the run itself; its
+    // finalizer only acts on a `running` run.
+    if (hasRunningStep(steps) || hasOwedSuccessors(runId)) {
       if (status === "waiting") await updateWorkflowRun(runId, { status: "running" });
       return;
     }

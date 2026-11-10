@@ -19,6 +19,7 @@ import {
 } from "../be/db/workflow-runs";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
+import { adoptStoredContext } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import {
@@ -38,6 +39,7 @@ import {
   resumeFromChildRun,
   resumeWaitState,
 } from "./resume";
+import { hasOwedSuccessors } from "./successor-routing";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -233,7 +235,7 @@ async function completeIfSettled(runId: string, ctx: Record<string, unknown>): P
     if (run?.status !== "running") return false;
     if (await getRunLineageBlock(runId)) return false;
     const steps = await getWorkflowRunStepsByRunId(runId);
-    if (retryPendingNodeIds(steps).size > 0) return false;
+    if (retryPendingNodeIds(steps).size > 0 || hasOwedSuccessors(runId)) return false;
     const latest = new Map<string, WorkflowRunStep>();
     for (const step of steps) latest.set(step.nodeId, step);
     for (const step of latest.values()) {
@@ -241,6 +243,7 @@ async function completeIfSettled(runId: string, ctx: Record<string, unknown>): P
         return false;
       }
     }
+    await adoptStoredContext(runId, ctx);
     await updateWorkflowRun(runId, {
       status: "completed",
       context: ctx,
