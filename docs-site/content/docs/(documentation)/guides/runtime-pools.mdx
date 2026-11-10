@@ -141,6 +141,12 @@ curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
   -d '{"workspace":{}}'
 ```
 
+In the dashboard, open the pool under Settings and turn on **Persistent workspace**.
+The switch shows only for the kinds that support it, and Kubernetes pools also get a
+**New claim size** field. A save that leaves the switch alone keeps the stored setting.
+The pool page shows the current setting in its side panel, and for a Kubernetes pool
+the size a new claim gets.
+
 | Kind | Support |
 | --- | --- |
 | `docker` | Yes, a named volume per workspace. `sizeGb` is ignored: the `local` driver has no quota. |
@@ -150,6 +156,19 @@ curl -s -X PATCH "$API/api/runtime-pools/$POOL" \
 | `static` | Not applicable. The operator owns the worker's disk. |
 
 The API rejects a workspace on an unsupported kind.
+
+**Size.** `sizeGb` and `K8S_STORAGE_CLASS` apply only when a claim is created. A
+runtime reuses its agent's existing claim as it is, so changing the size from 20 to
+50 saves the pool and leaves every existing claim at 20 Gi. The dashboard shows the
+pool setting, never the size of the claims in the cluster. Resize an existing claim
+yourself. This needs a storage class with `allowVolumeExpansion: true`, and a claim
+can only grow:
+
+```bash
+kubectl -n <namespace> get pvc -l swarm.workspace=true
+kubectl -n <namespace> patch pvc swarm-ws-<agentId>-<slot> \
+  -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'
+```
 
 **Slots.** Each runtime takes the lowest workspace slot no other live runtime of
 the same agent holds, and mounts the volume `swarm-ws-<agentId>-<slot>`. An agent
