@@ -21,7 +21,8 @@ afterEach(() => runtime.closeDb());
 
 describe("database runtime facade", () => {
   test("re-exports the same seven runtime bindings", () => {
-    expect(Object.keys(runtime).sort()).toEqual([...runtimeExports].sort());
+    // wasDbCreatedThisBoot is read by one boot seed and stays off the facade.
+    expect(Object.keys(runtime).sort()).toEqual([...runtimeExports, "wasDbCreatedThisBoot"].sort());
     expect(facade.__resetSqliteVecExtensionPathCacheForTests).toBe(
       runtime.__resetSqliteVecExtensionPathCacheForTests,
     );

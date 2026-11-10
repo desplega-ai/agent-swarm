@@ -37,6 +37,28 @@ function parseTags(raw: string | null): string[] {
   }
 }
 
+/**
+ * `isReviewTask` + the drop rule as a WHERE condition on agent_memory, so a
+ * store excludes the rows before its LIMIT. `memoryAlias` is the agent_memory
+ * alias in the query ("" for none). The CASE keeps json_each off malformed or
+ * non-array tags, which `parseTags` reads as no tags.
+ */
+export function notReviewTaskCompletionSql(memoryAlias = ""): { sql: string; params: string[] } {
+  const col = (name: string) => (memoryAlias ? `${memoryAlias}.${name}` : name);
+  return {
+    sql: `NOT (${col("source")} = 'task_completion' AND EXISTS (
+            SELECT 1 FROM agent_tasks rt
+            WHERE rt.id = ${col("sourceTaskId")}
+              AND (rt.taskType = ?
+                OR CASE WHEN json_valid(rt.tags)
+                     THEN json_type(rt.tags) = 'array' AND EXISTS (
+                       SELECT 1 FROM json_each(rt.tags)
+                       WHERE value IN (${REVIEW_TASK_TAGS.map(() => "?").join(",")}))
+                     ELSE 0 END)))`,
+    params: [REVIEW_TASK_TYPE, ...REVIEW_TASK_TAGS],
+  };
+}
+
 /** True when `taskId` names a review task. Unknown or missing ids are not review tasks. */
 export async function isReviewTaskId(taskId: string | undefined | null): Promise<boolean> {
   if (!taskId) return false;

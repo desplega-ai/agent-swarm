@@ -861,9 +861,12 @@ describe("keyPrefix search", () => {
   test("brute-force fallback arm applies the prefix before the cut", async () => {
     // Emptying the vec table flips retrieval to the fallback arm; the embedding
     // blobs stay, so the fallback scan still scores every row.
+    // Search reuses one health result per window and this delete bypasses the
+    // store, so the search runs on a store that has not read its health yet.
+    const unsearched = new SqliteMemoryStore();
     await getDbClient().run("DELETE FROM memory_vec");
 
-    const filtered = await store.search(queryEmbedding, worker, {
+    const filtered = await unsearched.search(queryEmbedding, worker, {
       scope: "all",
       limit: LIMIT,
       keyPrefix: prefix,
