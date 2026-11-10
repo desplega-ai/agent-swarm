@@ -347,6 +347,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
           registry,
           workflow.id,
           secretKeys,
+          { successorDebt: routing.successorDebt },
         );
       }
       recovered++;
@@ -448,6 +449,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
           registry,
           workflow.id,
           secretKeys,
+          { successorDebt: routing.successorDebt },
         );
       } else {
         await finalizeOrWait(stuck.runId);

@@ -30,6 +30,8 @@ import { hasOwedSuccessors } from "./successor-routing";
 import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
+/** Bumped by every stop, so a tick in flight can tell that its poller was stopped. */
+let pollerGeneration = 0;
 
 /**
  * Start the retry poller.
@@ -39,6 +41,7 @@ let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
  */
 export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000): void {
   if (pollerTimeout !== null) return; // Already running
+  const generation = pollerGeneration;
 
   async function poll(): Promise<void> {
     try {
@@ -274,8 +277,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
       console.error("[workflows] Retry poller error:", err);
     }
 
-    // Schedule next tick after completion
-    pollerTimeout = setTimeout(poll, intervalMs);
+    // Schedule next tick after completion, unless the poller was stopped mid-tick
+    if (generation === pollerGeneration) pollerTimeout = setTimeout(poll, intervalMs);
   }
 
   // Start the first tick
@@ -368,6 +371,7 @@ const RETRYABLE_RUN_STATUSES = new Set(["running", "waiting", "failed"]);
  * Stop the retry poller (for clean shutdown).
  */
 export function stopRetryPoller(): void {
+  pollerGeneration++;
   if (pollerTimeout !== null) {
     clearTimeout(pollerTimeout);
     pollerTimeout = null;

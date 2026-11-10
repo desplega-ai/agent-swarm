@@ -298,6 +298,7 @@ async function resumeFromTaskCompletionUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -441,6 +442,7 @@ async function handleTaskFailureUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -962,6 +964,7 @@ async function resumeFromApprovalResolutionUnguarded(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -1090,6 +1093,7 @@ async function resumeClaimedWait(
       registry,
       workflow.id,
       secretKeys,
+      { successorDebt: routing.successorDebt },
     );
   } else {
     await finalizeOrWait(run.id);
@@ -1186,6 +1190,7 @@ export async function resumeFromChildRun(
         registry,
         workflow.id,
         secretKeys,
+        { successorDebt: routing.successorDebt },
       );
     } else {
       await finalizeOrWait(run.id);
@@ -1198,6 +1203,7 @@ const CHILD_RETRY_SCHEDULED = {
   claimed: true,
   runFailed: false,
   successors: [] as WorkflowNode[],
+  successorDebt: undefined,
 } as const;
 
 /** The `node.retry` of a top-level `sub-workflow` node; foreach items retry through their parent. */

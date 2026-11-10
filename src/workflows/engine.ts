@@ -55,7 +55,11 @@ import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
-import { hasOwedSuccessors, holdSuccessorRouting } from "./successor-routing";
+import {
+  hasOwedSuccessors,
+  holdSuccessorRouting,
+  type SuccessorWalkDebt,
+} from "./successor-routing";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -96,6 +100,12 @@ export interface WorkflowExecutionOptions {
    * needs the run id waits for every instant step before it.
    */
   detach?: boolean;
+  /**
+   * The hold of the claim whose successors this walk routes
+   * (`TaskStepRoutingResult.successorDebt`). `walkGraph` takes it over and
+   * strips it, so steps never see it.
+   */
+  successorDebt?: SuccessorWalkDebt;
 }
 
 /**
@@ -468,8 +478,9 @@ export async function walkGraph(
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
   const release = holdWorkflowRun(runId);
-  // Taken before the first await: a claim that owes this walk hands over here.
-  const routed = holdSuccessorRouting(runId);
+  // Taken before the first await: the claim that owes this walk hands over here.
+  const { successorDebt, ...walkOptions } = options;
+  const routed = holdSuccessorRouting(runId, successorDebt);
   try {
     await walkGraphOwned(
       def,
@@ -480,7 +491,7 @@ export async function walkGraph(
       routed,
       workflowId,
       secretKeys,
-      options,
+      walkOptions,
     );
   } catch (err) {
     if (!(await failRunOnUnreadableReplay(runId, err))) throw err;
@@ -615,6 +626,8 @@ async function walkGraphOwned(
         if (currentRun?.status === "failed") return;
         continue;
       }
+      // A waiting step pauses only its own branch. Its siblings' successors
+      // still run here, and the check below holds any join it feeds.
       if (result.outcome === "waiting") continue;
       // Mark this node as completed
       const sourceNodeId = pendingNodes[i]!.id;
@@ -626,12 +639,6 @@ async function walkGraphOwned(
         nextBatch.set(succ.id, succ);
       }
     }
-
-    // A waiting step pauses only its own branch: its completed siblings'
-    // successors still run in this walk. The check below holds any join the
-    // waiting step feeds, and no resume path re-queues a dropped successor.
-    // The finalizer after the loop leaves a `waiting` run alone, and settles
-    // one whose parked step a resume completed while this walk was executing.
 
     // Convergence check — only wait for predecessors with active edges to
     // this node, not all structural predecessors. This prevents deadlocks
