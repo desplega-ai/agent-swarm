@@ -50,6 +50,7 @@ import {
 import { handleEventTrigger } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { listenOnFreePort } from "./test-net";
+import { waitUntil } from "./workflow-wait";
 
 // A creator-less workflow (the seeded `dreaming`) runs its `swarm-script` nodes as
 // the agent the server stamped on the run. `trigger.agentId` is caller data: a
@@ -266,7 +267,10 @@ describe("swarm-script principal for a creator-less workflow", () => {
       },
     });
     await callTrigger({ id: parent.id }, workerId);
-    await Bun.sleep(50);
+    await waitUntil(
+      () => gatherPrincipals().length > 0,
+      () => "the sub-workflow's gather script never ran",
+    );
     expect(gatherPrincipals()).toEqual([workerId]);
   });
 
@@ -570,7 +574,8 @@ describe("swarm-script principal for a creator-less workflow", () => {
       synthesize: { headline: "nothing to change", actions: [], rejected: [] },
     };
     const assigned = new Map<string, string | null>();
-    for (let round = 0; round < 20 && !assigned.has("apply-lead"); round++) {
+    const deadline = Date.now() + 5_000;
+    while (!assigned.has("apply-lead") && Date.now() < deadline) {
       const open = await getDbClient().query<{
         id: string;
         agentId: string | null;
