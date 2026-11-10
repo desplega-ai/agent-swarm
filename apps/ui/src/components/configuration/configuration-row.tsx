@@ -78,6 +78,7 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
   const { config, value: savedValue, save, reset, isSaving, isLoading } = useSwarmConfig(entry.key);
   const inputId = `config-${entry.key}`;
   const isPending = isSaving || isLoading;
+  const iconDisabled = !!entry.emptyDisablesIcon && savedValue?.trim() === "";
   const sourceChip = deriveSourceChip(config !== undefined, inEnv);
 
   // Text/number rows are draft-edited and committed with an explicit Save.
@@ -213,7 +214,10 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
     >
       <div className="min-w-0 space-y-1 sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor={showEnvOnly ? undefined : inputId} className="text-sm font-medium">
+          <Label
+            htmlFor={showEnvOnly || iconDisabled ? undefined : inputId}
+            className="text-sm font-medium"
+          >
             {entry.label}
           </Label>
           <code className="font-mono text-[10px] text-muted-foreground select-text">
@@ -301,8 +305,20 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
 
       <div className="flex flex-wrap items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
         {entry.emptyDisablesIcon &&
-          (savedValue !== undefined && savedValue.trim() === "" ? (
-            <span className="text-xs text-muted-foreground">No icon</span>
+          (iconDisabled ? (
+            <>
+              <output className="text-xs text-muted-foreground">No icon</output>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => handleSave(entry.defaultValue ?? "")}
+              >
+                Restore icon
+              </Button>
+              {resetButton}
+            </>
           ) : (
             <Button
               type="button"
@@ -420,7 +436,7 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
           </>
         )}
 
-        {!showEnvOnly && entry.kind !== "boolean" && entry.kind !== "enum" && (
+        {!showEnvOnly && !iconDisabled && entry.kind !== "boolean" && entry.kind !== "enum" && (
           <>
             {entry.unit ? (
               <DurationInput

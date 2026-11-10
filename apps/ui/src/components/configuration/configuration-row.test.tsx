@@ -162,6 +162,9 @@ describe("ConfigurationRow empty Slack icons", () => {
   test("saved empty is visibly disabled and can restore inheritance", () => {
     const html = renderRow("", icon, true);
     expect(html.match(/>No icon</g)).toHaveLength(1);
+    expect(html).toContain(">Restore icon</button>");
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain(">Save</button>");
     expect(html).not.toContain('placeholder="white_check_mark"');
     expect(html).toContain("Remove the saved value for SLACK_REACTION_COMPLETED");
     expect(html).toContain("Click “No icon” to remove this icon.");
