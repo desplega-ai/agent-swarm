@@ -20,6 +20,7 @@ import { isSlackLifecycleBusy, runSlackLifecycleExclusive } from "./lifecycle-lo
 import { createBoltInboundDrain, installSocketAckRecovery } from "./socket-ack";
 import { fenceSocketModeClient, type SlackSocketFence } from "./socket-fence";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
+import { invalidateSlackTreeOperations } from "./tree-visibility";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 import {
   getSlackWorkspaceIdentity,
@@ -598,6 +599,7 @@ export async function stopSlackAppUnderLifecycleLock(): Promise<void> {
 
 /** Stop the app but keep the watchdog armed; the watchdog restart uses this. */
 async function teardownSlackApp(): Promise<void> {
+  invalidateSlackTreeOperations();
   const stopping = detachSlackApp();
   if (stopping) {
     await stopping.stop();

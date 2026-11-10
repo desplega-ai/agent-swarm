@@ -9,7 +9,7 @@ import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
-import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 
 /** The ephemeral reply to a card click, or `null` when the click needs none. */
@@ -173,7 +173,7 @@ export function registerActionHandlers(app: App): void {
     );
 
     if (isSlackRenderV2Enabled()) {
-      await ensureSlackThreadTree([followUpTask.id]);
+      await ensureSlackThreadPresentation([followUpTask.id]);
       return;
     }
 
@@ -224,7 +224,7 @@ export function registerActionHandlers(app: App): void {
     });
 
     if (result.status === "started") {
-      if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([result.taskId]);
+      if (isSlackRenderV2Enabled()) await ensureSlackThreadPresentation([result.taskId]);
       return;
     }
     const reply = uiActionReply(result, isSlackRenderV2Enabled());
