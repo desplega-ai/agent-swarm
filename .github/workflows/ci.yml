@@ -4,9 +4,8 @@ on:
   # No push trigger: "Merge Gate" is the only required check, with strict mode and a
   # merge queue, so every commit on main is a tree a merge_group run already passed.
   # The nightly run keeps main's bun-test-timings cache (restored by the gate's test
-  # shards) and the ci-timings main baseline fresh.
-  schedule:
-    - cron: "41 2 * * *"
+  # shards) and the ci-timings main baseline fresh. An external scheduler
+  # dispatches it on main daily at 02:41 UTC.
   workflow_dispatch:
 
 jobs:

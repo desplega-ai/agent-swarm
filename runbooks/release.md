@@ -62,8 +62,8 @@ Merging to `main` does not deploy prod. The three manifest jobs publish SHA and
 optional version tags, and the `promote-main-tags` job moves API/worker
 `:latest` and worker `:slim` to the run's manifest digests on every merge.
 Prod runs `:prod` (API and worker), which only `.github/workflows/deploy.yml`
-moves, at 09:00, 14:00 and 19:00 Europe/Madrid (`on.schedule` with
-`timezone`), and on manual dispatch. Each deploy restarts the API, which cuts
+moves. An external scheduler dispatches it on `main` with no inputs at 09:00,
+14:00 and 19:00 Europe/Madrid; it also runs on manual dispatch. Each deploy restarts the API, which cuts
 and resumes in-flight tasks, so batching merges into three windows a day keeps
 that cost bounded. Prod must never read `:latest`: with `pull_policy: always`,
 any container restart would pull the main tip.
