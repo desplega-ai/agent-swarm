@@ -10,7 +10,7 @@ import {
   initDb,
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import { isWorkflowRunActive, startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
@@ -19,6 +19,7 @@ import {
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { setupWorkflowResumeListener } from "../workflows/resume";
+import { waitForRunStatus } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-hitl-routing.sqlite";
 
@@ -141,6 +142,14 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
   return workflow;
 }
 
+/** True once the walk has parked on a waiting `nodeId` step other than `notStepId`. */
+async function stepIsWaiting(runId: string, nodeId: string, notStepId?: string): Promise<boolean> {
+  if (isWorkflowRunActive(runId)) return false;
+  return (await getWorkflowRunStepsByRunId(runId)).some(
+    (s) => s.nodeId === nodeId && s.status === "waiting" && s.id !== notStepId,
+  );
+}
+
 /**
  * Helper: creates a workflow with a HITL node that has port-based routing,
  * starts it, waits for it to go async, then emits an approval event.
@@ -188,12 +197,6 @@ async function runHITLWorkflow(
   expect(requestId).toBeTruthy();
 
   // Emit approval.resolved event — this triggers resumeFromApprovalResolution
-  // Use a small delay to let the event handler finish
-  const resumePromise = new Promise<void>((resolve) => {
-    // Give the event handler time to run walkGraph
-    setTimeout(resolve, 10);
-  });
-
   eventBus.emit("approval.resolved", {
     requestId,
     status: approvalStatus,
@@ -202,7 +205,10 @@ async function runHITLWorkflow(
     workflowRunStepId: reviewStep!.id,
   });
 
-  await resumePromise;
+  // The handler walks the graph fire-and-forget. A cancelled approval routes
+  // nowhere, so there is no state to poll: give it a fixed window to (wrongly) act.
+  if (approvalStatus === "cancelled") await Bun.sleep(10);
+  else await waitForRunStatus(runId, "completed");
 
   return { runId, workflow };
 }
@@ -381,7 +387,6 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -389,7 +394,9 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await reject1Promise;
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "review-question", reviewStep1!.id),
+    );
 
     // After rejection: generate-question should have re-executed (2nd time),
     // and review-question should be waiting again (2nd time)
@@ -413,7 +420,6 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1); // Different request
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -421,7 +427,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await approve2Promise;
+    await waitForRunStatus(runId, "completed");
 
     // Final state: completed with all steps
     run = await getWorkflowRun(runId);
@@ -479,14 +485,13 @@ describe("HITL port-based routing", () => {
 
     // Simulate async task completion for generate-question (1st iteration)
     const genMeta1 = asyncTaskExecutor.lastMeta!;
-    const taskComplete1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-1",
       output: JSON.stringify({ question: "What is 2+2?" }),
       workflowRunId: runId,
       workflowRunStepId: genMeta1.stepId,
     });
-    await taskComplete1Promise;
+    await waitForRunStatus(runId, "waiting", () => stepIsWaiting(runId, "review-question"));
 
     // Now review-question should be waiting for HITL approval
     run = await getWorkflowRun(runId);
@@ -499,7 +504,6 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question (async)
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -507,7 +511,9 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await reject1Promise;
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "generate-question", genMeta1.stepId),
+    );
 
     // After rejection: generate-question should be waiting again (2nd async task)
     run = await getWorkflowRun(runId);
@@ -517,14 +523,15 @@ describe("HITL port-based routing", () => {
     expect(genMeta2.stepId).not.toBe(genMeta1.stepId); // Different step
 
     // Simulate async task completion for generate-question (2nd iteration)
-    const taskComplete2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-2",
       output: JSON.stringify({ question: "What is 3+3?" }),
       workflowRunId: runId,
       workflowRunStepId: genMeta2.stepId,
     });
-    await taskComplete2Promise;
+    await waitForRunStatus(runId, "waiting", () =>
+      stepIsWaiting(runId, "review-question", reviewStep1!.id),
+    );
 
     // KEY ASSERTION: review-question should be WAITING again (not auto-completed)
     // This is the bug: without the fix, findReadyNodes would skip review-question
@@ -544,7 +551,6 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1);
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -552,7 +558,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await approve2Promise;
+    await waitForRunStatus(runId, "completed");
 
     // Final state: completed
     run = await getWorkflowRun(runId);

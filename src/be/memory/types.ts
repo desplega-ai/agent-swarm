@@ -162,6 +162,11 @@ export interface MemorySearchOptions {
   includeExpired?: boolean;
   queryText?: string;
   /**
+   * Leave out `task_completion` memories whose source task is a review task
+   * (`review-recall-filter.ts`). Set when the searching task is a review task.
+   */
+  excludeReviewTaskCompletions?: boolean;
+  /**
    * Keep only memories whose `key` starts with this string. The vector arm
    * applies it after the sqlite-vec KNN (capped at 4096 rows), so a prefix
    * whose rows all rank below that cap returns nothing; pass `exhaustive`
