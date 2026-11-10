@@ -25,6 +25,22 @@ async function holdsFence(runId: string, stepId: string, fence: StepFence): Prom
 }
 
 /**
+ * Fold the stored run context into this walker's copy, inside the caller's
+ * transaction and before it writes `context: ctx`. Each walker writes the
+ * whole context from its own copy, so a key another walker stored meanwhile
+ * would otherwise be dropped. The walker's own value wins on a shared key.
+ */
+export async function adoptStoredContext(
+  runId: string,
+  ctx: Record<string, unknown>,
+): Promise<void> {
+  const stored = (await getWorkflowRun(runId))?.context as Record<string, unknown> | undefined;
+  for (const key in stored) {
+    if (!(key in ctx)) ctx[key] = stored[key];
+  }
+}
+
+/**
  * Checkpoint a successful step — atomic DB write of step result + run context.
  * Returns false, writing nothing, when `fence` no longer holds.
  */
@@ -46,6 +62,7 @@ export async function checkpointStep(
     });
 
     // Merge step output into run context
+    await adoptStoredContext(runId, ctx);
     ctx[nodeId] = result.output;
     await updateWorkflowRun(runId, {
       context: ctx,
@@ -145,6 +162,7 @@ export async function checkpointStepWaiting(
     );
     if (!step) return false;
 
+    await adoptStoredContext(runId, ctx);
     await updateWorkflowRun(
       runId,
       options.keepRunStatus ? { context: ctx } : { status: "waiting", context: ctx },

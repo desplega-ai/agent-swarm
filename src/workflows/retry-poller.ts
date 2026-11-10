@@ -8,7 +8,12 @@ import {
 } from "../be/db";
 import { disarmWorkflowTreeRetries, getRunLineageBlock } from "../be/db/workflow-runs";
 import type { RetryPolicy } from "../types";
-import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
+import {
+  adoptStoredContext,
+  checkpointStep,
+  checkpointStepFailure,
+  checkpointStepWaiting,
+} from "./checkpoint";
 import { getSuccessors, resolveValidationPort } from "./definition";
 import {
   failRunOnUnreadableReplay,
@@ -21,6 +26,7 @@ import type { ExecutorRegistry } from "./executors/registry";
 import { FOREACH_ITEMS_WAIT_FOR, parkAndDriveForeach, runForeachDrive } from "./foreach-driver";
 import { resolveForeachParent } from "./foreach-join";
 import { rebuildNodeExecutionInput } from "./step-input";
+import { hasOwedSuccessors } from "./successor-routing";
 import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -349,7 +355,8 @@ async function completeRunIfSettled(runId: string, ctx: Record<string, unknown>)
         s.status === "waiting" ||
         (s.status === "failed" && s.nextRetryAt != null),
     );
-    if (live) return;
+    if (live || hasOwedSuccessors(runId)) return;
+    await adoptStoredContext(runId, ctx);
     await updateWorkflowRun(runId, {
       status: "completed",
       context: ctx,
