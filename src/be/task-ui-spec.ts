@@ -12,7 +12,17 @@ export const TaskUiSpecSchema = z.object({
     state: z.record(z.string(), z.unknown()).optional(),
   }),
   actions: z
-    .record(z.string(), z.object({ kind: z.literal("follow_up"), prompt: z.string() }))
+    .record(
+      z.string(),
+      z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("follow_up"), prompt: z.string() }),
+        z.object({
+          kind: z.literal("script"),
+          script: z.string(),
+          args: z.record(z.string(), z.unknown()).optional(),
+        }),
+      ]),
+    )
     .optional(),
   fallbackText: z.string(),
 });
@@ -141,6 +151,97 @@ export async function setTaskUiActionResult(
       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE task_id = ? AND action_id = ?`,
     [resultTaskId, taskId, actionId],
+  );
+}
+
+export type TaskUiScriptActionLock =
+  | { status: "acquired" }
+  | { status: "running" | "rate_limited"; retryAfterSec: number };
+
+/**
+ * Takes the lease of a repeatable `script` action in one statement, so it
+ * holds across API processes that share the DB file. Refuses while another
+ * run holds an unexpired lease, or inside the cooldown after the last run.
+ * A follow-up row (with a result task) is never taken over.
+ */
+export async function acquireTaskUiScriptActionRun({
+  taskId,
+  actionId,
+  surface,
+  slackUserId,
+  userId,
+  leaseMs,
+  cooldownMs,
+  nowMs = Date.now(),
+}: {
+  taskId: string;
+  actionId: string;
+  surface: TaskUiActionSurface;
+  slackUserId?: string | null;
+  userId?: string | null;
+  leaseMs: number;
+  cooldownMs: number;
+  nowMs?: number;
+}): Promise<TaskUiScriptActionLock> {
+  // ISO strings in the strftime('%Y-%m-%dT%H:%M:%fZ') shape compare as text.
+  const now = new Date(nowMs).toISOString();
+  const lockedUntil = new Date(nowMs + leaseMs).toISOString();
+  const cooldownCutoff = new Date(nowMs - cooldownMs).toISOString();
+  const { changes } = await getDbClient().run(
+    `INSERT INTO task_ui_action_runs
+    (task_id, action_id, surface, slack_user_id, created_by, updated_by, locked_until)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(task_id, action_id) DO UPDATE SET
+      locked_until = excluded.locked_until, surface = excluded.surface,
+      slack_user_id = excluded.slack_user_id, updated_by = excluded.updated_by, updated_at = ?
+    WHERE task_ui_action_runs.result_task_id IS NULL
+      AND (task_ui_action_runs.locked_until IS NULL OR task_ui_action_runs.locked_until < ?)
+      AND (task_ui_action_runs.last_run_at IS NULL OR task_ui_action_runs.last_run_at < ?)`,
+    [
+      taskId,
+      actionId,
+      surface,
+      slackUserId ?? null,
+      userId ?? null,
+      userId ?? null,
+      lockedUntil,
+      now,
+      now,
+      cooldownCutoff,
+    ],
+  );
+  if (changes === 1) return { status: "acquired" };
+
+  const row = await getDbClient().get<{ lockedUntil: string | null; lastRunAt: string | null }>(
+    `SELECT locked_until AS lockedUntil, last_run_at AS lastRunAt
+    FROM task_ui_action_runs WHERE task_id = ? AND action_id = ?`,
+    [taskId, actionId],
+  );
+  const secondsUntil = (ms: number) => Math.max(1, Math.ceil((ms - nowMs) / 1000));
+  if (row?.lockedUntil && row.lockedUntil >= now) {
+    return { status: "running", retryAfterSec: secondsUntil(Date.parse(row.lockedUntil)) };
+  }
+  if (row?.lastRunAt && row.lastRunAt >= cooldownCutoff) {
+    return {
+      status: "rate_limited",
+      retryAfterSec: secondsUntil(Date.parse(row.lastRunAt) + cooldownMs),
+    };
+  }
+  return { status: "running", retryAfterSec: 1 };
+}
+
+/** Ends a script run: frees the lease and records when it ran and how. */
+export async function finishTaskUiScriptActionRun(
+  taskId: string,
+  actionId: string,
+  error: string | null,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await getDbClient().run(
+    `UPDATE task_ui_action_runs SET locked_until = NULL, last_run_at = ?,
+      run_count = run_count + 1, last_error = ?, updated_at = ?
+    WHERE task_id = ? AND action_id = ?`,
+    [now, error === null ? null : scrubSecrets(error), now, taskId, actionId],
   );
 }
 

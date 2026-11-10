@@ -5,6 +5,7 @@ import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
+import { attachDemotionEvidence } from "../be/memory/demotion-evidence";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
@@ -36,6 +37,7 @@ import {
 } from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
+import { dropReviewTaskCompletions, isReviewTaskId } from "../be/memory/review-recall-filter";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
@@ -908,6 +910,13 @@ export async function handleMemory(
       const store = getMemoryStore();
       const queryEmbedding = await provider.embed(query, { kind: "query" });
 
+      const sourceTaskIdHeader = req.headers["x-source-task-id"];
+      const sourceTaskId = Array.isArray(sourceTaskIdHeader)
+        ? sourceTaskIdHeader[0]
+        : sourceTaskIdHeader;
+      // A review task never recalls other review tasks' task_completion rows.
+      const excludeReviewTaskCompletions = await isReviewTaskId(sourceTaskId);
+
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
       const candidates = await searchMemoryCandidates(
         store,
@@ -920,16 +929,22 @@ export async function handleMemory(
           isLead: false,
           queryText: query,
           keyPrefix,
+          excludeReviewTaskCompletions,
         },
       );
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
-      const expanded = await expandCandidatesWithGraph(candidates, myAgentId, {
+      const graphExpanded = await expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
         source,
         keyPrefix,
         isLead: false,
       });
+      const expanded = await attachDemotionEvidence(
+        excludeReviewTaskCompletions
+          ? await dropReviewTaskCompletions(graphExpanded)
+          : graphExpanded,
+      );
       const resultLimit = Math.min(limit, 20);
       // Prompt recall injects only rows above the relevance gate, so the gate
       // must pick the slots, not trim them afterwards: eligible rows fill the
@@ -950,10 +965,6 @@ export async function handleMemory(
       // (ImplicitCitationRater, fired from store-progress on task completion)
       // know which memories were surfaced. Best-effort: a logging failure must
       // never poison search.
-      const sourceTaskIdHeader = req.headers["x-source-task-id"];
-      const sourceTaskId = Array.isArray(sourceTaskIdHeader)
-        ? sourceTaskIdHeader[0]
-        : sourceTaskIdHeader;
       const contextKeyHeader = req.headers["x-context-key"];
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
       if (sourceTaskId && intent) {
@@ -1055,7 +1066,9 @@ export async function handleMemory(
         if (pathNeedle) {
           candidates = candidates.filter((c) => matchesPath(c.sourcePath));
         }
-        const ranked = rerank(candidates, { limit: candidates.length });
+        const ranked = rerank(await attachDemotionEvidence(candidates), {
+          limit: candidates.length,
+        });
         const page = ranked.slice(offset, offset + pageLimit);
 
         listMemory.respond(res, 200, {

@@ -266,6 +266,13 @@ describe("workerRuntimeEnv reasoning effort", () => {
 });
 
 describe("apiRuntimeEnv", () => {
+  test("inline extension installs stay off unless the opt-in run option asks", () => {
+    expect(apiRuntimeEnv("k").EXTENSION_ALLOW_INLINE_INSTALL).toBeUndefined();
+    expect(apiRuntimeEnv("k", { allowInlineExtensions: true }).EXTENSION_ALLOW_INLINE_INSTALL).toBe(
+      "true",
+    );
+  });
+
   test("keeps production runtime behavior while tagging telemetry as test", () => {
     const env = apiRuntimeEnv("k");
     expect(env.NODE_ENV).toBe("production");

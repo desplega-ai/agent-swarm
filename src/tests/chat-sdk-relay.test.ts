@@ -189,8 +189,28 @@ describe("chat relay text", () => {
     const words = Array.from({ length: 2000 }, (_, i) => `word${i}`).join(" ");
     const chunks = splitChatMessage(words, 4096);
     expect(chunks.every((chunk) => chunk.length <= 4096)).toBe(true);
-    expect(chunks.join(" ")).toBe(words);
+    expect(chunks.join("")).toBe(words);
     expect(splitChatMessage("short", 4096)).toEqual(["short"]);
+  });
+
+  test("splitChatMessage keeps a space that falls on a split boundary", () => {
+    const chunks = splitChatMessage("hello world", 6);
+    expect(chunks).toEqual(["hello ", "world"]);
+    expect(chunks.join("")).toBe("hello world");
+    // Every boundary kind (space, line break, repeated whitespace) joins back
+    // to the original text and stays within the limit.
+    const cases: Array<[string, number]> = [
+      ["one two three four five", 9],
+      ["line one\nline two\nline three", 10],
+      ["a \n b", 2],
+      ["word ".repeat(50), 17],
+      ["  leading and trailing  ", 5],
+    ];
+    for (const [text, limit] of cases) {
+      const parts = splitChatMessage(text, limit);
+      expect(parts.join("")).toBe(text);
+      expect(parts.every((part) => part.length <= limit)).toBe(true);
+    }
   });
 
   test("splitChatMessage does not loop on a surrogate pair at a tiny limit", () => {

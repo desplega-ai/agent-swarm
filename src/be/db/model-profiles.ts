@@ -237,10 +237,10 @@ export async function updateModelProfile(
  * later write than the supersede (HTTP supersede, heartbeat remediation), and
  * after a restart the heartbeat's orphan repair makes it, inside the same
  * window (`SUPERSEDED_RESUME_REPAIR_WINDOW_MS`). Binds one parameter: the
- * oldest `finishedAt` the repair still covers. A workflow-step task superseded
- * by a queued retry gets no resume, so it never holds its profile.
+ * oldest `finishedAt` the repair still covers. A superseded workflow-step cut
+ * gets no resume, so it never holds its profile.
  */
-const TASK_HOLDS_PROFILE_SQL = `(
+export const TASK_HOLDS_PROFILE_SQL = `(
   t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
   OR (t.status = 'superseded'
       AND t.workflowRunStepId IS NULL
@@ -249,7 +249,7 @@ const TASK_HOLDS_PROFILE_SQL = `(
       AND NOT EXISTS (
         SELECT 1 FROM agent_tasks c WHERE c.parentTaskId = t.id AND c.taskType = 'resume')))`;
 
-function repairWindowStart(): string {
+export function repairWindowStart(): string {
   return new Date(Date.now() - SUPERSEDED_RESUME_REPAIR_WINDOW_MS).toISOString();
 }
 
@@ -260,14 +260,15 @@ const LISTED_AS_FALLBACK_SQL = `EXISTS (
 
 /**
  * Who still points at a profile: agents with it as default, tasks that still
- * hold it, schedules that fire tasks with it, and profiles that list it as a
- * fallback.
+ * hold it, schedules that fire tasks with it, profiles that list it as a
+ * fallback, and model groups that list it as a member.
  */
 export async function modelProfileReferences(name: string): Promise<{
   agentIds: string[];
   openTaskCount: number;
   scheduleIds: string[];
   fallbackOf: string[];
+  groups: string[];
 }> {
   const agents = await getDbClient().query<{ scopeId: string }>(
     "SELECT scopeId FROM swarm_config WHERE scope = 'agent' AND key = ? AND value = ?",
@@ -288,11 +289,17 @@ export async function modelProfileReferences(name: string): Promise<{
       WHERE j.value = ? AND o.name <> ? ORDER BY o.name`,
     [name, name],
   );
+  const groups = await getDbClient().query<{ name: string }>(
+    `SELECT g.name FROM model_group_members m JOIN model_groups g ON g.id = m.groupId
+      WHERE m.profileName = ? ORDER BY g.name`,
+    [name],
+  );
   return {
     agentIds: agents.map((a) => a.scopeId),
     openTaskCount: tasks?.n ?? 0,
     scheduleIds: schedules.map((s) => s.id),
     fallbackOf: [...new Set(fallbackOf.map((p) => p.name))],
+    groups: groups.map((g) => g.name),
   };
 }
 
@@ -306,11 +313,20 @@ export function modelProfileRefError(error: unknown): "missing" | null {
 }
 
 /**
+ * Whether migration 308's name-space trigger refused an insert: profiles and
+ * model groups share one name space.
+ */
+export function isModelNameTakenError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("model-name-taken:");
+}
+
+/**
  * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) as
  * its ask or as the profile claim applied (`resolvedProfile`, which a paused
  * task's resume re-reads for its credential allowlist), an
- * agent default names it, a schedule names it, or another profile lists it
- * as a fallback. The check is part of the
+ * agent default names it, a schedule names it, another profile lists it
+ * as a fallback, or a model group lists it as a member. The check is part of the
  * DELETE statement, so a reference written after the caller's own count still
  * makes it `in-use`; the triggers in migrations 220 and 240 refuse the
  * opposite order (a reference written after this delete).
@@ -329,6 +345,8 @@ export async function deleteModelProfile(name: string): Promise<"deleted" | "mis
         AND NOT EXISTS (
           SELECT 1 FROM scheduled_tasks s WHERE s.profile = model_profiles.name)
         AND NOT ${LISTED_AS_FALLBACK_SQL}
+        AND NOT EXISTS (
+          SELECT 1 FROM model_group_members m WHERE m.profileName = model_profiles.name)
       RETURNING id`,
     [name, repairWindowStart(), MODEL_PROFILE_CONFIG_KEY],
   );
