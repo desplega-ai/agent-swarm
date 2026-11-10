@@ -4962,6 +4962,42 @@ describe("optional Slack V2 task tree", () => {
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
   });
 
+  for (const enabled of ["false", "true"]) {
+    test(`an old ask cannot suppress a new outcome with tree visibility ${enabled}`, async () => {
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = enabled;
+      await syncSlackTreeVisibility();
+      const { task, channelId, threadTs } = await runningAsk("new ask in legacy thread");
+      const old = await createTaskExtended("legacy ask", {
+        agentId: task.agentId!,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      });
+      await startTask(old.id);
+      await completeTask(old.id, "old answer");
+      getDb().run("UPDATE agent_tasks SET createdAt = '2000-01-01T00:00:00.000Z' WHERE id = ?", [
+        old.id,
+      ]);
+      await completeTask(task.id, "new answer");
+      calls.length = 0;
+      await processSlackRenderV2();
+      expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+      expect(await getSlackOutcomeMessage(old.id)).toBeNull();
+      expect(calls.some((call) => call.method === "reactions.add")).toBe(true);
+      expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+    });
+  }
+
+  test("unchanged visibility observation makes no writes", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    const changes = () =>
+      (getDb().query("SELECT total_changes() AS count").get() as { count: number }).count;
+    const before = changes();
+    for (let i = 0; i < 10; i++) await syncSlackTreeVisibility();
+    expect(changes()).toBe(before);
+  });
+
   test("off freezes history and on resumes only the active thread across restart", async () => {
     process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
     const done = await runningAsk("completed while hidden");

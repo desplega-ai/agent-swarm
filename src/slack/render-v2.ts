@@ -11,10 +11,10 @@ import {
   getResolvableDeferralOutcomes,
   getSlackMessageByChannelTs,
   getSlackOutcomeMessage,
+  getSlackRenderV2ActivatedAt,
   getSlackTasksInThread,
   getSlackTreeMessage,
   getSlackTreeMessageByThread,
-  getSlackTreeMessages,
   getTaskById,
   isPendingSlackMessage,
   isSettledSlackMessage,
@@ -838,6 +838,14 @@ async function presentThreadTree(
   if (!task.slackChannelId || !task.slackThreadTs) return null;
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   if (isSlackTaskTreeEnabled()) assertSlackTreeCurrent(generation);
+  const activatedAt = await getSlackRenderV2ActivatedAt();
+  // Old asks prevent a new tree, but never suppress newer outcomes in the thread.
+  if (
+    activatedAt &&
+    tasks.some((candidate) => candidate.source === "slack" && candidate.createdAt < activatedAt) &&
+    !(await getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs))
+  )
+    return null;
   if (!canPresentSlackTree(tasks, cutoff)) {
     const tree = await getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs);
     if (tree) await closeSlackTreeIfSettled(tree.id);
@@ -1909,13 +1917,6 @@ async function processSlackThread(
   ) {
     return "closed";
   }
-  // Preserve the legacy-thread boundary used by missing-tree discovery.
-  if (
-    !existingTree &&
-    tasks.some((task) => task.source === "slack" && task.createdAt < activatedAt)
-  ) {
-    return "closed";
-  }
   const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
   const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
   const closuresByAskId = new Map<string, AgentTask[]>();
@@ -2221,22 +2222,13 @@ export function processSlackRenderV2(): Promise<void> {
 }
 
 async function reconcileAllThreads(): Promise<void> {
-  // The full pass covers everything queued so far.
-  dirtyTaskIds.clear();
-  dirtyThreads.clear();
+  // A bounded page does not cover queued events; leave them for the dirty flush.
   const context = await beginRenderPass();
-
-  const threads = new Map<string, SlackThreadAddress>();
-  for (const thread of await getSlackProcessingThreads(context.delegationEnabled)) {
-    threads.set(physicalThreadKey(thread.channelId, thread.threadTs), thread);
-  }
-  // Visual-only final updates (including skipped tasks) still need a pass.
-  if (isSlackTaskTreeEnabled()) {
-    for (const tree of await getSlackTreeMessages()) {
-      threads.set(physicalThreadKey(tree.channelId, tree.threadTs), tree);
-    }
-  }
-  for (const thread of threads.values()) {
+  const threads = await getSlackProcessingThreads(
+    context.delegationEnabled,
+    isSlackTaskTreeEnabled(),
+  );
+  for (const thread of threads) {
     if ((await processSlackThread(thread, context)) === "stop") return;
     await yieldToEventLoop();
   }

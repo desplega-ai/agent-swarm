@@ -62,7 +62,7 @@ function captureQueries(): { seen: Captured[]; restore: () => void } {
   return { seen, restore: () => spy.mockRestore() };
 }
 
-const isTreeSweep = (q: Captured) => q.sql.includes("SELECT tree.*");
+const isTreeSweep = (q: Captured) => q.sql.includes("INDEXED BY idx_slack_reconcile_tree");
 
 let leadId: string;
 
@@ -105,6 +105,69 @@ describe("slack render-v2 reconcile scheduling", () => {
       restore();
     }
     expect(seen.filter(isTreeSweep)).toHaveLength(1);
+  });
+
+  test("a full tick visits bounded pages of old work and preserves queued events outside its page", async () => {
+    const prior = process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED;
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    try {
+      const insert = getDb().query(`INSERT INTO agent_tasks
+        (id,task,status,source,slackChannelId,slackThreadTs,createdAt,lastUpdatedAt)
+        VALUES (?, 'old work', ?, 'slack', ?, 'thread', '2001-01-01', '2001-01-01')`);
+      getDb()
+        .transaction(() => {
+          for (let i = 0; i < 1001; i++) {
+            const id = String(i).padStart(5, "0");
+            insert.run(id, "in_progress", `C_BATCH_${id}`);
+            insert.run(`backlog-${id}`, "backlog", `C_BACKLOG_${id}`);
+          }
+        })
+        .immediate();
+      const target = await runningThread("QUEUED_OUTSIDE_PAGE");
+      startSlackRenderV2Events();
+      workflowEventBus.emit("task.progress", { taskId: target.task.id, progress: "queued" });
+      const full = captureQueries();
+      try {
+        await processSlackRenderV2();
+      } finally {
+        full.restore();
+      }
+      const channels = new Set(
+        full.seen.flatMap((q) =>
+          q.params.filter((p): p is string => typeof p === "string" && p.startsWith("C_BATCH_")),
+        ),
+      );
+      expect(channels.size).toBe(50);
+      expect(full.seen.some((q) => q.params.includes(target.channelId))).toBe(false);
+      expect(
+        full.seen.some((q) =>
+          q.params.some((p) => typeof p === "string" && p.startsWith("C_BACKLOG_")),
+        ),
+      ).toBe(false);
+      const dirty = captureQueries();
+      try {
+        await flushSlackRenderV2DirtyThreads();
+      } finally {
+        dirty.restore();
+      }
+      expect(dirty.seen.some((q) => q.params.includes(target.channelId))).toBe(true);
+      const next = captureQueries();
+      try {
+        await processSlackRenderV2();
+      } finally {
+        next.restore();
+      }
+      const nextChannels = new Set(
+        next.seen.flatMap((q) =>
+          q.params.filter((p): p is string => typeof p === "string" && p.startsWith("C_BATCH_")),
+        ),
+      );
+      expect(nextChannels.size).toBe(50);
+      expect([...nextChannels].some((channel) => channels.has(channel))).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED;
+      else process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = prior;
+    }
   });
 
   test("a task event renders only that task's thread", async () => {

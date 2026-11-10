@@ -716,6 +716,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "322_runtime_pool_workspace.sql");
       // 323 indexes Slack task columns absent from this migration-112-only fixture.
       markMigrationApplied(database, "323_slack_task_tree_visibility.sql");
+      // 326 indexes task columns absent from this migration-112-only fixture.
+      markMigrationApplied(database, "326_slack_reconcile_pages.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

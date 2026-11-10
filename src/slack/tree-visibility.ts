@@ -1,4 +1,4 @@
-import { ensureSlackRenderV2Activation } from "../be/db";
+import { ensureSlackRenderV2Activation, getSlackRenderV2ActivatedAt } from "../be/db";
 import { observeSlackTreeVisibility } from "../be/db/slack-trees";
 import type { AgentTask } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -35,7 +35,8 @@ export async function syncSlackTreeVisibility(): Promise<string | null> {
   const run = visibilityTail
     .catch(() => {})
     .then(async () => {
-      if (v2Enabled) await ensureSlackRenderV2Activation();
+      if (v2Enabled && !(await getSlackRenderV2ActivatedAt()))
+        await ensureSlackRenderV2Activation();
       return observeSlackTreeVisibility(enabled);
     });
   visibilityTail = run;
