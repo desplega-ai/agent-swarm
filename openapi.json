@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.9.1",
+    "version": "2.10.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2252,6 +2252,18 @@
           "author": {
             "type": "string",
             "minLength": 1
+          },
+          "toolSources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mcp",
+                "native"
+              ]
+            },
+            "minItems": 1,
+            "description": "Which tool calls reach this extension's `pre.tool.call` and `post.tool.call` handlers: `\"mcp\"` for swarm MCP tools, `\"native\"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `[\"mcp\"]`."
           }
         },
         "required": [
@@ -3988,7 +4000,8 @@
               "amp",
               "cursor",
               "grok",
-              "fx"
+              "fx",
+              "system-one"
             ]
           },
           "model": {
@@ -4446,6 +4459,14 @@
               "pricing-table",
               "unpriced",
               "estimated"
+            ],
+            "default": "harness"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "harness",
+              "system-one"
             ],
             "default": "harness"
           },
@@ -5262,6 +5283,12 @@
             ],
             "default": "active"
           },
+          "mergedIntoUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5276,6 +5303,85 @@
           "name",
           "createdAt",
           "lastUpdatedAt"
+        ]
+      },
+      "UserMergeJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceUserId": {
+            "type": "string"
+          },
+          "targetUserId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ]
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "progress": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceUserId",
+          "targetUserId",
+          "status",
+          "phase",
+          "progress",
+          "error",
+          "attempts",
+          "nextAttemptAt",
+          "createdAt",
+          "startedAt",
+          "finishedAt"
         ]
       },
       "WorkflowDefinition": {
@@ -5569,6 +5675,19 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                     }
                   },
                   "required": [
@@ -6334,6 +6453,19 @@
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                    },
+                    "eventHeader": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                     }
                   },
                   "required": [
@@ -6595,6 +6727,21 @@
             ],
             "additionalProperties": false
           },
+          "workspace": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "sizeGb": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1024
+              }
+            },
+            "default": null,
+            "additionalProperties": false
+          },
           "ttlSec": {
             "type": [
               "integer",
@@ -6742,6 +6889,12 @@
           "taskId": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "workspaceSlot": {
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -12243,6 +12396,12 @@
                           "taskId": {
                             "type": [
                               "string",
+                              "null"
+                            ]
+                          },
+                          "workspaceSlot": {
+                            "type": [
+                              "integer",
                               "null"
                             ]
                           },
@@ -39991,7 +40150,7 @@
     "/api/tasks/{id}/supersede": {
       "post": {
         "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
-        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent with the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies, and the task moves to `superseded` once the engine queues the step's retry or the step ends without failing. With `reason: provider_fallback` (and its `errorClass`), the resume runs on the same agent: on the same profile while a key-scoped error (`rate_limit`, `credits`) leaves another unbenched key in its pool, else on the next fallback profile that passes the profile check; when none is left, or the task is a workflow step, nothing changes and `kind: noFallback` tells the worker to fail the task itself, led by `failureReason` when set.",
         "tags": [
           "Tasks"
         ],
@@ -43254,7 +43413,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43340,7 +43500,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43459,7 +43620,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -43546,7 +43708,8 @@
                 "amp",
                 "cursor",
                 "grok",
-                "fx"
+                "fx",
+                "system-one"
               ]
             },
             "required": true,
@@ -54082,7 +54245,8 @@
                       "amp",
                       "cursor",
                       "grok",
-                      "fx"
+                      "fx",
+                      "system-one"
                     ]
                   },
                   "createdAt": {
@@ -64963,6 +65127,226 @@
         }
       }
     },
+    "/api/tool-hooks": {
+      "post": {
+        "summary": "Run extension tool hooks for a harness-native tool call",
+        "description": "A worker shim reports a harness built-in tool call (bash, read, write, edit). `phase: pre` runs `pre.tool.call` with `callOrigin: native` and returns the decision. `phase: post` runs `post.tool.call` observe-only and returns 202 at once. Only extensions whose manifest `toolSources` includes `\"native\"` receive these calls. The server runs the secret scrubber over the body before any handler sees it, so handlers read `[REDACTED:<name>]` in place of a secret. A `modify` whose args still carry that marker is rejected and the call continues unchanged. Shims must also scrub worker-side before sending.",
+        "tags": [
+          "Extensions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "pre"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "post"
+                        ]
+                      },
+                      "harness": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Worker harness, such as `claude` or `pi`."
+                      },
+                      "tool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Canonical tool name, such as `bash` or `edit`."
+                      },
+                      "nativeTool": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "The harness's own tool name."
+                      },
+                      "args": {
+                        "description": "Canonical tool arguments."
+                      },
+                      "rawArgs": {
+                        "description": "The harness's own argument shape."
+                      },
+                      "toolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "parentToolCallId": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "result": {},
+                      "isError": {
+                        "type": "boolean"
+                      },
+                      "durationMs": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "harness",
+                      "tool",
+                      "durationMs"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pre-call decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "continue"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "modify"
+                          ]
+                        },
+                        "args": {}
+                      },
+                      "required": [
+                        "action"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "block"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "action",
+                        "reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Post-call event accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or missing X-Agent-ID header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/trackers/jira/authorize": {
       "get": {
         "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",
@@ -69716,7 +70100,8 @@
     },
     "/api/users/{id}/merge": {
       "post": {
-        "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
+        "summary": "Merge another user into this one: moves identities + email aliases, queues the rest",
+        "description": "Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.",
         "tags": [
           "Users"
         ],
@@ -69754,137 +70139,19 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Merged user",
+          "202": {
+            "description": "The queued merge job",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "user": {
-                      "anyOf": [
-                        {
-                          "allOf": [
-                            {
-                              "$ref": "#/components/schemas/User"
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "identities": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "kind": {
-                                        "type": "string"
-                                      },
-                                      "externalId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "kind",
-                                      "externalId"
-                                    ]
-                                  }
-                                },
-                                "tokens": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "label": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "tokenPreview": {
-                                        "type": "string"
-                                      },
-                                      "createdAt": {
-                                        "type": "string"
-                                      },
-                                      "lastUsedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      },
-                                      "revokedAt": {
-                                        "type": [
-                                          "string",
-                                          "null"
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "label",
-                                      "tokenPreview",
-                                      "createdAt",
-                                      "lastUsedAt",
-                                      "revokedAt"
-                                    ]
-                                  }
-                                },
-                                "recentEvents": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
-                                      },
-                                      "userId": {
-                                        "type": "string"
-                                      },
-                                      "eventType": {
-                                        "type": "string"
-                                      },
-                                      "actor": {
-                                        "type": "string"
-                                      },
-                                      "before": {},
-                                      "after": {},
-                                      "createdAt": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "userId",
-                                      "eventType",
-                                      "actor",
-                                      "createdAt"
-                                    ]
-                                  }
-                                }
-                              },
-                              "required": [
-                                "identities",
-                                "tokens",
-                                "recentEvents"
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
                     }
                   },
                   "required": [
-                    "user"
+                    "job"
                   ]
                 }
               }
@@ -69931,7 +70198,142 @@
             }
           },
           "409": {
-            "description": "Source is the last active admin (last_admin)",
+            "description": "Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs": {
+      "get": {
+        "summary": "List background user merge jobs, newest first",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "running",
+                "done",
+                "failed"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merge jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserMergeJob"
+                      }
+                    }
+                  },
+                  "required": [
+                    "jobs"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/merge-jobs/{jobId}": {
+      "get": {
+        "summary": "A background user merge job (poll until status is done or failed)",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The merge job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "$ref": "#/components/schemas/UserMergeJob"
+                    }
+                  },
+                  "required": [
+                    "job"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -71351,6 +71753,19 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                             }
                           },
                           "required": [
@@ -71772,6 +72187,19 @@
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
+                            },
+                            "events": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                            },
+                            "eventHeader": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
                             }
                           },
                           "required": [
@@ -73014,6 +73442,41 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "skipped": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "event-not-allowed"
+                      ]
+                    },
+                    "event": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "skipped",
+                    "reason",
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
           "201": {
             "description": "Webhook processed",
             "content": {
@@ -73517,6 +73980,21 @@
                     ],
                     "additionalProperties": false
                   },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
+                    "default": null,
+                    "additionalProperties": false
+                  },
                   "ttlSec": {
                     "type": [
                       "integer",
@@ -73813,6 +74291,20 @@
                     "required": [
                       "mountPath"
                     ],
+                    "additionalProperties": false
+                  },
+                  "workspace": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sizeGb": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1024
+                      }
+                    },
                     "additionalProperties": false
                   },
                   "ttlSec": {

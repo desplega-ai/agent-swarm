@@ -708,6 +708,12 @@ describe("script connections", () => {
       // 318 updates agent_tasks.status, which this fixture's id-only
       // agent_tasks lacks.
       markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
+      // 319 indexes user FK columns on tables this fixture does not create.
+      markMigrationApplied(database, "319_user_fk_indexes.sql");
+      // 320 alters session_costs, which this fixture lacks.
+      markMigrationApplied(database, "320_session_costs_kind.sql");
+      // 322 alters runtime_pools and runtime_instances, which this fixture lacks.
+      markMigrationApplied(database, "322_runtime_pool_workspace.sql");
       // 323 indexes Slack task columns absent from this migration-112-only fixture.
       markMigrationApplied(database, "323_slack_task_tree_visibility.sql");
 
@@ -845,7 +851,9 @@ describe("script connections", () => {
         );
       // 213 rebuilds script_connections with the post-117 columns; skip it with 117.
       markMigrationApplied(database, "213_script_connections_sql.sql");
-      runMigrations(database); // applies every migration except 117 and 213
+      // 319 indexes the oauth tables that 117 creates; skip it with 117.
+      markMigrationApplied(database, "319_user_fk_indexes.sql");
+      runMigrations(database); // applies every migration except 117, 213 and 319
 
       const now = new Date().toISOString();
       // A user-created STANDALONE binding: source='user', arbitrary config_key

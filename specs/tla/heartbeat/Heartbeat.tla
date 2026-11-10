@@ -242,8 +242,8 @@ AbortTerminal(w, t) ==
 \* drain's refusal to dispatch only removes behaviors and is not modeled.
 \* Since #2736 the same route also runs for a provider error on a task with a
 \* claim-time profile (requestProviderFallback, reason provider_fallback):
-\* the resume always pins to the caller, ignoring capacity, and runs the next
-\* fallback profile. Same guards and the same state change, so this action
+\* the resume always pins to the caller, ignoring capacity, and runs the same
+\* profile on another key or the next fallback profile. Same guards and the same state change, so this action
 \* covers it; PROVIDER_FALLBACK enables it without the drain. No fallback left
 \* is a no-op on the server (the worker then fails the task: Complete).
 DrainHandoff(w, t) ==

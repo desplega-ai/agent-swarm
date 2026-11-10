@@ -295,6 +295,11 @@ export interface RuntimeControllerInput {
   secretConfig?: Record<string, string | null>;
 }
 
+/** Persistent `/workspace/personal` per agent and slot. `sizeGb` sizes new k8s claims only. */
+export interface RuntimePoolWorkspace {
+  sizeGb?: number;
+}
+
 export interface RuntimePoolInput {
   name: string;
   kind: RuntimeProviderKind;
@@ -308,6 +313,8 @@ export interface RuntimePoolInput {
   delivery: RuntimeDeliveryMode | null;
   env: Record<string, string>;
   resources: RuntimeResources | null;
+  /** Omitted on update keeps the stored value. Absent from an API without the field. */
+  workspace?: RuntimePoolWorkspace | null;
   ttlSec: number | null;
   enabled: boolean;
 }
@@ -675,6 +682,8 @@ export interface User {
   // Phase 064: NULL/undefined = unlimited.
   dailyBudgetUsd?: number | null;
   status: "invited" | "active" | "suspended";
+  /** Set while a merge job still moves this user into another one; the row disappears when it is done. */
+  mergedIntoUserId?: string | null;
   metadata?: Record<string, unknown>;
   createdAt: string;
   lastUpdatedAt: string;
@@ -940,6 +949,35 @@ export type ResolveUnmappedInput = { userId: string } | { name: string; email: s
 
 export interface MergeUsersInput {
   sourceUserId: string;
+}
+
+export type UserMergeJobStatus = "pending" | "running" | "done" | "failed";
+
+/**
+ * Background merge queued by `POST /api/users/{id}/merge` (202). The route
+ * moves identities and aliases at once; the job rewrites attribution in
+ * batches and deletes the source. `progress` counts rewritten rows per step,
+ * keyed like `phase` (`workflow-context`, `<table>.<column>`, `delete-user`).
+ * A failed attempt keeps the job `pending` with `error` set and `nextAttemptAt`
+ * in the future until the attempt cap, then the job is `failed`.
+ */
+export interface UserMergeJob {
+  id: string;
+  sourceUserId: string;
+  targetUserId: string;
+  status: UserMergeJobStatus;
+  phase: string | null;
+  progress: Record<string, number>;
+  error: string | null;
+  attempts: number;
+  nextAttemptAt: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface UserMergeJobResponse {
+  job: UserMergeJob;
 }
 
 /**

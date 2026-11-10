@@ -54,29 +54,56 @@ It does **not** stage or commit anything — it regenerates and reports. Commit 
 
 The Helm chart is published separately by `helm-publish.yml` when `charts/agent-swarm/Chart.yaml`'s `version` changes — which is exactly what `sync-chart-version` (and thus `prepare-release`) updates.
 
-If you push to `main` **without** a version change, none of the publish jobs run — Docker images still build/deploy but aren't tagged with a release version. So a release is opt-in: it's defined by the `package.json` version bump.
+If you push to `main` **without** a version change, none of the publish jobs run — Docker images still build (and deploy at the next window) but aren't tagged with a release version. So a release is opt-in: it's defined by the `package.json` version bump.
 
 ### Moving Docker tags and deployment
 
-The three manifest jobs publish SHA and optional version tags, then expose the
-exact manifest digests from Buildx's metadata file. Only the `deploy` job promotes
-API/worker `:latest` and worker `:slim`. It waits for all three manifests and holds
-the `agent-swarm-deploy` concurrency lock through the completed Dokploy deploy.
-`queue: max` preserves pending deployments (up to GitHub's 100-job limit), so a
-late stale build cannot evict a queued main-tip run.
-After acquiring that lock, it checks whether a newer main commit touches the
-workflow's `on.push.paths` (read from the workflow file, so the list lives in one
-place). If one does, that commit starts its own run, so this stale run keeps
-its SHA/version images but skips both promotion and deployment. Newer commits
-outside those paths (docs, for example) start no run, so they do not block the
-deploy. Logic: `scripts/deploy-guard.sh`; test: `src/tests/deploy-guard.test.ts`.
-Non-main manual dispatches cannot promote moving tags or deploy.
+Merging to `main` does not deploy prod. The three manifest jobs publish SHA and
+optional version tags, and the `promote-main-tags` job moves API/worker
+`:latest` and worker `:slim` to the run's manifest digests on every merge.
+Prod runs `:prod` (API and worker), which only `.github/workflows/deploy.yml`
+moves. An external scheduler dispatches it on `main` with no inputs at 09:00,
+14:00 and 19:00 Europe/Madrid; it also runs on manual dispatch. Each deploy restarts the API, which cuts
+and resumes in-flight tasks, so batching merges into three windows a day keeps
+that cost bounded. Prod must never read `:latest`: with `pull_policy: always`,
+any container restart would pull the main tip.
 
-Promotion uses the run's digest outputs, since even a SHA tag can change on a
-rerun. Builds remain parallel. The three registry writes are sequential, so a
-failed promotion can leave partially updated tags; it fails the job before
-deployment. Rerunning the current main workflow retries promotion. A newer main
-commit arriving after the guard waits for the lock before its own promotion.
+`promote-main-tags` holds the `agent-swarm-main-tags` concurrency lock.
+`queue: max` preserves pending promotions (up to GitHub's 100-job limit), so a
+late stale build cannot evict a queued main-tip run. After acquiring that lock,
+it checks whether a newer main commit touches the workflow's `on.push.paths`
+(read from the workflow file, so the list lives in one place). If one does,
+that commit starts its own run, so this stale run keeps its SHA/version images
+but skips promotion. Newer commits outside those paths (docs, for example)
+start no run, so they do not block it. Logic: `scripts/deploy-guard.sh`; test:
+`src/tests/deploy-guard.test.ts`. Promotion uses the run's digest outputs,
+since even a SHA tag can change on a rerun.
+
+`scripts/deploy-select.ts` walks main's first-parent history newest first and
+takes the first commit whose API and worker `sha-<short>` images both exist;
+builds are superseded per ref, so not every commit has images. It stops at the
+commit the API `:prod` revision label names: reaching it means nothing new was
+built, and the run skips with a job-summary notice (no promotion, no Dokploy
+call, no Slack post). A missing `:prod` means no previous deploy: it deploys,
+with an empty change list. It resolves both digests once, and promotion uses
+those digests, since a rerun can move a SHA tag. Test:
+`src/tests/deploy-select.test.ts`.
+
+The deploy job holds the `agent-swarm-deploy` concurrency lock through the
+completed Dokploy deploy, and selects only after taking it. Non-main dispatches
+cannot deploy. The two registry writes are sequential, so a failed promotion
+can leave partially updated tags; it fails the job before deployment, and the
+next run retries.
+
+Hotfix or rollback, without waiting for a window:
+
+```bash
+gh workflow run deploy.yml -R desplega-ai/agent-swarm                 # newest built main commit
+gh workflow run deploy.yml -R desplega-ai/agent-swarm -f sha=<main sha>
+```
+
+A requested SHA must be on main and have API and worker images. A rollback holds
+until the next window that finds a newer built commit.
 
 The deploy step is `scripts/dokploy-deploy.ts`. `compose.deploy` only queues the
 job; Dokploy creates the deployment record when its worker starts it, and that
@@ -90,9 +117,6 @@ hand after a red run, list the compose's deployments (or run
 `bun scripts/dokploy-deploy.ts --check` with `DOKPLOY_URL`, `DOKPLOY_COMPOSE_ID`,
 `DOKPLOY_TOKEN` set): a late record means the deploy is still coming.
 
-When first rolling out this workflow, let runs using the old workflow finish
-before relying on the lock: their manifest jobs still write moving tags outside it.
-
 ### Swarm Cloud image-release callback
 
 After the server and worker Docker manifest lists are published, the workflow posts the same release payload to each configured Swarm Cloud image-release intake. The callbacks are limited to the protected publish context: `desplega-ai/agent-swarm`, non-PR events, and `refs/heads/main`.
@@ -105,7 +129,7 @@ The production target uses `SWARM_CLOUD_BASE_URL` with `IMAGE_RELEASE_INTAKE_SEC
 
 ## Verifying a release
 
-After the merge, confirm the `Docker Build + Publish + Deploy` workflow run is green, then spot-check:
+After the merge, confirm the `Docker Build + Publish` workflow run is green and the next `Deploy` run (or a manual dispatch) deployed it, then spot-check:
 
 ```bash
 npm view @desplega.ai/agent-swarm@<version> version      # npm

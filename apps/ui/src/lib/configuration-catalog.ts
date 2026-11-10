@@ -950,15 +950,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   {
     id: "database",
     title: "Database",
-    description:
-      "Safety controls for database queries and opt-in retention of non-critical log tables.",
+    description: "Safety controls for database queries and retention of non-critical log tables.",
     icon: Database,
     entries: [
       {
         key: "SESSION_LOG_RETENTION_DAYS",
         label: "Session log retention",
         description:
-          "Delete session_logs rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes session transcripts.",
+          "Delete session_logs rows older than this many days. New installs start at 30 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes session transcripts.",
         kind: "number",
         unit: "days",
         placeholder: "30",
@@ -968,27 +967,27 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "AGENT_LOG_RETENTION_DAYS",
         label: "Agent log retention",
         description:
-          "Delete agent_log rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes task and agent history.",
+          "Delete agent_log rows older than this many days. New installs start at 90 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes task and agent history.",
         kind: "number",
         unit: "days",
-        placeholder: "30",
+        placeholder: "90",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "EVENTS_RETENTION_DAYS",
         label: "Event retention",
         description:
-          "Delete events rows older than this many days. Leave unset to disable this table's sweep. Aggregate event totals become retention-window totals.",
+          "Delete events rows older than this many days. New installs start at 90 days; reset to turn this sweep off. Existing installs: off until set. Aggregate event totals become retention-window totals.",
         kind: "number",
         unit: "days",
-        placeholder: "30",
+        placeholder: "90",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "CONTEXT_VERSIONS_KEEP_LATEST",
         label: "Context version retention",
         description:
-          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. Leave unset to disable this table's sweep. Deletion permanently removes older profile history.",
+          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. New installs start at 100; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes older profile history.",
         kind: "number",
         placeholder: "100",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
@@ -997,10 +996,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SCRIPT_RUNS_RETENTION_DAYS",
         label: "Script run retention",
         description:
-          "Delete finished script_runs rows (completed, failed, cancelled, aborted) older than this many days, with their journal. Running and paused runs and runs with an idempotency key are kept. Leave unset to disable this table's sweep. Deletion permanently removes script run source, args and output.",
+          "Delete finished script_runs rows (completed, failed, cancelled, aborted) older than this many days, with their journal. Running and paused runs and runs with an idempotency key are kept. New installs start at 30 days; reset to turn this sweep off. Existing installs: off until set. Deletion permanently removes script run source, args and output.",
         kind: "number",
         unit: "days",
-        placeholder: "95",
+        placeholder: "30",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {

@@ -15,6 +15,7 @@ import {
 } from "../constants";
 import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
+import { notReviewTaskCompletionSql } from "../review-recall-filter";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
 import type {
   MemoryCandidate,
@@ -59,6 +60,8 @@ export const FTS_SCAN_BATCH_SQL = `SELECT rowid AS rowid, memory_id AS memoryId,
   FROM memory_fts WHERE rowid > ? ORDER BY rowid LIMIT ?`;
 export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
   WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+/** How long search reuses one health result. Stale by at most this long. */
+export const SEARCH_HEALTH_TTL_MS = 60_000;
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
@@ -206,6 +209,7 @@ export class SqliteMemoryStore implements MemoryStore {
   private ftsInitialized = false;
   private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
+  private searchHealthCache: { health: MemoryHealth; db: unknown; at: number } | null = null;
 
   constructor() {
     this.ensureVecTable();
@@ -457,6 +461,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     const afterCount = this.getVecCount();
+    this.searchHealthCache = null;
     this.lastPopulate = {
       attempted,
       inserted,
@@ -635,6 +640,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead = false,
       includeExpired = false,
       keyPrefix,
+      excludeReviewTaskCompletions,
     } = options;
 
     if (options.exhaustive) {
@@ -645,11 +651,12 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        excludeReviewTaskCompletions,
         minSimilarity: options.minSimilarity,
       });
     }
 
-    const health = this.getHealth();
+    const health = this.searchHealth();
     if (
       isHybridSearchEnabled() &&
       options.queryText &&
@@ -668,6 +675,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        excludeReviewTaskCompletions,
       });
     }
 
@@ -682,6 +690,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        excludeReviewTaskCompletions,
         minSimilarity: options.minSimilarity,
       });
     }
@@ -697,6 +706,7 @@ export class SqliteMemoryStore implements MemoryStore {
         isLead,
         includeExpired,
         keyPrefix,
+        excludeReviewTaskCompletions,
       });
     }
 
@@ -710,6 +720,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead,
       includeExpired,
       keyPrefix,
+      excludeReviewTaskCompletions,
       minSimilarity: options.minSimilarity,
     });
   }
@@ -725,6 +736,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      excludeReviewTaskCompletions?: boolean;
     },
   ): Promise<MemoryCandidate[]> {
     const overfetchLimit = armFetchLimit(options.limit);
@@ -806,6 +818,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      excludeReviewTaskCompletions?: boolean;
     },
   ): Promise<MemoryCandidate[]> {
     const match = this.buildFtsMatch(queryText);
@@ -817,6 +830,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
     this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
+    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -883,6 +897,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      excludeReviewTaskCompletions?: boolean;
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
@@ -890,14 +905,16 @@ export class SqliteMemoryStore implements MemoryStore {
     const floor = options.minSimilarity ?? minSimilarity();
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
-    // sqlite-vec hard ceiling is 4096 for knn queries
-    const knnLimit = Math.min(Math.max(limit, this.getVecCount()), 4096);
+    // sqlite-vec's hard ceiling for knn queries. A table with fewer rows
+    // returns them all, so no per-query row count is needed to size k.
+    const knnLimit = 4096;
 
     const conditions: string[] = ["v.embedding MATCH ?"];
     const params: (Buffer | string | number | null)[] = [embeddingBuffer];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
     this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
+    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -952,6 +969,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      excludeReviewTaskCompletions?: boolean;
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
@@ -962,6 +980,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const params: (string | number | null)[] = [];
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
     this.addKeyPrefixCondition(conditions, params, keyPrefix);
+    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions);
     if (source) {
       conditions.push("source = ?");
       params.push(source);
@@ -1063,6 +1082,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
       keyPrefix?: string;
+      excludeReviewTaskCompletions?: boolean;
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
@@ -1074,6 +1094,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
     this.addKeyPrefixCondition(conditions, params, keyPrefix);
+    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions);
 
     if (source) {
       conditions.push("source = ?");
@@ -1147,6 +1168,19 @@ export class SqliteMemoryStore implements MemoryStore {
     const key = tableAlias ? `${tableAlias}.key` : "key";
     conditions.push(`substr(${key}, 1, length(?)) = ?`);
     params.push(keyPrefix, keyPrefix);
+  }
+
+  /** A review recaller's filter, applied in SQL so the rows never fill the window. */
+  private addReviewExclusion(
+    conditions: string[],
+    params: (Buffer | string | number | null)[],
+    exclude: boolean | undefined,
+    tableAlias = "",
+  ): void {
+    if (!exclude) return;
+    const filter = notReviewTaskCompletionSql(tableAlias);
+    conditions.push(filter.sql);
+    params.push(...filter.params);
   }
 
   private buildListWhereClause(
@@ -1426,6 +1460,7 @@ export class SqliteMemoryStore implements MemoryStore {
     if (this.vecInitialized && this.getVecTableSchema()) {
       const placeholders = ids.map(() => "?").join(",");
       await getDbClient().run(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`, ids);
+      this.noteVecWrite();
     }
     await this.deleteFtsRows(ids);
   }
@@ -1536,8 +1571,11 @@ export class SqliteMemoryStore implements MemoryStore {
             id,
             vecBuffer,
           ]);
+          this.noteVecWrite();
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
+          // The row now misses from memory_vec: search must see the fallback.
+          this.searchHealthCache = null;
         }
       }
     });
@@ -1550,6 +1588,7 @@ export class SqliteMemoryStore implements MemoryStore {
       ]);
       if (this.vecInitialized && this.getVecTableSchema()) {
         await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+        this.noteVecWrite();
       }
     });
   }
@@ -1587,6 +1626,7 @@ export class SqliteMemoryStore implements MemoryStore {
       // re-embed backfill picks the row up via `embedding IS NULL`.
       if (contentChanged && this.vecInitialized && this.getVecTableSchema()) {
         await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+        this.noteVecWrite();
       }
       if (after.name !== before.name || contentChanged) {
         await this.syncFtsRow(id, after.name, after.content);
@@ -1683,6 +1723,32 @@ export class SqliteMemoryStore implements MemoryStore {
           )
         : 0,
     };
+  }
+
+  /**
+   * getHealth() for the search path. The counts scan agent_memory and
+   * memory_vec synchronously, so search reuses one result per window; the
+   * health endpoint keeps calling getHealth() for fresh counts.
+   */
+  private searchHealth(): MemoryHealth {
+    const db = getDb();
+    const cached = this.searchHealthCache;
+    // The db check drops a result that outlived a DB swap (tests reinit it).
+    if (cached && cached.db === db && Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) {
+      return cached.health;
+    }
+    const health = this.getHealth();
+    this.searchHealthCache = { health, db, at: Date.now() };
+    return health;
+  }
+
+  /**
+   * A vec write can heal a cached fallback (first vector, backfilled row), so
+   * it drops one. A cached "vec" stays: dropping it on every write would
+   * recount on the next search, and a stale "vec" is at worst one TTL old.
+   */
+  private noteVecWrite(): void {
+    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.searchHealthCache = null;
   }
 
   getHealth(): MemoryHealth {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createWorkflow, deleteWorkflow, getDbClient, initDb } from "../be/db";
 import { telemetry } from "../telemetry";
+import { waitUntil } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-definition-telemetry.sqlite";
 
@@ -15,8 +16,9 @@ async function removeTestDb(): Promise<void> {
   }
 }
 
+// Workflow telemetry runs through DbClient.afterCommit, which queues behind the client lock.
+// Only for asserting that nothing more arrives; wait for an expected call with `telemetryCalls`.
 async function flushAfterCommit(): Promise<void> {
-  // Workflow telemetry runs through DbClient.afterCommit, which queues behind the client lock.
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
@@ -26,6 +28,12 @@ describe("workflow definition telemetry", () => {
     event: string;
     props: Parameters<typeof telemetry.workflow>[1];
   }>;
+
+  const telemetryCalls = (count: number) =>
+    waitUntil(
+      () => calls.length >= count,
+      () => `expected ${count} workflow telemetry call(s), saw ${calls.length}`,
+    );
 
   beforeEach(async () => {
     closeDb();
@@ -57,7 +65,7 @@ describe("workflow definition telemetry", () => {
       },
       "api",
     );
-    await flushAfterCommit();
+    await telemetryCalls(1);
 
     expect(calls).toEqual([
       {
@@ -79,11 +87,13 @@ describe("workflow definition telemetry", () => {
       },
       "mcp",
     );
-    await flushAfterCommit();
+    await telemetryCalls(1);
     calls = [];
 
     expect(await deleteWorkflow(workflow.id, "mcp")).toBe(true);
     expect(await deleteWorkflow(workflow.id, "mcp")).toBe(false);
+    await telemetryCalls(1);
+    // The second, no-op delete must add nothing.
     await flushAfterCommit();
 
     expect(calls).toEqual([
@@ -102,7 +112,7 @@ describe("workflow definition telemetry", () => {
       name: "internal telemetry",
       definition: { nodes: [] },
     });
-    await flushAfterCommit();
+    await telemetryCalls(1);
 
     expect(calls).toEqual([
       {
@@ -117,7 +127,7 @@ describe("workflow definition telemetry", () => {
 
   test("emits nothing when the caller's transaction rolls back", async () => {
     const kept = await createWorkflow({ name: "kept", definition: { nodes: [] } });
-    await flushAfterCommit();
+    await telemetryCalls(1);
     calls = [];
 
     await expect(

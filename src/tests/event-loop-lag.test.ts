@@ -86,43 +86,39 @@ describe("event-loop lag probe", () => {
     expect(lines[0]).toContain("path=test.env");
   });
 
-  test("a chain of awaited DB statements is one stall attributed to its entry point", async () => {
+  test("a long DB statement is one stall attributed to its entry point", async () => {
     const raw = new Database(":memory:");
+    // One driver call that blocks 1.1 s by the wall clock (a chain of shorter
+    // statements is sliced into separate macrotasks, so it no longer adds up
+    // to one stall). Not a statement sized by a timing calibration: the
+    // per-row cost moves more than the margin on a busy runner.
+    const query = raw.query.bind(raw);
+    raw.query = ((sql: string) => {
+      busyWait(1100);
+      return query(sql);
+    }) as typeof raw.query;
     const client = createBunSqliteClient(() => raw);
     try {
-      // Pure CPU in one driver call. Params are never logged.
-      const sql =
-        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c WHERE ? IS NOT NULL";
-      // Calibrate: one statement of about 350 ms on this machine. Two passes,
-      // because the first (cold) pass overestimates the per-row cost.
-      let rows = 200_000;
-      for (let pass = 0; pass < 2; pass++) {
-        const t0 = performance.now();
-        await client.get(sql, [rows, "calibrate"]);
-        rows = Math.max(10_000, Math.round((350 * rows) / (performance.now() - t0)));
-      }
-      await settle();
-      warn.mockClear();
-
       const startedAt = performance.now();
       await withLoopPath("test.db-chain", async () => {
-        for (let i = 0; i < 5; i++) await client.get(sql, [rows, "param-secret"]);
+        // Params are never logged.
+        await client.get("SELECT ? AS v", ["param-secret"]);
       });
       const elapsedMs = performance.now() - startedAt;
       await settle();
 
-      // Guard the premise: the chain must have run past the 1 s threshold.
+      // Guard the premise: the statement must have run past the 1 s threshold.
       expect(elapsedMs).toBeGreaterThan(1000);
       const lines = stallLines(warn);
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toMatch(/path=test\.db-chain statements=5 /);
-      expect(lines[0]).toContain("paths=test.db-chain:5");
+      expect(lines[0]).toMatch(/path=test\.db-chain statements=1 /);
+      expect(lines[0]).toContain("paths=test.db-chain:1");
       expect(lines[0]).not.toContain("param-secret");
       // The per-statement slow line carries the same path key.
       const slow = warn.mock.calls
         .map((args) => String(args[0]))
         .filter((l) => l.includes("[db-client] slow sync statement"));
-      expect(slow.length).toBe(5);
+      expect(slow.length).toBe(1);
       for (const l of slow) expect(l).toContain("path=test.db-chain:");
     } finally {
       raw.close();

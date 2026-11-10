@@ -35,6 +35,11 @@ import {
   upsertKv,
 } from "../be/db";
 import { ensureRbacSeedsSynced, setUserRoles } from "../be/rbac-roles";
+import {
+  clearUserMergeRetryTimersForTests,
+  getUserMergeJob,
+  runUserMergeJobs,
+} from "../be/user-merge-jobs";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -94,8 +99,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // A merge test's background job must not outlive the test, nor its retry timer.
+  clearUserMergeRetryTimersForTests();
+  await runUserMergeJobs();
   // Clean slate between tests for deterministic event counts.
   const client = getDbClient();
+  await client.run("DELETE FROM user_merge_jobs");
   await client.run("DELETE FROM user_identity_events");
   await client.run("DELETE FROM user_external_ids");
   await client.run("DELETE FROM user_tokens");
@@ -807,7 +816,11 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 });
 
 describe("POST /api/users/:id/merge", () => {
-  test("moves identities, removes source, leaves manual_merge event", async () => {
+  type MergeResponse = {
+    job: { id: string; status: string; sourceUserId: string; targetUserId: string };
+  };
+
+  test("202: moves identities, queues the job, the job removes the source", async () => {
     const target = await createUser({ name: "Target", email: "t@x.com" });
     const source = await createUser({
       name: "Source",
@@ -840,8 +853,27 @@ describe("POST /api/users/:id/merge", () => {
       method: "POST",
       body: JSON.stringify({ sourceUserId: source.id }),
     });
-    expect(r.status).toBe(200);
-    const { user } = (await r.json()) as {
+    expect(r.status).toBe(202);
+    const { job } = (await r.json()) as MergeResponse;
+    expect(job.sourceUserId).toBe(source.id);
+    expect(job.targetUserId).toBe(target.id);
+    expect(["pending", "running", "done"]).toContain(job.status);
+
+    // The route's own kick drains the queue; wait for it.
+    await runUserMergeJobs();
+    const finished = await getUserMergeJob(job.id);
+    expect(finished?.status).toBe("done");
+    expect(finished?.error).toBeNull();
+    expect(finished?.progress["workflow-context"]).toBe(1);
+    expect(finished?.progress["scheduled_tasks.created_by"]).toBe(1);
+    expect(finished?.progress["delete-user"]).toBe(1);
+
+    const jobR = await authedFetch(`/api/users/merge-jobs/${job.id}`);
+    expect(jobR.status).toBe(200);
+    expect(((await jobR.json()) as MergeResponse).job.status).toBe("done");
+
+    const targetR = await authedFetch(`/api/users/${target.id}`);
+    const { user } = (await targetR.json()) as {
       user: {
         id: string;
         identities: Array<{ kind: string; externalId: string }>;
@@ -879,8 +911,9 @@ describe("POST /api/users/:id/merge", () => {
       method: "POST",
       body: JSON.stringify({ sourceUserId: source.id }),
     });
-    expect(r.status).toBe(200);
-    const { user } = (await r.json()) as {
+    expect(r.status).toBe(202);
+    const targetR = await authedFetch(`/api/users/${target.id}`);
+    const { user } = (await targetR.json()) as {
       user: {
         recentEvents: Array<{
           eventType: string;
@@ -897,33 +930,16 @@ describe("POST /api/users/:id/merge", () => {
     expect(mergeEvent!.after?.source?.email).toBe("ms@x.com");
   });
 
-  test("rolls back identity moves when deletion fails", async () => {
+  test("rolls back identity moves when the short phase fails", async () => {
     const target = await createUser({ name: "RollbackTarget", email: "rollback-target@x.com" });
     const source = await createUser({ name: "RollbackSource", email: "rollback-source@x.com" });
-    const workflow = await createWorkflow({
-      name: `rollback-attribution-${crypto.randomUUID()}`,
-      definition: { nodes: [] },
-    });
-    const run = await createWorkflowRun({
-      id: crypto.randomUUID(),
-      workflowId: workflow.id,
-      createdBy: source.id,
-    });
-    await updateWorkflowRun(run.id, {
-      context: { swarm: { requestedByUserId: source.id }, retained: "rollback" },
-    });
-    const schedule = await createScheduledTask({
-      name: `rollback-user-schedule-${crypto.randomUUID()}`,
-      intervalMs: 60_000,
-      taskTemplate: "Retain rollback schedule",
-      createdBy: source.id,
-    });
     await linkIdentity(source.id, "slack", "U_MERGE_ROLLBACK", {
       kind: "operator",
       id: OPERATOR_FP,
     });
-    await getDbClient().run(`CREATE TEMP TRIGGER fail_merge_source_delete
-      BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
+    // The merge mark is the last write of the short phase.
+    await getDbClient().run(`CREATE TEMP TRIGGER fail_merge_mark
+      BEFORE UPDATE OF mergedIntoUserId ON users WHEN NEW.id = '${source.id}'
       BEGIN SELECT RAISE(ABORT, 'forced merge failure'); END`);
 
     try {
@@ -940,14 +956,6 @@ describe("POST /api/users/:id/merge", () => {
       expect(identity?.userId).toBe(source.id);
       expect(
         (
-          await getDbClient().get<{ count: number }>(
-            "SELECT COUNT(*) AS count FROM users WHERE id = ?",
-            [source.id],
-          )
-        )?.count,
-      ).toBe(1);
-      expect(
-        (
           await getDbClient().get<{ emailAliases: string }>(
             "SELECT emailAliases FROM users WHERE id = ?",
             [target.id],
@@ -962,16 +970,109 @@ describe("POST /api/users/:id/merge", () => {
           )
         )?.count,
       ).toBe(0);
-      expect((await getWorkflowRun(run.id))?.createdBy).toBe(source.id);
-      expect((await getWorkflowRun(run.id))?.context).toEqual({
-        swarm: { requestedByUserId: source.id },
-        retained: "rollback",
-      });
-      expect((await getScheduledTaskById(schedule.id))?.createdBy).toBe(source.id);
-      expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBe(source.id);
+      expect(
+        (
+          await getDbClient().get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM user_merge_jobs",
+          )
+        )?.count,
+      ).toBe(0);
     } finally {
+      await getDbClient().run("DROP TRIGGER fail_merge_mark");
+    }
+  });
+
+  test("a job that fails waits for a retry with the error and keeps the short phase", async () => {
+    const target = await createUser({ name: "FailTarget", email: "fail-target@x.com" });
+    const source = await createUser({ name: "FailSource", email: "fail-source@x.com" });
+    const workflow = await createWorkflow({
+      name: `failed-job-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: source.id,
+    });
+    await linkIdentity(source.id, "slack", "U_MERGE_FAIL", { kind: "operator", id: OPERATOR_FP });
+    await getDbClient().run(`CREATE TEMP TRIGGER fail_merge_source_delete
+      BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
+      BEGIN SELECT RAISE(ABORT, 'forced merge failure'); END`);
+
+    try {
+      const response = await authedFetch(`/api/users/${target.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: source.id }),
+      });
+      expect(response.status).toBe(202);
+      const { job } = (await response.json()) as MergeResponse;
+      await runUserMergeJobs();
+
+      // A failed attempt goes back to pending with a backoff; the error is kept.
+      const failed = await getUserMergeJob(job.id);
+      expect(failed?.status).toBe("pending");
+      expect(failed?.attempts).toBe(1);
+      expect(failed?.nextAttemptAt).not.toBeNull();
+      expect(failed?.error).toContain("forced merge failure");
+      // The short phase stays committed: identity moved, source marked.
+      const identity = await getDbClient().get<{ userId: string }>(
+        "SELECT userId FROM user_external_ids WHERE kind = ? AND externalId = ?",
+        ["slack", "U_MERGE_FAIL"],
+      );
+      expect(identity?.userId).toBe(target.id);
+      const sourceR = await authedFetch(`/api/users/${source.id}`);
+      expect(sourceR.status).toBe(200);
+      expect(
+        ((await sourceR.json()) as { user: { mergedIntoUserId?: string } }).user.mergedIntoUserId,
+      ).toBe(target.id);
+      // The batches before the failure are committed too.
+      expect((await getWorkflowRun(run.id))?.createdBy).toBe(target.id);
+      const listR = await authedFetch("/api/users/merge-jobs?status=pending");
+      expect(listR.status).toBe(200);
+      expect(
+        ((await listR.json()) as { jobs: Array<{ id: string }> }).jobs.map((j) => j.id),
+      ).toContain(job.id);
+    } finally {
+      clearUserMergeRetryTimersForTests();
       await getDbClient().run("DROP TRIGGER fail_merge_source_delete");
     }
+  });
+
+  test("409 merge_in_progress while a job for the source or target is not done", async () => {
+    const target = await createUser({ name: "BusyTarget", email: "busy-target@x.com" });
+    const source = await createUser({ name: "BusySource", email: "busy-source@x.com" });
+    const other = await createUser({ name: "BusyOther", email: "busy-other@x.com" });
+    await getDbClient().run(`CREATE TEMP TRIGGER hold_merge_source_delete
+      BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
+      BEGIN SELECT RAISE(ABORT, 'hold'); END`);
+    try {
+      const first = await authedFetch(`/api/users/${target.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: source.id }),
+      });
+      expect(first.status).toBe(202);
+      await runUserMergeJobs();
+      // The source carries the merge mark whatever the job's state.
+      const again = await authedFetch(`/api/users/${other.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: source.id }),
+      });
+      expect(again.status).toBe(409);
+      expect(((await again.json()) as { error: string }).error).toBe("merge_in_progress");
+      const intoSource = await authedFetch(`/api/users/${source.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: other.id }),
+      });
+      expect(intoSource.status).toBe(409);
+    } finally {
+      clearUserMergeRetryTimersForTests();
+      await getDbClient().run("DROP TRIGGER hold_merge_source_delete");
+    }
+  });
+
+  test("GET /api/users/merge-jobs/:jobId → 404 for an unknown job", async () => {
+    const r = await authedFetch("/api/users/merge-jobs/no-such-job");
+    expect(r.status).toBe(404);
   });
 
   test("409 last_admin when the source is the only admin, and nothing is merged", async () => {
@@ -1008,7 +1109,7 @@ describe("POST /api/users/:id/merge", () => {
       method: "POST",
       body: JSON.stringify({ sourceUserId: source.id }),
     });
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(202);
   });
 
   test("400 when target == source", async () => {

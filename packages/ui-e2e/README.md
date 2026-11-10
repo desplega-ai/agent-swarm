@@ -100,7 +100,7 @@ The target API must be 2.5.1 or later, or run with `SWARM_DEV_MODE=true`, for `s
 
 ## CI
 
-`.github/workflows/ui-e2e.yml` runs two shards on pull requests that touch the UI, the API, or this package, and on pushes to `main`. It also runs on a nightly cron (`0 3 * * *` UTC) and on manual dispatch.
+`.github/workflows/ui-e2e.yml` runs two shards on pull requests that touch the UI, the API, or this package, and on pushes to `main`. It also runs on manual dispatch. An external scheduler dispatches it on `main` nightly at 03:00 UTC, and a dispatch on `main` reports to the tracker as a nightly run.
 
 The `report` job resolves the run context once: trigger, target, sha, ref, and PR number. Every later step reads that context. It merges the blob reports into the `ui-e2e-html-report` artifact. For every same-repo event, it uploads screenshots, traces, and each shard's `summary.json` to agent-fs. It builds the sticky PR comment from every `summary.json`. It ingests one payload per shard into the UI E2E tracker. It uploads the ingest payloads and `artifacts.json` as the `ui-e2e-ingest-payloads` artifact for review.
 

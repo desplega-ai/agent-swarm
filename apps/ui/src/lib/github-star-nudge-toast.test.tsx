@@ -40,6 +40,13 @@ const starToasts = () =>
   [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].filter(
     (el) => el.textContent?.includes("Enjoying agent-swarm?") && el.dataset.removed !== "true",
   );
+async function waitForStarToasts(count: number) {
+  const deadline = Date.now() + 2000;
+  while (starToasts().length !== count && Date.now() < deadline) {
+    await act(() => new Promise((resolve) => setTimeout(resolve, 25)));
+  }
+  expect(starToasts()).toHaveLength(count);
+}
 const close = () =>
   act(async () =>
     starToasts()[0]?.querySelector<HTMLButtonElement>("button[aria-label=Close]")?.click(),
@@ -78,9 +85,11 @@ beforeEach(() => {
   root = createRoot(host);
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  toast.dismiss();
-  client.clear();
+  await act(async () => {
+    root.unmount();
+    toast.dismiss();
+    client.clear();
+  });
   host.remove();
 });
 afterAll(async () => GlobalRegistrator.unregister());
@@ -91,9 +100,9 @@ describe("automatic GitHub star nudge", () => {
     await render();
     expect(starToasts()).toHaveLength(0);
     await refreshStats(5);
-    expect(starToasts()).toHaveLength(1);
+    await waitForStarToasts(1);
     await refreshStats(6);
-    expect(starToasts()).toHaveLength(1);
+    await waitForStarToasts(1);
   });
 
   test("opens on load for existing tasks despite a filtered, paginated list", async () => {
@@ -117,9 +126,7 @@ describe("automatic GitHub star nudge", () => {
     await render();
     expect(starToasts()).toHaveLength(0);
     statsResponse = async () => stats(5);
-    await tick();
-    await tick();
-    expect(starToasts()).toHaveLength(1);
+    await waitForStarToasts(1);
   });
 
   test("Strict Mode cleanup neither dismisses the offer nor removes its replacement", async () => {
@@ -145,11 +152,7 @@ describe("automatic GitHub star nudge", () => {
     await render();
     expect(starToasts()).toHaveLength(0);
     await act(async () => pending.resolve(stats(5)));
-    const deadline = Date.now() + 2000;
-    while (starToasts().length === 0 && Date.now() < deadline) {
-      await act(() => new Promise((resolve) => setTimeout(resolve, 25)));
-    }
-    expect(starToasts()).toHaveLength(1);
+    await waitForStarToasts(1);
   });
 
   test("waits for resolved identity and skips anonymous tabs", async () => {

@@ -1249,12 +1249,47 @@ export const UserSchema = z
     dailyBudgetUsd: z.number().nullable().optional(),
     // Lifecycle (Phase 064). CHECK constraint enforces these three values.
     status: z.enum(["invited", "active", "suspended"]).default("active"),
+    // Set while a merge job (POST /api/users/{id}/merge) still rewrites this
+    // user's rows into the target. Such a user cannot authenticate, and
+    // identity lookups resolve to the target. Absent once the job deletes it.
+    mergedIntoUserId: z.string().nullable().optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
   .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
+
+export const UserMergeJobStatusSchema = z.enum(["pending", "running", "done", "failed"]);
+export type UserMergeJobStatus = z.infer<typeof UserMergeJobStatusSchema>;
+
+/**
+ * Background merge of one user into another (`user_merge_jobs`). The route
+ * moves identities and aliases synchronously and queues the attribution
+ * rewrite; `src/be/user-merge-jobs.ts` runs it in batches and deletes the
+ * source when done. `progress` counts rewritten rows per step, keyed like
+ * `phase` (`workflow-context`, `<table>.<column>`, `delete-user`). A failed
+ * attempt keeps the job `pending` with `error` set and `nextAttemptAt` in the
+ * future until the attempt cap, then the job is `failed`.
+ */
+export const UserMergeJobSchema = z
+  .object({
+    id: z.string(),
+    sourceUserId: z.string(),
+    targetUserId: z.string(),
+    status: UserMergeJobStatusSchema,
+    phase: z.string().nullable(),
+    progress: z.record(z.string(), z.number()),
+    error: z.string().nullable(),
+    attempts: z.number(),
+    nextAttemptAt: z.string().nullable(),
+    createdAt: z.string(),
+    startedAt: z.string().nullable(),
+    finishedAt: z.string().nullable(),
+  })
+  .openapi("UserMergeJob");
+
+export type UserMergeJob = z.infer<typeof UserMergeJobSchema>;
 
 export const RbacRoleSchema = z
   .object({
@@ -2009,6 +2044,11 @@ export const SessionCostSourceSchema = z.enum([
 ]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+// Migration 320: what incurred the row. 'harness' is a worker session;
+// 'system-one' is one SystemOne decision (Jev, Clef) made for the task.
+export const SessionCostKindSchema = z.enum(["harness", "system-one"]);
+export type SessionCostKind = z.infer<typeof SessionCostKindSchema>;
+
 export const SessionCostModelBreakdownSchema = z
   .object({
     model: z.string(),
@@ -2056,6 +2096,7 @@ export const SessionCostSchema = z
     //   'estimated'      — the API priced fallback token counts at an assumed
     //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
+    kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
     cacheWrite5mTokens: z.number().int().nullable().optional(),
@@ -2493,6 +2534,11 @@ export const RuntimePoolCacheSchema = z
   })
   .strict();
 
+/** Persistent `/workspace/personal` per (agent, slot). `sizeGb` applies to k8s only. */
+export const RuntimePoolWorkspaceSchema = z
+  .object({ sizeGb: z.number().int().min(1).max(1024).optional() })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2508,6 +2554,7 @@ export const RuntimePoolCreateSchema = z
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
     cache: RuntimePoolCacheSchema.nullable().default(null),
+    workspace: RuntimePoolWorkspaceSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2522,6 +2569,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
   cache: RuntimePoolCacheSchema.nullable().optional(),
+  workspace: RuntimePoolWorkspaceSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -2571,6 +2619,8 @@ export const RuntimeInstanceSchema = z
     idleSince: z.string().nullable().optional(),
     leaseExpiresAt: z.string().nullable().optional(),
     taskId: z.string().nullable().optional(),
+    /** Persistent workspace slot (lowest free per agent); null without a pool workspace. */
+    workspaceSlot: z.number().int().nullable().optional(),
     /** Runtime-local concurrent task capacity, self-reported at registration. */
     reportedSlots: z.number().int(),
     /** Process-local credential readiness; null when never reported. */
@@ -2871,6 +2921,19 @@ export const TriggerConfigSchema = z
       verification: WebhookVerificationSchema.optional().describe(
         "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
       ),
+      events: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event.",
+        ),
+      eventHeader: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event.",
+        ),
     }),
     z.object({
       type: z.literal("schedule"),
@@ -3749,6 +3812,14 @@ export const ExtensionManifestSchema = z
       .strict(),
     homepage: z.string().url().optional(),
     author: z.string().min(1).optional(),
+    toolSources: z
+      .array(z.enum(["mcp", "native"]))
+      .min(1)
+      .readonly()
+      .optional()
+      .describe(
+        'Which tool calls reach this extension\'s `pre.tool.call` and `post.tool.call` handlers: `"mcp"` for swarm MCP tools, `"native"` for harness built-ins (bash, read, write, edit) reported through `POST /api/tool-hooks`. Default `["mcp"]`.',
+      ),
   })
   .strict()
   .superRefine((manifest, ctx) => {
@@ -4184,6 +4255,9 @@ export const PricingProviderSchema = z.enum([
   "cursor",
   "grok",
   "fx",
+  // SystemOne decisions recorded on a task; model keys are `<host>/<model>`
+  // (e.g. `cloudflare/clef`). No seeded rows: unpriced until an operator adds one.
+  "system-one",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 
