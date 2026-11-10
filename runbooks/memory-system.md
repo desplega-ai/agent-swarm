@@ -330,8 +330,11 @@ every call. `missingFromVec` is `validEmbedding` minus a `memory_vec`-driven joi
 probed vec0 once per memory and took about 1.1 s at 57k memories.
 
 `memory_fts.memory_id` is `UNINDEXED`, so `DELETE FROM memory_fts WHERE memory_id = ?`
-reads the whole index. `store()` skips that delete for its fresh id unless an FTS
-backfill is running in the process. `edit()` and the scrub rewrite keep it.
+reads the whole index. `store()` writes its FTS row inside the memory transaction
+and skips that delete: the fresh id has no FTS row, and the backfill's insert
+skips ids `memory_fts` already holds, so any backfill, in any store instance or
+process, sees the memory row only together with its FTS row. `edit()` and the
+scrub rewrite keep the delete and run it with the insert in one transaction.
 Tests: `src/tests/memory-search-stall.test.ts`.
 
 ## Trigger paths

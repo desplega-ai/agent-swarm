@@ -65,20 +65,6 @@ export const SEARCH_HEALTH_TTL_MS = 60_000;
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
-/**
- * FTS backfills running in this process, across store instances. While one
- * runs it can index a just-committed memory before store() does, so store()
- * must delete before it inserts. With none running, a fresh id has no FTS row,
- * and the delete is skipped: it is a full memory_fts scan (memory_id is
- * UNINDEXED), about 90 ms at 57k memories, once per stored chunk.
- */
-const ftsBackfillsInFlight = new Set<Promise<void>>();
-
-/** Resolves once every FTS backfill started so far has settled. */
-export async function waitForFtsBackfillsForTesting(): Promise<void> {
-  while (ftsBackfillsInFlight.size > 0) await Promise.all(ftsBackfillsInFlight);
-}
-
 export type AgentMemoryRow = {
   id: string;
   agentId: string | null;
@@ -243,15 +229,9 @@ export class SqliteMemoryStore implements MemoryStore {
         )
       `);
       this.ftsInitialized = true;
-      const backfill: Promise<void> = this.populateFtsTable()
-        .catch((err) => {
-          console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
-        })
-        .finally(() => {
-          ftsBackfillsInFlight.delete(backfill);
-        });
-      ftsBackfillsInFlight.add(backfill);
-      this.ftsPopulate = backfill;
+      this.ftsPopulate = this.populateFtsTable().catch((err) => {
+        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
+      });
     } catch (err) {
       this.ftsInitialized = false;
       console.error("[memory-fts] Failed to initialize memory_fts:", (err as Error).message);
@@ -276,8 +256,9 @@ export class SqliteMemoryStore implements MemoryStore {
    * FTS_MISSING_IDS_SQL), and inserts run in batches that yield the event loop
    * between them, so a cold rebuild cannot stall the API the way the old
    * synchronous correlated anti-join did at boot. Rows written by
-   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows,
-   * which delete-then-insert, so a concurrent write cannot leave a duplicate.
+   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows.
+   * The insert below skips ids memory_fts already holds, in one statement, so
+   * a write that commits its memory and FTS rows together cannot be doubled.
    */
   private async populateFtsTable(): Promise<void> {
     const client = getDbClient();
@@ -345,8 +326,11 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   /**
-   * `freshId`: the memory row was just inserted under a new random id, so only
-   * a concurrent backfill can have indexed it (see ftsBackfillsInFlight).
+   * Delete and insert run in one transaction (a SAVEPOINT inside a caller's),
+   * so a backfill insert cannot land between them, and a failure rolls back
+   * only the FTS write. `freshId`: the caller inserted the memory row under a
+   * new id in the same transaction, so no FTS row can exist for it and the
+   * delete, a full memory_fts scan (memory_id is UNINDEXED), is skipped.
    */
   private async syncFtsRow(
     memoryId: string,
@@ -356,14 +340,14 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
     try {
-      if (!freshId || ftsBackfillsInFlight.size > 0) {
-        await getDbClient().run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
-      }
-      await getDbClient().run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
-        memoryId,
-        name,
-        content,
-      ]);
+      await getDbClient().transaction(async (tx) => {
+        if (!freshId) await tx.run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+        await tx.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
+          memoryId,
+          name,
+          content,
+        ]);
+      });
     } catch (err) {
       console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
     }
@@ -583,10 +567,11 @@ export class SqliteMemoryStore implements MemoryStore {
           input.agentId ?? null,
         ],
       );
+      // Same transaction: a backfill sees the memory row only with its FTS row.
+      await this.syncFtsRow(inserted.id, inserted.name, inserted.content, true);
       return inserted;
     });
 
-    await this.syncFtsRow(row.id, row.name, row.content, true);
     return rowToAgentMemory(row);
   }
 

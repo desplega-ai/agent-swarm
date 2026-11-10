@@ -2,11 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, setSystemTime, test }
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, getDbClient, initDb } from "../be/db";
-import {
-  SEARCH_HEALTH_TTL_MS,
-  SqliteMemoryStore,
-  waitForFtsBackfillsForTesting,
-} from "../be/memory/providers/sqlite-store";
+import { SEARCH_HEALTH_TTL_MS, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import type { AgentMemory } from "../types";
 
@@ -303,6 +299,20 @@ describe("health counts and the FTS sync avoid full scans", () => {
       source: "manual",
     });
     await store.updateEmbedding(invalid.id, new Float32Array(7), "test");
+    // No embedding at all: counted in neither side either.
+    await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-none",
+      content: "vec-none",
+      source: "manual",
+    });
+    // A vec row with no memory behind it must not reduce the count.
+    const orphanId = randomUUID();
+    await getDbClient().run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
+      orphanId,
+      new Uint8Array(mix(0.5, 6).buffer),
+    ]);
 
     const oracle = getDb()
       .prepare<{ n: number }, []>(
@@ -312,14 +322,18 @@ describe("health counts and the FTS sync avoid full scans", () => {
            AND v.memory_id IS NULL`,
       )
       .get()?.n;
-    expect(oracle).toBeGreaterThanOrEqual(1);
-    expect(store.getHealth().counts.missingFromVec).toBe(oracle as number);
+    try {
+      expect(oracle).toBeGreaterThanOrEqual(1);
+      const counts = store.getHealth().counts;
+      expect(counts.extraInVec).toBeGreaterThanOrEqual(1);
+      expect(counts.missingFromVec).toBe(oracle as number);
+    } finally {
+      await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [orphanId]);
+    }
   });
 
-  test("store() runs no memory_fts delete once the backfill is done", async () => {
-    const store = new SqliteMemoryStore();
-    // Every store built in this file starts its own backfill.
-    await waitForFtsBackfillsForTesting();
+  test("store() runs no memory_fts delete, even while a backfill runs", async () => {
+    const store = new SqliteMemoryStore(); // starts a backfill
     const watch = watchFtsDeletes();
     try {
       const ids: string[] = [];
@@ -361,5 +375,47 @@ describe("health counts and the FTS sync avoid full scans", () => {
     });
     await store.whenFtsPopulated();
     expect(await ftsRowCount(row.id)).toBe(1);
+  });
+
+  test("a backfill that finishes between store()'s commit and return leaves one memory_fts row", async () => {
+    const store = new SqliteMemoryStore();
+    await store.whenFtsPopulated();
+    // Pause store() after its outermost transaction commits, before it returns.
+    const client = getDbClient();
+    const realTransaction = client.transaction;
+    let committed!: () => void;
+    const commit = new Promise<void>((resolve) => {
+      committed = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let armed = true;
+    client.transaction = (async (fn, opts) => {
+      if (!armed) return realTransaction.call(client, fn, opts);
+      armed = false;
+      const result = await realTransaction.call(client, fn, opts);
+      committed();
+      await gate;
+      return result;
+    }) as typeof client.transaction;
+    try {
+      const storing = store.store({
+        agentId: scanAgent,
+        scope: "agent",
+        name: "paused",
+        content: "fts sync probe paused",
+        source: "manual",
+      });
+      await commit;
+      // Another instance's backfill sees the committed row and runs to completion.
+      await new SqliteMemoryStore().whenFtsPopulated();
+      release();
+      const row = await storing;
+      expect(await ftsRowCount(row.id)).toBe(1);
+    } finally {
+      client.transaction = realTransaction;
+    }
   });
 });
