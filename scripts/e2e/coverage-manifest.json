@@ -272,7 +272,12 @@
     },
     "credential-pool": {
       "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
-      "scenarios": ["platform-keys", "key-window-usage", "platform-pool-keys", "platform-codex-accounts"]
+      "scenarios": [
+        "platform-keys",
+        "key-window-usage",
+        "platform-pool-keys",
+        "platform-codex-accounts"
+      ]
     },
     "extension-lead-gating": {
       "description": "Install by catalog name, enable and disable by lead tool, hook blocks and unblocks, run log, version list, owner delete",
@@ -441,6 +446,7 @@
         "slack-reaction-override",
         "slack-relay-restart",
         "slack-task-output-citations",
+        "slack-task-tree-toggle",
         "slack-task-output-ui-spec",
         "slack-pre-task-create-block"
       ]

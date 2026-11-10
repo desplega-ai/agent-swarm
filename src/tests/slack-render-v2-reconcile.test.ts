@@ -120,14 +120,22 @@ describe("slack render-v2 reconcile scheduling", () => {
       workflowEventBus.emit("task.progress", { taskId: a.task.id, progress: "working" });
       // The debounced flush runs on its own, without a watcher tick.
       const deadline = Date.now() + 3_000;
-      while (!seen.some(isTreeSweep) && Date.now() < deadline) await Bun.sleep(20);
+      while (
+        !seen.some(
+          (q) => q.sql.includes("SELECT * FROM agent_tasks") && q.params.includes(a.threadTs),
+        ) &&
+        Date.now() < deadline
+      )
+        await Bun.sleep(20);
       await flushSlackRenderV2DirtyThreads();
     } finally {
       restore();
     }
     const sweeps = seen.filter(isTreeSweep);
-    expect(sweeps).toHaveLength(1);
-    expect(sweeps[0]!.params).toEqual([a.channelId, a.threadTs]);
+    expect(sweeps).toHaveLength(0);
+    const reads = seen.filter((q) => q.params.includes(a.channelId));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(seen.some((q) => q.params.includes(b.channelId))).toBe(false);
   });
 
   test("a flush with nothing queued reads no thread", async () => {

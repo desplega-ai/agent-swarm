@@ -3109,6 +3109,7 @@
     }
   },
   "slack_render_v2_state": {
+    "task_tree_enabled_at": { "exempt": "timestamp" },
     "activated_at": {
       "exempt": "timestamp"
     },

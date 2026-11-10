@@ -15,7 +15,7 @@ import {
   recordSlackMessage,
   updateSlackMessageRecord,
 } from "../be/db";
-import { closeSlackTreeIfSettled } from "../be/db/slack-trees";
+import { closeSlackTreeIfSettled, getSlackProcessingThreads } from "../be/db/slack-trees";
 import { getSlackTasksMissingTree } from "../be/db/tasks/read";
 import { completeTask, startTask } from "../be/db/tasks/write";
 
@@ -118,6 +118,26 @@ describe("slack render-v2 watcher queries", () => {
     } finally {
       copy.close();
     }
+  });
+
+  test("processing discovers old active threads without a tree or a 200-task cap", async () => {
+    const lead = await createAgent({ name: "old active lead", isLead: true, status: "idle" });
+    const old = "2001-01-01T00:00:00.000Z";
+    for (let i = 0; i < 205; i++) {
+      const task = await createTaskExtended(`old ask ${i}`, {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: "C_OLD_ACTIVE",
+        slackThreadTs: `${i}.0`,
+      });
+      await getDbClient().run(
+        "UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?",
+        [old, old, task.id],
+      );
+    }
+    expect(await getSlackProcessingThreads(false)).toHaveLength(205);
+    const sql = await capturedSql(() => getSlackProcessingThreads(false));
+    expect(plan(sql, [0])).toContain("idx_slack_render_active_tasks");
   });
 
   test("deferral resolution drives from the chain, not from every task", async () => {

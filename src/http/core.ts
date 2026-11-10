@@ -153,6 +153,8 @@ export async function loadGlobalConfigsIntoEnv(override = false): Promise<string
   if (updated.length > 0) {
     refreshSecretScrubberCache();
   }
+  const { syncSlackTreeVisibility } = await import("../slack/tree-visibility");
+  await syncSlackTreeVisibility();
   return updated;
 }
 

@@ -708,6 +708,8 @@ describe("script connections", () => {
       // 318 updates agent_tasks.status, which this fixture's id-only
       // agent_tasks lacks.
       markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
+      // 323 indexes Slack task columns absent from this migration-112-only fixture.
+      markMigrationApplied(database, "323_slack_task_tree_visibility.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

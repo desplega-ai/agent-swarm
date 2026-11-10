@@ -59,7 +59,7 @@ import {
   shouldSkipLeftSlackThread,
 } from "./left-threads";
 import { collectSlackMessageFiles, slackInboundMessageText } from "./message-text";
-import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { buildSlackThreadSnapshot, type SlackThreadSnapshot } from "./thread-participants";
@@ -774,7 +774,7 @@ export function registerMessageHandler(app: App): void {
       await notifySlackFileFailures(client, msg.channel, threadTs, unattached);
 
       if (isSlackRenderV2Enabled()) {
-        await ensureSlackThreadTree([task.id]);
+        await ensureSlackThreadPresentation([task.id]);
       } else {
         await say({
           text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",
@@ -957,7 +957,7 @@ export function registerMessageHandler(app: App): void {
         ({ taskId }) => taskId,
       );
       if (isSlackRenderV2Enabled()) {
-        if (successfulTaskIds.length > 0) await ensureSlackThreadTree(successfulTaskIds);
+        if (successfulTaskIds.length > 0) await ensureSlackThreadPresentation(successfulTaskIds);
         // The tree only renders tasks that exist. A blocked or failed assignment must
         // still be answered, or the user gets silence for a policy block.
         if (results.failed.length > 0) {
