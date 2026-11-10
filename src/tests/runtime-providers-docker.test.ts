@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DockerRuntimeProvider } from "../runtime-providers/docker";
-import { type ProvisionRequest, RUNTIME_LABELS } from "../runtime-providers/types";
+import {
+  type ProvisionRequest,
+  RUNTIME_LABELS,
+  WORKSPACE_LABEL,
+  workspaceVolumeKey,
+} from "../runtime-providers/types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 const provider = new DockerRuntimeProvider();
@@ -192,6 +197,25 @@ describe("Docker runtime provider", () => {
           })
         : new Response("volume is in use", { status: 409 });
     await expect(provider.releaseCache(target, cache)).rejects.toThrow("volume is in use");
+  });
+
+  test("cache release refuses a volume labelled as a workspace", async () => {
+    const cache = { key: "swarm-cache-pool-1", poolId: request.poolId, ownerId: request.ownerId };
+    handler = (_url, init) =>
+      init.method === "GET"
+        ? Response.json({
+            Name: cache.key,
+            Labels: {
+              [RUNTIME_LABELS.owner]: cache.ownerId,
+              [RUNTIME_LABELS.poolId]: cache.poolId,
+              "swarm.cache": "true",
+              "swarm.workspace": "true",
+            },
+          })
+        : new Response(null, { status: 204 });
+    calls = [];
+    await expect(provider.releaseCache(target, cache)).rejects.toThrow("not owned");
+    expect(calls.map(({ init }) => init.method)).toEqual(["GET"]);
   });
 
   test("cache volumes are shared across runtimes and survive container termination", async () => {
@@ -402,6 +426,151 @@ describe("Docker runtime provider", () => {
         Memory: 128 * 1024 * 1024,
         NanoCpus: 500_000_000,
       },
+    });
+  });
+
+  test("a request without a workspace sends the same create body bytes as before", async () => {
+    await provider.provision(target, request);
+    expect(calls.map(({ url, init }) => `${init.method} ${url.pathname}`)).toEqual([
+      "POST /v1.47/containers/create",
+      "POST /v1.47/containers/container-1/start",
+    ]);
+    expect(String(calls[0]?.init.body)).toBe(
+      JSON.stringify({
+        Image: request.image,
+        Env: ["AGENT_ROLE=worker"],
+        Labels: {
+          custom: "value",
+          [RUNTIME_LABELS.owner]: request.ownerId,
+          [RUNTIME_LABELS.runtimeId]: request.runtimeId,
+          [RUNTIME_LABELS.poolId]: request.poolId,
+          [RUNTIME_LABELS.agentId]: request.agentId,
+        },
+        HostConfig: {
+          ExtraHosts: ["host.docker.internal:host-gateway"],
+          Memory: 128 * 1024 * 1024,
+          NanoCpus: 500_000_000,
+        },
+      }),
+    );
+  });
+
+  describe("persistent workspace", () => {
+    const key = workspaceVolumeKey(request.agentId, 0);
+    const workspaceRequest = { ...request, workspace: { key } };
+    const ownedLabels = {
+      [RUNTIME_LABELS.owner]: request.ownerId,
+      [RUNTIME_LABELS.agentId]: request.agentId,
+      [WORKSPACE_LABEL]: "true",
+    };
+    const workspaceMount = { Type: "volume", Source: key, Target: "/workspace/personal" };
+    let volumes: Map<string, { Name: string; Labels: Record<string, string> }>;
+    let users: Array<{ Id: string; State: string }>;
+    let createBodies: Array<{ HostConfig: { Mounts?: unknown[] } }>;
+    let createFailure: ((attempt: number) => Response | undefined) | undefined;
+
+    beforeEach(() => {
+      volumes = new Map();
+      users = [];
+      createBodies = [];
+      createFailure = undefined;
+      handler = (url, init) => {
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        if (url.pathname.endsWith("/volumes/create")) {
+          if (!volumes.has(body.Name)) volumes.set(body.Name, body);
+          return Response.json(volumes.get(body.Name));
+        }
+        if (url.pathname.endsWith("/containers/json")) return Response.json(users);
+        if (url.pathname.endsWith("/containers/create")) {
+          createBodies.push(body);
+          return createFailure?.(createBodies.length) ?? Response.json({ Id: handle.externalId });
+        }
+        return new Response(null, { status: 204 });
+      };
+    });
+
+    test("creates an agent-owned volume, mounts it at /workspace/personal and echoes the key", async () => {
+      const result = await provider.provision(target, workspaceRequest);
+      expect(result.meta).toEqual({ workspaceKey: key });
+      expect(volumes.get(key)?.Labels).toEqual(ownedLabels);
+      expect(createBodies[0]?.HostConfig.Mounts).toEqual([workspaceMount]);
+      const lookup = calls.find(({ url }) => url.pathname.endsWith("/containers/json"));
+      expect(JSON.parse(lookup?.url.searchParams.get("filters") ?? "{}")).toEqual({
+        volume: [key],
+      });
+      expect(provider.traits.persistentWorkspace).toBe(true);
+    });
+
+    test("reuses an owned volume across runtimes and terminate never deletes it", async () => {
+      const first = await provider.provision(target, workspaceRequest);
+      users = [{ Id: first.externalId, State: "exited" }];
+      await provider.terminate(target, first);
+      await provider.provision(target, { ...workspaceRequest, runtimeId: crypto.randomUUID() });
+      expect(volumes.size).toBe(1);
+      expect(createBodies.map((b) => b.HostConfig.Mounts)).toEqual([
+        [workspaceMount],
+        [workspaceMount],
+      ]);
+      expect(
+        calls.some(
+          ({ url, init }) => init.method === "DELETE" && url.pathname.includes("/volumes"),
+        ),
+      ).toBe(false);
+    });
+
+    test("rejects a volume with foreign labels", async () => {
+      volumes.set(key, { Name: key, Labels: { ...ownedLabels, [RUNTIME_LABELS.owner]: "other" } });
+      await expect(provider.provision(target, workspaceRequest)).rejects.toThrow("not owned");
+      expect(createBodies).toHaveLength(0);
+    });
+
+    for (const State of ["running", "restarting", "paused", "created"])
+      test(`rejects a volume a ${State} container still mounts`, async () => {
+        users = [{ Id: "previous", State }];
+        await expect(provider.provision(target, workspaceRequest)).rejects.toThrow(
+          `workspace ${key} is in use by previous`,
+        );
+        expect(createBodies).toHaveLength(0);
+      });
+
+    test("mounts the cache and the workspace together", async () => {
+      await provider.provision(target, {
+        ...workspaceRequest,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      });
+      expect(createBodies[0]?.HostConfig.Mounts).toEqual([
+        { Type: "volume", Source: "swarm-cache-pool-1", Target: "/cache" },
+        workspaceMount,
+      ]);
+    });
+
+    test("a cache mount error retries without the cache but keeps the workspace", async () => {
+      createFailure = (attempt) =>
+        attempt === 1
+          ? Response.json({ message: "invalid mount config" }, { status: 500 })
+          : undefined;
+      const result = await provider.provision(target, {
+        ...workspaceRequest,
+        cache: { key: "swarm-cache-pool-1", mountPath: "/cache" },
+      });
+      expect(result.meta?.workspaceKey).toBe(key);
+      expect(result.meta?.cacheWarning).toContain("mount");
+      expect(createBodies.at(-1)?.HostConfig.Mounts).toEqual([workspaceMount]);
+    });
+
+    test("a workspace mount error fails the provision without a workspace-free retry", async () => {
+      createFailure = () => Response.json({ message: "invalid mount config" }, { status: 500 });
+      await expect(provider.provision(target, workspaceRequest)).rejects.toThrow("mount");
+      expect(createBodies).toHaveLength(1);
+    });
+
+    test("a volume create error fails the provision instead of starting without it", async () => {
+      handler = (url) =>
+        url.pathname.endsWith("/volumes/create")
+          ? new Response("disk full", { status: 500 })
+          : Response.json({ Id: handle.externalId });
+      await expect(provider.provision(target, workspaceRequest)).rejects.toThrow("disk full");
+      expect(calls.some(({ url }) => url.pathname.endsWith("/containers/create"))).toBe(false);
     });
   });
 
@@ -628,6 +797,28 @@ describe("Docker runtime provider", () => {
     expect(JSON.parse(calls[0]?.url.searchParams.get("filters") ?? "")).toEqual({
       label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${request.ownerId}`],
     });
+  });
+
+  test("list reports the workspace key from the real mount, never from a label", async () => {
+    handler = () =>
+      Response.json([
+        {
+          Id: "mounted",
+          Labels: { [RUNTIME_LABELS.runtimeId]: "a", workspaceKey: "swarm-ws-forged-0" },
+          Mounts: [
+            { Type: "volume", Name: "swarm-cache-pool", Destination: "/cache" },
+            { Type: "volume", Name: "swarm-ws-agent-0", Destination: "/workspace/personal" },
+          ],
+        },
+        {
+          Id: "ephemeral",
+          Labels: { [RUNTIME_LABELS.runtimeId]: "b", workspaceKey: "swarm-ws-agent-1" },
+          Mounts: [{ Type: "bind", Source: "/tmp", Destination: "/workspace/personal" }],
+        },
+      ]);
+    const rows = await provider.list(target, request.ownerId);
+    expect(rows.map((row) => row.meta?.workspaceKey)).toEqual(["swarm-ws-agent-0", undefined]);
+    expect(rows[0]?.meta?.[RUNTIME_LABELS.runtimeId]).toBe("a");
   });
 
   test("maps container states and distinguishes absence from lookup failure", async () => {
