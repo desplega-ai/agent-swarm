@@ -695,3 +695,11 @@ This setting requires `SLACK_RENDER_V2=true`. With V2 off, the legacy renderer i
 and the tree preference is retained. It applies live through the normal global config
 reload. A saved value overrides deployment env at boot and reload; removing it restores
 the deployment value, or On when unset.
+
+## Slack icons
+
+The seven `SLACK_REACTION_*` settings and `SLACK_STATUS_ICON_COMPLETED` support **No icon**. Choose that action or clear the field and save to store an empty string. Saved empty values display **No icon**. **Remove the saved value** deletes the override and restores the deployment setting or built-in default.
+
+Click **No icon** to remove this icon. Otherwise, enter an emoji shortcode such as `:eyes:`. If Slack rejects a reaction's emoji name, the reaction falls back to its default. The completed text icon renders the value as `:name:`; unknown emoji names appear literally, without a fallback. Remove the saved value to restore the deployment setting or default.
+
+Global saves apply through automatic reload. Empty or whitespace-only deployment values also disable; absent variables use defaults. Existing empty values now disable instead of falling back. Malformed nonempty shortcodes are rejected when saving. See [Slack reactions](/docs/integrations/slack) for lifecycle behavior and the existing limitation when changing acceptance names during an active task.

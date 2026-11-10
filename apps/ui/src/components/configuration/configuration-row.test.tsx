@@ -149,3 +149,40 @@ describe("ConfigurationRow image preview", () => {
     expect(renderRow("x", { ...LOGO, preview: undefined }, false)).not.toContain("image-preview");
   });
 });
+
+describe("ConfigurationRow empty Slack icons", () => {
+  const icon: ConfigCatalogEntry = {
+    key: "SLACK_REACTION_COMPLETED",
+    label: "Completed reaction",
+    description: "Completion reaction",
+    kind: "string",
+    defaultValue: "white_check_mark",
+    emptyDisablesIcon: true,
+  };
+  test("saved empty is visibly disabled and can restore inheritance", () => {
+    const html = renderRow("", icon, true);
+    expect(html.match(/>No icon</g)).toHaveLength(1);
+    expect(html).toContain(">Restore icon</button>");
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain(">Save</button>");
+    expect(html).not.toContain('placeholder="white_check_mark"');
+    expect(html).toContain("Remove the saved value for SLACK_REACTION_COMPLETED");
+    expect(html).toContain("Click “No icon” to remove this icon.");
+    expect(html).toContain(
+      "If Slack rejects the emoji name, the reaction falls back to its default.",
+    );
+  });
+  test("environment-only still offers explicit disable without guessing its value", () => {
+    const html = renderRow(null, icon, true);
+    expect(html).toContain("Set via environment");
+    expect(html.match(/>No icon</g)).toHaveLength(1);
+    expect(html).not.toContain("Remove the saved value for");
+  });
+
+  test("text icons describe literal shortcodes without promising a fallback", () => {
+    const html = renderRow("", { ...icon, key: "SLACK_STATUS_ICON_COMPLETED" }, true);
+    expect(html).toContain("Text renders the value as :name:.");
+    expect(html).toContain("Unknown emoji names appear literally, without a fallback.");
+    expect(html).not.toContain("the reaction falls back to its default");
+  });
+});

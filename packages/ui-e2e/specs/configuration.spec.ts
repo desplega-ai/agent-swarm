@@ -185,6 +185,51 @@ test("multi-select can save no raters and preserves unknown saved names", async 
   await expect(row.getByText("None selected", { exact: true })).toBeVisible();
 });
 
+test("Slack icons distinguish disabled, custom and inherited values", async ({
+  page,
+  api,
+  seed,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const key = "SLACK_REACTION_COMPLETED";
+  const row = page.locator(`#setting-${key}`);
+  const input = row.getByRole("textbox");
+  const stored = async () =>
+    (await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global")).configs.find(
+      (entry) => entry.key === key,
+    );
+  try {
+    await page.goto(`/settings/configuration?search=${key}`);
+    await expect(row.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await row.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(async () => (await stored())?.value).toBe("");
+    await page.reload();
+    await expect(input).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+    await expect(row.getByText("No icon", { exact: true })).toHaveCount(1);
+    await expect(row.getByRole("button", { name: "No icon", exact: true })).toHaveCount(0);
+    await row.getByRole("button", { name: "Restore icon", exact: true }).click();
+    await expect.poll(async () => (await stored())?.value).toBe("white_check_mark");
+    await expect(input).toHaveValue("white_check_mark");
+    await input.fill(":owl:");
+    await row.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(async () => (await stored())?.value).toBe(":owl:");
+    await row.getByRole("button", { name: "No icon", exact: true }).click();
+    await expect.poll(async () => (await stored())?.value).toBe("");
+    await expect(input).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Restore icon", exact: true })).toBeEnabled();
+    await row.getByRole("button", { name: `Remove the saved value for ${key}` }).click();
+    await expect.poll(stored).toBeUndefined();
+    await expect(input).toHaveAttribute("placeholder", "Enter shortcode");
+    await expect(row.getByRole("button", { name: "No icon", exact: true })).toBeEnabled();
+  } finally {
+    const config = await stored();
+    if (config) await api.delete(`/api/config/${config.id}`);
+  }
+  await clean.assertClean();
+});
+
 test("Slack task tree preference persists independently of V2 and resets to On", async ({
   page,
   api,

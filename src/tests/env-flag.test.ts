@@ -83,6 +83,8 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
       expect(validateConfigValue(key, "thumbsup")).toBeNull();
       expect(validateConfigValue(key, ":thumbsup:")).toBeNull();
       expect(validateConfigValue(key, "+1")).toBeNull();
+      expect(validateConfigValue(key, "")).toBeNull();
+      expect(validateConfigValue(key, "  ")).toBeNull();
     }
   });
 
@@ -105,11 +107,11 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     }
   });
 
-  test("Slack reaction shortcode keys reject spaces, upper case, unicode and empty", () => {
+  test("Slack reaction shortcode keys reject malformed nonempty values", () => {
     // "Heavy Check" (not "Heavy" alone): normalisation lowercases before the format
     // check (section 2.3), so a bare case difference alone is not rejected — only
     // the space is. Matches T4's own acceptance check value.
-    for (const value of ["heavy check", "Heavy Check", "✅", "", ":"]) {
+    for (const value of ["heavy check", "Heavy Check", "✅", ":", null, 42]) {
       expect(validateConfigValue("SLACK_REACTION_COMPLETED", value)).toContain(
         "Invalid SLACK_REACTION_COMPLETED",
       );
