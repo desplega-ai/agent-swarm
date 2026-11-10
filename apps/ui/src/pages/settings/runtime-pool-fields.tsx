@@ -24,6 +24,14 @@ import {
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Switch } from "@/components/ui/switch";
 import {
+  RUNTIME_WORKSPACE_KINDS,
+  WORKSPACE_DEFAULT_SIZE_GB,
+  type WorkspaceForm,
+  workspaceFormFromPool,
+  workspaceHasSize,
+  workspaceInput,
+} from "@/lib/runtime-pool-workspace";
+import {
   RUNTIME_DELIVERY_LABEL,
   RUNTIME_KIND_DESCRIPTION,
   RUNTIME_KIND_LABEL,
@@ -34,7 +42,7 @@ import {
 
 type DeliveryChoice = RuntimeDeliveryMode | "default";
 
-export interface PoolForm {
+export interface PoolForm extends WorkspaceForm {
   name: string;
   kind: RuntimeProviderKind;
   controllerId: string;
@@ -77,6 +85,7 @@ export function formFromPool(pool: RuntimePool | null, controllers: RuntimeContr
       memoryMb: "",
       enabled: true,
       env: [],
+      ...workspaceFormFromPool(null),
     };
   }
   return {
@@ -95,6 +104,7 @@ export function formFromPool(pool: RuntimePool | null, controllers: RuntimeContr
     memoryMb: text(pool.resources?.memoryMb),
     enabled: pool.enabled,
     env: rowsFromRecord(pool.env),
+    ...workspaceFormFromPool(pool),
   };
 }
 
@@ -145,6 +155,8 @@ export function validate(
   if (cpu !== null && !(Number.isFinite(cpu) && cpu > 0)) errors.cpu = "Enter a positive number.";
   const duplicates = duplicateKeys(form.env);
   if (duplicates.length > 0) errors.env = `Duplicate keys: ${duplicates.join(", ")}.`;
+  const workspace = workspaceInput(form.kind, form);
+  if (workspace.error) errors.workspaceSizeGb = workspace.error;
 
   if (Object.keys(errors).length > 0) return { errors, input: null };
   const resources = {
@@ -168,6 +180,7 @@ export function validate(
       resources: Object.keys(resources).length > 0 ? resources : null,
       ttlSec: ttl ?? null,
       enabled: form.enabled,
+      ...workspace.input,
     },
   };
 }
@@ -242,6 +255,7 @@ export function PoolFields({
   controllers: RuntimeController[];
 }) {
   const isStatic = form.kind === "static";
+  const workspaceSupported = RUNTIME_WORKSPACE_KINDS.includes(form.kind);
   const kindControllers = controllers.filter((c) => c.kind === form.kind);
   const set = <K extends keyof PoolForm>(key: K, value: PoolForm[K]) =>
     setForm({ ...form, [key]: value });
@@ -252,6 +266,8 @@ export function PoolFields({
       kind,
       controllerId: controllers.find((c) => c.kind === kind)?.id ?? "",
       ...(kind === "static" ? { lifecycle: "idle" as const, idleMinutes: "" } : {}),
+      // Re-send an enabled workspace, so a kind without support turns it off.
+      workspaceTouched: form.workspaceTouched || form.workspace,
     });
   }
 
@@ -455,6 +471,34 @@ export function PoolFields({
           error={errors.memoryMb}
           helper="Blank uses the provider default."
         />
+        {workspaceSupported ? (
+          <SettingsRow
+            label="Persistent workspace"
+            htmlFor="pool-workspace"
+            helper="Keeps each agent's /workspace/personal on its own volume across runtimes. It fails closed: a runtime that cannot mount its workspace does not start, and a remote controller too old to know the setting fails the provision. The swarm never deletes a workspace. Remove volumes and claims by hand."
+            className="sm:col-span-2"
+          >
+            <Switch
+              id="pool-workspace"
+              checked={form.workspace}
+              onCheckedChange={(checked) =>
+                setForm({ ...form, workspace: checked, workspaceTouched: true })
+              }
+            />
+          </SettingsRow>
+        ) : null}
+        {workspaceSupported && form.workspace && workspaceHasSize(form.kind) ? (
+          <NumberField
+            id="pool-workspace-size"
+            label="New claim size (GiB)"
+            value={form.workspaceSizeGb}
+            onChange={(value) =>
+              setForm({ ...form, workspaceSizeGb: value, workspaceTouched: true })
+            }
+            error={errors.workspaceSizeGb}
+            helper={`Size of each new workspace claim. Blank uses ${WORKSPACE_DEFAULT_SIZE_GB}. Existing claims keep their size. Resize them in Kubernetes.`}
+          />
+        ) : null}
       </div>
       <SettingsRow label="Environment" helper="Passed to every runtime in this pool. Not secret.">
         <KeyValueEditor rows={form.env} onChange={(env) => set("env", env)} label="Environment" />

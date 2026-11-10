@@ -295,6 +295,11 @@ export interface RuntimeControllerInput {
   secretConfig?: Record<string, string | null>;
 }
 
+/** Persistent `/workspace/personal` per agent and slot. `sizeGb` sizes new k8s claims only. */
+export interface RuntimePoolWorkspace {
+  sizeGb?: number;
+}
+
 export interface RuntimePoolInput {
   name: string;
   kind: RuntimeProviderKind;
@@ -308,6 +313,8 @@ export interface RuntimePoolInput {
   delivery: RuntimeDeliveryMode | null;
   env: Record<string, string>;
   resources: RuntimeResources | null;
+  /** Omitted on update keeps the stored value. Absent from an API without the field. */
+  workspace?: RuntimePoolWorkspace | null;
   ttlSec: number | null;
   enabled: boolean;
 }

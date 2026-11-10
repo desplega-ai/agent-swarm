@@ -22,6 +22,7 @@ interface RecordedRequest {
 const SEAT_REPORT_DELAY_MS = 150;
 let requests: RecordedRequest[] = [];
 let seatReportRespondedAt: number | undefined;
+let keyReportRespondedAt: number | undefined;
 let originalFetch: typeof fetch;
 
 beforeAll(() => {
@@ -40,6 +41,11 @@ beforeAll(() => {
       seatReportRespondedAt = Date.now();
       return Response.json({ success: true, message: "recorded" });
     }
+    if (path === "/api/keys/report-rate-limit") {
+      await Bun.sleep(SEAT_REPORT_DELAY_MS);
+      keyReportRespondedAt = Date.now();
+      return Response.json({ success: true });
+    }
     if (method === "POST" && /^\/api\/tasks\/[^/]+\/finish$/.test(path)) {
       return Response.json({ success: true, task: { status: "failed" } });
     }
@@ -54,6 +60,7 @@ afterAll(() => {
 beforeEach(() => {
   requests = [];
   seatReportRespondedAt = undefined;
+  keyReportRespondedAt = undefined;
 });
 
 const apiConfig: ApiConfig = {
@@ -167,6 +174,28 @@ describe("reportCredentialOutcomeThenFinish — seat mismatch after a key-wide r
     const keyReports = requests.filter((r) => r.path === "/api/keys/report-rate-limit");
     expect(keyReports).toHaveLength(1);
     expect(keyReports[0]?.body).toMatchObject({ keyIndex: 3, rateLimitedUntil: rateLimitResetAt });
+  });
+});
+
+describe("reportCredentialOutcomeThenFinish — key-wide rate limit", () => {
+  test("the key's bench lands before the finish step, which may resume on another key", async () => {
+    const taskId = "33333333-3333-4333-8333-333333333333";
+    await completeTask(
+      taskId,
+      {
+        exitCode: 1,
+        isError: true,
+        sessionId: "session-4",
+        failureReason: "You've hit your weekly limit · resets 5pm (UTC)",
+      },
+      "claude-opus-5-5",
+    );
+
+    expect(requests.filter((r) => r.path === "/api/keys/report-rate-limit")).toHaveLength(1);
+    const finish = requests.find((r) => r.path === `/api/tasks/${taskId}/finish`);
+    expect(finish).toBeDefined();
+    expect(keyReportRespondedAt).toBeDefined();
+    expect(finish!.at).toBeGreaterThanOrEqual(keyReportRespondedAt!);
   });
 });
 

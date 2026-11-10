@@ -7,7 +7,7 @@ import type {
 import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome";
 import { reportSeatMismatchOutcome } from "./seat-mismatch-report";
 
-/** Report a rate-limited key to the API (fire-and-forget) */
+/** Report a rate-limited key to the API. Bounded, never throws. */
 async function reportKeyRateLimit(
   apiUrl: string,
   apiKey: string,
@@ -29,6 +29,8 @@ async function reportKeyRateLimit(
         keyIndex,
         rateLimitedUntil,
       }),
+      // Awaited on a key-wide outcome: a hung API must not hold the task open.
+      signal: AbortSignal.timeout(10_000),
     });
     console.log(
       `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
@@ -121,9 +123,10 @@ export interface CredentialOutcomeInput {
  * classified model rejection go out as ONE payload, so an older `allowed`
  * snapshot never overwrites the terminal rejection.
  *
- * Reports that gate admission on other workers (a seat mismatch, a model
- * window rejection) land before `finish` runs. Plain telemetry and the
- * key-wide report stay fire-and-forget.
+ * Reports that gate admission (a seat mismatch, a model window rejection, a
+ * key-wide rejection that ended the session) land before `finish` runs.
+ * Plain telemetry, and a key-wide report next to a seat or model outcome,
+ * stay fire-and-forget.
  */
 export async function reportCredentialOutcomeThenFinish(
   input: CredentialOutcomeInput,
@@ -153,7 +156,7 @@ export async function reportCredentialOutcomeThenFinish(
           : undefined;
     if (keyRateLimitedUntil) {
       console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
-      reportKeyRateLimit(
+      const report = reportKeyRateLimit(
         apiUrl,
         apiKey,
         credentialInfo.keyType,
@@ -161,6 +164,9 @@ export async function reportCredentialOutcomeThenFinish(
         credentialInfo.keyIndex,
         keyRateLimitedUntil,
       ).catch(() => {});
+      // `finish` may resume the task on another key of the pool: the bench
+      // lands first, so the resume's claim cannot draw this key again.
+      if (outcome.kind === "key") await report;
     }
     if (outcome.kind === "model") {
       const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();

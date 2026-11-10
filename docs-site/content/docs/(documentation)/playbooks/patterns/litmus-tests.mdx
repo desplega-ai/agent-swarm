@@ -36,6 +36,7 @@ Instead of trusting a generator's self-assessment, you run its output through a 
 - Pick a judge model from a different family than the generator (e.g. [Claude](https://www.anthropic.com/claude) writes, [Gemini](https://deepmind.google/technologies/gemini/) judges, or vice versa).
 - Make the gate **blocking**: a fail returns to the generator, it doesn't warn-and-continue.
 - Log scores over time so you can calibrate thresholds (too strict = nothing ships; too loose = the gate is theater).
+- **Try the rubric on a business workflow.** The [evaluation worksheet for an AI operations pilot](https://www.agent-swarm.dev/blog/omnia/evaluate-ai-agent-operations-pilot) applies the same discipline outside content: a named process owner, checkable pass criteria agreed before the first run, exception cases from real past work, and a fail that blocks.
 
 ## Used in
 

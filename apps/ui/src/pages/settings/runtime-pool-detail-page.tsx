@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Skeleton } from "@/components/ui/skeleton";
+import { workspaceLabel, workspaceNewClaimSize } from "@/lib/runtime-pool-workspace";
 import {
   deliveryLabel,
   isCircuitOpen,
@@ -302,6 +303,7 @@ function PoolEditor({
     </div>
   );
 
+  const newClaimSize = pool ? workspaceNewClaimSize(pool.kind, pool.workspace) : null;
   const rail = pool ? (
     <DetailPageRail>
       <QuickStats title="Health">
@@ -330,6 +332,8 @@ function PoolEditor({
           }
           mono
         />
+        <QuickStat label="Persistent workspace" value={workspaceLabel(pool.workspace)} />
+        {newClaimSize ? <QuickStat label="New claim size" value={newClaimSize} /> : null}
         <QuickStat label="Created" value={formatSmartTime(pool.createdAt)} />
         <QuickStat label="Updated" value={formatSmartTime(pool.updatedAt)} />
       </QuickStats>

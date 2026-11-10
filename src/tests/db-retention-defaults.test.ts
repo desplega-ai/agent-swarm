@@ -75,6 +75,19 @@ describe("seedDbRetentionDefaults", () => {
       SCRIPT_RUNS_RETENTION_DAYS: "365",
     });
   });
+
+  test("an empty or blank env value at first boot is the operator's off, not a gap to fill", async () => {
+    process.env.SESSION_LOG_RETENTION_DAYS = "";
+    process.env.AGENT_LOG_RETENTION_DAYS = "   ";
+
+    await seedDbRetentionDefaults(true);
+
+    expect(await storedRetention()).toEqual({
+      EVENTS_RETENTION_DAYS: "90",
+      CONTEXT_VERSIONS_KEEP_LATEST: "100",
+      SCRIPT_RUNS_RETENTION_DAYS: "30",
+    });
+  });
 });
 
 describe("retention defaults across real boots", () => {
@@ -82,7 +95,7 @@ describe("retention defaults across real boots", () => {
   const BOOT_TEST_TIMEOUT_MS = 300_000;
   const headers = { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" };
 
-  type Api = { proc: Subprocess<"ignore", "pipe", "pipe">; base: string; stdout: Promise<string> };
+  type Api = { proc: Subprocess<"ignore", "pipe", "pipe">; base: string; stdout: { text: string } };
   const booted: Api[] = [];
   const dbPaths: string[] = [];
 
@@ -114,7 +127,11 @@ describe("retention defaults across real boots", () => {
       stderr: "pipe",
     });
     // Drain both pipes from the start so a full buffer cannot stall the server.
-    const stdout = new Response(proc.stdout).text();
+    const stdout = { text: "" };
+    void (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of proc.stdout) stdout.text += decoder.decode(chunk, { stream: true });
+    })();
     void new Response(proc.stderr).text();
     const api: Api = { proc, base: `http://127.0.0.1:${port}`, stdout };
     booted.push(api);
@@ -123,14 +140,19 @@ describe("retention defaults across real boots", () => {
     return api;
   }
 
-  /** Stop the server and return the line that reports what the sweep will apply. */
+  /**
+   * Wait for the line that reports what the sweep will apply, then stop the
+   * server. The sweep starts after `/health` answers, so a loaded host can
+   * reach SIGTERM before the line prints unless the test waits for it.
+   */
   async function stopAndReadSweepConfig(api: Api): Promise<string> {
+    const findLine = () =>
+      api.stdout.text.split("\n").find((entry) => entry.includes("[db-retention] starting"));
+    const deadline = Date.now() + 120_000;
+    while (!findLine() && api.proc.exitCode === null && Date.now() < deadline) await Bun.sleep(100);
     api.proc.kill("SIGTERM");
     await api.proc.exited;
-    const line = (await api.stdout)
-      .split("\n")
-      .find((entry) => entry.includes("[db-retention] starting"));
-    return line ?? "";
+    return findLine() ?? "";
   }
 
   async function storedRetention(api: Api): Promise<Record<string, { id: string; value: string }>> {
@@ -183,6 +205,19 @@ describe("retention defaults across real boots", () => {
       expect(values(await storedRetention(second))).toEqual(kept);
       expect(await stopAndReadSweepConfig(second)).toContain(
         "session_logs=disabled, agent_log=90, events=disabled, context_versions=100, script_runs=30",
+      );
+    },
+    BOOT_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a new install booted with empty or blank env values stores nothing and sweeps nothing",
+    async () => {
+      const blank = Object.fromEntries(KEYS.map((key, i) => [key, i % 2 === 0 ? "" : "  "]));
+      const api = await bootApi(newDbPath(), blank);
+      expect(await storedRetention(api)).toEqual({});
+      expect(await stopAndReadSweepConfig(api)).toContain(
+        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled",
       );
     },
     BOOT_TEST_TIMEOUT_MS,
