@@ -44,6 +44,9 @@ async function capturedSql(run: () => Promise<unknown>): Promise<string> {
   return seen[0]!;
 }
 
+// These pin paging and plans over old seeded rows, not the outcome window.
+const NO_WINDOW = { finishedAfter: "", closureActiveAfter: "", delegationEnabled: false };
+
 function plan(sql: string, params: unknown[] = []): string {
   return getDb()
     .query<{ detail: string }, any[]>(`EXPLAIN QUERY PLAN ${sql}`)
@@ -139,7 +142,7 @@ describe("slack render-v2 watcher queries", () => {
       .immediate();
     const seen = new Set<string>();
     for (let tick = 0; tick < 21; tick++) {
-      const rows = await getSlackProcessingThreads(false);
+      const rows = await getSlackProcessingThreads(false, false, NO_WINDOW);
       expect(rows.length).toBeLessThanOrEqual(SLACK_RECONCILE_PAGE_SIZE);
       for (const row of rows) {
         expect(row.threadTs.startsWith("active-")).toBe(true);
@@ -159,7 +162,9 @@ describe("slack render-v2 watcher queries", () => {
       }
     }
     expect(seen.size).toBe(1001);
-    expect((await getSlackProcessingThreads(false))[0]?.threadTs).toBe("active-0");
+    expect((await getSlackProcessingThreads(false, false, NO_WINDOW))[0]?.threadTs).toBe(
+      "active-0",
+    );
   });
 
   test("each recovery source seeks its keyset before filtering a bounded page", async () => {
@@ -171,7 +176,7 @@ describe("slack render-v2 watcher queries", () => {
       return original(sql, params);
     }) as typeof client.query);
     try {
-      await getSlackProcessingThreads(true, true);
+      await getSlackProcessingThreads(true, true, { ...NO_WINDOW, delegationEnabled: true });
     } finally {
       spy.mockRestore();
     }
@@ -207,7 +212,8 @@ describe("slack render-v2 watcher queries", () => {
     getDb().run(`INSERT INTO agent_tasks (id,task,status,source,slackChannelId,slackThreadTs,createdAt,lastUpdatedAt)
       VALUES ('zz-pending', 'pending outcome', 'completed', 'slack', 'C_PENDING', 'pending', '2001-01-01', '2001-01-01')`);
     const found = [];
-    for (let tick = 0; tick < 3; tick++) found.push(...(await getSlackProcessingThreads(false)));
+    for (let tick = 0; tick < 3; tick++)
+      found.push(...(await getSlackProcessingThreads(false, false, NO_WINDOW)));
     expect(found).toContainEqual({ channelId: "C_PENDING", threadTs: "pending" });
     expect(found.some((row) => row.channelId === "C_HISTORY")).toBe(false);
     expect(found.some((row) => row.threadTs === old.threadTs)).toBe(false);

@@ -124,14 +124,81 @@ export async function getSlackThreadsOfTasks(taskIds: string[]): Promise<{
 }
 
 /**
+ * Outcome cards answer live work; they are not a history backfill. A task
+ * that ended before `finishedAfter` gets no card of its own, so a sweep over
+ * terminal history never replies in a thread months later. A delegated ask
+ * (closure mode) concludes when its closure goes quiet, which can be long
+ * after the ask itself finished, so it also stays eligible while any task in
+ * its thread changed after `closureActiveAfter`. The render pass applies the
+ * exact closure bound; this SQL form is a superset of it.
+ */
+export type SlackOutcomeWindow = {
+  finishedAfter: string;
+  closureActiveAfter: string;
+  delegationEnabled: boolean;
+};
+
+/**
+ * Needs aliases `task` and `state` in scope. Params: slackOutcomeWindowParams.
+ * shortcut: thread activity stands in for closure activity, so an expired
+ * closure in a busy thread is revisited until the thread goes quiet; walk the
+ * closure here if that shows up in tick cost.
+ */
+const SLACK_OUTCOME_WINDOW_SQL = `(COALESCE(task.finishedAt, task.lastUpdatedAt) >= ?
+  OR (? = 1 AND task.source = 'slack' AND task.createdAt >= state.delegation_activated_at
+    AND EXISTS (SELECT 1 FROM agent_tasks recent
+      WHERE recent.slackChannelId = task.slackChannelId AND recent.slackThreadTs = task.slackThreadTs
+        AND recent.lastUpdatedAt >= ?)))`;
+
+/**
+ * A Lead deferred wake whose answer already reached the thread: the wake sent
+ * a `slack-reply`, or the bot replied in the thread after the wake was created
+ * (a `slack-reply`, or a delivered outcome card of another task). Its own card
+ * would repeat that answer. Needs alias `task`. Keep in step with
+ * slackThreadHasBotReplySince.
+ */
+const SLACK_WAKE_ALREADY_ANSWERED_SQL = `(task.slackReplySent = 1 OR EXISTS (
+  SELECT 1 FROM slack_messages reply
+  WHERE reply.channel_id = task.slackChannelId AND reply.thread_ts = task.slackThreadTs
+    AND reply.created_at >= task.createdAt
+    AND (reply.kind = 'agent'
+      OR (reply.kind = 'outcome' AND reply.finalized_at IS NOT NULL AND reply.task_id != task.id))))`;
+
+/** True when the bot replied in the thread at or after `since`, other than `taskId`'s own card. */
+export async function slackThreadHasBotReplySince(
+  channelId: string,
+  threadTs: string,
+  since: string,
+  taskId: string,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM slack_messages reply
+       WHERE reply.channel_id = ? AND reply.thread_ts = ? AND reply.created_at >= ?
+         AND (reply.kind = 'agent'
+           OR (reply.kind = 'outcome' AND reply.finalized_at IS NOT NULL AND reply.task_id != ?))
+     ) AS found`,
+    [channelId, threadTs, since, taskId],
+  );
+  return !!row?.found;
+}
+
+function slackOutcomeWindowParams(window: SlackOutcomeWindow): (string | number)[] {
+  return [window.finishedAfter, Number(window.delegationEnabled), window.closureActiveAfter];
+}
+
+/**
  * True while the thread still owes an outcome card: a terminal Slack task
  * whose card is not finalized or abandoned, or a card still in flight. These
  * wait on time (conclusion settle, delivery backoff), not on a task event.
  */
-export async function slackThreadHasOutcomeWork(thread: {
-  channelId: string;
-  threadTs: string;
-}): Promise<boolean> {
+export async function slackThreadHasOutcomeWork(
+  thread: {
+    channelId: string;
+    threadTs: string;
+  },
+  window: SlackOutcomeWindow,
+): Promise<boolean> {
   const row = await getDbClient().get<{ pending: number }>(
     `SELECT EXISTS (
          SELECT 1 FROM agent_tasks task, slack_render_v2_state state
@@ -140,6 +207,7 @@ export async function slackThreadHasOutcomeWork(thread: {
          AND task.source = 'slack'
          AND task.createdAt >= state.activated_at
          AND task.status IN ('completed', 'failed', 'cancelled')
+         AND ${SLACK_OUTCOME_WINDOW_SQL}
          AND NOT EXISTS (
            SELECT 1 FROM slack_messages outcome
            WHERE outcome.kind = 'outcome'
@@ -152,7 +220,13 @@ export async function slackThreadHasOutcomeWork(thread: {
          AND outcome.channel_id = ? AND outcome.thread_ts = ?
          AND outcome.finalized_at IS NULL AND outcome.delivery_abandoned_at IS NULL
        ) AS pending`,
-    [thread.channelId, thread.threadTs, thread.channelId, thread.threadTs],
+    [
+      thread.channelId,
+      thread.threadTs,
+      ...slackOutcomeWindowParams(window),
+      thread.channelId,
+      thread.threadTs,
+    ],
   );
   return !!row?.pending;
 }
@@ -190,7 +264,8 @@ export const SLACK_RECONCILE_PAGE_SIZE = 50;
  */
 export async function getSlackProcessingThreads(
   delegationEnabled: boolean,
-  treesEnabled = false,
+  treesEnabled: boolean,
+  window: SlackOutcomeWindow,
 ): Promise<SlackRenderThread[]> {
   return getDbClient().transaction(async () => {
     const state = await getDbClient().get<{ reconcile_cursors: string }>(
@@ -238,6 +313,9 @@ export async function getSlackProcessingThreads(
          OR (? = 1 AND task.parentTaskId IS NOT NULL AND task.createdAt >= state.delegation_activated_at
            AND task.status IN ('completed', 'failed') AND task.slackReplySent = 0
            AND COALESCE(task.taskType, '') NOT IN ('follow-up', 'reroute-decision')))
+       AND ${SLACK_OUTCOME_WINDOW_SQL}
+       AND NOT (task.source = 'schedule' AND task.taskType = 'deferred'
+         AND ${SLACK_WAKE_ALREADY_ANSWERED_SQL})
        AND NOT EXISTS (
          SELECT 1 FROM agent_tasks parent JOIN slack_messages parent_card ON parent_card.task_id = parent.id
          WHERE task.source = 'schedule' AND task.taskType = 'deferred' AND parent.id = task.parentTaskId
@@ -248,7 +326,7 @@ export async function getSlackProcessingThreads(
          AND card.task_id = task.id
          AND (card.finalized_at IS NOT NULL OR card.delivery_abandoned_at IS NOT NULL))) AS eligible
       FROM candidates task, slack_render_v2_state state WHERE state.id = 1 ORDER BY task.id`,
-      [Number(delegationEnabled)],
+      [Number(delegationEnabled), ...slackOutcomeWindowParams(window)],
     );
     await page(
       "outcome",
