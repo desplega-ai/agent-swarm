@@ -79,14 +79,42 @@ export function windowStart<T>(turns: T[], weight: (turn: T) => number, budget: 
 }
 
 /**
- * The newest turns within the task budget, plus a `showEarlier` that adds a
- * budget above and keeps the turn the person was looking at in place.
- * Resets per session.
+ * The first turn to render. A session opens on the newest turns that fit the
+ * task budget. After that the start only moves up, never down: a poll that
+ * adds turns at the tail never unmounts a turn the person can see. A turn
+ * with open work or a pending approval always renders, however old.
  */
-function useTurnWindow<T>(rootTaskId: string, turns: T[], weight: (turn: T) => number) {
-  const [shown, setShown] = useState({ rootTaskId, pages: 1 });
-  const pages = shown.rootTaskId === rootTaskId ? shown.pages : 1;
-  const hidden = windowStart(turns, weight, TASK_BUDGET * pages);
+export function turnWindowStart<T extends { id: string }>(
+  turns: T[],
+  weight: (turn: T) => number,
+  isOpen: (turn: T) => boolean,
+  pinnedId: string | null,
+): number {
+  const pinned = pinnedId ? turns.findIndex((turn) => turn.id === pinnedId) : -1;
+  const start = pinned >= 0 ? pinned : windowStart(turns, weight, TASK_BUDGET);
+  const firstOpen = turns.findIndex(isOpen);
+  return firstOpen >= 0 && firstOpen < start ? firstOpen : start;
+}
+
+/**
+ * The visible turns, plus a `showEarlier` that adds a budget above and keeps
+ * the turn the person was looking at in place. Resets per session.
+ */
+function useTurnWindow<T extends { id: string }>(
+  rootTaskId: string,
+  turns: T[],
+  weight: (turn: T) => number,
+  isOpen: (turn: T) => boolean,
+) {
+  const pin = useRef<{ rootTaskId: string; firstId: string | null }>({
+    rootTaskId,
+    firstId: null,
+  });
+  const [reveals, setReveals] = useState(0);
+  const pinnedId = pin.current.rootTaskId === rootTaskId ? pin.current.firstId : null;
+  const hidden = turnWindowStart(turns, weight, isOpen, pinnedId);
+  // Idempotent: the same turns and pin give the same start on a second render.
+  if (turns.length > 0) pin.current = { rootTaskId, firstId: turns[hidden]?.id ?? null };
   const anchor = useRef<{ el: Element; top: number } | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the earlier turns render.
@@ -96,12 +124,14 @@ function useTurnWindow<T>(rootTaskId: string, turns: T[], weight: (turn: T) => n
     anchor.current = null;
     const scroller = scrollParent(kept.el);
     if (scroller) scroller.scrollTop += kept.el.getBoundingClientRect().top - kept.top;
-  }, [pages]);
+  }, [reveals]);
 
   const showEarlier = (firstShown: Element | null) => {
     if (firstShown)
       anchor.current = { el: firstShown, top: firstShown.getBoundingClientRect().top };
-    setShown({ rootTaskId, pages: pages + 1 });
+    const next = windowStart(turns.slice(0, hidden), weight, TASK_BUDGET);
+    pin.current = { rootTaskId, firstId: turns[next]?.id ?? null };
+    setReveals((count) => count + 1);
   };
   return { visible: hidden > 0 ? turns.slice(hidden) : turns, hidden, showEarlier };
 }
@@ -165,7 +195,22 @@ export function TurnTimeline({
     return approvalsByPart(turns, shown);
   }, [rootTaskId, turns, approvals]);
   const pendingIds = useMemo(() => new Set(approvals.map((approval) => approval.id)), [approvals]);
-  const { visible, hidden, showEarlier } = useTurnWindow(rootTaskId, turns, turnWeight);
+  // A turn with work still running stays on screen, however old.
+  const turnIsOpen = (turn: (typeof turns)[number]) =>
+    turn.parts.some(
+      (part) =>
+        !!part.live ||
+        !TERMINAL_STATUSES.has(part.reply.status) ||
+        partSteps(part).some(
+          (step) => !TERMINAL_STATUSES.has(step.tries[step.tries.length - 1].status),
+        ),
+    );
+  const { visible, hidden, showEarlier } = useTurnWindow(rootTaskId, turns, turnWeight, turnIsOpen);
+  // Pending approvals of hidden turns still wait on someone: they show above the window.
+  const hiddenApprovals = turns
+    .slice(0, hidden)
+    .flatMap((turn) => turn.parts.flatMap((part) => placed.get(part.id) ?? []))
+    .filter((approval) => pendingIds.has(approval.id));
   const earlierRef = useRef<HTMLDivElement>(null);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
@@ -201,6 +246,9 @@ export function TurnTimeline({
 
   return (
     <div className={cn("@container/turns flex min-w-0 flex-col gap-6", CHAT_COLUMN)}>
+      {hiddenApprovals.map((approval) => (
+        <ApprovalLine key={approval.id} approval={approval} pending />
+      ))}
       {hidden > 0 ? (
         <div ref={earlierRef} className="flex justify-center">
           <Button

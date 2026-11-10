@@ -122,3 +122,46 @@ test("a long session renders only the newest turns, with a control for earlier o
   expect(html).not.toContain("Answer 0<");
   expect(html).toContain("Show earlier messages");
 });
+
+test("turnWindowStart keeps a pinned start and reaches back to open turns", () => {
+  const { turnWindowStart, TASK_BUDGET } =
+    require("./turn-timeline") as typeof import("./turn-timeline");
+  const turns = Array.from({ length: 20 }, (_, i) => ({ id: `turn${i}` }));
+  const heavy = () => TASK_BUDGET / 2;
+  const closed = () => false;
+  // Fresh open: the newest turns that fit the budget (MIN_TURNS here).
+  expect(turnWindowStart(turns, heavy, closed, null)).toBe(17);
+  // A poll that adds turns keeps the pinned first turn on screen.
+  const grown = [...turns, { id: "turn20" }, { id: "turn21" }];
+  expect(turnWindowStart(grown, heavy, closed, "turn17")).toBe(17);
+  // An unknown pin (another session) falls back to the budget.
+  expect(turnWindowStart(turns, heavy, closed, "gone")).toBe(17);
+  // An old turn with open work or a pending approval stays visible.
+  expect(turnWindowStart(turns, heavy, (turn) => turn.id === "turn4", null)).toBe(4);
+});
+
+test("a pending approval of a hidden turn shows above the window", () => {
+  const total = 100;
+  const chain = Array.from({ length: total }, (_, i) =>
+    task(`t${i}`, {
+      source: "ui",
+      parentTaskId: i === 0 ? undefined : `t${i - 1}`,
+      createdAt: new Date(Date.UTC(2026, 10, 7, 12, i)).toISOString(),
+      task: `Question ${i}`,
+      output: `Answer ${i}`,
+    }),
+  );
+  const approvals = [{ id: "old", sourceTaskId: "t1", title: "Old question" }] as SessionApproval[];
+  const html = renderToStaticMarkup(
+    <TurnTimeline
+      rootTaskId="t0"
+      chain={chain}
+      approvals={approvals}
+      showHandoffs={false}
+      typing={[]}
+    />,
+  );
+  expect(html).not.toContain("Answer 1<");
+  expect(html).toContain("Old question");
+  expect(html.indexOf("Old question")).toBeLessThan(html.indexOf("Show earlier messages"));
+});
