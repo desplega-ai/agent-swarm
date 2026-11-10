@@ -40,6 +40,7 @@ import {
   markTaskSlackReplySent,
   noteSlackOutcomeDeliveryFailure,
   recordSlackMessage,
+  reserveSlackMessage,
   skipTask,
   startTask,
   supersedeTask,
@@ -57,9 +58,11 @@ import {
   callSlackWithRetry,
   childOutcomeContent,
   ensureSlackThreadTree,
+  flushSlackRenderV2DirtyThreads,
   formatV2Duration,
   isSlackRenderV2Enabled,
   isTerminalSlackError,
+  markSlackThreadDirty,
   processSlackRenderV2,
   refreshSlackOutcomeCard,
   renderThreadTree,
@@ -5384,5 +5387,211 @@ describe("optional Slack V2 task tree", () => {
     const streams = calls.filter((call) => call.method === "chat.startStream");
     expect(streams).toHaveLength(2);
     expect(String(streams[0]?.payload.markdown_text)).toContain("child answer");
+  });
+});
+
+// With the default 240-minute conclusion timeout the card window is 4 hours,
+// and a closure stays eligible while it changed in the last 8 hours.
+describe("Slack outcome window across closures, deliveries and wakes", () => {
+  afterEach(() => {
+    delete process.env.SLACK_RENDER_V2_DELEGATION;
+  });
+
+  function hoursAgo(hours: number): string {
+    return new Date(Date.now() - hours * 3_600_000).toISOString();
+  }
+
+  async function endedAt(taskIds: string[], hours: number): Promise<void> {
+    const ts = hoursAgo(hours);
+    for (const id of taskIds) {
+      await getDbClient().run(
+        "UPDATE agent_tasks SET finishedAt = ?, lastUpdatedAt = ? WHERE id = ?",
+        [ts, ts, id],
+      );
+    }
+  }
+
+  async function slackAsk(label: string, extra: { slackTriggerMessageTs?: string } = {}) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(`C_${label}`);
+    const ask = await createTaskExtended(`${label} ask`, {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+      ...extra,
+    });
+    await startTask(ask.id);
+    return { lead, ask, channelId, threadTs };
+  }
+
+  async function delegatedAsk(label: string, childCount = 1) {
+    process.env.SLACK_RENDER_V2_DELEGATION = "true";
+    await ensureSlackDelegationActivation();
+    const base = await slackAsk(label);
+    const worker = await createAgent({ name: `${label} Worker`, isLead: false, status: "idle" });
+    const children: AgentTask[] = [];
+    for (let i = 0; i < childCount; i++) {
+      const child = await createTaskExtended(`${label} child ${i}`, {
+        agentId: worker.id,
+        source: "mcp",
+        parentTaskId: base.ask.id,
+        followUpConfig: { disabled: true },
+      });
+      await startTask(child.id);
+      children.push(child);
+    }
+    return { ...base, children };
+  }
+
+  function streamTexts(): string[] {
+    return calls
+      .filter((call) => call.method === "chat.startStream")
+      .map((call) => String(call.payload.markdown_text));
+  }
+
+  test("a child that ended before the window does not hold back a fresh complete conclusion", async () => {
+    const { ask, children } = await delegatedAsk("EXPIRED_CHILD_COMPLETE");
+    const [child] = children;
+    await completeTask(child!.id, "Earlier child result.");
+    await completeTask(ask.id, "Fresh conclusion.");
+    await endedAt([child!.id], 5);
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+
+    for (let tick = 0; tick < 3; tick++) await processSlackRenderV2();
+
+    const conclusion = await getSlackOutcomeMessage(ask.id);
+    expect(conclusion?.finalizedAt).toBeTruthy();
+    expect(conclusion?.conclusionKind).toBe("complete");
+    expect(await getSlackOutcomeMessage(child!.id)).toBeNull();
+    expect(streamTexts()).toHaveLength(1);
+  });
+
+  test("a child that ended before the window does not hold back a timeout conclusion", async () => {
+    const { ask, children } = await delegatedAsk("EXPIRED_CHILD_TIMEOUT", 2);
+    const [expired, stuck] = children;
+    await completeTask(expired!.id, "Earlier child result.");
+    await completeTask(ask.id, "Waiting on the children.");
+    // Idle past the 240-minute timeout, still inside the 8-hour closure window.
+    await endedAt([ask.id, expired!.id], 5);
+    await backdateLastUpdated([stuck!.id], 5 * 3600);
+    calls.length = 0;
+
+    await processSlackRenderV2();
+
+    const conclusion = await getSlackOutcomeMessage(ask.id);
+    expect(conclusion?.finalizedAt).toBeTruthy();
+    expect(conclusion?.conclusionKind).toBe("timeout");
+    expect(await getSlackOutcomeMessage(expired!.id)).toBeNull();
+    expect(streamTexts()).toHaveLength(1);
+  });
+
+  test("an old child's in-flight card still holds back the conclusion until it lands", async () => {
+    const { ask, children } = await delegatedAsk("INFLIGHT_CHILD");
+    const [child] = children;
+    await completeTask(child!.id, "Child answer in flight.");
+    await completeTask(ask.id, "Fresh conclusion.");
+    await backdateLastUpdated([ask.id, child!.id], 20);
+    calls.length = 0;
+    // The child's stream starts but never finalizes, then the child ages out.
+    stopCallsUntilFailure = 0;
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(child!.id))?.finalizedAt).toBeUndefined();
+    await endedAt([child!.id], 5);
+
+    // The child's retry is in backoff, so this tick only sees its open card.
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+
+    _resetSlackRenderV2ForTests();
+    for (let tick = 0; tick < 3; tick++) await processSlackRenderV2();
+
+    expect((await getSlackOutcomeMessage(child!.id))?.finalizedAt).toBeTruthy();
+    expect((await getSlackOutcomeMessage(ask.id))?.conclusionKind).toBe("complete");
+    const texts = streamTexts();
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toContain("Child answer in flight.");
+  });
+
+  test("a closure timeout stays eligible after the ask leaves the direct card window", async () => {
+    const { ask, children } = await delegatedAsk("CLOSURE_TIMEOUT");
+    await completeTask(ask.id, "Waiting on child.");
+    await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+      hoursAgo(5),
+      ask.id,
+    ]);
+    await backdateLastUpdated([ask.id, children[0]!.id], 5 * 3600);
+
+    await processSlackRenderV2();
+
+    expect((await getSlackOutcomeMessage(ask.id))?.conclusionKind).toBe("timeout");
+  });
+
+  test("an old card whose stream never finalized still finishes", async () => {
+    const { ask } = await slackAsk("OLD_STREAM");
+    await completeTask(ask.id, "Retried result.");
+    stopCallsUntilFailure = 0;
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeUndefined();
+    await endedAt([ask.id], 5);
+    stopCallsUntilFailure = undefined;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeTruthy();
+  });
+
+  test("an old card reservation is still delivered", async () => {
+    const { ask, channelId, threadTs } = await slackAsk("OLD_RESERVATION");
+    await completeTask(ask.id, "Reserved result.");
+    await reserveSlackMessage({
+      contextKey: slackContextKey({ channelId, threadTs }),
+      channelId,
+      threadTs,
+      kind: "outcome",
+      taskId: ask.id,
+    });
+    await endedAt([ask.id], 5);
+
+    await processSlackRenderV2();
+
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeTruthy();
+  });
+
+  test("an answered Lead wake that ended before the window settles its trigger and posts no card", async () => {
+    const trigger = `${slackAddressSequence + 1}.9`;
+    const { lead, ask, channelId, threadTs } = await slackAsk("OLD_ANSWERED_WAKE", {
+      slackTriggerMessageTs: trigger,
+    });
+    await completeTask(ask.id, "Waiting.", { addTags: ["deferred"] });
+    const wake = await createTaskExtended("deferred wake", {
+      agentId: lead.id,
+      source: "schedule",
+      taskType: "deferred",
+      parentTaskId: ask.id,
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(wake.id);
+    await markTaskSlackReplySent(wake.id);
+    await completeTask(wake.id, "Already replied.");
+    await endedAt([ask.id, wake.id], 5);
+    calls.length = 0;
+
+    markSlackThreadDirty(channelId, threadTs);
+    await flushSlackRenderV2DirtyThreads();
+    await Bun.sleep(0);
+
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: trigger },
+    });
+    expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+    expect(streamTexts()).toHaveLength(0);
   });
 });

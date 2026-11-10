@@ -2044,13 +2044,15 @@ async function processSlackThread(
       task.createdAt >= delegationActivatedAt;
 
     if (!deferByClosure) {
-      // An in-flight card keeps its bounded retries; only a new card is refused.
-      if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
+      // Before the age cutoff: an answered wake posts no card at any age, but
+      // its trigger reaction still settles.
       if (!card && (await isSlackContinuation(task)) && (await isWakeAnsweredByReply(task))) {
         // The reply is the answer; settle the reaction the card would have settled.
         await finalizeTerminalSlackReactions([task]);
         continue;
       }
+      // An in-flight card keeps its bounded retries; only a new card is refused.
+      if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         const outcome = await streamOutcomeCard(task, { statusBudget: statusTick.budget });
@@ -2079,6 +2081,9 @@ async function processSlackThread(
       // represented in the conclusion digest rather than blocking it.
       if (existingChildCards >= CHILD_CARDS_PER_ASK) break;
       const memberCard = await getSlackOutcomeMessage(member.id);
+      // The child pass never starts a card past the cutoff, so do not wait
+      // for one; an in-flight card is still awaited.
+      if (!memberCard && endedBefore(member, outcomeWindow.finishedAfter)) continue;
       if (!memberCard || !isSettledSlackMessage(memberCard)) {
         childCardPending = true;
         break;
