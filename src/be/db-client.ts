@@ -270,6 +270,48 @@ function timedStatement<T>(sql: string, run: () => T): T {
   }
 }
 
+/**
+ * Longest stretch of DB work (driver calls plus the JS between them) that may
+ * run without handing the event loop back. The FIFO lock hands over through
+ * microtasks, so a burst of queued statements (a dozen memory searches, one
+ * store-progress with 20 deletes) otherwise runs as ONE macrotask: measured
+ * 4-30 s in which /health, scripts and MCP calls get no turn.
+ */
+const SLICE_MS = 25;
+let sliceStartedAt = 0;
+
+function markSlice(): void {
+  if (sliceStartedAt !== 0) return;
+  sliceStartedAt = performance.now();
+  // Fires at the next macrotask boundary, whoever caused it: the slice is over.
+  // A timer, not setImmediate: the yield below owns setImmediate.
+  setTimeout(() => {
+    sliceStartedAt = 0;
+  }, 0);
+}
+
+/** Starts the slice if none is open; yields to timers and sockets once it is spent. */
+async function yieldIfSliceSpent(): Promise<void> {
+  markSlice();
+  if (performance.now() - sliceStartedAt < SLICE_MS) return;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  sliceStartedAt = 0;
+}
+
+/**
+ * In-transaction statement: runs NOW, before any await, exactly as it did
+ * before slicing, so an interleaved rollback or commit cannot overtake it
+ * (a statement parked on a yield would resume after the transaction closed
+ * and autocommit outside it). Only the caller's continuation waits for the
+ * yield. A throw skips the yield: the caller is about to unwind anyway.
+ */
+async function runThenYield<T>(run: () => T): Promise<T> {
+  markSlice();
+  const result = run();
+  await yieldIfSliceSpent();
+  return result;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -600,7 +642,8 @@ class BunSqliteClient implements DbClient {
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) {
       const db = this.getDatabase();
-      return timed(() => op(db));
+      // The transaction holds the lock: the yield after the statement lets only timers and sockets run.
+      return runThenYield(() => timed(() => op(db)));
     }
     let sleptMs = 0;
     let sawBusy = false;
@@ -610,6 +653,9 @@ class BunSqliteClient implements DbClient {
       const release = await this.lock.acquire();
       let backoff = 0;
       try {
+        // Checked while holding the lock: waiters queued behind it passed any
+        // earlier check long ago. Other callers just wait, as behind a slow statement.
+        await yieldIfSliceSpent();
         // A top-level single statement is atomic, so a repeat on BUSY is
         // exact. The final attempt spins `finalAttemptSpinMs` (see
         // transaction()).
@@ -696,26 +742,31 @@ class BunSqliteClient implements DbClient {
       return this.getDatabase();
     };
     return {
-      query: async <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
-        timedStatement(sql, () =>
-          guard()
-            .query<T, DbParam[]>(sql)
-            .all(...params),
+      query: <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
+        runThenYield(() =>
+          timedStatement(sql, () =>
+            guard()
+              .query<T, DbParam[]>(sql)
+              .all(...params),
+          ),
         ),
-      get: async <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
-        timedStatement(sql, () =>
-          guard()
-            .query<T, DbParam[]>(sql)
-            .get(...params),
+      get: <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
+        runThenYield(() =>
+          timedStatement(sql, () =>
+            guard()
+              .query<T, DbParam[]>(sql)
+              .get(...params),
+          ),
         ),
-      run: async (sql: string, params: DbParam[] = []): Promise<{ changes: number }> => {
-        const result = timedStatement(sql, () =>
-          guard()
-            .query(sql)
-            .run(...params),
-        );
-        return { changes: result.changes };
-      },
+      run: (sql: string, params: DbParam[] = []): Promise<{ changes: number }> =>
+        runThenYield(() => {
+          const result = timedStatement(sql, () =>
+            guard()
+              .query(sql)
+              .run(...params),
+          );
+          return { changes: result.changes };
+        }),
     };
   }
 }
