@@ -37,6 +37,8 @@ const TEST_DB_PATH = "./test-workflow-retry-v2.sqlite";
 
 let failCounter = 0;
 const failExecutorMeta: ExecutorMeta[] = [];
+/** Runs inside the executor, so inside the poller tick that retries the step. */
+let onFailOnceExecute: ((meta: ExecutorMeta) => void) | undefined;
 
 class FailOnceExecutor extends BaseExecutor<
   typeof FailOnceExecutor.schema,
@@ -60,6 +62,7 @@ class FailOnceExecutor extends BaseExecutor<
   ): Promise<ExecutorResult<z.infer<typeof FailOnceExecutor.outSchema>>> {
     failExecutorMeta.push(meta);
     failCounter++;
+    onFailOnceExecute?.(meta);
     if (failCounter <= config.failUntilAttempt) {
       return { status: "failed", error: `Intentional failure #${failCounter}` };
     }
@@ -409,6 +412,44 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       } else {
         // Already terminal
         expect(run!.status).toBe("failed");
+      }
+    });
+
+    test("a tick in flight when the poller stops does not schedule another", async () => {
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "n1",
+            type: "fail-once",
+            config: { failUntilAttempt: 999 }, // Always fails
+            retry: { strategy: "static", maxRetries: 5, baseDelayMs: 1, maxDelayMs: 1 },
+          },
+        ],
+      });
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+      const attempts = () => failExecutorMeta.filter((m) => m.runId === runId).length;
+      expect(attempts()).toBe(1);
+
+      // Stop from inside the first retry: the tick that runs it is still in flight.
+      onFailOnceExecute = (meta) => {
+        if (meta.runId !== runId) return;
+        onFailOnceExecute = undefined;
+        stopRetryPoller();
+      };
+      try {
+        startRetryPoller(registry, 1);
+        await waitUntil(
+          () => attempts() >= 2,
+          () => "the poller never retried n1",
+        );
+        // Negative: a poller that survived the stop retries again within a few ms.
+        await Bun.sleep(100);
+        expect(attempts()).toBe(2);
+      } finally {
+        onFailOnceExecute = undefined;
+        stopRetryPoller();
+        // The step still has retries left: remove it so no later poller picks it up.
+        await deleteWorkflow(workflow.id);
       }
     });
   });
