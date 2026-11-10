@@ -4277,5 +4277,24 @@
     "finishedAt": { "exempt": "timestamp" },
     "created_by": { "exempt": "identifier" },
     "updated_by": { "exempt": "identifier" }
+  },
+  "mcp_event_subscriptions": {
+    "id": { "exempt": "identifier" },
+    "userId": { "exempt": "identifier" },
+    "eventName": { "exempt": "enum or fixed-format value" },
+    "argumentsJson": { "exempt": "canonical JSON of validated subscription arguments (an optional task id)" },
+    "url": { "exempt": "client-supplied callback URL, must round-trip byte-exact for delivery" },
+    "secretSealed": { "exempt": "ciphertext (encryptSecret)" },
+    "previousSecretSealed": { "exempt": "ciphertext (encryptSecret)" },
+    "previousSecretUntil": { "exempt": "timestamp" },
+    "verifiedAt": { "exempt": "timestamp" },
+    "expiresAt": { "exempt": "timestamp" },
+    "lastDeliveryAt": { "exempt": "timestamp" },
+    "lastError": { "exempt": "enum or fixed-format value" },
+    "failedSince": { "exempt": "timestamp" },
+    "createdAt": { "exempt": "timestamp" },
+    "updatedAt": { "exempt": "timestamp" },
+    "created_by": { "exempt": "identifier" },
+    "updated_by": { "exempt": "identifier" }
   }
 }
