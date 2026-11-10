@@ -5,6 +5,7 @@ import {
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
+  getAvailableKeyIndices,
   getDependentTasks,
   getLeadAgent,
   getLogsByTaskIdAndEventType,
@@ -13,9 +14,9 @@ import {
   hasNonTerminalRerouteDecisionChild,
   isAgentEligibleForTask,
 } from "../be/db";
-import { getModelProfileByName } from "../be/db/model-profiles";
+import { getModelProfileByName, hasUnreadableCredentialAllowlist } from "../be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
-import { checkProfileForAgent } from "../be/model-profile-check";
+import { checkProfileForAgent, configPools } from "../be/model-profile-check";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { carryUnhandledSteering } from "../be/steering";
 import { dispatchPre } from "../extensions/dispatcher";
@@ -35,7 +36,9 @@ import {
   type RoutingAffinity,
   type TaskAttachment,
 } from "../types";
+import { keySuffix, splitCredentialPool } from "../utils/credentials";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { modelFamilyOf, windowForModelFamily } from "../utils/model-rate-limit-windows";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { chatThreadOfContextKey } from "./context-key";
 import { scheduleFollowUpGateShadow } from "./follow-up-gate";
@@ -208,12 +211,86 @@ export function inheritedModelSelection(
 /** Result of `nextFallback`. */
 export type FallbackPick =
   | { kind: "picked"; profile: string; hop: FallbackHop }
-  /** `message` is null when no fallback was ever configured: the task fails as before. */
+  /** `message` is null when no fallback was configured and no key pool ran out: the task fails as before. */
   | { kind: "none"; message: string | null };
+
+/**
+ * Provider errors that end one key, not the profile: the runner's key-wide
+ * report benches the failed key before it asks for the pick, so another key
+ * of the pool can run the same profile. `auth` is not here: a Claude auth
+ * failure never benches the key and a codex one benches it at the second
+ * failure, so the resume could draw the failed key again.
+ */
+const KEY_SCOPED_ERRORS: ReadonlySet<ProviderErrorClass> = new Set(["rate_limit", "credits"]);
+
+type FallbackParent = Pick<
+  AgentTask,
+  | "agentId"
+  | "resolvedProfile"
+  | "resolvedModel"
+  | "fallbackHops"
+  | "vcsRepo"
+  | "routingAffinity"
+  | "routingAffinityInvalid"
+  | "credentialKeyType"
+  | "credentialKeySuffix"
+>;
+
+/**
+ * The key pool the failed run drew from, as the worker's next claim will see
+ * it: `size` keys the profile may use, `free` of them not benched and not the
+ * key that just failed. Null when there is nothing to rotate to or the server
+ * cannot judge: no key recorded on the task, a pool that lives only in the
+ * worker's env, an unreadable allowlist, or a pool of one key.
+ */
+async function keyPoolOf(
+  parent: FallbackParent,
+  profileName: string,
+  options: { includeRepoSecrets?: boolean },
+): Promise<{ keyType: string; size: number; free: number } | null> {
+  const keyType = parent.credentialKeyType;
+  const profile = await getModelProfileByName(profileName);
+  if (!keyType || !parent.agentId || !profile || hasUnreadableCredentialAllowlist(profile)) {
+    return null;
+  }
+  const pools = await configPools(parent.agentId, {
+    vcsRepo: parent.vcsRepo,
+    includeRepoSecrets: options.includeRepoSecrets,
+  });
+  const pool = pools.get(keyType);
+  if (pool === undefined) return null;
+  const suffixes = splitCredentialPool(pool).map(keySuffix);
+  const allowlist = profile.credentials?.[keyType];
+  const usable = (suffix: string) => !allowlist || allowlist.includes(suffix);
+  const size = suffixes.filter(usable).length;
+  if (size < 2) return null;
+  // Same read as the worker's `GET /api/keys/available`: by suffix, with the
+  // model's weekly window and seat blocks when the family has a window.
+  const family = modelFamilyOf(parent.resolvedModel ?? profile.model);
+  const { availableIndices } = await getAvailableKeyIndices(
+    keyType,
+    suffixes.length,
+    "global",
+    null,
+    family && windowForModelFamily(family) ? family : undefined,
+    suffixes,
+  );
+  const free = availableIndices
+    .map((i) => suffixes[i]!)
+    // The bench is the worker's report; exclude the failed key even if it has not landed.
+    .filter((suffix) => usable(suffix) && suffix !== parent.credentialKeySuffix).length;
+  return { keyType, size, free };
+}
 
 /**
  * The next profile a task that hit a provider error should resume on, on the
  * same agent (runbooks/model-tiers.md § Fallbacks on provider errors).
+ *
+ * A key-scoped error (`KEY_SCOPED_ERRORS`) first retries the profile it ran
+ * on while its key pool has another unbenched key (`keyPoolOf`). The retry is
+ * a hop with `from === profile`; a profile gets at most as many of them as
+ * its pool has keys. Every other error, and a pool with no key left, takes
+ * the profile fallbacks below.
  *
  * The chain starts at the profile claim applied (`resolvedProfile`). It walks
  * the fallback lists of the profiles this work already ran on, the current
@@ -229,27 +306,24 @@ export type FallbackPick =
  * a lead-only pin would be rerouted to another agent, so it never hops.
  */
 export async function nextFallback(
-  parent: Pick<
-    AgentTask,
-    | "agentId"
-    | "resolvedProfile"
-    | "fallbackHops"
-    | "vcsRepo"
-    | "routingAffinity"
-    | "routingAffinityInvalid"
-  >,
+  parent: FallbackParent,
   errorClass: ProviderErrorClass,
   options: { includeRepoSecrets?: boolean } = {},
 ): Promise<FallbackPick> {
   const current = parent.resolvedProfile;
   if (!current || !parent.agentId) return { kind: "none", message: null };
   const hops = parent.fallbackHops ?? [];
-  const path = hops.length > 0 ? [hops[0]!.from, ...hops.map((hop) => hop.profile)] : [current];
+  // A same-profile key retry (`from === profile`) is not a step of the chain.
+  const profileHops = hops.filter((hop) => hop.from !== hop.profile);
+  const path =
+    profileHops.length > 0
+      ? [profileHops[0]!.from, ...profileHops.map((hop) => hop.profile)]
+      : [current];
   if (path[path.length - 1] !== current) path.push(current);
   const visited = new Set(path);
   const skipped: { profile: string; reason: string }[] = [];
   const judged = new Set<string>();
-  let configured = hops.length > 0;
+  let configured = profileHops.length > 0;
 
   if (parent.routingAffinity?.leadOnly) {
     const agent = await getAgentById(parent.agentId);
@@ -260,6 +334,26 @@ export async function nextFallback(
         kind: "none",
         message: `${errorClass} on ${current}; no fallback: lead-only work cannot resume on agent ${parent.agentId}`,
       };
+    }
+  }
+
+  // Why no other key ran the profile, to lead the failure reason.
+  let keysExhausted = "";
+  if (KEY_SCOPED_ERRORS.has(errorClass)) {
+    const pool = await keyPoolOf(parent, current, options);
+    if (pool) {
+      const retries = hops.filter((hop) => hop.from === current && hop.profile === current).length;
+      if (pool.free > 0 && retries < pool.size) {
+        return {
+          kind: "picked",
+          profile: current,
+          hop: { from: current, profile: current, errorClass, at: new Date().toISOString() },
+        };
+      }
+      keysExhausted =
+        pool.free > 0
+          ? `no key retry left (${retries} retries on a pool of ${pool.size} ${pool.keyType} keys); `
+          : `no key left (all ${pool.size} ${pool.keyType} keys are rate-limited or just failed); `;
     }
   }
 
@@ -290,14 +384,21 @@ export async function nextFallback(
       skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
     }
   }
-  if (!configured) return { kind: "none", message: null };
+  if (!configured) {
+    return {
+      kind: "none",
+      message: keysExhausted
+        ? `${errorClass} on ${current}; ${keysExhausted}no fallback configured`
+        : null,
+    };
+  }
   const skippedText =
     skipped.length > 0
       ? `; skipped: ${skipped.map((s) => `${s.profile} (${s.reason})`).join(", ")}`
       : "";
   return {
     kind: "none",
-    message: `${errorClass} on ${current}; no fallback left (tried: ${path.join(" → ")})${skippedText}`,
+    message: `${errorClass} on ${current}; ${keysExhausted}no fallback left (tried: ${path.join(" → ")})${skippedText}`,
   };
 }
 
