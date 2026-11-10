@@ -48,6 +48,8 @@ export interface ConfigCatalogEntry {
   label: string;
   description: string;
   kind: ConfigCatalogKind;
+  /** An empty saved string disables this Slack icon. */
+  emptyDisablesIcon?: boolean;
   /** Native storage unit for numeric durations. Never inferred by the renderer. */
   unit?: DurationUnit;
   /** Allowed values for enum and comma-separated multiselect controls. */
@@ -1247,6 +1249,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_ACCEPTED",
+        emptyDisablesIcon: true,
         label: "Accepted-message reaction",
         description:
           "Slack emoji shortcode the bot adds when a task is accepted from a channel mention, thread reply, follow-up or assistant DM. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1256,6 +1259,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_BUFFERED",
+        emptyDisablesIcon: true,
         label: "Buffered-message reaction",
         description:
           "Slack emoji shortcode the bot adds when message 2 and later arrive in an additive buffer window. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1265,6 +1269,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_NOW",
+        emptyDisablesIcon: true,
         label: "Instant-flush reaction",
         description:
           "Slack emoji shortcode the bot adds when the !now command flushes the buffer. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1274,6 +1279,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_STEERED",
+        emptyDisablesIcon: true,
         label: "Steering-accepted reaction",
         description:
           "Slack emoji shortcode the bot adds when a thread message is accepted as steering for a running task. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1283,6 +1289,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_COMPLETED",
+        emptyDisablesIcon: true,
         label: "Completed-task reaction",
         description:
           "Slack emoji shortcode the bot adds when every task linked to the trigger message reached status completed. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name. Change this when another tool in the workspace acts on the default emoji.",
@@ -1292,6 +1299,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_FAILED",
+        emptyDisablesIcon: true,
         label: "Failed-task reaction",
         description:
           "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1301,6 +1309,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_REACTION_SKIPPED",
+        emptyDisablesIcon: true,
         label: "Skipped-message reaction",
         description:
           "Slack emoji shortcode the bot adds when it decides a message is not its to answer: every linked task ended skipped, or a pre.task.create extension blocked the task. Posts nothing to the thread. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
@@ -1310,9 +1319,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_STATUS_ICON_COMPLETED",
+        emptyDisablesIcon: true,
         label: "Completed status icon",
         description:
-          "Slack emoji shortcode for the done glyph in thread text: task tree, thread header and outcome cards. Bare name or :name:, same rules as the reaction keys. Unset or invalid keeps the stock check mark. Unlike reactions there is no fallback: a name the workspace lacks renders as literal :name:.",
+          "Slack emoji shortcode for the done glyph in thread text: task tree, thread header and outcome cards. Bare name or :name:, same rules as the reaction keys. Unset uses the stock check mark. Empty disables the icon. Unlike reactions there is no fallback: a name the workspace lacks renders as literal :name:.",
         kind: "string",
         defaultValue: "white_check_mark",
         docsUrl: `${DOCS}integrations/slack`,

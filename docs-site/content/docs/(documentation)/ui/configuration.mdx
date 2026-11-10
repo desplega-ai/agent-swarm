@@ -681,3 +681,12 @@ A website, team size, and use case enable the full fleet benchmark. The API send
 `POST /api/used-by` accepts `{granted, contactEmail?, contactFunction?, quote?}`. A grant requires a valid contact email. The optional quote allows at most 280 characters. Contact function accepts `engineer`, `eng_lead`, `founder`, `product`, `marketing`, `sales`, `research`, `ops`, or `other`.
 
 The explicit consent sends these details to Desplega, even when telemetry is off. The API stores them in `SWARM_USED_BY_CONTACT_EMAIL`, `SWARM_USED_BY_CONTACT_FUNCTION`, and `SWARM_USED_BY_QUOTE`. Revocation clears all three local values after the proxy accepts the request. Desplega keeps the earlier grant record because the proxy has no delete path. To request deletion of that record, contact [contact@desplega.sh](mailto:contact@desplega.sh).
+
+
+## Slack icons
+
+The seven `SLACK_REACTION_*` settings and `SLACK_STATUS_ICON_COMPLETED` support **No icon**. Choose that action or clear the field and save to store an empty string. Saved empty values display **No icon**. **Remove the saved value** deletes the override and restores the deployment setting or built-in default.
+
+Click **No icon** to remove this icon. Otherwise, enter an emoji shortcode such as `:eyes:`. If Slack rejects a reaction's emoji name, the reaction falls back to its default. The completed text icon renders the value as `:name:`; unknown emoji names appear literally, without a fallback. Remove the saved value to restore the deployment setting or default.
+
+Global saves apply through automatic reload. Empty or whitespace-only deployment values also disable; absent variables use defaults. Existing empty values now disable instead of falling back. Malformed nonempty shortcodes are rejected when saving. See [Slack reactions](/docs/integrations/slack) for lifecycle behavior and the existing limitation when changing acceptance names during an active task.

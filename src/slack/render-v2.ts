@@ -60,7 +60,13 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
-import { completedStatusIcon, reactionName, type SlackReactionEvent } from "./reaction-shortcode";
+import {
+  completedStatusIcon,
+  iconPrefix,
+  reactionName,
+  reactionStatusIcon,
+  type SlackReactionEvent,
+} from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import {
   _resetSlackSessionStatusForTests,
@@ -364,7 +370,7 @@ async function taskStateGlyph(
     case "superseded":
       return "↪️";
     case "skipped":
-      return `:${reactionName("skipped")}:`;
+      return reactionStatusIcon("skipped");
     default:
       return "🕒";
   }
@@ -477,7 +483,7 @@ async function renderNodeLines(
     indent.length > MAX_TREE_PREFIX_LENGTH
       ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : indent;
-  let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now, threadTasks)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
+  let line = `${boundedPrefix}↳ ${iconPrefix(await taskStateGlyph(node.task, now, threadTasks))}${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
   // A skip posts no outcome card, so its row carries the reason. Editing the
   // tree is silent; it notifies no one.
   const detail =
@@ -527,7 +533,7 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`
-    : `🧵 ${completedStatusIcon()} done — ${duration}`;
+    : `🧵 ${iconPrefix(completedStatusIcon())}done — ${duration}`;
 }
 
 export async function renderThreadTree(
@@ -935,6 +941,7 @@ const LINE_START_BLOCK =
  * blank line so its markdown still renders.
  */
 export function withStatusLead(lead: string, body: string): string {
+  if (!lead) return body;
   const text = body.replace(/^(?:[ \t]*\r?\n)+/, "");
   if (LINE_START_BLOCK.test(text)) return `${lead}\n\n${body}`;
   return `${lead} ${text.trimStart()}`;
@@ -954,7 +961,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   // gets no outcome card of its own. The rewrite is an edit, so it is silent.
   if (task.status === "skipped") {
     return withStatusLead(
-      `:${reactionName("skipped")}: **Skipped:**`,
+      `${iconPrefix(reactionStatusIcon("skipped"))}**Skipped:**`,
       outcomeText(task.failureReason, "Task was skipped."),
     );
   }
@@ -966,7 +973,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
     const agentName = task.agentId
       ? ((await getAgentById(task.agentId))?.name ?? "Agent")
       : "Agent";
-    return `${completedStatusIcon()} ${agentName} completed`;
+    return `${iconPrefix(completedStatusIcon())}${agentName} completed`;
   }
   // A deferral is `completed` in the database but unfinished to a human: the
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
@@ -1007,7 +1014,7 @@ export async function childOutcomeContent(
     );
   }
   if (slackReplySent && !isDeferredTask(task)) {
-    return `↳ ${completedStatusIcon()} ${agentName} completed`;
+    return `↳ ${iconPrefix(completedStatusIcon())}${agentName} completed`;
   }
   if (isDeferredTask(task)) {
     return withStatusLead(
@@ -1016,7 +1023,7 @@ export async function childOutcomeContent(
     );
   }
   return withStatusLead(
-    `↳ ${completedStatusIcon()} ${agentName} — result:`,
+    `↳ ${iconPrefix(completedStatusIcon())}${agentName} — result:`,
     outcomeText(slackTaskOutput(task), "Task completed."),
   );
 }
@@ -1078,7 +1085,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
     const agentName = await agentDisplayNameFor(member);
     const card = await getSlackOutcomeMessage(member.id);
     if (card?.permalink) {
-      lines.push(`↳ ${glyph} ${agentName} — [result](${card.permalink})`);
+      lines.push(`↳ ${iconPrefix(glyph)}${agentName} — [result](${card.permalink})`);
       continue;
     }
     const raw = outcomeText(
@@ -1097,7 +1104,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       false,
     );
     const label = digest ? `${agentName} — ${citedDigest}` : agentName;
-    lines.push(`↳ ${glyph} ${label} ${getTaskLink(member.id)}`);
+    lines.push(`↳ ${iconPrefix(glyph)}${label} ${getTaskLink(member.id)}`);
   }
   return lines;
 }
@@ -1108,7 +1115,7 @@ async function conclusionTimeoutLines(ask: AgentTask, closure: AgentTask[]): Pro
   for (const member of [ask, ...closure]) {
     if (isTerminalTreeStatus(member.status)) continue;
     const glyph = await taskStateGlyph(member, new Date());
-    lines.push(`↳ ${glyph} ${getTaskLink(member.id)}`);
+    lines.push(`↳ ${iconPrefix(glyph)}${getTaskLink(member.id)}`);
   }
   return lines;
 }

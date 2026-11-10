@@ -77,13 +77,45 @@ describe("reaction-shortcode.ts", () => {
     }
   });
 
+  test("explicit empty and whitespace disable every reaction without calling Slack", async () => {
+    for (const event of ALL_EVENTS) {
+      for (const value of ["", "  "]) {
+        process.env[SLACK_REACTION_CONFIG_KEYS[event]] = value;
+        expect(reactionName(event)).toBeNull();
+        const { client, calls } = recordingClient();
+        await ackSlackMessage(client as never, "C_TEST", "empty", reactionName(event), event);
+        expect(calls).toEqual([]);
+      }
+    }
+  });
+
+  test("disabled terminal reaction still removes acceptance reactions", async () => {
+    process.env.SLACK_REACTION_COMPLETED = "";
+    const { client, calls } = recordingClient();
+    await finalizeSlackMessageReaction(
+      client as never,
+      "C_TEST",
+      "empty-terminal",
+      reactionName("completed"),
+      "completed",
+    );
+    expect(calls).toEqual(DEFAULT_ACCEPTANCE_NAMES.map((name) => ({ method: "remove", name })));
+  });
+
+  test("disabled acceptance reactions never send null or empty names", async () => {
+    for (const key of Object.values(SLACK_REACTION_CONFIG_KEYS)) process.env[key] = "";
+    const { client, calls } = recordingClient();
+    await finalizeSlackMessageReaction(client as never, "C_TEST", "all-empty", null, "completed");
+    expect(calls).toEqual([]);
+  });
+
   test("reactionName normalizes colons, whitespace and case", () => {
     process.env.SLACK_REACTION_COMPLETED = "  :Swarm_Check_Mark:  ";
     expect(reactionName("completed")).toBe("swarm_check_mark");
   });
 
   test("reactionName rejects a value outside the shortcode format and returns the default", () => {
-    for (const bad of ["white check", "✅", "Check!", "", "::"]) {
+    for (const bad of ["white check", "✅", "Check!", "::"]) {
       process.env.SLACK_REACTION_COMPLETED = bad;
       expect(reactionName("completed")).toBe("white_check_mark");
     }
@@ -125,7 +157,11 @@ describe("reaction-shortcode.ts", () => {
         process.env.SLACK_STATUS_ICON_COMPLETED = value;
         expect(completedStatusIcon()).toBe(":bee-lgtm:");
       }
-      for (const bad of ["", "::", "bee lgtm", "✅", "bee:lgtm"]) {
+      for (const empty of ["", "  "]) {
+        process.env.SLACK_STATUS_ICON_COMPLETED = empty;
+        expect(completedStatusIcon()).toBe("");
+      }
+      for (const bad of ["::", "bee lgtm", "✅", "bee:lgtm"]) {
         process.env.SLACK_STATUS_ICON_COMPLETED = bad;
         expect(completedStatusIcon()).toBe("✅");
       }
