@@ -164,7 +164,9 @@ export function decideWebhookDelivery(
     clauses.push({ ...source, allowed: events, origin: "events" });
   }
 
-  if (trigger.filter != null) {
+  // `null` is a stored JSON value, not an omitted filter. Rows are loaded
+  // without re-validating the trigger, so a null filter must fail closed.
+  if (trigger.filter !== undefined) {
     const parsed = WebhookDeliveryFilterSchema.safeParse(trigger.filter);
     if (!parsed.success) return invalid(WEBHOOK_FILTER_INVALID_MESSAGE);
     for (const [name, allowed] of Object.entries(parsed.data.headers ?? {})) {

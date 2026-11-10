@@ -241,6 +241,10 @@ describe("webhook delivery filter", () => {
       action: "invalid",
       message: WEBHOOK_FILTER_INVALID_MESSAGE,
     });
+    expect(decideWebhookDelivery({ filter: null }, {}, { action: "opened" })).toEqual({
+      action: "invalid",
+      message: WEBHOOK_FILTER_INVALID_MESSAGE,
+    });
   });
 });
 

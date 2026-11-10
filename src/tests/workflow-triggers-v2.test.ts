@@ -973,6 +973,21 @@ describe("handleWebhookTrigger — delivery filter", () => {
     expect((presetErr as WebhookError).statusCode).toBe(500);
     expect(await countWorkflowRuns(presetWorkflow.id)).toBe(0);
   });
+
+  test("a stored filter: null returns 500 and writes no run", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", filter: null } as Workflow["triggers"][number]],
+    });
+
+    const err = await handleWebhookTrigger(workflow.id, '{"action":"opened"}', {}, registry).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(WebhookError);
+    expect((err as WebhookError).statusCode).toBe(500);
+    expect((err as WebhookError).message).toBe("Webhook trigger filter is invalid");
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+  });
 });
 
 describe("handleWebhookTrigger — verification formats", () => {
