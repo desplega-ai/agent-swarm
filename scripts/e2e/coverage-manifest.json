@@ -546,6 +546,7 @@
       "scenarios": [
         "workflow-engine-instant-nodes",
         "workflow-engine-async-nodes",
+        "workflow-wait-event-loop",
         "workflow-engine-system-one",
         "workflow-script-node"
       ]

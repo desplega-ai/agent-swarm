@@ -231,6 +231,8 @@ const COLUMN_MIGRATIONS = [
   // The run's effective effort per config id, snapshotted at creation
   // ({"claude-opus":"high"}); NULL on runs created before efforts existed.
   "ALTER TABLE eval_runs ADD COLUMN efforts_json TEXT",
+  // Opt-in api extension plan installed in each attempt's sandbox API (JSON); NULL = none.
+  "ALTER TABLE eval_runs ADD COLUMN api_extension_json TEXT",
   // Effort the attempt's worker was launched with, and the one its harness
   // reported applying (agent latestModel). NULL = harness default / none reported.
   "ALTER TABLE attempts ADD COLUMN reasoning_effort TEXT",

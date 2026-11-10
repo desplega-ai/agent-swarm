@@ -142,6 +142,8 @@ type EntryPoint = {
   run: (targetId: string) => Promise<{ status: number; body: any }>;
   /** Whether the write landed. */
   wrote: (targetId: string) => Promise<boolean>;
+  /** Success status of the control run. Default 200. */
+  okStatus?: number;
 };
 
 function entryPoints(): EntryPoint[] {
@@ -207,7 +209,10 @@ function entryPoints(): EntryPoint[] {
           body: { sourceUserId: source.id },
         });
       },
-      wrote: async (t) => (await getUserById(sources.get(t) as string)) == null,
+      // The merge answers 202 and a background job deletes the source; the
+      // short phase marks it first, which is the write the guard protects.
+      wrote: async (t) => (await getUserById(sources.get(t) as string))?.mergedIntoUserId === t,
+      okStatus: 202,
     },
   ];
 }
@@ -246,7 +251,7 @@ describe("an operator grant landing between the check and the write", () => {
   for (const entry of entryPoints()) {
     test(`${entry.name}: control, a grant without an operator-granted role lets it through`, async () => {
       const { target, res } = await raced(entry, ["requester"]);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(entry.okStatus ?? 200);
       expect(await entry.wrote(target.id)).toBe(true);
     });
   }

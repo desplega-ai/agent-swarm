@@ -431,9 +431,50 @@ export const platformUsersLifecycle: Scenario = {
     const merged = await ctx.api("POST", `/api/users/${alice.id}/merge`, {
       body: { sourceUserId: bob.id },
     });
-    expectStatus(merged, [200], "merge users");
-    const mergedUser = userOf(merged.json);
-    expect(mergedUser.id === alice.id, "merge returns the target user");
+    expectStatus(merged, [202], "merge users queues a job");
+    const job = asRecord(asRecord(merged.json).job);
+    expect(job.sourceUserId === bob.id, "the job names the source");
+    expect(job.targetUserId === alice.id, "the job names the target");
+    expect(
+      ["pending", "running", "done"].includes(String(job.status)),
+      `a fresh job is pending, running or done, got ${String(job.status)}`,
+    );
+    // While the job runs, the source still exists, marked for the target, and
+    // the merge cannot be repeated.
+    const bobPending = await ctx.api("GET", `/api/users/${bob.id}`);
+    if (bobPending.status === 200) {
+      expect(
+        userOf(bobPending.json).mergedIntoUserId === alice.id,
+        "the pending source is marked with the target",
+      );
+    }
+    expectStatus(
+      await ctx.api("GET", "/api/users/merge-jobs/no-such-job"),
+      [404],
+      "unknown merge job",
+    );
+    const jobList = await ctx.api("GET", "/api/users/merge-jobs?limit=10");
+    expectStatus(jobList, [200], "list merge jobs");
+    expect(
+      asRecords(jobList.json, "jobs").some((j) => j.id === job.id),
+      "the list includes the queued job",
+    );
+    // The rewrite runs in batches off the request; poll until it is done.
+    let finished = job;
+    for (let attempt = 0; attempt < 100 && finished.status !== "done"; attempt++) {
+      expect(finished.status !== "failed", `merge job failed: ${String(finished.error)}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const polled = await ctx.api("GET", `/api/users/merge-jobs/${job.id}`);
+      expectStatus(polled, [200], "poll the merge job");
+      finished = asRecord(asRecord(polled.json).job);
+    }
+    expect(finished.status === "done", `merge job finished, got ${String(finished.status)}`);
+    expect(finished.phase === "delete-user", "the done job ends on the delete-user phase");
+    expect(
+      asRecord(finished.progress)["delete-user"] === 1,
+      "the job counts the deleted source row",
+    );
+    const mergedUser = await getUser(ctx, alice.id);
     for (const identity of bobBefore.identities) {
       expect(
         mergedUser.identities.some(
