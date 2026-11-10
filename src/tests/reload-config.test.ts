@@ -561,3 +561,48 @@ describe("auto-reload debouncer", () => {
     delete process.env[testKey];
   });
 });
+
+test("task-tree visibility follows stored precedence, reset, and persists quick transitions", async () => {
+  const key = "SLACK_RENDER_V2_TASK_TREE_ENABLED";
+  const oldTree = process.env[key];
+  const oldV2 = process.env.SLACK_RENDER_V2;
+  __resetInjectedEnvTracking();
+  try {
+    process.env.SLACK_RENDER_V2 = "true";
+    process.env[key] = "false";
+    await loadGlobalConfigsIntoEnv(true);
+    const row = await upsertSwarmConfig({ scope: "global", key, value: "true", isSecret: false });
+    await loadGlobalConfigsIntoEnv(true);
+    expect(process.env[key]).toBe("true");
+    const enabled = await getDbClient().get<{
+      task_tree_enabled: number;
+      task_tree_enabled_at: string;
+    }>("SELECT task_tree_enabled, task_tree_enabled_at FROM slack_render_v2_state WHERE id = 1");
+    expect(enabled?.task_tree_enabled).toBe(1);
+    expect(enabled?.task_tree_enabled_at).toBeTruthy();
+    await loadGlobalConfigsIntoEnv(true);
+    expect(
+      (
+        await getDbClient().get<{ cutoff: string }>(
+          "SELECT task_tree_enabled_at AS cutoff FROM slack_render_v2_state WHERE id = 1",
+        )
+      )?.cutoff,
+    ).toBe(enabled?.task_tree_enabled_at);
+    await deleteSwarmConfig(row.id);
+    await loadGlobalConfigsIntoEnv(true);
+    expect(process.env[key]).toBe("false");
+    expect(
+      (
+        await getDbClient().get<{ enabled: number }>(
+          "SELECT task_tree_enabled AS enabled FROM slack_render_v2_state WHERE id = 1",
+        )
+      )?.enabled,
+    ).toBe(0);
+  } finally {
+    __resetInjectedEnvTracking();
+    if (oldTree === undefined) delete process.env[key];
+    else process.env[key] = oldTree;
+    if (oldV2 === undefined) delete process.env.SLACK_RENDER_V2;
+    else process.env.SLACK_RENDER_V2 = oldV2;
+  }
+});

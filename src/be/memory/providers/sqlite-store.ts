@@ -256,8 +256,9 @@ export class SqliteMemoryStore implements MemoryStore {
    * FTS_MISSING_IDS_SQL), and inserts run in batches that yield the event loop
    * between them, so a cold rebuild cannot stall the API the way the old
    * synchronous correlated anti-join did at boot. Rows written by
-   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows,
-   * which delete-then-insert, so a concurrent write cannot leave a duplicate.
+   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows.
+   * The insert below skips ids memory_fts already holds, in one statement, so
+   * a write that commits its memory and FTS rows together cannot be doubled.
    */
   private async populateFtsTable(): Promise<void> {
     const client = getDbClient();
@@ -324,15 +325,29 @@ export class SqliteMemoryStore implements MemoryStore {
     return this.ftsPopulate ?? Promise.resolve();
   }
 
-  private async syncFtsRow(memoryId: string, name: string, content: string): Promise<void> {
+  /**
+   * Delete and insert run in one transaction (a SAVEPOINT inside a caller's),
+   * so a backfill insert cannot land between them, and a failure rolls back
+   * only the FTS write. `freshId`: the caller inserted the memory row under a
+   * new id in the same transaction, so no FTS row can exist for it and the
+   * delete, a full memory_fts scan (memory_id is UNINDEXED), is skipped.
+   */
+  private async syncFtsRow(
+    memoryId: string,
+    name: string,
+    content: string,
+    freshId = false,
+  ): Promise<void> {
     if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
     try {
-      await getDbClient().run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
-      await getDbClient().run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
-        memoryId,
-        name,
-        content,
-      ]);
+      await getDbClient().transaction(async (tx) => {
+        if (!freshId) await tx.run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+        await tx.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
+          memoryId,
+          name,
+          content,
+        ]);
+      });
     } catch (err) {
       console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
     }
@@ -552,10 +567,11 @@ export class SqliteMemoryStore implements MemoryStore {
           input.agentId ?? null,
         ],
       );
+      // Same transaction: a backfill sees the memory row only with its FTS row.
+      await this.syncFtsRow(inserted.id, inserted.name, inserted.content, true);
       return inserted;
     });
 
-    await this.syncFtsRow(row.id, row.name, row.content);
     return rowToAgentMemory(row);
   }
 
@@ -1683,15 +1699,16 @@ export class SqliteMemoryStore implements MemoryStore {
     const tableExists = this.getVecTableSchema() !== null;
     const tableUsable = tableExists && isSqliteVecAvailable();
     const count = (sql: string) => db.prepare<{ count: number }, []>(sql).get()?.count ?? 0;
+    const validEmbedding = count(
+      `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
+    );
 
     return {
       total: count("SELECT COUNT(*) as count FROM agent_memory"),
       withEmbedding: count(
         "SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL",
       ),
-      validEmbedding: count(
-        `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
-      ),
+      validEmbedding,
       invalidEmbedding: count(
         `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
       ),
@@ -1702,18 +1719,21 @@ export class SqliteMemoryStore implements MemoryStore {
            AND (expiresAt IS NULL OR expiresAt > datetime('now'))`,
       ),
       memoryVec: tableUsable ? count("SELECT COUNT(*) as count FROM memory_vec") : 0,
+      // Valid rows minus the valid rows memory_vec holds. memory_vec.memory_id
+      // is its primary key, so the join counts each memory at most once. The
+      // CROSS JOIN pins memory_vec as the outer loop: an agent_memory-driven
+      // anti-join probes vec0 once per memory, which held the event loop for
+      // seconds at 57k memories; this side is a primary-key lookup per vec row.
       missingFromVec: tableUsable
-        ? count(
+        ? validEmbedding -
+          count(
             `SELECT COUNT(*) as count
-             FROM agent_memory m
-             LEFT JOIN memory_vec v ON v.memory_id = m.id
+             FROM memory_vec v
+             CROSS JOIN agent_memory m ON m.id = v.memory_id
              WHERE m.embedding IS NOT NULL
-               AND length(m.embedding) = ${VECTOR_BYTES}
-               AND v.memory_id IS NULL`,
+               AND length(m.embedding) = ${VECTOR_BYTES}`,
           )
-        : count(
-            `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
-          ),
+        : validEmbedding,
       extraInVec: tableUsable
         ? count(
             `SELECT COUNT(*) as count

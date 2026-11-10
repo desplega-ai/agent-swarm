@@ -677,6 +677,37 @@ jobs:
           docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
           docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
 
+  # A version bump (the nightly release PR) also deploys prod, instead of waiting
+  # for the next deploy.yml window. Runs after this run's api and worker images and
+  # the :latest promotion, so deploy.yml's selection (newest main commit with both
+  # images) finds the release commit. GITHUB_TOKEN may dispatch workflow_dispatch
+  # (as create-release does for publish-mcp-registry.yml). A failed dispatch only
+  # warns: the release stands and the next window deploys it.
+  deploy-release:
+    name: Deploy release to prod
+    runs-on: ubuntu-latest
+    needs:
+      - detect-version-change
+      - merge-server
+      - merge-worker
+      - promote-main-tags
+    if: github.ref == 'refs/heads/main' && needs.detect-version-change.outputs.version_changed == 'true'
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch deploy.yml
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+        run: |
+          if gh workflow run deploy.yml -R "$GITHUB_REPOSITORY" --ref main; then
+            echo "::notice::Dispatched deploy.yml for release v${VERSION}"
+          else
+            echo "::warning::Could not dispatch deploy.yml for v${VERSION}; the next deploy window ships it"
+            exit 1
+          fi
+
   notify-image-release:
     name: Notify Swarm Cloud image release
     runs-on: ubuntu-latest

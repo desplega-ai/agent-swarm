@@ -264,11 +264,15 @@ function enumValidator(key: string, options: string[]): Record<string, ConfigVal
 /** Build `{ KEY: validator }` entries accepting a Slack emoji shortcode. */
 function shortcodeValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
-    `Invalid ${key} (must be a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
+    `Invalid ${key} (must be empty to disable, or a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
   return Object.fromEntries(
     keys.map((key) => [
       key,
-      (value: unknown) => (normalizeSlackReactionShortcode(value) !== null ? null : message(key)),
+      (value: unknown) =>
+        typeof value === "string" &&
+        (value.trim() === "" || normalizeSlackReactionShortcode(value) !== null)
+          ? null
+          : message(key),
     ]),
   );
 }
@@ -622,6 +626,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_DISABLE",
     "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
+    "SLACK_RENDER_V2_TASK_TREE_ENABLED",
     "SLACK_RENDER_V2_DELEGATION",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
     "GITHUB_DISABLE",

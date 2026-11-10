@@ -263,7 +263,13 @@ const shortcode = (raw: string): string | null => {
 
 /** The acceptance reactions the engine may have put on the message, deduplicated. */
 export const acceptanceReactions = (): string[] => [
-  ...new Set(ACCEPTANCE_REACTIONS.map(([key, fallback]) => shortcode(envOf(key)) ?? fallback)),
+  ...new Set(
+    ACCEPTANCE_REACTIONS.flatMap(([key, fallback]) => {
+      const raw = process.env[key];
+      if (raw !== undefined && raw.trim() === "") return [];
+      return [shortcode(raw ?? "") ?? fallback];
+    }),
+  ),
 ];
 
 const slackCall = async (
@@ -405,9 +411,7 @@ export const askModel = async (
     } | null;
     if (res?.success === false || body?.success === false) {
       const why = `${target.provider}: ${String(body?.message ?? body?.error ?? `HTTP ${res?.status}`).slice(0, 200)}`;
-      throw body?.providerUnavailable === true
-        ? new ProviderUnavailableError(why)
-        : new Error(why);
+      throw body?.providerUnavailable === true ? new ProviderUnavailableError(why) : new Error(why);
     }
     const answer = body?.answers?.reason;
     const reason = typeof answer?.choice === "string" ? answer.choice : "";

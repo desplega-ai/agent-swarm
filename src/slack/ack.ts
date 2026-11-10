@@ -41,9 +41,10 @@ async function addReaction(
   client: SlackReactionClient,
   channel: string,
   timestamp: string,
-  name: string,
+  name: string | null,
   event: SlackReactionEvent | undefined,
 ): Promise<void> {
+  if (!name) return;
   try {
     await client.reactions.add({ channel, name, timestamp });
   } catch (error) {
@@ -91,7 +92,7 @@ export async function ackSlackMessage(
   client: SlackReactionClient,
   channel: string,
   timestamp: string,
-  name: string,
+  name: string | null,
   event?: SlackReactionEvent,
 ): Promise<void> {
   await addReaction(client, channel, timestamp, name, event);
@@ -112,10 +113,14 @@ export async function finalizeSlackMessageReaction(
   client: SlackReactionClient,
   channel: string,
   timestamp: string,
-  outcome: string,
+  outcome: string | null,
   event?: SlackReactionEvent,
 ): Promise<void> {
-  const names = new Set(ACCEPTANCE_EVENTS.map((acceptanceEvent) => reactionName(acceptanceEvent)));
+  const names = new Set(
+    ACCEPTANCE_EVENTS.map((acceptanceEvent) => reactionName(acceptanceEvent)).filter(
+      (name): name is string => name !== null,
+    ),
+  );
   // Each removal targets a different name and absorbs its own error, so the
   // (at most ACCEPTANCE_EVENTS.length) calls run together. The outcome
   // reaction still waits for all of them: an outcome name that matches an
@@ -167,7 +172,7 @@ export async function skipSlackMessageReaction(
  * is a fixed built-in shortcode, so it opts out of the `invalid_name` fallback
  * that only makes sense for operator-configured names.
  */
-export type SlackReactionChoice = { name: string; event?: SlackReactionEvent };
+export type SlackReactionChoice = { name: string | null; event?: SlackReactionEvent };
 
 /** The reaction choice for a task's terminal outcome, honouring operator config. */
 export function terminalReactionChoice(task: AgentTask): SlackReactionChoice {

@@ -5710,12 +5710,94 @@
                         "type": "string",
                         "minLength": 1
                       },
-                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                      "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
                     },
                     "eventHeader": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
+                      "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                    },
+                    "preset": {
+                      "type": "string",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "standard-webhooks"
+                      ],
+                      "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                    },
+                    "filter": {
+                      "type": "object",
+                      "properties": {
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                        },
+                        "body": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 512
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                     }
                   },
                   "required": [
@@ -6491,12 +6573,94 @@
                         "type": "string",
                         "minLength": 1
                       },
-                      "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                      "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
                     },
                     "eventHeader": {
                       "type": "string",
                       "minLength": 1,
-                      "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
+                      "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                    },
+                    "preset": {
+                      "type": "string",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "standard-webhooks"
+                      ],
+                      "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                    },
+                    "filter": {
+                      "type": "object",
+                      "properties": {
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                        },
+                        "body": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 512
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 512
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 64
+                              }
+                            ]
+                          },
+                          "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                     }
                   },
                   "required": [
@@ -71863,12 +72027,94 @@
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                              "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
                             },
                             "eventHeader": {
                               "type": "string",
                               "minLength": 1,
-                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
+                              "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                            },
+                            "preset": {
+                              "type": "string",
+                              "enum": [
+                                "github",
+                                "gitlab",
+                                "standard-webhooks"
+                              ],
+                              "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                            },
+                            "filter": {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                                },
+                                "body": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 512
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                             }
                           },
                           "required": [
@@ -72297,12 +72543,94 @@
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "description": "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event."
+                              "description": "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause."
                             },
                             "eventHeader": {
                               "type": "string",
                               "minLength": 1,
-                              "description": "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event."
+                              "description": "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted."
+                            },
+                            "preset": {
+                              "type": "string",
+                              "enum": [
+                                "github",
+                                "gitlab",
+                                "standard-webhooks"
+                              ],
+                              "description": "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set."
+                            },
+                            "filter": {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 512
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match."
+                                },
+                                "body": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "maxLength": 512
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 64
+                                      }
+                                    ]
+                                  },
+                                  "description": "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run."
                             }
                           },
                           "required": [
@@ -73546,35 +73874,80 @@
         ],
         "responses": {
           "200": {
-            "description": "Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created.",
+            "description": "Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "skipped": {
-                      "type": "boolean",
-                      "enum": [
-                        true
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "skipped": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "event-not-allowed"
+                          ]
+                        },
+                        "event": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "skipped",
+                        "reason",
+                        "event"
                       ]
                     },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "event-not-allowed"
-                      ]
-                    },
-                    "event": {
-                      "type": [
-                        "string",
-                        "null"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "skipped": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "filter-not-matched"
+                          ]
+                        },
+                        "match": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "header",
+                                "body"
+                              ]
+                            },
+                            "path": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "path"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "skipped",
+                        "reason",
+                        "match"
                       ]
                     }
-                  },
-                  "required": [
-                    "skipped",
-                    "reason",
-                    "event"
                   ]
                 }
               }

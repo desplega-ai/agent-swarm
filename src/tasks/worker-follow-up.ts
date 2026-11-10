@@ -249,8 +249,10 @@ async function keyPoolOf(
   options: { includeRepoSecrets?: boolean },
 ): Promise<{ keyType: string; size: number; free: number } | null> {
   const keyType = parent.credentialKeyType;
+  // Without the failed key's suffix the pick cannot exclude it, so no retry.
+  if (!keyType || !parent.credentialKeySuffix || !parent.agentId) return null;
   const profile = await getModelProfileByName(profileName);
-  if (!keyType || !parent.agentId || !profile || hasUnreadableCredentialAllowlist(profile)) {
+  if (!profile || hasUnreadableCredentialAllowlist(profile)) {
     return null;
   }
   const pools = await configPools(parent.agentId, {

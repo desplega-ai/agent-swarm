@@ -78,6 +78,7 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
   const { config, value: savedValue, save, reset, isSaving, isLoading } = useSwarmConfig(entry.key);
   const inputId = `config-${entry.key}`;
   const isPending = isSaving || isLoading;
+  const iconDisabled = !!entry.emptyDisablesIcon && savedValue?.trim() === "";
   const sourceChip = deriveSourceChip(config !== undefined, inEnv);
 
   // Text/number rows are draft-edited and committed with an explicit Save.
@@ -138,7 +139,8 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
   }, [config]);
 
   function handleSave(value: string) {
-    const next = normalize ? normalize(value) : value;
+    const next =
+      entry.emptyDisablesIcon && value.trim() === "" ? "" : normalize ? normalize(value) : value;
     save(next, { description: entry.description });
     if (next !== value) setDraft(next);
     onSave?.(next);
@@ -172,7 +174,9 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
           size="icon"
           variant="ghost"
           className="h-8 w-8 shrink-0"
-          onClick={reset}
+          onClick={() =>
+            reset(entry.emptyDisablesIcon ? `Removed saved value for ${entry.key}` : undefined)
+          }
           disabled={isPending}
           aria-label={`Remove the saved value for ${entry.key}`}
         >
@@ -193,7 +197,10 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
       type={entry.kind === "number" ? "number" : "text"}
       step={entry.kind === "number" ? "any" : undefined}
       value={draft}
-      placeholder={entry.placeholder ?? entry.defaultValue}
+      placeholder={
+        entry.emptyDisablesIcon ? "Enter shortcode" : (entry.placeholder ?? entry.defaultValue)
+      }
+      aria-describedby={entry.emptyDisablesIcon ? `${inputId}-help` : undefined}
       disabled={isPending}
       onChange={(event) => setDraft(event.target.value)}
       className="min-w-0 w-full font-mono text-xs"
@@ -207,7 +214,10 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
     >
       <div className="min-w-0 space-y-1 sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor={showEnvOnly ? undefined : inputId} className="text-sm font-medium">
+          <Label
+            htmlFor={showEnvOnly || iconDisabled ? undefined : inputId}
+            className="text-sm font-medium"
+          >
             {entry.label}
           </Label>
           <code className="font-mono text-[10px] text-muted-foreground select-text">
@@ -251,6 +261,15 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
           )}
         </div>
         <p className="text-xs text-muted-foreground">{entry.description}</p>
+        {entry.emptyDisablesIcon && (
+          <p id={`${inputId}-help`} className="text-xs text-muted-foreground">
+            Click “No icon” to remove this icon. Otherwise, enter an emoji shortcode such as :eyes:.{" "}
+            {entry.key === "SLACK_STATUS_ICON_COMPLETED"
+              ? "Text renders the value as :name:. Unknown emoji names appear literally, without a fallback."
+              : "If Slack rejects the emoji name, the reaction falls back to its default."}{" "}
+            Remove the saved value to restore the deployment setting or default.
+          </p>
+        )}
         {entry.resolvesTo && (
           <p className="text-[11px] text-muted-foreground" data-testid={`resolves-to-${entry.key}`}>
             Resolves to{" "}
@@ -285,6 +304,32 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
       </div>
 
       <div className="flex flex-wrap items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
+        {entry.emptyDisablesIcon &&
+          (iconDisabled ? (
+            <>
+              <output className="text-xs text-muted-foreground">No icon</output>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => handleSave(entry.defaultValue ?? "")}
+              >
+                Restore icon
+              </Button>
+              {resetButton}
+            </>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={isPending}
+              onClick={() => handleSave("")}
+            >
+              No icon
+            </Button>
+          ))}
         {showEnvOnly && (
           <>
             <Tooltip>
@@ -391,7 +436,7 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
           </>
         )}
 
-        {!showEnvOnly && entry.kind !== "boolean" && entry.kind !== "enum" && (
+        {!showEnvOnly && !iconDisabled && entry.kind !== "boolean" && entry.kind !== "enum" && (
           <>
             {entry.unit ? (
               <DurationInput
@@ -448,7 +493,9 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
               size="sm"
               variant="outline"
               disabled={
-                (!isDirty && !isDraftOverride) ||
+                (!isDirty &&
+                  !isDraftOverride &&
+                  !(entry.emptyDisablesIcon && config === undefined)) ||
                 isPending ||
                 invalidDraft ||
                 (entry.kind === "number" && draft === "" && !config)

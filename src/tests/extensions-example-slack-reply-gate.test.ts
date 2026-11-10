@@ -679,6 +679,21 @@ describe("mute on drop (enforce)", () => {
     expect(removed).not.toContain("eyes");
   });
 
+  test("does not remove a default for an explicitly disabled acceptance reaction", async () => {
+    process.env.SLACK_REACTION_ACCEPTED = "";
+    try {
+      await dropped();
+      const removed = slackCalls
+        .filter((c) => c.method === "reactions.remove")
+        .map((c) => c.body.name);
+      expect(removed).not.toContain("eyes");
+      expect(removed).not.toContain("");
+      expect(removed).toContain("heavy_plus_sign");
+    } finally {
+      delete process.env.SLACK_REACTION_ACCEPTED;
+    }
+  });
+
   test("an already-muted message counts as muted", async () => {
     slackReply = (method, body) =>
       method === "reactions.add"

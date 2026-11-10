@@ -1185,6 +1185,8 @@ async function runClaimedStep(
         ctx,
         registry,
       });
+      // This walk's own hold covers the successors it routes next.
+      drive.successorDebt?.release();
       if (drive.joined) return { outcome: "completed", successors: drive.successors };
       return { outcome: drive.parked ? "waiting" : "completed", successors: [] };
     }

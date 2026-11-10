@@ -26,7 +26,7 @@ import {
   type SlackMessageLike,
   slackInboundMessageText,
 } from "./message-text";
-import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { isAddressedToOtherUser } from "./router";
 import { markSlackSessionProcessing } from "./session-status";
 import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
@@ -333,7 +333,7 @@ export function createAssistant(
           );
           await notifySlackFileFailures(client, channelId, threadTs, unattached);
 
-          if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
+          if (isSlackRenderV2Enabled()) await ensureSlackThreadPresentation([task.id]);
 
           await safeSetStatus("Processing follow-up...");
           return;
@@ -383,7 +383,7 @@ export function createAssistant(
           );
           await notifySlackFileFailures(client, channelId, threadTs, unattached);
           if (isSlackRenderV2Enabled()) {
-            await ensureSlackThreadTree([task.id]);
+            await ensureSlackThreadPresentation([task.id]);
           } else {
             const offlineResult = resolveTemplate("slack.assistant.offline", {});
             await say(offlineResult.text);
@@ -410,7 +410,7 @@ export function createAssistant(
         );
         await ackSlackMessage(client, channelId, message.ts, reactionName("accepted"), "accepted");
         await notifySlackFileFailures(client, channelId, threadTs, unattached);
-        if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
+        if (isSlackRenderV2Enabled()) await ensureSlackThreadPresentation([task.id]);
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {
         console.error("[Slack] Assistant userMessage error:", error);

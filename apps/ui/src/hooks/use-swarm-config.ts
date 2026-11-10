@@ -46,15 +46,15 @@ export interface UseSwarmConfigResult {
   /** Upsert `{ scope: "global", key, value, isSecret: false }`. */
   save: (value: string, options?: { description?: string | null }) => void;
   /** Delete the row so the key falls back to env / the code default. No-op when unset. */
-  reset: () => void;
+  reset: (successMessage?: string) => void;
   isSaving: boolean;
 }
 
 /**
  * Read + write a single global `swarm_config` value.
  *
- * Env vars still win at boot; a value saved here becomes effective after the
- * server's debounced auto-reload (or an explicit `POST /api/config/reload`).
+ * Stored values override deployment env at boot and after the server's
+ * debounced auto-reload.
  */
 export function useSwarmConfig(key: string): UseSwarmConfigResult {
   const queryClient = useQueryClient();
@@ -107,19 +107,22 @@ export function useSwarmConfig(key: string): UseSwarmConfigResult {
     [invalidate, key, queryClient, upsertConfig],
   );
 
-  const reset = useCallback(() => {
-    if (!config) return;
-    deleteConfig.mutate(config.id, {
-      onSuccess: () => {
-        invalidate();
-        applySavedIdentity(queryClient, key, null);
-        toast.success(`Reset ${key} to its default`);
-      },
-      onError: (err) => {
-        toast.error(`Failed to reset ${key}: ${errorMessage(err)}`);
-      },
-    });
-  }, [config, deleteConfig, invalidate, key, queryClient]);
+  const reset = useCallback(
+    (successMessage?: string) => {
+      if (!config) return;
+      deleteConfig.mutate(config.id, {
+        onSuccess: () => {
+          invalidate();
+          applySavedIdentity(queryClient, key, null);
+          toast.success(successMessage ?? `Reset ${key} to its default`);
+        },
+        onError: (err) => {
+          toast.error(`Failed to reset ${key}: ${errorMessage(err)}`);
+        },
+      });
+    },
+    [config, deleteConfig, invalidate, key, queryClient],
+  );
 
   return {
     config,

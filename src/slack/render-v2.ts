@@ -11,11 +11,10 @@ import {
   getResolvableDeferralOutcomes,
   getSlackMessageByChannelTs,
   getSlackOutcomeMessage,
+  getSlackRenderV2ActivatedAt,
   getSlackTasksInThread,
-  getSlackTasksMissingTree,
   getSlackTreeMessage,
   getSlackTreeMessageByThread,
-  getSlackTreeMessages,
   getTaskById,
   isPendingSlackMessage,
   isSettledSlackMessage,
@@ -29,6 +28,7 @@ import {
 } from "../be/db";
 import {
   closeSlackTreeIfSettled,
+  getSlackProcessingThreads,
   getSlackThreadsOfTasks,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
@@ -60,7 +60,13 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
-import { completedStatusIcon, reactionName, type SlackReactionEvent } from "./reaction-shortcode";
+import {
+  completedStatusIcon,
+  iconPrefix,
+  reactionName,
+  reactionStatusIcon,
+  type SlackReactionEvent,
+} from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import {
   _resetSlackSessionStatusForTests,
@@ -70,6 +76,17 @@ import {
 } from "./session-status";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
+
+import {
+  assertSlackTreeCurrent,
+  canPresentSlackTree,
+  invalidateSlackTreeOperations,
+  isSlackTaskTreeEnabled,
+  onSlackTreeInvalidated,
+  SlackTreeSuppressed,
+  slackTreeGeneration,
+  syncSlackTreeVisibility,
+} from "./tree-visibility";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
@@ -93,6 +110,10 @@ const treeUpdateTails = new Map<string, Promise<void>>();
 const lastTreeText = new Map<string, string>();
 const lastTreeUpdateAt = new Map<string, number>();
 let cachedTeamId: string | undefined;
+onSlackTreeInvalidated(() => {
+  for (const timer of pendingTreeUpdates.values()) clearTimeout(timer);
+  pendingTreeUpdates.clear();
+});
 
 type SlackApiResult = Record<string, unknown> & { ok?: boolean; ts?: string; permalink?: string };
 
@@ -134,8 +155,10 @@ export async function callSlackWithRetry(
   client: WebClient,
   method: string,
   payload: Record<string, unknown>,
+  beforeAttempt?: () => void,
 ): Promise<SlackApiResult> {
   for (let attempt = 0; ; attempt++) {
+    beforeAttempt?.();
     try {
       return (await client.apiCall(method, payload)) as SlackApiResult;
     } catch (error) {
@@ -213,7 +236,6 @@ function noteOutcomeDeliverySuccess(taskId: string): void {
 
 async function noteOutcomeDeliveryFailure(
   task: AgentTask,
-  tree: SlackMessageRecord,
   error: unknown,
   statusBudget: StatusBudget | undefined,
 ): Promise<void> {
@@ -232,7 +254,9 @@ async function noteOutcomeDeliveryFailure(
   // yet. Reserve one so the count and the give-up have a place to live.
   if (!(await getSlackOutcomeMessage(task.id))) {
     await reserveSlackMessage({
-      contextKey: task.contextKey ?? tree.contextKey,
+      contextKey:
+        task.contextKey ??
+        slackContextKey({ channelId: task.slackChannelId, threadTs: task.slackThreadTs }),
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
       kind: "outcome",
@@ -364,7 +388,7 @@ async function taskStateGlyph(
     case "superseded":
       return "↪️";
     case "skipped":
-      return `:${reactionName("skipped")}:`;
+      return reactionStatusIcon("skipped");
     default:
       return "🕒";
   }
@@ -477,7 +501,7 @@ async function renderNodeLines(
     indent.length > MAX_TREE_PREFIX_LENGTH
       ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : indent;
-  let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now, threadTasks)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
+  let line = `${boundedPrefix}↳ ${iconPrefix(await taskStateGlyph(node.task, now, threadTasks))}${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
   // A skip posts no outcome card, so its row carries the reason. Editing the
   // tree is silent; it notifies no one.
   const detail =
@@ -527,7 +551,7 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`
-    : `🧵 ${completedStatusIcon()} done — ${duration}`;
+    : `🧵 ${iconPrefix(completedStatusIcon())}done — ${duration}`;
 }
 
 export async function renderThreadTree(
@@ -596,9 +620,20 @@ async function resolvePermalink(client: WebClient, channelId: string, ts: string
 async function ensureTreePermalink(
   client: WebClient,
   tree: SlackMessageRecord,
+  generation = slackTreeGeneration(),
 ): Promise<SlackMessageRecord> {
   if (tree.permalink) return tree;
-  const permalink = await resolvePermalink(client, tree.channelId, tree.ts);
+  const result = await callSlackWithRetry(
+    client,
+    "chat.getPermalink",
+    {
+      channel: tree.channelId,
+      message_ts: tree.ts,
+    },
+    () => assertSlackTreeCurrent(generation),
+  );
+  const permalink = result.permalink;
+  if (typeof permalink !== "string" || !permalink) throw new Error("Missing tree permalink");
   return (await updateSlackMessageRecord(tree.id, { permalink, touchUpdatedAt: false })) ?? tree;
 }
 
@@ -614,19 +649,25 @@ async function findReservedSlackMessage(
   client: WebClient,
   reservation: SlackMessageRecord,
   outcomeMarker?: string,
+  beforeAttempt?: () => void,
 ): Promise<SlackThreadMessage | undefined> {
   let cursor: string | undefined;
   const oldest = Math.max(0, new Date(reservation.createdAt).getTime() / 1_000 - 5);
   do {
-    const response = await callSlackWithRetry(client, "conversations.replies", {
-      channel: reservation.channelId,
-      ts: reservation.threadTs,
-      include_all_metadata: true,
-      oldest: String(oldest),
-      inclusive: true,
-      limit: 100,
-      ...(cursor ? { cursor } : {}),
-    });
+    const response = await callSlackWithRetry(
+      client,
+      "conversations.replies",
+      {
+        channel: reservation.channelId,
+        ts: reservation.threadTs,
+        include_all_metadata: true,
+        oldest: String(oldest),
+        inclusive: true,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      },
+      beforeAttempt,
+    );
     const messages = Array.isArray(response.messages)
       ? (response.messages as SlackThreadMessage[])
       : [];
@@ -666,7 +707,12 @@ async function findThreadTree(
   );
 }
 
-async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | null> {
+async function createThreadTree(
+  task: AgentTask,
+  generation: number,
+): Promise<SlackMessageRecord | null> {
+  const guard = () => assertSlackTreeCurrent(generation);
+  guard();
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) return null;
   const contextKey =
@@ -682,6 +728,7 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const agent = task.agentId ? await getAgentById(task.agentId) : undefined;
   const text = await renderThreadTree(tasks);
+  guard();
   const reserved = existing
     ? { record: existing, created: false }
     : await reserveSlackMessage({
@@ -694,35 +741,30 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
   const reservation = reserved.record;
   const reconciled = reserved.created
     ? undefined
-    : await findReservedSlackMessage(app.client, reservation);
+    : await findReservedSlackMessage(app.client, reservation, undefined, guard);
   let remote = reconciled;
   if (!remote) {
-    remote = await callSlackWithRetry(app.client, "chat.postMessage", {
-      channel: task.slackChannelId,
-      thread_ts: task.slackThreadTs,
-      text,
-      blocks: treeBlocks(text),
-      unfurl_links: false,
-      unfurl_media: false,
-      ...(agent ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) } : {}),
-      metadata: {
-        event_type: SLACK_RENDER_METADATA_EVENT,
-        event_payload: { message_id: reservation.id, kind: "tree" },
+    remote = await callSlackWithRetry(
+      app.client,
+      "chat.postMessage",
+      {
+        channel: task.slackChannelId,
+        thread_ts: task.slackThreadTs,
+        text,
+        blocks: treeBlocks(text),
+        unfurl_links: false,
+        unfurl_media: false,
+        ...(agent ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) } : {}),
+        metadata: {
+          event_type: SLACK_RENDER_METADATA_EVENT,
+          event_payload: { message_id: reservation.id, kind: "tree" },
+        },
       },
-    });
+      guard,
+    );
   }
   if (typeof remote.ts !== "string" || !remote.ts) {
     throw new Error("Slack did not return a timestamp for the thread tree");
-  }
-  if (reconciled) {
-    await callSlackWithRetry(app.client, "chat.update", {
-      channel: task.slackChannelId,
-      ts: remote.ts,
-      text,
-      blocks: treeBlocks(text),
-      unfurl_links: false,
-      unfurl_media: false,
-    });
   }
   let record = await bindSlackMessageTimestamp(reservation.id, remote.ts, {
     renderedThrough,
@@ -733,7 +775,23 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
   if (!record || isPendingSlackMessage(record)) {
     throw new Error("Failed to persist the thread tree timestamp");
   }
-  record = await ensureTreePermalink(app.client, record);
+  guard();
+  if (reconciled) {
+    await callSlackWithRetry(
+      app.client,
+      "chat.update",
+      {
+        channel: task.slackChannelId,
+        ts: remote.ts,
+        text,
+        blocks: treeBlocks(text),
+        unfurl_links: false,
+        unfurl_media: false,
+      },
+      guard,
+    );
+  }
+  record = await ensureTreePermalink(app.client, record, generation);
   lastTreeText.set(record.id, text);
   lastTreeUpdateAt.set(record.id, Date.now());
   return record;
@@ -743,7 +801,7 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
  * `statusBudget` is the render tick's shared cap on native status writes; calls
  * from outside a tick (a newly accepted ask) pass none.
  */
-export async function ensureSlackThreadTree(
+export async function ensureSlackThreadPresentation(
   taskIds: string[],
   statusBudget?: StatusBudget,
 ): Promise<SlackMessageRecord | null> {
@@ -758,15 +816,55 @@ export async function ensureSlackThreadTree(
   // the old guarantee that the status write has finished before a tree
   // failure propagates.
   const [tree] = await Promise.allSettled([
-    findOrCreateThreadTree(task, task.slackChannelId, task.slackThreadTs, taskIds, statusBudget),
+    presentThreadTree(task, taskIds, statusBudget),
     reconcileSlackSessionStatus({
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
       budget: statusBudget,
     }),
   ]);
-  if (tree.status === "rejected") throw tree.reason;
+  if (tree.status === "rejected") {
+    if (tree.reason instanceof SlackTreeSuppressed) return null;
+    throw tree.reason;
+  }
   return tree.value;
+}
+
+// Kept for callers outside the renderer while they migrate to presentation semantics.
+export const ensureSlackThreadTree = ensureSlackThreadPresentation;
+
+async function presentThreadTree(
+  task: AgentTask,
+  taskIds: string[],
+  statusBudget?: StatusBudget,
+): Promise<SlackMessageRecord | null> {
+  const visibility = syncSlackTreeVisibility();
+  const generation = slackTreeGeneration();
+  const cutoff = await visibility;
+  if (!task.slackChannelId || !task.slackThreadTs) return null;
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  if (isSlackTaskTreeEnabled()) assertSlackTreeCurrent(generation);
+  const activatedAt = await getSlackRenderV2ActivatedAt();
+  // Old asks prevent a new tree, but never suppress newer outcomes in the thread.
+  if (
+    activatedAt &&
+    tasks.some((candidate) => candidate.source === "slack" && candidate.createdAt < activatedAt) &&
+    !(await getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs))
+  )
+    return null;
+  if (!canPresentSlackTree(tasks, cutoff)) {
+    const tree = await getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs);
+    if (tree) await closeSlackTreeIfSettled(tree.id);
+    return null;
+  }
+  return findOrCreateThreadTree(
+    task,
+    task.slackChannelId,
+    task.slackThreadTs,
+    taskIds,
+    statusBudget,
+    generation,
+  );
 }
 
 async function findOrCreateThreadTree(
@@ -775,7 +873,9 @@ async function findOrCreateThreadTree(
   threadTs: string,
   taskIds: string[],
   statusBudget: StatusBudget | undefined,
+  generation: number,
 ): Promise<SlackMessageRecord | null> {
+  assertSlackTreeCurrent(generation);
   const contextKey =
     task.contextKey ??
     slackContextKey({
@@ -783,14 +883,16 @@ async function findOrCreateThreadTree(
       threadTs,
     });
   const existing = await findThreadTree(contextKey, channelId, threadTs);
+  assertSlackTreeCurrent(generation);
   if (existing && !isPendingSlackMessage(existing)) {
     const app = getSlackApp();
     try {
-      const resolved = app ? await ensureTreePermalink(app.client, existing) : existing;
+      const resolved = app ? await ensureTreePermalink(app.client, existing, generation) : existing;
       scheduleSlackTreeUpdate(resolved);
       return resolved;
     } catch (error) {
       if (!isSlackMessageNotFound(error)) throw error;
+      assertSlackTreeCurrent(generation);
       await discardTreeRecord(existing);
       return ensureSlackThreadTree(taskIds, statusBudget);
     }
@@ -798,7 +900,9 @@ async function findOrCreateThreadTree(
   const creationKey = physicalThreadKey(channelId, threadTs);
   const inFlight = treeCreationPromises.get(creationKey);
   if (inFlight) return inFlight;
-  const creation = createThreadTree(task).finally(() => treeCreationPromises.delete(creationKey));
+  const creation = createThreadTree(task, generation).finally(() =>
+    treeCreationPromises.delete(creationKey),
+  );
   treeCreationPromises.set(creationKey, creation);
   return creation;
 }
@@ -807,6 +911,8 @@ function scheduleSlackTreeUpdate(
   tree: SlackMessageRecord,
   delayMs = TREE_UPDATE_DEBOUNCE_MS,
 ): void {
+  if (!isSlackTaskTreeEnabled()) return;
+  const generation = slackTreeGeneration();
   const existing = pendingTreeUpdates.get(tree.id);
   if (existing) clearTimeout(existing);
   pendingTreeUpdates.set(
@@ -814,8 +920,13 @@ function scheduleSlackTreeUpdate(
     setTimeout(
       () => {
         pendingTreeUpdates.delete(tree.id);
+        if (generation !== slackTreeGeneration() || !isSlackTaskTreeEnabled()) return;
         void updateThreadTree(tree).catch((error) => {
-          console.error(`[Slack] Failed to run debounced v2 tree update ${tree.id}:`, error);
+          if (error instanceof SlackTreeSuppressed) return;
+          console.error(
+            `[Slack] Failed to run debounced v2 tree update ${tree.id}:`,
+            scrubSecrets(String(error)),
+          );
         });
       },
       Math.max(0, delayMs),
@@ -859,7 +970,10 @@ async function updateThreadTree(
   bypassThrottle = false,
   statusBudget?: StatusBudget,
 ): Promise<boolean> {
+  const generation = slackTreeGeneration();
   const result = await withTreeUpdateLock(tree.channelId, tree.threadTs, async () => {
+    assertSlackTreeCurrent(generation);
+    const cutoff = await syncSlackTreeVisibility();
     const app = getSlackApp();
     if (!app) return "unchanged" as const;
     const current = await getSlackTreeMessageByThread(tree.channelId, tree.threadTs);
@@ -868,8 +982,9 @@ async function updateThreadTree(
 
     const renderedThrough = new Date().toISOString();
     const tasks = await getSlackTasksInThread(current.channelId, current.threadTs);
-    if (tasks.length === 0) return "unchanged" as const;
+    if (tasks.length === 0 || !canPresentSlackTree(tasks, cutoff)) return "unchanged" as const;
     const text = await renderThreadTree(tasks);
+    assertSlackTreeCurrent(generation);
     const lastText = lastTreeText.get(current.id);
     const lastUpdate = lastTreeUpdateAt.get(current.id) ?? 0;
     if (text === lastText) {
@@ -882,14 +997,19 @@ async function updateThreadTree(
       return "throttled" as const;
     }
     try {
-      await callSlackWithRetry(app.client, "chat.update", {
-        channel: current.channelId,
-        ts: current.ts,
-        text,
-        blocks: treeBlocks(text),
-        unfurl_links: false,
-        unfurl_media: false,
-      });
+      await callSlackWithRetry(
+        app.client,
+        "chat.update",
+        {
+          channel: current.channelId,
+          ts: current.ts,
+          text,
+          blocks: treeBlocks(text),
+          unfurl_links: false,
+          unfurl_media: false,
+        },
+        () => assertSlackTreeCurrent(generation),
+      );
     } catch (error) {
       if (isSlackMessageNotFound(error)) return "missing" as const;
       throw error;
@@ -901,6 +1021,7 @@ async function updateThreadTree(
   });
 
   if (result === "missing") {
+    assertSlackTreeCurrent(generation);
     await replaceMissingTree(tree, statusBudget);
     return false;
   }
@@ -935,6 +1056,7 @@ const LINE_START_BLOCK =
  * blank line so its markdown still renders.
  */
 export function withStatusLead(lead: string, body: string): string {
+  if (!lead) return body;
   const text = body.replace(/^(?:[ \t]*\r?\n)+/, "");
   if (LINE_START_BLOCK.test(text)) return `${lead}\n\n${body}`;
   return `${lead} ${text.trimStart()}`;
@@ -954,7 +1076,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   // gets no outcome card of its own. The rewrite is an edit, so it is silent.
   if (task.status === "skipped") {
     return withStatusLead(
-      `:${reactionName("skipped")}: **Skipped:**`,
+      `${iconPrefix(reactionStatusIcon("skipped"))}**Skipped:**`,
       outcomeText(task.failureReason, "Task was skipped."),
     );
   }
@@ -966,7 +1088,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
     const agentName = task.agentId
       ? ((await getAgentById(task.agentId))?.name ?? "Agent")
       : "Agent";
-    return `${completedStatusIcon()} ${agentName} completed`;
+    return `${iconPrefix(completedStatusIcon())}${agentName} completed`;
   }
   // A deferral is `completed` in the database but unfinished to a human: the
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
@@ -1007,7 +1129,7 @@ export async function childOutcomeContent(
     );
   }
   if (slackReplySent && !isDeferredTask(task)) {
-    return `↳ ${completedStatusIcon()} ${agentName} completed`;
+    return `↳ ${iconPrefix(completedStatusIcon())}${agentName} completed`;
   }
   if (isDeferredTask(task)) {
     return withStatusLead(
@@ -1016,7 +1138,7 @@ export async function childOutcomeContent(
     );
   }
   return withStatusLead(
-    `↳ ${completedStatusIcon()} ${agentName} — result:`,
+    `↳ ${iconPrefix(completedStatusIcon())}${agentName} — result:`,
     outcomeText(slackTaskOutput(task), "Task completed."),
   );
 }
@@ -1078,7 +1200,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
     const agentName = await agentDisplayNameFor(member);
     const card = await getSlackOutcomeMessage(member.id);
     if (card?.permalink) {
-      lines.push(`↳ ${glyph} ${agentName} — [result](${card.permalink})`);
+      lines.push(`↳ ${iconPrefix(glyph)}${agentName} — [result](${card.permalink})`);
       continue;
     }
     const raw = outcomeText(
@@ -1097,7 +1219,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       false,
     );
     const label = digest ? `${agentName} — ${citedDigest}` : agentName;
-    lines.push(`↳ ${glyph} ${label} ${getTaskLink(member.id)}`);
+    lines.push(`↳ ${iconPrefix(glyph)}${label} ${getTaskLink(member.id)}`);
   }
   return lines;
 }
@@ -1108,7 +1230,7 @@ async function conclusionTimeoutLines(ask: AgentTask, closure: AgentTask[]): Pro
   for (const member of [ask, ...closure]) {
     if (isTerminalTreeStatus(member.status)) continue;
     const glyph = await taskStateGlyph(member, new Date());
-    lines.push(`↳ ${glyph} ${getTaskLink(member.id)}`);
+    lines.push(`↳ ${iconPrefix(glyph)}${getTaskLink(member.id)}`);
   }
   return lines;
 }
@@ -1376,7 +1498,6 @@ async function outcomeFooter(
 
 export async function streamOutcomeCard(
   task: AgentTask,
-  tree: SlackMessageRecord,
   options?: {
     buildContent?: (task: AgentTask, slackReplySent: boolean) => Promise<string>;
     conclusionKind?: SlackConclusionKind;
@@ -1395,7 +1516,6 @@ export async function streamOutcomeCard(
     return null;
   const existing = await getSlackOutcomeMessage(task.id);
   if (existing && isSettledSlackMessage(existing)) return existing?.finalizedAt ? existing : null;
-  if (!tree.permalink) throw new Error(`Tree ${tree.id} has no permalink`);
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
@@ -1440,7 +1560,9 @@ export async function streamOutcomeCard(
   let reservationWasCreated = false;
   if (!outcome) {
     const reserved = await reserveSlackMessage({
-      contextKey: task.contextKey ?? tree.contextKey,
+      contextKey:
+        task.contextKey ??
+        slackContextKey({ channelId: task.slackChannelId, threadTs: task.slackThreadTs }),
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
       kind: "outcome",
@@ -1783,89 +1905,24 @@ type RenderPassContext = {
   statusTick: ReturnType<typeof beginSlackStatusTick>;
 };
 
-/**
- * One tree's render pass: outcome, child and conclusion cards, the tree
- * itself, the session status, then the close check. "stop" means render v2
- * was switched off mid-pass; "skipped" that the pass bailed out early (an
- * error, or a pending tree that could not be recovered).
- */
-async function renderStoredTree(
-  storedTree: SlackMessageRecord,
+/** Process outcomes by physical thread, regardless of its optional tree message. */
+async function processSlackThread(
+  thread: SlackThreadAddress,
   { activatedAt, delegationEnabled, delegationActivatedAt, statusTick }: RenderPassContext,
-): Promise<"stop" | "skipped" | "open" | "closed"> {
+): Promise<"stop" | "open" | "closed"> {
   if (!isSlackRenderV2Enabled()) return "stop";
-  let tree = storedTree;
-  const initialTasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-  if (isPendingSlackMessage(tree)) {
-    try {
-      const recovered = await ensureSlackThreadTree(
-        initialTasks.map((task) => task.id),
-        statusTick.budget,
-      );
-      if (!recovered) return "skipped";
-      tree = recovered;
-    } catch (error) {
-      console.error(`[Slack] Failed to recover pending v2 tree ${tree.id}:`, error);
-      return "skipped";
-    }
-  }
-  const app = getSlackApp();
-  if (app && !tree.permalink) {
-    try {
-      tree = await ensureTreePermalink(app.client, tree);
-    } catch (error) {
-      if (isSlackMessageNotFound(error)) {
-        try {
-          await replaceMissingTree(tree, statusTick.budget);
-        } catch (replacementError) {
-          console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
-        }
-        return "skipped";
-      }
-      console.error(`[Slack] Failed to resolve v2 tree permalink ${tree.id}:`, error);
-      return "skipped";
-    }
-  }
-  let tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-  let needsOutcome = false;
-  for (const task of tasks) {
-    const card = await getSlackOutcomeMessage(task.id);
-    if (card && isSettledSlackMessage(card)) continue;
-    // In-progress asks are eligible only for the timeout backstop. They do
-    // not represent immediately active outcome work, so avoid waking an old
-    // tree solely to verify its permalink on every render tick.
-    const isDirectCandidate =
-      (await taskNeedsDirectOutcome(task, activatedAt)) &&
-      isOutcomeStatus(task.status) &&
-      !(await isAnsweredByDeferralCard(task, tasks));
-    const isChildCandidate =
-      delegationEnabled &&
-      delegationActivatedAt !== null &&
-      isChildCardCandidate(task, delegationActivatedAt) &&
-      !task.slackReplySent;
-    if (isDirectCandidate || isChildCandidate) {
-      needsOutcome = true;
-      break;
-    }
-  }
-  if (needsOutcome && app) {
-    try {
-      await resolvePermalink(app.client, tree.channelId, tree.ts);
-    } catch (error) {
-      if (!isSlackMessageNotFound(error)) {
-        console.error(`[Slack] Failed to verify v2 tree ${tree.id}:`, error);
-        return "skipped";
-      }
-      try {
-        const replacement = await replaceMissingTree(tree, statusTick.budget);
-        if (!replacement) return "skipped";
-        tree = replacement;
-        tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
-      } catch (replacementError) {
-        console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
-        return "skipped";
-      }
-    }
+  const tasks = await getSlackTasksInThread(thread.channelId, thread.threadTs);
+  const existingTree = await getSlackTreeMessageByThread(thread.channelId, thread.threadTs);
+  if (
+    !existingTree &&
+    !tasks.some(
+      (task) =>
+        task.source === "slack" &&
+        task.createdAt >= activatedAt &&
+        !["backlog", "unassigned", "superseded"].includes(task.status),
+    )
+  ) {
+    return "closed";
   }
   const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
   const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
@@ -1916,7 +1973,7 @@ async function renderStoredTree(
     if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
     if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
     try {
-      const outcome = await streamOutcomeCard(task, tree, {
+      const outcome = await streamOutcomeCard(task, {
         buildContent: childOutcomeContent,
         statusBudget: statusTick.budget,
       });
@@ -1928,7 +1985,7 @@ async function renderStoredTree(
       }
       outcomeCreated ||= !!outcome;
     } catch (error) {
-      await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+      await noteOutcomeDeliveryFailure(task, error, statusTick.budget);
     }
   }
 
@@ -1947,14 +2004,14 @@ async function renderStoredTree(
     if (!deferByClosure) {
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
-        const outcome = await streamOutcomeCard(task, tree, { statusBudget: statusTick.budget });
+        const outcome = await streamOutcomeCard(task, { statusBudget: statusTick.budget });
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
           await finalizeTerminalSlackReactions([task]);
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {
-        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+        await noteOutcomeDeliveryFailure(task, error, statusTick.budget);
       }
       continue;
     }
@@ -1981,7 +2038,7 @@ async function renderStoredTree(
     if (state === "open") continue;
     if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
     try {
-      const outcome = await streamOutcomeCard(task, tree, {
+      const outcome = await streamOutcomeCard(task, {
         buildContent: (_t, slackReplySent) =>
           askConclusionContent(task, closure, state, slackReplySent),
         conclusionKind: state === "timedOut" ? "timeout" : "complete",
@@ -2009,23 +2066,25 @@ async function renderStoredTree(
       }
       outcomeCreated ||= !!outcome;
     } catch (error) {
-      await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
+      await noteOutcomeDeliveryFailure(task, error, statusTick.budget);
     }
   }
   try {
-    await updateThreadTree(tree, outcomeCreated, statusTick.budget);
+    const tree = await ensureSlackThreadPresentation(
+      tasks.map((task) => task.id),
+      statusTick.budget,
+    );
+    if (tree) {
+      await updateThreadTree(tree, outcomeCreated, statusTick.budget);
+      await closeSlackTreeIfSettled(tree.id);
+    }
   } catch (error) {
-    console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
+    if (!(error instanceof SlackTreeSuppressed)) {
+      console.error("[Slack] Failed to present v2 tree:", scrubSecrets(String(error)));
+    }
   }
-  await statusTick.reconcile(tree.channelId, tree.threadTs);
-  try {
-    // Drop the tree from later sweeps once its thread has no work left.
-    // Any later task or outcome write in the thread reopens it.
-    if (await closeSlackTreeIfSettled(tree.id)) return "closed";
-  } catch (error) {
-    console.error(`[Slack] Failed to close settled v2 tree ${tree.id}:`, error);
-  }
-  return "open";
+  await statusTick.reconcile(thread.channelId, thread.threadTs);
+  return (await slackThreadHasOutcomeWork(thread)) ? "open" : "closed";
 }
 
 /** Task events that can change what a thread's tree or cards should show. */
@@ -2105,6 +2164,7 @@ export function startSlackRenderV2Events(): void {
 }
 
 export function stopSlackRenderV2Events(): void {
+  invalidateSlackTreeOperations();
   if (!renderEventsSubscribed) return;
   for (const event of SLACK_RENDER_TASK_EVENTS) workflowEventBus.off(event, onSlackRenderTaskEvent);
   workflowEventBus.off(TASK_UI_SPEC_UPDATED_EVENT, onTaskUiSpecUpdated);
@@ -2132,6 +2192,7 @@ function runExclusive(work: () => Promise<void>): Promise<void> {
 }
 
 async function beginRenderPass(): Promise<RenderPassContext> {
+  await syncSlackTreeVisibility();
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
@@ -2159,7 +2220,7 @@ export async function flushSlackRenderV2DirtyThreads(): Promise<void> {
 
 /**
  * Full reconcile, run on every watcher tick (the safety net behind the
- * event-driven render): every recent tree-less Slack task, every open tree,
+ * event-driven render): active threads and pending outcomes, visible open trees,
  * every deferral card, then the session-status sweep.
  */
 export function processSlackRenderV2(): Promise<void> {
@@ -2168,24 +2229,14 @@ export function processSlackRenderV2(): Promise<void> {
 }
 
 async function reconcileAllThreads(): Promise<void> {
-  // The full pass covers everything queued so far.
-  dirtyTaskIds.clear();
-  dirtyThreads.clear();
+  // A bounded page does not cover queued events; leave them for the dirty flush.
   const context = await beginRenderPass();
-
-  for (const task of await getSlackTasksMissingTree()) {
-    if (!isSlackRenderV2Enabled()) return;
-    if (!task.slackChannelId || !task.slackThreadTs) continue;
-    try {
-      await ensureSlackThreadTree([task.id], context.statusTick.budget);
-    } catch (error) {
-      console.error(`[Slack] Failed to create v2 tree for task ${task.id}:`, error);
-    }
-  }
-  await yieldToEventLoop();
-
-  for (const storedTree of await getSlackTreeMessages()) {
-    if ((await renderStoredTree(storedTree, context)) === "stop") return;
+  const threads = await getSlackProcessingThreads(
+    context.delegationEnabled,
+    isSlackTaskTreeEnabled(),
+  );
+  for (const thread of threads) {
+    if ((await processSlackThread(thread, context)) === "stop") return;
     await yieldToEventLoop();
   }
 
@@ -2208,21 +2259,10 @@ async function renderDirtyThreads(): Promise<void> {
 
   for (const thread of threads.values()) {
     if (!isSlackRenderV2Enabled()) return;
-    for (const task of await getSlackTasksMissingTree({ thread })) {
-      try {
-        await ensureSlackThreadTree([task.id], context.statusTick.budget);
-      } catch (error) {
-        console.error(`[Slack] Failed to create v2 tree for task ${task.id}:`, error);
-      }
-    }
-    for (const storedTree of await getSlackTreeMessages({ thread })) {
-      const result = await renderStoredTree(storedTree, context);
-      if (result === "stop") return;
-      // Time-based waits (conclusion settle, delivery backoff) emit no event:
-      // keep the thread queued while it still owes an outcome card.
-      if (result !== "closed" && (await slackThreadHasOutcomeWork(thread))) {
-        markSlackThreadDirty(thread.channelId, thread.threadTs, DIRTY_REVISIT_MS);
-      }
+    const result = await processSlackThread(thread, context);
+    if (result === "stop") return;
+    if (result === "open") {
+      markSlackThreadDirty(thread.channelId, thread.threadTs, DIRTY_REVISIT_MS);
     }
     await yieldToEventLoop();
   }
@@ -2255,6 +2295,5 @@ export function _resetSlackRenderV2ForTests(): void {
  */
 export const _noteOutcomeDeliveryFailureForTests = (
   task: AgentTask,
-  tree: SlackMessageRecord,
   error: unknown,
-): Promise<void> => noteOutcomeDeliveryFailure(task, tree, error, undefined);
+): Promise<void> => noteOutcomeDeliveryFailure(task, error, undefined);

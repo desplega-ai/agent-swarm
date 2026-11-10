@@ -262,6 +262,24 @@ describe("buildCompletedBlocks", () => {
 });
 
 describe("completed status icon override", () => {
+  test("empty completed icon omits the glyph and its separator", () => {
+    process.env.SLACK_STATUS_ICON_COMPLETED = "";
+    try {
+      const card = buildCompletedBlocks({
+        agentName: "Alpha",
+        taskId: makeTaskId("empty001"),
+        body: "Output",
+      });
+      expect(card[0].text.text.startsWith("*Alpha*")).toBe(true);
+      const tree = buildTreeBlocks([
+        { taskId: makeTaskId("empty002"), agentName: "Lead", status: "completed", children: [] },
+      ]);
+      expect(tree[0].text.text).not.toContain("✅");
+      expect(tree[0].text.text).toContain("*Lead*");
+    } finally {
+      delete process.env.SLACK_STATUS_ICON_COMPLETED;
+    }
+  });
   test("buildCompletedBlocks and tree lines use SLACK_STATUS_ICON_COMPLETED", () => {
     process.env.SLACK_STATUS_ICON_COMPLETED = "bee-lgtm";
     try {
