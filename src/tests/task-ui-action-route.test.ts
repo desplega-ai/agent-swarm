@@ -2,7 +2,7 @@
  * `POST /api/tasks/{id}/ui-actions/{actionId}`: only the task requester, as a
  * user principal, runs a card action. Agent and operator callers get 403.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -22,6 +22,7 @@ import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import * as uiActionsModule from "../ui-spec/actions";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-task-ui-action-route.sqlite";
@@ -188,4 +189,61 @@ describe("POST /api/tasks/{id}/ui-actions/{actionId}", () => {
     expect((await click(taskId, { "x-agent-id": workerAgentId })).status).toBe(403);
     expect(await followUpCount(taskId)).toBe(0);
   });
+});
+
+describe("script action responses", () => {
+  const uiSpec = {
+    spec: { root: "c", elements: { c: { type: "Card", props: {}, children: [] } } },
+    fallbackText: "Fresh",
+  };
+  const cases: Array<{
+    result: uiActionsModule.TaskUiActionResult;
+    status: number;
+    retryAfter?: string;
+    text: string;
+  }> = [
+    { result: { status: "refreshed", uiSpec }, status: 200, text: '"status":"refreshed"' },
+    {
+      result: { status: "running", retryAfterSec: 40 },
+      status: 409,
+      retryAfter: "40",
+      text: "already running",
+    },
+    {
+      result: { status: "rate_limited", retryAfterSec: 12 },
+      status: 429,
+      retryAfter: "12",
+      text: "try again in 12s",
+    },
+    {
+      result: { status: "script_failed", error: "script exited 1" },
+      status: 422,
+      text: "Refresh failed: script exited 1",
+    },
+    {
+      result: { status: "invalid_output", error: "bad card" },
+      status: 422,
+      text: "Refresh failed: bad card",
+    },
+    { result: { status: "not_allowlisted" }, status: 403, text: "not allowlisted" },
+    { result: { status: "script_changed" }, status: 403, text: "changed since it was allowlisted" },
+  ];
+
+  for (const { result, status, retryAfter, text } of cases) {
+    test(`${result.status} answers ${status}`, async () => {
+      const spy = spyOn(uiActionsModule, "runTaskUiAction").mockImplementation(async () => result);
+      try {
+        const taskId = await taskWithButton();
+        const response = await fetch(`${baseUrl}/api/tasks/${taskId}/ui-actions/rerun`, {
+          method: "POST",
+          headers: { "x-test-user-id": requesterId },
+        });
+        expect(response.status).toBe(status);
+        expect(response.headers.get("retry-after")).toBe(retryAfter ?? null);
+        expect(await response.text()).toContain(text);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
 });

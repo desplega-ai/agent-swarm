@@ -275,6 +275,15 @@ also appear in the UI picker or cold-start fallback, add it to
 `src/be/modelsdev-cache.json`; otherwise add a manual override row via the
 existing admin route `POST /api/pricing`.
 
+## SystemOne decisions
+
+`system-one-decide` records each decision made for a task as a `session_costs`
+row with `kind='system-one'`. It looks up rates under provider `system-one`,
+model `<host>/<model>` (for example `cloudflare/clef`), token classes `input`
+and `output`. There is no seed for this provider: no public per-token rate
+exists for every host, so rows stay `unpriced` at $0 with tokens kept until an
+operator adds rates via `POST /api/pricing`.
+
 ## Session attribution and cache counters
 
 Workers capture credential type, credential suffix, and harness at execution start.

@@ -45,8 +45,77 @@ describe("markdownToSlack", () => {
     expect(markdownToSlack("## Header")).toBe("*Header*");
   });
 
+  test("preserves the referrer heading inside a fenced code block", () => {
+    const code = "```\n#  Referrer          Views  Uniq  Share   vs 7d ago\n```";
+    expect(markdownToSlack(code)).toBe(code);
+  });
+
+  test("converts a heading outside a fenced code block", () => {
+    expect(markdownToSlack("# Heading")).toBe("*Heading*");
+    expect(markdownToSlack("# Heading\n```\n# code\n```")).toBe("*Heading*\n```\n# code\n```");
+  });
+
+  test("preserves bold markers inside inline code", () => {
+    expect(markdownToSlack("Use `**x**` and **bold**")).toBe("Use `**x**` and *bold*");
+  });
+
+  test("preserves formatting and whitespace inside code", () => {
+    const code =
+      "```ts\r\n**bold** __bold__ *italic* ~~strike~~\r\n- [link](https://example.com)\r\n![image](https://example.com/a.png)\n\n\n\n`inline`\n```";
+    expect(markdownToSlack(code)).toBe(code);
+    expect(markdownToSlack("``a ` **x** [link](url)``")).toBe("``a ` **x** [link](url)``");
+    expect(markdownToSlack("`**x**\n# code`")).toBe("`**x**\n# code`");
+    expect(markdownToSlack("```\n# unfinished\n**x**")).toBe("```\n# unfinished\n**x**");
+  });
+
   test("collapses excessive blank lines", () => {
     expect(markdownToSlack("a\n\n\n\nb")).toBe("a\n\nb");
+  });
+
+  test("keeps literal code placeholders distinct from protected code", () => {
+    const literal = "\uE0020\uE0021\uE0020\uE003 \uE00200\uE0020\uE003";
+    const code = "`**code** \uE0022\uE0020\uE003`";
+    expect(markdownToSlack(`${literal} ${code} **bold**`)).toBe(`${literal} ${code} *bold*`);
+  });
+
+  // A generous budget catches quadratic marker selection; retry for a loaded CI host.
+  test(
+    "converts long marker runs without stalling",
+    () => {
+      const literal = "\uE002".repeat(80_000);
+      const code = "`**code**`";
+      const started = performance.now();
+      const converted = markdownToSlack(`${literal} ${code} **bold**`);
+      const elapsed = performance.now() - started;
+      expect(converted).toBe(`${literal} ${code} *bold*`);
+      expect(elapsed).toBeLessThan(1_000);
+    },
+    { retry: 2 },
+  );
+
+  test.each([
+    "\n\n",
+    "\n \t\n",
+    "\r\n\r\n",
+  ])("does not pair stray backticks across paragraph boundaries (%j)", (separator) => {
+    const text = `\`${separator}# Heading${separator}Use \`**code**\` and **bold**`;
+    expect(markdownToSlack(text)).toBe(
+      `\`${separator}*Heading*${separator}Use \`**code**\` and *bold*`,
+    );
+  });
+
+  test("does not start inline code at an escaped backtick", () => {
+    expect(markdownToSlack("\\`**bold**\\` and `**code**`")).toBe("\\`*bold*\\` and `**code**`");
+  });
+
+  test("does not pair partial or unmatched backtick runs", () => {
+    expect(markdownToSlack("``**bold**` and **outside**")).toBe("``*bold*` and *outside*");
+    expect(markdownToSlack("`**bold**`` and **outside**")).toBe("`*bold*`` and *outside*");
+  });
+
+  test("preserves inline code after an escaped backslash and before an escaped backtick", () => {
+    expect(markdownToSlack("\\\\`**code**` and **bold**")).toBe("\\\\`**code**` and *bold*");
+    expect(markdownToSlack("`**code**\\` and **bold**")).toBe("`**code**\\` and *bold*");
   });
 });
 

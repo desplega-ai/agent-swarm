@@ -69,6 +69,7 @@ Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-too
 ## Patterns used
 
 - [**No-op When Nothing Changed**](/docs/playbooks/patterns/no-op-workflows) — digests skip on a quiet day instead of posting an empty report.
+- For preparing a supplier renewal briefing from several documents for a human owner, see the [supplier renewal decision guide](https://www.agent-swarm.dev/blog/omnia/ai-supplier-renewal-decision).
 
 The same fetch-then-synthesize split applied to booking records, where a person owns any change, is worked through in [Investigating booking discrepancies with AI agents](https://www.agent-swarm.dev/blog/omnia/ai-booking-exception-triage).
 
@@ -80,3 +81,7 @@ The same fetch-then-synthesize split applied to booking records, where a person 
 - **One agent owns the cross-source secrets** (scoped per agent), keeping the secret surface small and auditable.
 - **Cache slow warehouse queries in KV** with a short TTL — a 1-hour cache is invisible to users and saves a lot of cycles.
 - **Ask the swarm questions in Slack and let it pick the source** — a well-skilled lead routes "active orgs last week?" to [Clerk](https://clerk.com/), "activation funnel?" to [PostHog](https://posthog.com/), "top GSC query?" to [Google Search Console](https://search.google.com/search-console), without you naming the source.
+
+## Related
+
+Related guide: [post-incident business impact review](https://www.agent-swarm.dev/blog/omnia/ai-incident-business-impact-review) applies the same deterministic collection to an outage window, with a source on every line.

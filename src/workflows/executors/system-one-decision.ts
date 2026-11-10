@@ -916,7 +916,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
   async decide(
     config: SystemOneDecisionConfig,
   ): Promise<
-    | { ok: true; output: SystemOneDecisionOutput }
+    | { ok: true; output: SystemOneDecisionOutput; provider: SystemOneProviderId }
     | { ok: false; error: string; deploymentRefused?: true }
   > {
     const providerId = config.provider ?? (await this.defaultProvider());
@@ -980,7 +980,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
       }
       throw err;
     }
-    return { ok: true, output: decision };
+    return { ok: true, output: decision, provider: providerId };
   }
 
   /**

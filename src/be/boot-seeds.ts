@@ -18,6 +18,7 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "./db";
 import { ensureRbacSeedsSynced } from "./rbac-roles";
+import { seedModelGroups } from "./seed-model-groups";
 import { seedModelProfiles } from "./seed-model-profiles";
 import { seedPricingFromModelsDev } from "./seed-pricing";
 
@@ -41,11 +42,16 @@ export function ensureRbacSeeded(): void {
   rbacSyncedDbs.add(db);
 }
 
-/** Seed the shipped `<harness>-<tier>` model profiles (src/be/seed-model-profiles.ts). */
+/**
+ * Seed the shipped `<harness>-<tier>` model profiles (src/be/seed-model-profiles.ts),
+ * then the four tier groups that list them (src/be/seed-model-groups.ts).
+ */
 export async function ensureModelProfilesSeeded(): Promise<void> {
   const db = getDb();
   if (modelProfilesSeededDbs.has(db)) return;
   const inserted = await seedModelProfiles();
   if (inserted > 0) console.log(`[startup] Seeded ${inserted} model profiles`);
+  const groups = await seedModelGroups();
+  if (groups > 0) console.log(`[startup] Seeded ${groups} model groups`);
   modelProfilesSeededDbs.add(db);
 }

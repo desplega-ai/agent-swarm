@@ -1004,7 +1004,8 @@ export async function supersedeTask(
 /**
  * Move a workflow-step task that a supersede cut failed (`failed` with
  * `SUPERSEDED_WORKFLOW_TASK_REASON`) to `superseded` once the engine has
- * queued a retry for its step, so it no longer counts as a real failure. The
+ * queued a retry for its step or settled the step without failing it, so it
+ * no longer counts as a real failure. The
  * engine still sees `failed` first: its retry path runs off `task.failed`.
  * Keeps `failureReason` and `finishedAt`; emits no `task.superseded` event
  * (there is no resume task, and the failure listeners already ran). No-op

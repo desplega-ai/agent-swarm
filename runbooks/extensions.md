@@ -119,6 +119,8 @@ The name comes from the file, not the manifest.
 A skill's name comes from the `SKILL.md` frontmatter.
 Each file under `<dir>/files/` becomes a skill file, with its path relative to `files/`.
 
+Optional `toolSources` picks which tool calls reach the extension's `pre.tool.call` and `post.tool.call` handlers: `"mcp"` (swarm MCP tools) and `"native"` (harness built-ins). It defaults to `["mcp"]`, so an existing tool gate never receives a `bash` call it was not written for.
+
 `ExtensionManifestSchema` adds refinements on top of the shape:
 
 - Every script and schedule name starts with `<extension name>-`.
@@ -385,9 +387,25 @@ bun run e2e:tsc
 bun run e2e --only extensions
 ```
 
+## Native tool calls
+
+`POST /api/tool-hooks` (`src/http/tool-hooks.ts`) carries a harness built-in tool call (bash, read, write, edit) from a worker shim into the same tool events.
+One route, discriminated by `phase`:
+
+| `phase` | Event | Response |
+| --- | --- | --- |
+| `pre` | `pre.tool.call` with `requestInfo.callOrigin: "native"` and `requestInfo.harness` | 200 `{action:"continue"}`, `{action:"modify", args}` or `{action:"block", reason}` |
+| `post` | `post.tool.call`, observe-only | 202 at once; handlers run after the response |
+
+- Only extensions whose manifest `toolSources` includes `"native"` receive these calls.
+- The route runs `scrubObject` over the whole body at entry, so handlers, `extension_runs` rows and logs see `[REDACTED:<name>]`, never the secret.
+- A `modify` whose args contain a `[REDACTED:` marker is rejected with an `extension_runs` error row and the call continues with its original args, so a placeholder never executes.
+- Shims must also run `scrubObject` worker-side before the POST. The server scrubber knows only the API's own env values and structural patterns, not a worker's per-task credentials.
+- No harness calls the route yet. The shims, a subscriber probe, and a chain deadline ship with the first shim.
+
 ## Version 1 boundaries
 
-- Tool events cover agent-facing MCP calls only.
+- Tool events cover agent-facing MCP calls, and native calls a worker reports through `POST /api/tool-hooks`.
 - Slack route events cover the Slack message handler only.
 - Heartbeat events cover remediation after stall classification only.
 - Worker runtime hooks do not run.

@@ -90,6 +90,20 @@ function poolLeaseTtl(pool: RuntimePool, controller: ControllerCommands): number
   );
 }
 
+export function poolProvisionTtl(
+  pool: RuntimePool,
+  controller: ControllerCommands,
+): number | undefined {
+  switch (pool.kind) {
+    case "e2b":
+      return poolLeaseTtl(pool, controller);
+    case "k8s":
+      return pool.ttlSec ?? undefined;
+    default:
+      return undefined;
+  }
+}
+
 async function recordProvisionFailure(
   runtime: Pick<RuntimeInstance, "agentId" | "poolId" | "controllerId"> & { id: string | null },
   reason: string,
@@ -245,7 +259,7 @@ export async function provisionRuntime(
     delete env.TEMPLATE_ID;
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
-    const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
+    const ttlSec = poolProvisionTtl(pool, controller);
     const currentPoolCache = await getPoolCache(pool.id);
     const currentCache =
       currentPoolCache?.controllerId === pool.placements[0] ? currentPoolCache : null;

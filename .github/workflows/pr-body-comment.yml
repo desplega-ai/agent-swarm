@@ -1,0 +1,147 @@
+# Tells fork contributors what their PR description is missing.
+#
+# PR Body (pr-body.yml) runs on `pull_request`. A fork PR gets a read-only
+# token there, so the check can only go red, with the reason in a job log. A
+# first-time contributor's runs also wait for maintainer approval, so that
+# author gets no signal at all. This workflow posts the same findings as one
+# sticky comment, deleted again once the description passes.
+#
+# Trigger: `pull_request_target` runs this file from the base branch with a
+# write token, and GitHub runs it without the first-time contributor approval.
+#
+# Security invariant: nothing here checks out or runs PR head code. The
+# checkout has no `ref:`, so it is the base branch commit; the only PR input is
+# the event payload (title, body, file list), read as data by the base
+# branch's own check script. That script runs in a job with a read-only token.
+# The job that holds `pull-requests: write` runs no repo code at all: gh calls
+# on a list the base branch script built from template headings.
+name: PR Body comment
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    # Same events as pr-body.yml, so the comment tracks the check.
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-body-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check fork PR body
+    # Same-repo authors read the PR Body job log; release and Dependabot PRs never come from forks.
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      failed: ${{ steps.check.outputs.failed }}
+      problems: ${{ steps.check.outputs.problems }}
+
+    steps:
+      # No `ref:`: under pull_request_target this is the base branch, never the PR head.
+      - name: Checkout base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: List changed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > "$RUNNER_TEMP/changed-files.txt"
+
+      - name: Check PR body against the template
+        id: check
+        # The label skips PR Body, so it also clears the comment (failed stays empty).
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-pr-body-check') }}
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_CHANGED_FILES_FILE: ${{ runner.temp }}/changed-files.txt
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+          PR_BODY_PROBLEMS_FILE: ${{ runner.temp }}/problems.md
+        run: |
+          set -euo pipefail
+          rm -f "$PR_BODY_PROBLEMS_FILE"
+          code=0
+          PR_CHANGED_LINES=$(( ${PR_ADDITIONS:-0} + ${PR_DELETIONS:-0} )) bun scripts/check-pr-body.ts || code=$?
+          if [ "$code" -eq 0 ]; then
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          elif [ "$code" -eq 1 ] && [ -s "$PR_BODY_PROBLEMS_FILE" ]; then
+            delim="EOF_$(openssl rand -hex 8)"
+            { echo "failed=true"; echo "problems<<$delim"; cat "$PR_BODY_PROBLEMS_FILE"; echo "$delim"; } >> "$GITHUB_OUTPUT"
+          else
+            # The script crashed: fail here and leave any comment as it is.
+            exit "$code"
+          fi
+
+  comment:
+    name: Update the PR comment
+    needs: check
+    if: needs.check.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Post, update or delete the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          FAILED: ${{ needs.check.outputs.failed }}
+          PROBLEMS: ${{ needs.check.outputs.problems }}
+          TEMPLATE_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/.github/pull_request_template.md
+        run: |
+          set -euo pipefail
+          marker="<!-- pr-body:fork-comment -->"
+          # Only this workflow's own comment: anyone can paste the marker, and this token could edit theirs.
+          id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")
+          id=${id%%$'\n'*}
+
+          if [ "$FAILED" != "true" ]; then
+            if [ -n "$id" ]; then
+              gh api -X DELETE "repos/$REPO/issues/comments/$id" --silent
+              echo "The body passes: deleted comment $id."
+            else
+              echo "The body passes: no comment to delete."
+            fi
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/comment.md"
+          {
+            echo "$marker"
+            echo "**PR description check failed.** Every PR here fills [the PR template]($TEMPLATE_URL), and the **PR Body** check blocks the merge until it does. It found:"
+            echo
+            echo "$PROBLEMS"
+            echo
+            echo "Edit the PR description to fix it; no push is needed. \`gh pr create --body\` skips the template, so write the body to a file and pass \`--body-file\`. To check it locally: \`bun scripts/check-pr-body.ts --title \"<title>\" --body-file <file>\`."
+            echo
+            echo "This comment updates on every description edit and is deleted once the description passes. If the checks show as waiting, a maintainer has to approve workflow runs for your first PR."
+          } > "$body"
+
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$body" --silent
+            echo "Updated comment $id."
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" --silent
+            echo "Posted a comment."
+          fi

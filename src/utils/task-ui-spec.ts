@@ -12,8 +12,14 @@ export const UI_SPEC_MAX_BLOCKS = 45;
 /** Max elements in one Slack `actions` block. */
 export const UI_SPEC_MAX_ACTIONS_ROW_ELEMENTS = 25;
 
+/** Max entries in a uiSpec's `actions` map. Bounds the write-time script checks. */
+export const UI_SPEC_MAX_ACTIONS = 25;
+
 /** Prefix on the Slack `action_id` of every spec Button. */
 export const UI_SPEC_ACTION_PREFIX = "swarm_ui:";
+
+/** Emitted after a script action replaced a task's card. Data: `{ taskId }`. */
+export const TASK_UI_SPEC_UPDATED_EVENT = "task.ui_spec_updated";
 
 /** Allowed id of a declared action, and of the Button that names it. */
 export const UI_SPEC_ACTION_ID = /^[a-z][a-z0-9_]{0,39}$/;
@@ -52,10 +58,16 @@ export interface TaskUiSpecDocument {
   state?: Record<string, unknown>;
 }
 
-export interface TaskUiSpecAction {
-  kind: "follow_up";
-  prompt: string;
-}
+/** Max UTF-8 bytes of `JSON.stringify(args)` on a `script` action. */
+export const UI_SPEC_SCRIPT_ARGS_MAX_BYTES = 4_096;
+
+/**
+ * `follow_up` starts a Lead task once. `script` re-runs an allowlisted global
+ * script with frozen `args` and replaces the card with its output.
+ */
+export type TaskUiSpecAction =
+  | { kind: "follow_up"; prompt: string }
+  | { kind: "script"; script: string; args?: Record<string, unknown> };
 
 export interface TaskUiSpec {
   spec: TaskUiSpecDocument;

@@ -222,6 +222,36 @@ export const extensions: Scenario = {
       installedIds.add(notifyId);
       await enable(ctx, notifyId);
       await enable(ctx, verificationId);
+
+      // Native harness calls reach only extensions that opt in with toolSources "native".
+      // require-verification-note keeps the default ["mcp"], so the same unverified
+      // completion reported as a native call is not gated.
+      const nativeCall = {
+        harness: "pi",
+        tool: "store-progress",
+        nativeTool: "store-progress",
+        args: { taskId: toolTaskId, status: "completed", output: "done" },
+      };
+      const nativePre = await ctx.api("POST", "/api/tool-hooks", {
+        agentId: toolWorkerId,
+        body: { phase: "pre", ...nativeCall },
+      });
+      expectStatus(nativePre, [200], "native pre tool hook");
+      expect(
+        asRecord(nativePre.json).action === "continue",
+        "An extension without toolSources native gated a native tool call",
+      );
+      const nativePost = await ctx.api("POST", "/api/tool-hooks", {
+        agentId: toolWorkerId,
+        body: { phase: "post", ...nativeCall, result: { ok: true }, durationMs: 5 },
+      });
+      expectStatus(nativePost, [202], "native post tool hook");
+      expectStatus(
+        await ctx.api("POST", "/api/tool-hooks", { body: { phase: "pre", ...nativeCall } }),
+        [400],
+        "native tool hook without X-Agent-ID",
+      );
+
       workerConnection = await ctx.connectMcp(toolWorkerId);
       const unverified = asRecord(
         await workerConnection.callTool("store-progress", {

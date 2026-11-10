@@ -111,6 +111,7 @@ function makeIssueEvent(senderLogin: string, issueNumber = 10): IssueEvent {
       body: null,
       html_url: `https://github.com/test/repo/issues/${issueNumber}`,
       user: { login: senderLogin },
+      author_association: "COLLABORATOR",
     },
     repository: BASE_REPO,
     sender: { login: senderLogin },
@@ -125,6 +126,7 @@ function makeCommentEvent(senderLogin: string, body: string): CommentEvent {
       body,
       html_url: "https://github.com/test/repo/issues/10#issuecomment-999",
       user: { login: senderLogin },
+      author_association: "COLLABORATOR",
     },
     issue: { number: 10, title: "Test Issue", html_url: "https://github.com/test/repo/issues/10" },
     repository: BASE_REPO,
@@ -149,6 +151,7 @@ function makeReviewEvent(
       state: options.state ?? "approved",
       html_url: "https://github.com/test/repo/pull/99#pullrequestreview-1",
       user: { login: senderLogin },
+      author_association: "COLLABORATOR",
       submitted_at: "2026-01-01T00:00:00Z",
     },
     pull_request: {
