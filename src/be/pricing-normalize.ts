@@ -74,6 +74,8 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // connection), `vercel/<vendor>/<id>` (AI Gateway) or a bare OpenAI id.
   // Stripping the route prefix lands the first two on `<vendor>/<id>` rows.
   fx: ["openrouter/", "vercel/"],
+  // Keys are already `<host>/<model>`; the host is part of the price.
+  "system-one": [],
 };
 
 /** `gpt-5-nano-2025-08-07` -> `gpt-5-nano`. Anthropic's 8-digit dates (`-20251001`) are real catalog ids and are left alone. */
