@@ -13,7 +13,7 @@ import {
   initDb,
 } from "../be/db";
 import type { WorkflowDefinition, WorkflowNode } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import { startWorkflowExecution, walkGraph } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import {
@@ -23,6 +23,12 @@ import {
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { setupWorkflowResumeListener } from "../workflows/resume";
+import {
+  hasOwedSuccessors,
+  holdSuccessorRouting,
+  oweSuccessorWalk,
+} from "../workflows/successor-routing";
+import { completeTaskStepAndResolveSuccessors } from "../workflows/task-step-routing";
 import { interpolate } from "../workflows/template";
 
 // Two walkers live on one run: the walk that started it and a task-completion
@@ -154,12 +160,15 @@ async function completeTasksTogether(runId: string, bus: InProcessEventBus, node
 }
 
 describe("two walkers finalize one workflow run", () => {
-  test("a task completing while its batch sibling still runs keeps its output in the run context", async () => {
+  test("a task completing while its batch sibling still runs keeps its output and the sibling's successor", async () => {
     const entered = Promise.withResolvers<string>();
     const release = Promise.withResolvers<void>();
     slowGate = { entered: entered.resolve, release: release.promise };
     const h = harness();
-    const walk = start([record("sweep", ["slow", "park"]), record("slow"), task("park")], h);
+    const walk = start(
+      [record("sweep", ["slow", "park"]), record("slow", "after"), task("park"), record("after")],
+      h,
+    );
 
     // `slow` is in flight in the first walk when the parked task completes.
     const runId = await entered.promise;
@@ -173,8 +182,46 @@ describe("two walkers finalize one workflow run", () => {
     const run = await getWorkflowRun(runId);
     expect(run?.context).toHaveProperty("park");
     expect(run?.context).toHaveProperty("slow");
+    // The parked sibling does not stop this walk from routing `slow`'s branch.
+    expect(executions(runId, "after")).toBe(1);
+    expect(run?.context).toHaveProperty("after");
     // The resume left the run `running` for this walk to finalize.
     expect(run?.status).toBe("completed");
+  });
+
+  // A retry walk or a foreach drive on the same run, holding nothing of its
+  // own, finishes between a claim's commit and the claim's walk.
+  test("an unrelated walk finishing between a claim and its walk does not finish the run", async () => {
+    const h = harness();
+    const nodes = [record("sweep", "branch"), task("branch", "after"), record("after")];
+    const { runId } = await start(nodes, h);
+    const definition: WorkflowDefinition = { nodes };
+    const step = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === "branch");
+    const dispatched = step ? await getTaskByWorkflowRunStepId(step.id) : null;
+    if (!step || !dispatched) throw new Error("No dispatched branch task");
+    const ctx = ((await getWorkflowRun(runId))?.context ?? {}) as Record<string, unknown>;
+
+    const routing = await completeTaskStepAndResolveSuccessors(
+      definition,
+      runId,
+      step,
+      { taskId: dispatched.id, taskOutput: "done" },
+      ctx,
+      undefined,
+      undefined,
+      h.registry,
+    );
+    expect(routing.successors.map((n) => n.id)).toEqual(["after"]);
+
+    await walkGraph(definition, runId, { ...ctx }, [], h.registry);
+    expect((await getWorkflowRun(runId))?.status).toBe("running");
+
+    await walkGraph(definition, runId, ctx, routing.successors, h.registry, undefined, undefined, {
+      successorDebt: routing.successorDebt,
+    });
+    expect(executions(runId, "after")).toBe(1);
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect(hasOwedSuccessors(runId)).toBe(false);
   });
 
   test("two parked siblings resuming together both keep their output in the run context", async () => {
@@ -215,6 +262,24 @@ describe("two walkers finalize one workflow run", () => {
     expect(executions(runId, "after")).toBe(1);
     expect(await stepStatuses(runId, "after")).toEqual(["completed"]);
     expect((await getWorkflowRun(runId))?.context).toHaveProperty("after");
+  });
+});
+
+describe("successor routing holds", () => {
+  test("a walk without the claim's debt holds and releases only its own share", () => {
+    const runId = crypto.randomUUID();
+    const debt = oweSuccessorWalk(runId);
+    holdSuccessorRouting(runId)();
+    expect(hasOwedSuccessors(runId)).toBe(true);
+
+    const routed = holdSuccessorRouting(runId, debt);
+    // A second walk handed the same debt takes a hold of its own.
+    const other = holdSuccessorRouting(runId, debt);
+    routed();
+    routed();
+    expect(hasOwedSuccessors(runId)).toBe(true);
+    other();
+    expect(hasOwedSuccessors(runId)).toBe(false);
   });
 });
 

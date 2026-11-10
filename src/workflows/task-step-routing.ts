@@ -23,7 +23,7 @@ import { getSuccessors } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveStepNode } from "./foreach-body";
 import { type ForeachSettleResult, resolveForeachParent, settleForeachChild } from "./foreach-join";
-import { oweSuccessorWalk } from "./successor-routing";
+import { oweSuccessorWalk, type SuccessorWalkDebt } from "./successor-routing";
 
 export interface TaskStepRoutingResult {
   /**
@@ -38,6 +38,8 @@ export interface TaskStepRoutingResult {
   successors: WorkflowNode[];
   /** True when this call failed the run: nothing may route or re-park it. */
   runFailed: boolean;
+  /** This claim's hold on the run; pass it to the `walkGraph` that routes `successors`. */
+  successorDebt?: SuccessorWalkDebt;
 }
 
 const UNCLAIMED: TaskStepRoutingResult = {
@@ -131,18 +133,20 @@ function toRoutingResult(settle: ForeachSettleResult): TaskStepRoutingResult {
  * Run a claim that completes a step and hands its successors to the caller.
  * The successors have no step row until the caller's walk claims them, so the
  * claim holds the run against finalizers from inside its own transaction.
- * Callers pass a claimed result with successors straight to `walkGraph`.
+ * Callers pass a claimed result with successors straight to `walkGraph`, with
+ * `successorDebt` in its options.
  */
 async function claimAndOweWalk(
   runId: string,
   claim: () => Promise<TaskStepRoutingResult>,
 ): Promise<TaskStepRoutingResult> {
-  let cancel: (() => void) | undefined;
+  let debt: SuccessorWalkDebt | undefined;
   try {
     return await getDbClient().transaction(async () => {
       const result = await claim();
       if (result.claimed && !result.runFailed && result.successors.length > 0) {
-        cancel = oweSuccessorWalk(runId);
+        debt = oweSuccessorWalk(runId);
+        return { ...result, successorDebt: debt };
       }
       return result;
     });
@@ -151,7 +155,7 @@ async function claimAndOweWalk(
     // outer transaction failing at COMMIT leaves the run held until restart,
     // where boot recovery settles it. Upgrade to a rollback hook on the db
     // client if that ever shows up.
-    cancel?.();
+    debt?.release();
     throw err;
   }
 }
