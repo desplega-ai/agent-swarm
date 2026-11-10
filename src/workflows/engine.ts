@@ -31,6 +31,7 @@ import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import {
+  adoptStoredContext,
   checkpointStep,
   checkpointStepFailure,
   checkpointStepWaiting,
@@ -54,6 +55,7 @@ import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
+import { hasOwedSuccessors, holdSuccessorRouting } from "./successor-routing";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -466,11 +468,24 @@ export async function walkGraph(
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
   const release = holdWorkflowRun(runId);
+  // Taken before the first await: a claim that owes this walk hands over here.
+  const routed = holdSuccessorRouting(runId);
   try {
-    await walkGraphOwned(def, runId, ctx, startNodes, registry, workflowId, secretKeys, options);
+    await walkGraphOwned(
+      def,
+      runId,
+      ctx,
+      startNodes,
+      registry,
+      routed,
+      workflowId,
+      secretKeys,
+      options,
+    );
   } catch (err) {
     if (!(await failRunOnUnreadableReplay(runId, err))) throw err;
   } finally {
+    routed();
     release();
   }
 }
@@ -481,6 +496,7 @@ async function walkGraphOwned(
   ctx: Record<string, unknown>,
   startNodes: WorkflowNode[],
   registry: ExecutorRegistry,
+  routed: () => void,
   workflowId?: string,
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
@@ -615,7 +631,10 @@ async function walkGraphOwned(
       }
     }
 
-    if (hasWaiting) return; // Run paused, will be resumed by event
+    // Paused for an event. The finalizer below still runs: it leaves a
+    // `waiting` run alone, and settles one whose parked step a resume already
+    // completed while this batch was executing, which no one else would.
+    if (hasWaiting) break;
 
     // Convergence check — only wait for predecessors with active edges to
     // this node, not all structural predecessors. This prevents deadlocks
@@ -662,6 +681,7 @@ async function walkGraphOwned(
   // finalizeOrWait): a cancel committing in between would otherwise be
   // overwritten from a stale snapshot, resurrecting the run as `completed` or
   // parking it in `waiting` with no waiting step left to ever finalize it.
+  routed();
   await getDbClient().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || run.status !== "running") return;
@@ -669,8 +689,10 @@ async function walkGraphOwned(
     if (await getRunLineageBlock(runId)) return;
 
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
-    // Another walker is still executing a branch; it finalizes the run.
-    if (hasRunningStep(finalSteps)) return;
+    // Another walker is still executing a branch, or has successors left to
+    // start; it finalizes the run.
+    if (hasRunningStep(finalSteps) || hasOwedSuccessors(runId)) return;
+    await adoptStoredContext(runId, ctx);
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
