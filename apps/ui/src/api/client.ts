@@ -204,6 +204,8 @@ import type {
   UsedByConsentInput,
   User,
   UserIdentity,
+  UserMergeJob,
+  UserMergeJobResponse,
   UserResponse,
   UsersResponse,
   WhoamiResponse,
@@ -3677,7 +3679,8 @@ class ApiClient {
     return body.events;
   }
 
-  async mergeUsers(targetId: string, sourceUserId: string): Promise<User> {
+  /** Queues the merge (202). Poll `getUserMergeJob` until `status` is done or failed. */
+  async mergeUsers(targetId: string, sourceUserId: string): Promise<UserMergeJob> {
     const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(targetId)}/merge`;
     const res = await fetch(url, {
       method: "POST",
@@ -3688,8 +3691,16 @@ class ApiClient {
       const err = await res.json().catch(() => ({ error: "Failed to merge users" }));
       throw new Error(err.error || `Failed to merge users: ${res.status}`);
     }
-    const body = (await res.json()) as UserResponse;
-    return body.user;
+    const body = (await res.json()) as UserMergeJobResponse;
+    return body.job;
+  }
+
+  async getUserMergeJob(jobId: string): Promise<UserMergeJob> {
+    const url = `${this.getBaseUrl()}/api/users/merge-jobs/${encodeURIComponent(jobId)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch merge job: ${res.status}`);
+    const body = (await res.json()) as UserMergeJobResponse;
+    return body.job;
   }
 
   async listUnmapped(opts?: { kind?: string; limit?: number }): Promise<UnmappedIdentity[]> {

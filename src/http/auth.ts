@@ -69,5 +69,7 @@ export async function resolveHttpRequestAuth(
 }
 
 function isActiveUser(user: User | null): user is User {
-  return !!user && user.status === "active";
+  // A merge source (mergedIntoUserId set) is on its way out: the merge route
+  // revoked its tokens, and any credential that still names it is refused.
+  return !!user && user.status === "active" && !user.mergedIntoUserId;
 }

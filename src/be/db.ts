@@ -12434,6 +12434,7 @@ type UserRow = {
   metadata: string | null;
   dailyBudgetUsd: number | null;
   status: string;
+  mergedIntoUserId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -12451,6 +12452,7 @@ function rowToUser(row: UserRow): User {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
+    ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12583,6 +12585,14 @@ export async function updateUser(
   return row ? rowToUser(row) : null;
 }
 
+/**
+ * Delete a user in one transaction, moving every retained reference to
+ * `replacementUserId` (or clearing it). Used by the manage-user tool. The
+ * merge route queues the same rewrite as a background job instead
+ * (src/be/user-merge-jobs.ts, built on the same SQL from
+ * src/be/db/user-references.ts), because on a large database this holds the
+ * event loop for minutes.
+ */
 export async function deleteUser(id: string, replacementUserId?: string): Promise<boolean> {
   if (replacementUserId === id) {
     throw new Error("Replacement user must differ from deleted user");
