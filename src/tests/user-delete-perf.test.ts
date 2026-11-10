@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
   closeDb,
@@ -7,6 +7,7 @@ import {
   createWorkflow,
   createWorkflowRun,
   deleteUser,
+  getDb,
   getDbClient,
   getWorkflowRun,
   initDb,
@@ -53,9 +54,27 @@ const HEAVY_COLUMNS: Array<[table: string, column: string]> = [
   ["asset_key_history", "changed_by"],
 ];
 
+/**
+ * `EXPLAIN QUERY PLAN <write>` read with `.all()` on a cached bun:sqlite statement
+ * leaves the connection holding an active write statement, and COMMIT then fails
+ * with SQLITE_BUSY ("SQL statements in progress"). The db client retries that
+ * with 25 ms..500 ms backoffs, so the next deleteUser stalled for ~1.4 s locally
+ * and past the 10 s test timeout on CI. Read the plan from a statement this
+ * helper finalizes.
+ */
+function explainRows(sql: string, params: string[]): ExplainRow[] {
+  const stmt = getDb().query<ExplainRow, string[]>(`EXPLAIN QUERY PLAN ${sql}`);
+  try {
+    return stmt.all(...params);
+  } finally {
+    stmt.finalize();
+  }
+}
+
 async function explain(sql: string, params: string[]): Promise<string> {
-  const rows = await getDbClient().query<ExplainRow>(`EXPLAIN QUERY PLAN ${sql}`, params);
-  return rows.map((row) => row.detail).join(" | ");
+  return explainRows(sql, params)
+    .map((row) => row.detail)
+    .join(" | ");
 }
 
 /**
@@ -85,8 +104,7 @@ async function recordStatements(fn: () => Promise<void>): Promise<string[]> {
 /** Explains a recorded statement with one placeholder value per `?`. */
 async function explainRecorded(sql: string): Promise<string[]> {
   const params = Array.from({ length: (sql.match(/\?/g) ?? []).length }, () => "x");
-  const rows = await getDbClient().query<ExplainRow>(`EXPLAIN QUERY PLAN ${sql}`, params);
-  return rows.map((row) => row.detail);
+  return explainRows(sql, params).map((row) => row.detail);
 }
 
 async function runRequestedBy(
@@ -139,6 +157,18 @@ afterAll(() => {
 });
 
 describe("deleteUser query plans", () => {
+  // Regression: a plan read that leaves a statement active makes the next
+  // deleteUser transaction retry its COMMIT on SQLITE_BUSY for seconds.
+  afterEach(() => {
+    const db = getDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      expect(() => db.run("COMMIT")).not.toThrow();
+    } finally {
+      if (db.inTransaction) db.run("ROLLBACK");
+    }
+  });
+
   test("the discovery query returns every heavy column", async () => {
     const references = await getDbClient().query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
     const pairs = new Set(references.map((r) => `${r.tableName}.${r.columnName}`));
@@ -226,10 +256,7 @@ describe("deleteUser query plans", () => {
     // A partial index with an unrelated predicate does not count: session_shares_user
     // (migration 230, WHERE revokedAt IS NULL) left SCAN session_shares in this plan
     // until migration 319 added idx_session_shares_userId.
-    const rows = await getDbClient().query<ExplainRow>(
-      "EXPLAIN QUERY PLAN DELETE FROM users WHERE id = ?",
-      ["source"],
-    );
+    const rows = explainRows("DELETE FROM users WHERE id = ?", ["source"]);
     const scans = rows.map((row) => row.detail).filter((detail) => detail.startsWith("SCAN"));
     expect(scans).toEqual([]);
   });

@@ -57,8 +57,12 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
         "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
         "verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }.\n" +
-        "- WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, " +
-        "before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event).\n" +
+        "- WEBHOOK DELIVERY FILTER: optional filter on a webhook trigger drops deliveries after signature verification and before any run is saved " +
+        "(200 { skipped: true, reason }). filter.headers and filter.body are allowlists (a string or an array of scalars); every field must match. " +
+        "Header names are case-insensitive; values and JSON paths are exact, with no type coercion. " +
+        'preset "github" | "gitlab" | "standard-webhooks" selects where the deprecated events allowlist is read ' +
+        "(X-GitHub-Event, X-Gitlab-Event, or JSON body type). events and eventHeader still work and are AND-ed with filter; eventHeader overrides preset. " +
+        "Omit filter and events to accept every delivery.\n" +
         "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
         "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
       inputSchema: z.object({
@@ -74,7 +78,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
+            "Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",

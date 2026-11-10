@@ -917,6 +917,35 @@ Authentication runs first on every request; a revoked token gets `401` and no re
 
 Code: `src/be/db/workflow-idempotency.ts`, `src/http/idempotency-key.ts`, `src/http/workflows.ts`. Tests: `src/tests/workflow-idempotency.test.ts`.
 
+## Webhook delivery filter
+
+A webhook trigger can drop a delivery after signature verification and before any run or step row is written. The public route stays 2xx so senders that treat non-2xx as a failed delivery (GitHub) do not retry.
+
+```json
+{
+  "type": "webhook",
+  "filter": {
+    "headers": { "x-github-event": ["pull_request"] },
+    "body": { "action": ["opened", "reopened", "ready_for_review", "synchronize"] }
+  }
+}
+```
+
+Clauses are AND. A string is a one-value list. Header names are case-insensitive; the first value of a repeated header is used. Body paths are dot-separated (`commits.0.id` indexes an array, with no leading zeros). Scalars compare with `Object.is`, so `1` does not match `"1"`. A missing field misses. Inherited object keys do not match.
+
+The first miss is the HTTP body:
+
+- `events` clause: `200 { skipped: true, reason: "event-not-allowed", event }` (`event` is the string that was read, or `null`)
+- `filter` clause: `200 { skipped: true, reason: "filter-not-matched", match: { source, path } }` (the received value is not echoed)
+
+`events` and `eventHeader` are a deprecated alias of one clause, AND-ed with `filter`. `preset` selects that clause's field and does not filter on its own: `github` reads `X-GitHub-Event` (also the default), `gitlab` reads `X-Gitlab-Event`, `standard-webhooks` reads JSON body `type`. `eventHeader` overrides the preset and always reads a header. Omit `filter` and `events` (or leave `events` empty) to accept every verified delivery.
+
+A saved trigger whose `filter`, `preset`, `events`, or `eventHeader` is not that shape returns 500 and creates no run. The workflow save API rejects it first (`filter` needs at least one field, at most 32 headers and 32 body fields, 64 values each).
+
+Order in `handleWebhookTrigger`: load the workflow, verify the signature against the raw body, parse JSON, run `decideWebhookDelivery`, then `startWorkflowExecution`. `triggerSchema` still runs inside the start, after this filter. Chat dispatch sends no HTTP headers, so a header clause skips it; body clauses see the chat payload object.
+
+Code: `WebhookDeliveryFilterSchema` in `src/types.ts`, `decideWebhookDelivery` in `src/workflows/webhook-filter.ts`, the call site in `src/workflows/triggers.ts`, `POST /api/webhooks/{workflowId}` in `src/http/workflows.ts`. Tests: `src/tests/webhook-filter.test.ts`, `src/tests/workflow-triggers-v2.test.ts`, `src/tests/workflow-http-v2.test.ts`.
+
 ## Trigger schema
 
 `triggerSchema` is an optional JSON Schema attached to a workflow that validates the `triggerData` payload for every trigger path — manual `/trigger`, webhooks, schedules, and MCP `trigger-workflow`. When set, mismatched payloads are rejected before the workflow starts (no run is created, no nodes execute). When unset (the default), any payload is accepted.

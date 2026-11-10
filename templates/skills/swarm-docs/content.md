@@ -82,6 +82,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
+- [MCP Events on the User MCP](https://docs.agent-swarm.dev/docs/guides/mcp-events). Reference.
 - [Claude Code Mod](https://docs.agent-swarm.dev/docs/guides/claude-code-mod). Reference.
 - [Observability with OpenTelemetry](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry). When: Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend.
 - [Host Requirements & Disk Cleanup](https://docs.agent-swarm.dev/docs/guides/host-requirements). When: Someone asks how big a host their self-hosted swarm needs, or their disk is filling up with Docker images.

@@ -1261,6 +1261,14 @@ describe("Slack renderer v2", () => {
       );
       expect(await childOutcomeContent(done, true)).toBe("↳ :bee-lgtm: Icon Lead completed");
 
+      process.env.SLACK_STATUS_ICON_COMPLETED = "";
+      const withoutIcon = await renderThreadTree([done], new Map(), now);
+      expect(withoutIcon.startsWith("🧵 done")).toBe(true);
+      expect(withoutIcon).toContain("↳ ");
+      expect(withoutIcon).not.toContain("↳  ");
+      expect(await childOutcomeContent(done, false)).toBe("↳ Icon Lead — result: Shipped.");
+      expect(await childOutcomeContent(done, true)).toBe("↳ Icon Lead completed");
+
       // Only the completed glyph moves; failure keeps its own icon.
       expect(
         await childOutcomeContent({ ...done, status: "failed", failureReason: "boom" }, false),

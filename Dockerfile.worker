@@ -152,7 +152,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.5.1
+ARG PI_CODING_AGENT_VERSION=1.5.2
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.6
+ARG OPENCODE_VERSION=2.2.7
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -561,9 +561,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794283240-gd5964f
-ARG AMP_SHA512_AMD64=fdff397121517bfc57342ff1324e75b556091e0664ed904519935e6448658d59dd0f04bc1b215696d5c5cf64a9a87936a842c6841947c8d0506e2698e4258c05
-ARG AMP_SHA512_ARM64=dfdda07cfff8b9f2dd0d94d888e8cff181196cef13893f575a2af6f00c17b198ae7f62e6da6c8b47c17d260231d91c9014832bcea316d5f84e68722a8cb88458
+ARG AMP_VERSION=0.0.1794312042-g538cd5
+ARG AMP_SHA512_AMD64=1d9f9041c547e2e3cd687c0136f98b4cc6232c4c6cb2e0e87173be09f75356661a12f3b9321692319aa5560d190700b726c0d326620bb8fb3660152b7d8df475
+ARG AMP_SHA512_ARM64=171510eb9ae6617858fe8629b45e8f4c4da95b870095308dc3f3747946ed3c48aac01df88b3b6de15250ac251b6017b3fa6768b81cfaefc8f85e9b5df69c9436
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \

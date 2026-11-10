@@ -28,6 +28,7 @@ import {
 } from "../be/swarm-config-guard";
 import { isScriptRunToken } from "../be/users";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
+import { isSlackIconConfigKey } from "../slack/reaction-shortcode";
 import { type SwarmConfig, SwarmConfigSchema } from "../types";
 import { authUserId, getRequestAuth, type HttpRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
@@ -500,7 +501,7 @@ export async function handleConfig(
       // Organization identity is trimmed by both /status and telemetry.
       // Match that definition without changing presence semantics for secrets.
       const value = key === "SWARM_ORG_NAME" ? process.env[key]?.trim() : process.env[key];
-      presence[key] = value !== undefined && value !== "";
+      presence[key] = value !== undefined && (isSlackIconConfigKey(key) || value !== "");
     }
     envPresence.respond(res, 200, { presence });
     return true;

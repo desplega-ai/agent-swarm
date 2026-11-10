@@ -262,6 +262,10 @@
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]
     },
+    "mcp-user-events": {
+      "description": "MCP Events webhooks on /mcp-user: events/list, subscribe with a verified local callback, signed task.completed and task.failed deliveries, a plain client unchanged, unsubscribe stops delivery",
+      "scenarios": ["mcp-user-events"]
+    },
     "cost-and-orphan-recovery": {
       "description": "Session costs priced and billed, active sessions, orphan task recovery",
       "scenarios": ["core-session-data"]
@@ -544,8 +548,8 @@
       "scenarios": ["workflow-definitions"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
-      "scenarios": ["workflow-engine-control", "workflow-engine-cancel"]
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "scenarios": ["workflow-engine-control", "workflow-engine-cancel", "workflow-webhook-filter"]
     },
     "workflow-engine-nodes": {
       "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",

@@ -489,12 +489,22 @@ const webhookTriggerRoute = route({
   responses: {
     200: {
       description:
-        "Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created.",
-      schema: z.object({
-        skipped: z.literal(true),
-        reason: z.literal("event-not-allowed"),
-        event: z.string().nullable(),
-      }),
+        "Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss.",
+      schema: z.discriminatedUnion("reason", [
+        z.object({
+          skipped: z.literal(true),
+          reason: z.literal("event-not-allowed"),
+          event: z.string().nullable(),
+        }),
+        z.object({
+          skipped: z.literal(true),
+          reason: z.literal("filter-not-matched"),
+          match: z.object({
+            source: z.enum(["header", "body"]),
+            path: z.string(),
+          }),
+        }),
+      ]),
     },
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
@@ -596,11 +606,19 @@ export async function handleWorkflows(
     // run that already started.
     if (result.skipped) {
       // 2xx, not 4xx: GitHub and similar senders count non-2xx as a failed delivery.
-      webhookTriggerRoute.respond(res, 200, {
-        skipped: true,
-        reason: result.reason,
-        event: result.event,
-      });
+      if (result.reason === "event-not-allowed") {
+        webhookTriggerRoute.respond(res, 200, {
+          skipped: true,
+          reason: result.reason,
+          event: result.event,
+        });
+      } else {
+        webhookTriggerRoute.respond(res, 200, {
+          skipped: true,
+          reason: result.reason,
+          match: result.match,
+        });
+      }
     } else {
       webhookTriggerRoute.respond(res, 201, { runId: result.runId });
     }

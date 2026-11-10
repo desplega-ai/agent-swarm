@@ -41,14 +41,33 @@ export function normalizeSlackReactionShortcode(raw: unknown): string | null {
   return normalized;
 }
 
-export function reactionName(event: SlackReactionEvent): string {
+export function reactionName(event: SlackReactionEvent): string | null {
   const raw = process.env[SLACK_REACTION_CONFIG_KEYS[event]];
+  if (raw !== undefined && raw.trim() === "") return null;
   const normalized = normalizeSlackReactionShortcode(raw);
   return normalized ?? SLACK_REACTION_DEFAULTS[event];
 }
 
 export const SLACK_STATUS_ICON_COMPLETED_KEY = "SLACK_STATUS_ICON_COMPLETED";
 export const SLACK_STATUS_ICON_COMPLETED_DEFAULT = "✅";
+
+/** Only these settings give an explicitly empty value a disabling meaning. */
+export function isSlackIconConfigKey(key: string): boolean {
+  return (
+    key === SLACK_STATUS_ICON_COMPLETED_KEY ||
+    Object.values(SLACK_REACTION_CONFIG_KEYS).includes(key)
+  );
+}
+
+export function reactionStatusIcon(event: SlackReactionEvent): string {
+  const name = reactionName(event);
+  return name === null ? "" : `:${name}:`;
+}
+
+/** Include the separator only when an optional glyph exists. */
+export function iconPrefix(icon: string): string {
+  return icon ? `${icon} ` : "";
+}
 
 /**
  * The "done" glyph in thread text (task tree, thread header, outcome cards).
@@ -57,6 +76,8 @@ export const SLACK_STATUS_ICON_COMPLETED_DEFAULT = "✅";
  * fallback in text: a name the workspace lacks renders as literal `:name:`.
  */
 export function completedStatusIcon(): string {
-  const normalized = normalizeSlackReactionShortcode(process.env[SLACK_STATUS_ICON_COMPLETED_KEY]);
+  const raw = process.env[SLACK_STATUS_ICON_COMPLETED_KEY];
+  if (raw !== undefined && raw.trim() === "") return "";
+  const normalized = normalizeSlackReactionShortcode(raw);
   return normalized ? `:${normalized}:` : SLACK_STATUS_ICON_COMPLETED_DEFAULT;
 }
