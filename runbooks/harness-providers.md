@@ -107,7 +107,7 @@ on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` rej
 - **Per-key caps**: NaN allows 60 RPM and 7 concurrent requests in total on
   the base plan (10 on premium), 5 per model on `qwen3.6`, `gemma4` and the
   `mimo` models. Helmcode allows 100 RPM, 2M TPM, and 5 concurrent requests
-  per model (10 on the GLM family, DeepSeek V4 Flash and Qwen 3.8 Flash). One
+  per model (10 on the GLM family, DeepSeek V4.1 Flash and Qwen 3.8 Flash). One
   shared key across a fleet hits these fast; use a pool.
 - **Pricing**: $0 rows under `pi` and `opencode`, so sessions record $0 with
   `costSource: "pricing-table"`. See `src/providers/pricing-sources.md`.

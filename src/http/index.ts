@@ -17,6 +17,7 @@ import {
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
 import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
@@ -654,6 +655,18 @@ startEventLoopLagProbe();
 // credential saved only in swarm_config silently reverts to the stale env
 // value on the next deploy (2026-09-16 prod Slack outage). Reserved keys
 // (API_KEY, SECRETS_ENCRYPTION_KEY, ...) stay env-only regardless.
+// New-install seed: a database created by this boot gets the default
+// retention values as global config rows. Runs before the load below so the
+// rows are injected. Non-fatal: a failed seed leaves retention off.
+try {
+  await seedDbRetentionDefaults();
+} catch (err) {
+  console.warn(
+    "[startup] Retention defaults seed failed (non-fatal):",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 let startupConfigsInjected: string[] = [];
 try {
   startupConfigsInjected = await loadGlobalConfigsIntoEnv(true);
