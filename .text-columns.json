@@ -3112,6 +3112,8 @@
     }
   },
   "slack_render_v2_state": {
+    "reconcile_cursors": { "exempt": "JSON of internal pagination identifiers" },
+    "task_tree_enabled_at": { "exempt": "timestamp" },
     "activated_at": {
       "exempt": "timestamp"
     },

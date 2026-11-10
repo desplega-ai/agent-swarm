@@ -715,9 +715,11 @@ RUN case "$TARGETARCH" in \
 # agent-browser (vercel-labs; native binary + Node launcher) is the workers'
 # browser-automation CLI. It drives Chrome over CDP and reuses Playwright's
 # Chromium through AGENT_BROWSER_EXECUTABLE_PATH (set below), so the image
-# ships exactly ONE browser. playwright is a direct dep, pinned to the version
-# the retired qa-use CLI used to pull in, because `playwright install chromium`
-# is what puts that browser into /opt/playwright.
+# ships exactly ONE browser. playwright is a direct dep because
+# `playwright install chromium` is what puts that browser (plus the headless
+# shell) into /opt/playwright. Its pin MUST equal packages/ui-e2e's
+# @playwright/test, or `bun run e2e:ui` finds no browser of its revision
+# (enforced by scripts/check-playwright-version.ts).
 RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <<'EOF'
 {
   "name": "global-deps-full",
@@ -727,7 +729,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
     "agent-browser": "0.41.2",
-    "playwright": "1.58.0"
+    "playwright": "1.63.0"
   },
   "overrides": {
     "@huggingface/hub": "2.11.0",
@@ -774,7 +776,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     && chmod -R a+rX /opt/playwright
 
 # agent-browser finds the browser through this stable symlink; the real path
-# carries Playwright's build number (e.g. chromium-1208/chrome-linux/chrome).
+# carries Playwright's build number (e.g. chromium-1243/chrome-linux64/chrome).
 # The npm package ships a native binary per platform (~70 MB for the seven
 # of them); the prune above keeps only this image's TARGETARCH binary, and
 # the `test -x` before it fails the build if upstream moves the binaries.

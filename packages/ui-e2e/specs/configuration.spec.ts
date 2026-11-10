@@ -229,3 +229,47 @@ test("Slack icons distinguish disabled, custom and inherited values", async ({
   }
   await clean.assertClean();
 });
+
+test("Slack task tree preference persists independently of V2 and resets to On", async ({
+  page,
+  api,
+  seed,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const key = "SLACK_RENDER_V2_TASK_TREE_ENABLED";
+  await api.put("/api/config", {
+    scope: "global",
+    key: "SLACK_RENDER_V2",
+    value: "false",
+    isSecret: false,
+  });
+  try {
+    await page.goto("/settings/configuration?search=SLACK_RENDER_V2");
+    const toggle = page.getByRole("switch", {
+      name: "Show task tree in Slack threads",
+      exact: true,
+    });
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
+    await expect(page.getByText(`Saved ${key}`, { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(toggle).not.toBeChecked();
+    const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    expect(configs.find((row) => row.key === key)?.value).toBe("false");
+    expect(configs.find((row) => row.key === "SLACK_RENDER_V2")?.value).toBe("false");
+    await page
+      .getByRole("button", { name: `Remove the saved value for ${key}`, exact: true })
+      .click();
+    await expect(toggle).toBeChecked();
+  } finally {
+    const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    for (const config of configs.filter(
+      (row) => row.key === key || row.key === "SLACK_RENDER_V2",
+    )) {
+      await api.delete(`/api/config/${config.id}`);
+    }
+  }
+  await clean.assertClean();
+});

@@ -24,6 +24,7 @@ import {
   ensureSlackDelegationActivation,
   ensureSlackRenderV2Activation,
   failTask,
+  getDb,
   getDbClient,
   getInboxMessageById,
   getLogsByEventType,
@@ -65,6 +66,7 @@ import {
   withStatusLead,
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
+import { syncSlackTreeVisibility } from "../slack/tree-visibility";
 import { slackContextKey } from "../tasks/context-key";
 import { registerSlackReplyTool } from "../tools/slack-reply";
 import type { AgentTask, TaskAttachment } from "../types";
@@ -1557,7 +1559,6 @@ describe("Slack renderer v2", () => {
       .map((call) => call.method)
       .filter((method) => method.startsWith("chat."));
     expect(chatSequence).toEqual([
-      "chat.getPermalink",
       "chat.startStream",
       "chat.stopStream",
       "chat.getPermalink",
@@ -2536,14 +2537,14 @@ describe("Slack renderer v2", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
     });
     await startTask(ask.id);
-    const tree = await ensureSlackThreadTree([ask.id]);
+    await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
     // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
     const staleSnapshot = { ...(await getTaskById(ask.id))!, slackReplySent: false };
     await markTaskSlackReplySent(ask.id);
     calls.length = 0;
 
-    const outcome = await streamOutcomeCard(staleSnapshot, tree!);
+    const outcome = await streamOutcomeCard(staleSnapshot);
 
     const started = calls.find((call) => call.method === "chat.startStream");
     expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
@@ -3448,17 +3449,16 @@ describe("Outcome delivery give-up", () => {
     await completeTask(taskB0.id, "The answer.");
     const taskB = (await getTaskById(taskB0.id))!;
 
-    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
     // Simulate a failure before streamOutcomeCard's own reservation (e.g. a
     // DB read throwing while building content) — noteOutcomeDeliveryFailure
     // eagerly reserves a row with no Slack call ever attempted.
-    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+    await _noteOutcomeDeliveryFailureForTests(taskB, new Error("content build blew up"));
     const reservedB = await getSlackOutcomeMessage(taskB.id);
     expect(reservedB?.ts.startsWith("pending:")).toBe(true);
     expect(reservedB?.deliveryAttempts).toBe(1);
 
     calls.length = 0;
-    const outcome = await streamOutcomeCard(taskB, tree);
+    const outcome = await streamOutcomeCard(taskB);
 
     // Without the fix, this reconciles by presentation text against taskA's
     // identical, unrelated message instead of posting a fresh one.
@@ -3498,8 +3498,7 @@ describe("Outcome delivery give-up", () => {
     await completeTask(taskB0.id, "The answer.");
     const taskB = (await getTaskById(taskB0.id))!;
 
-    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
-    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+    await _noteOutcomeDeliveryFailureForTests(taskB, new Error("content build blew up"));
 
     calls.length = 0;
     // A process restart clears the in-memory `outcomeReservedWithoutAttempt`
@@ -3508,7 +3507,7 @@ describe("Outcome delivery give-up", () => {
     // it — without it, this throws `UNIQUE constraint failed:
     // slack_messages.channel_id, slack_messages.ts` at bindSlackMessageTimestamp.
     _resetSlackRenderV2ForTests();
-    const outcome = await streamOutcomeCard(taskB, tree);
+    const outcome = await streamOutcomeCard(taskB);
 
     expect(calls.some((c) => c.method === "conversations.replies")).toBe(true);
     expect(calls.some((c) => c.method === "chat.startStream")).toBe(true);
@@ -3678,7 +3677,7 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
     });
     await startTask(ask.id);
-    const tree = await ensureSlackThreadTree([ask.id]);
+    await ensureSlackThreadTree([ask.id]);
     const child = await createTaskExtended("child whose reply lands before its card", {
       agentId: worker.id,
       source: "mcp",
@@ -3693,7 +3692,7 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     await markTaskSlackReplySent(child.id);
     calls.length = 0;
 
-    const outcome = await streamOutcomeCard(staleChildSnapshot, tree!, {
+    const outcome = await streamOutcomeCard(staleChildSnapshot, {
       buildContent: childOutcomeContent,
     });
 
@@ -4929,5 +4928,224 @@ describe("Slack outcome card from a task uiSpec", () => {
       const blocks = childStop?.payload.blocks as Block[];
       expect(blocks.slice(0, -1)).toEqual(fixture.specBlocks as Block[]);
     });
+  });
+});
+
+describe("optional Slack V2 task tree", () => {
+  const original = process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED;
+    else process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = original;
+    process.env.SLACK_RENDER_V2 = "true";
+  });
+
+  async function runningAsk(label: string) {
+    const lead = await createAgent({ name: label, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_OPTIONAL_TREE");
+    const task = await createTaskExtended(label, {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: threadTs,
+    });
+    await startTask(task.id);
+    return { task, channelId, threadTs };
+  }
+
+  test("hidden from acceptance through completion: status, card and reaction survive", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    const { task, channelId, threadTs } = await runningAsk("hidden result");
+    expect(await ensureSlackThreadTree([task.id])).toBeNull();
+    expect(calls.some((call) => call.method === "agents.sessions.setStatus")).toBe(true);
+    await completeTask(task.id, "The tree is optional, the answer is not.");
+    await processSlackRenderV2();
+    expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+    expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+    expect(calls.some((call) => call.method === "reactions.add")).toBe(true);
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(0);
+    expect(calls.filter((call) => call.method === "chat.update")).toHaveLength(0);
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
+  });
+
+  for (const enabled of ["false", "true"]) {
+    test(`an old ask cannot suppress a new outcome with tree visibility ${enabled}`, async () => {
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = enabled;
+      await syncSlackTreeVisibility();
+      const { task, channelId, threadTs } = await runningAsk("new ask in legacy thread");
+      const old = await createTaskExtended("legacy ask", {
+        agentId: task.agentId!,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      });
+      await startTask(old.id);
+      await completeTask(old.id, "old answer");
+      getDb().run("UPDATE agent_tasks SET createdAt = '2000-01-01T00:00:00.000Z' WHERE id = ?", [
+        old.id,
+      ]);
+      await completeTask(task.id, "new answer");
+      calls.length = 0;
+      await processSlackRenderV2();
+      expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+      expect(await getSlackOutcomeMessage(old.id)).toBeNull();
+      expect(calls.some((call) => call.method === "reactions.add")).toBe(true);
+      expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+    });
+  }
+
+  test("unchanged visibility observation makes no writes", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    const changes = () =>
+      (getDb().query("SELECT total_changes() AS count").get() as { count: number }).count;
+    const before = changes();
+    for (let i = 0; i < 10; i++) await syncSlackTreeVisibility();
+    expect(changes()).toBe(before);
+  });
+
+  test("off freezes history and on resumes only the active thread across restart", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    const done = await runningAsk("completed while hidden");
+    const active = await runningAsk("still active");
+    const tree = (await ensureSlackThreadTree([done.task.id]))!;
+    await ensureSlackThreadTree([active.task.id]);
+    const historicalText = remoteMessages.get(remoteKey(done.channelId, tree.ts))?.text;
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    await syncSlackTreeVisibility();
+    await completeTask(done.task.id, "hidden completion");
+    await processSlackRenderV2();
+    await Bun.sleep(2);
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    const cutoff = await syncSlackTreeVisibility();
+    expect(cutoff).not.toBeNull();
+    _resetSlackRenderV2ForTests();
+    // initDb restores the test template; reopen a snapshot of this database instead.
+    const globals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
+    const originalTemplate = globals.__testMigrationTemplate;
+    globals.__testMigrationTemplate = getDb().serialize();
+    closeDb();
+    try {
+      initDb(TEST_DB_PATH);
+    } finally {
+      globals.__testMigrationTemplate = originalTemplate;
+    }
+    expect(await syncSlackTreeVisibility()).toBe(cutoff);
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(remoteMessages.get(remoteKey(done.channelId, tree.ts))?.text).toBe(historicalText);
+    expect(
+      calls.filter(
+        (call) => call.payload.channel === done.channelId && call.method.startsWith("chat."),
+      ),
+    ).toHaveLength(0);
+    expect((await getSlackOutcomeMessage(done.task.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackTreeMessageByThread(active.channelId, active.threadTs)).not.toBeNull();
+  });
+
+  test("no tree is backfilled for a hidden completion even when its outcome still needs recovery", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    const { task, channelId, threadTs } = await runningAsk("recover outcome without backfill");
+    await ensureSlackThreadTree([task.id]);
+    await completeTask(task.id, "delayed answer");
+    await Bun.sleep(2);
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+  });
+
+  test("a broken tree permalink cannot prevent outcome delivery", async () => {
+    const { task, channelId, threadTs } = await runningAsk("tree lookup fails");
+    permalinkFailuresRemaining = 1;
+    await expect(ensureSlackThreadTree([task.id])).rejects.toThrow();
+    expect((await getSlackTreeMessageByThread(channelId, threadTs))?.permalink).toBeUndefined();
+    await completeTask(task.id, "answer despite tree failure");
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+  });
+
+  test("disabling cancels queued debounce updates", async () => {
+    const { task } = await runningAsk("cancel queued update");
+    await ensureSlackThreadTree([task.id]);
+    await ensureSlackThreadTree([task.id]);
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    await syncSlackTreeVisibility();
+    calls.length = 0;
+    await Bun.sleep(550);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("a dispatched tree post is bound after disabling and reused on re-enable", async () => {
+    const { task, channelId, threadTs } = await runningAsk("in-flight tree");
+    const started = deferred();
+    const release = deferred();
+    apiCallGate = async (method) => {
+      if (method === "chat.postMessage") {
+        started.resolve();
+        await release.promise;
+      }
+    };
+    const posting = ensureSlackThreadTree([task.id]);
+    await started.promise;
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    await syncSlackTreeVisibility();
+    release.resolve();
+    expect(await posting).toBeNull();
+    const bound = await getSlackTreeMessageByThread(channelId, threadTs);
+    expect(bound).not.toBeNull();
+    expect(isPendingSlackMessage(bound!)).toBe(false);
+    apiCallGate = undefined;
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    await processSlackRenderV2();
+    expect((await getSlackTreeMessageByThread(channelId, threadTs))?.ts).toBe(bound?.ts);
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
+  });
+
+  test("disabling during rate-limit backoff prevents the tree retry", async () => {
+    const { task } = await runningAsk("cancel retry");
+    apiCallGate = async (method) => {
+      if (method !== "chat.postMessage") return;
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+      await syncSlackTreeVisibility();
+      throw { code: "slack_webapi_rate_limited_error", retryAfter: 0.01 };
+    };
+    expect(await ensureSlackThreadTree([task.id])).toBeNull();
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
+  });
+
+  test("hidden delegation delivers child cards before conclusions", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+    process.env.SLACK_RENDER_V2_DELEGATION = "true";
+    await ensureSlackDelegationActivation();
+    const { task, channelId, threadTs } = await runningAsk("delegated without tree");
+    const worker = await createAgent({ name: "hidden worker", isLead: false, status: "idle" });
+    const child = await createTaskExtended("hidden child", {
+      agentId: worker.id,
+      parentTaskId: task.id,
+      source: "mcp",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await startTask(child.id);
+    await completeTask(child.id, "child answer");
+    await completeTask(task.id, "parent answer");
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
+      new Date(Date.now() - 20_000).toISOString(),
+      task.id,
+      child.id,
+    ]);
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(child.id))?.finalizedAt).toBeDefined();
+    expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams).toHaveLength(2);
+    expect(String(streams[0]?.payload.markdown_text)).toContain("child answer");
   });
 });

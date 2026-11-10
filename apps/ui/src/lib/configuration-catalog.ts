@@ -2,9 +2,8 @@
 // page.
 //
 // Each entry maps to a **non-secret** `swarm_config` row in the `global` scope
-// (the same store the Integrations UI writes to). Env vars win at boot; a value
-// saved here becomes effective after the server's debounced auto-reload (or the
-// explicit "Reload config" button). Entries flagged `restartRequired` are read
+// (the same store the Integrations UI writes to). Stored values override deployment
+// env at boot and after the server's debounced auto-reload. Entries flagged `restartRequired` are read
 // once at process start and need a full server restart.
 //
 // Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) and anything
@@ -1161,7 +1160,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
-          "Show one editable task tree per thread and immutable streamed outcome cards by default. Turn off to use the legacy per-task message renderer.",
+          "Use streamed outcome cards and an optional task tree in each Slack thread. Turn off to use the legacy per-task message renderer.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_RENDER_V2_TASK_TREE_ENABLED",
+        label: "Show task tree in Slack threads",
+        description:
+          "Post and update a message showing tasks and their status in each Slack thread. Requires Slack thread renderer v2.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack`,

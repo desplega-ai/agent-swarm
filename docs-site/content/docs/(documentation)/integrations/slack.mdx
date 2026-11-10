@@ -176,7 +176,7 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 ### Tree-Based Status Messages
 
-The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the legacy renderer. With v2, each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
+The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the legacy renderer. With v2 and task trees enabled, each Slack thread owns one task-tree message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
 🧵 worked for 44m
@@ -234,9 +234,27 @@ Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt i
 - **In-flight threads.** The first tick with the flag on stamps `delegation_activated_at`. An ask created before that stamp keeps the pre-delegation behavior: its own outcome card, no child cards, and the reaction gate keyed to its own completion. An ask created after the stamp gets the new lifecycle. One thread can carry both kinds of ask at once.
 - **Rollback.** Set `SLACK_RENDER_V2_DELEGATION=false`. The next tick reverts every closure to the pre-delegation gate; any ask that was deferred while the flag was on finalizes immediately under the old rule, so no thread is left stranded.
 
+### Hide task trees while keeping outcome cards
+
+Set `SLACK_RENDER_V2_TASK_TREE_ENABLED=false`, or turn off **Show task tree in Slack threads**
+in **Settings → Configuration**. It defaults to On and requires `SLACK_RENDER_V2=true`.
+Outcome cards, delegated results, completion reactions, native working status, and task
+processing continue independently of tree messages, including when tree delivery fails.
+
+The setting applies live. Existing trees remain as history and stop updating. Re-enabling
+resumes threads with unfinished task work and reuses their existing tree where possible.
+It does not create or update trees for threads that completed while hidden, even after a
+restart or while their outcome delivery is retried. A later ask reactivates its thread and
+can include earlier tasks in the tree. Tree writes already sent to Slack may finish after
+disabling takes effect; queued writes and retries are cancelled.
+
+The saved global setting overrides deployment env at boot and reload. Removing the saved
+value restores the deployment value or the On default. With V2 disabled, this preference
+has no effect on the legacy renderer and remains saved for when V2 is enabled again.
+
 ### Opt out of the renderer
 
-Set `SLACK_RENDER_V2=false` to use the legacy per-task assignment/progress/completion renderer. Leaving it unset enables the task tree and streamed outcome cards.
+Set `SLACK_RENDER_V2=false` to use the legacy per-task assignment/progress/completion renderer. Leaving it unset enables V2 streamed outcome cards; task trees have their own setting.
 
 ### Rich Block Kit Messages
 
@@ -267,7 +285,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 
 ### Progress Updates
 
-The engine reflects progress by updating the thread tree. Agents can choose to send a distinct message with `slack-reply`, but routine start, progress, completion, and failure receipts are not posted automatically.
+When task trees are enabled, the engine reflects progress by updating the thread tree. Agents can choose to send a distinct message with `slack-reply`, but routine start, progress, completion, and failure receipts are not posted automatically.
 
 ### Reading Messages
 

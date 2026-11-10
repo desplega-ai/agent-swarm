@@ -53,8 +53,8 @@ export interface UseSwarmConfigResult {
 /**
  * Read + write a single global `swarm_config` value.
  *
- * Env vars still win at boot; a value saved here becomes effective after the
- * server's debounced auto-reload (or an explicit `POST /api/config/reload`).
+ * Stored values override deployment env at boot and after the server's
+ * debounced auto-reload.
  */
 export function useSwarmConfig(key: string): UseSwarmConfigResult {
   const queryClient = useQueryClient();

@@ -29,7 +29,7 @@ import {
   type SlackFileFailure,
 } from "./inbound-files";
 import { isSlackThreadLeft } from "./left-threads";
-import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
 import { formatSlackFoldAck, formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import type { BufferedMessage } from "./thread-buffer-store";
@@ -279,7 +279,7 @@ async function postFoldFeedback(args: {
     await notifySlackFileFailures(app.client, channelId, threadTs, args.unattached);
   }
   if (isSlackRenderV2Enabled()) {
-    await ensureSlackThreadTree([args.taskId]);
+    await ensureSlackThreadPresentation([args.taskId]);
     return;
   }
   if (!app) return;
@@ -620,7 +620,7 @@ async function slackFlush(
   );
 
   if (isSlackRenderV2Enabled()) {
-    await ensureSlackThreadTree([task.id]);
+    await ensureSlackThreadPresentation([task.id]);
     return;
   }
 

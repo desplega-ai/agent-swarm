@@ -240,3 +240,182 @@ describe("a review task's recall excludes review completions in the store query"
     expect(rows.map((row) => row.name)).toEqual([0, 1, 2, 3, 4].map((i) => `review-${i}`));
   });
 });
+
+// The two remaining full scans on hot memory paths, measured at 57k memories:
+// the health count's agent_memory -> memory_vec anti-join (about 1.1 s of the
+// 1.3 s getHealth()) and store()'s DELETE FROM memory_fts per stored chunk
+// (memory_id is UNINDEXED, so each delete reads the whole index).
+describe("health counts and the FTS sync avoid full scans", () => {
+  const scanAgent = randomUUID();
+  const FTS_DELETE_SQL = "DELETE FROM memory_fts WHERE memory_id = ?";
+
+  beforeAll(async () => {
+    await createAgent({ id: scanAgent, name: "Scan Agent", isLead: false, status: "idle" });
+  });
+
+  function watchFtsDeletes(): { deletes: number; stop: () => void } {
+    const db = getDb();
+    const realQuery = db.query;
+    const seen = {
+      deletes: 0,
+      stop: () => {
+        db.query = realQuery;
+      },
+    };
+    db.query = ((sql: string, ...rest: unknown[]) => {
+      if (sql === FTS_DELETE_SQL) seen.deletes++;
+      return (realQuery as (...args: unknown[]) => unknown).call(db, sql, ...rest);
+    }) as typeof db.query;
+    return seen;
+  }
+
+  async function ftsRowCount(memoryId: string): Promise<number> {
+    const row = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM memory_fts WHERE memory_id = ?",
+      [memoryId],
+    );
+    return row?.n ?? 0;
+  }
+
+  test("missingFromVec equals the agent_memory anti-join it replaced", async () => {
+    const store = new SqliteMemoryStore();
+    if (!store.getHealth().sqliteVec.initialized) return; // no vec0: the count is validEmbedding
+    for (let i = 0; i < 3; i++) await remember(store, scanAgent, `vec-${i}`, "manual", null, 0.5);
+    const dropped = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-dropped",
+      content: "vec-dropped",
+      source: "manual",
+    });
+    await store.updateEmbedding(dropped.id, mix(0.5, 5), "test");
+    await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [dropped.id]);
+    // Wrong dimensions: counted in neither side of the difference.
+    const invalid = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-invalid",
+      content: "vec-invalid",
+      source: "manual",
+    });
+    await store.updateEmbedding(invalid.id, new Float32Array(7), "test");
+    // No embedding at all: counted in neither side either.
+    await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "vec-none",
+      content: "vec-none",
+      source: "manual",
+    });
+    // A vec row with no memory behind it must not reduce the count.
+    const orphanId = randomUUID();
+    await getDbClient().run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
+      orphanId,
+      new Uint8Array(mix(0.5, 6).buffer),
+    ]);
+
+    const oracle = getDb()
+      .prepare<{ n: number }, []>(
+        `SELECT COUNT(*) AS n FROM agent_memory m
+         LEFT JOIN memory_vec v ON v.memory_id = m.id
+         WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${512 * 4}
+           AND v.memory_id IS NULL`,
+      )
+      .get()?.n;
+    try {
+      expect(oracle).toBeGreaterThanOrEqual(1);
+      const counts = store.getHealth().counts;
+      expect(counts.extraInVec).toBeGreaterThanOrEqual(1);
+      expect(counts.missingFromVec).toBe(oracle as number);
+    } finally {
+      await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [orphanId]);
+    }
+  });
+
+  test("store() runs no memory_fts delete, even while a backfill runs", async () => {
+    const store = new SqliteMemoryStore(); // starts a backfill
+    const watch = watchFtsDeletes();
+    try {
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const row = await store.store({
+          agentId: scanAgent,
+          scope: "agent",
+          name: `chunk-${i}`,
+          content: `fts sync probe chunk ${i}`,
+          source: "task_completion",
+        });
+        ids.push(row.id);
+      }
+      expect(watch.deletes).toBe(0);
+      for (const id of ids) expect(await ftsRowCount(id)).toBe(1);
+
+      // An edit rewrites an existing id: it still deletes before it inserts.
+      await store.edit({
+        id: ids[0],
+        mode: "replace",
+        content: "fts sync probe edited",
+        intent: "test",
+      });
+      expect(watch.deletes).toBe(1);
+      expect(await ftsRowCount(ids[0] as string)).toBe(1);
+    } finally {
+      watch.stop();
+    }
+  });
+
+  test("a store() racing the boot backfill leaves one memory_fts row", async () => {
+    const store = new SqliteMemoryStore(); // starts a backfill
+    const row = await store.store({
+      agentId: scanAgent,
+      scope: "agent",
+      name: "racing",
+      content: "fts sync probe racing",
+      source: "manual",
+    });
+    await store.whenFtsPopulated();
+    expect(await ftsRowCount(row.id)).toBe(1);
+  });
+
+  test("a backfill that finishes between store()'s commit and return leaves one memory_fts row", async () => {
+    const store = new SqliteMemoryStore();
+    await store.whenFtsPopulated();
+    // Pause store() after its outermost transaction commits, before it returns.
+    const client = getDbClient();
+    const realTransaction = client.transaction;
+    let committed!: () => void;
+    const commit = new Promise<void>((resolve) => {
+      committed = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let armed = true;
+    client.transaction = (async (fn, opts) => {
+      if (!armed) return realTransaction.call(client, fn, opts);
+      armed = false;
+      const result = await realTransaction.call(client, fn, opts);
+      committed();
+      await gate;
+      return result;
+    }) as typeof client.transaction;
+    try {
+      const storing = store.store({
+        agentId: scanAgent,
+        scope: "agent",
+        name: "paused",
+        content: "fts sync probe paused",
+        source: "manual",
+      });
+      await commit;
+      // Another instance's backfill sees the committed row and runs to completion.
+      await new SqliteMemoryStore().whenFtsPopulated();
+      release();
+      const row = await storing;
+      expect(await ftsRowCount(row.id)).toBe(1);
+    } finally {
+      client.transaction = realTransaction;
+    }
+  });
+});
