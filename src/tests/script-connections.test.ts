@@ -714,8 +714,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "320_session_costs_kind.sql");
       // 322 alters runtime_pools and runtime_instances, which this fixture lacks.
       markMigrationApplied(database, "322_runtime_pool_workspace.sql");
-      // 323 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
-      markMigrationApplied(database, "323_audit_agent_columns.sql");
+      // 326 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
+      markMigrationApplied(database, "326_audit_agent_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
