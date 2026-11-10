@@ -124,6 +124,11 @@ export function useUserEvents(id: string | undefined, opts?: { limit?: number })
   });
 }
 
+/**
+ * Queues the merge. The server answers 202 with a job: identities and aliases
+ * moved at once, the attribution rewrite and the source deletion run in the
+ * background. Follow it with `useUserMergeJob(job.id)`.
+ */
 export function useMergeUsers() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -134,6 +139,19 @@ export function useMergeUsers() {
       queryClient.invalidateQueries({ queryKey: ["user", targetId] });
       queryClient.invalidateQueries({ queryKey: ["user", sourceUserId] });
       queryClient.invalidateQueries({ queryKey: ["user-events", targetId] });
+    },
+  });
+}
+
+/** Polls a merge job every second until it is done or failed. */
+export function useUserMergeJob(jobId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["user-merge-job", jobId],
+    queryFn: () => api.getUserMergeJob(jobId!),
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "done" || status === "failed" ? false : 1000;
     },
   });
 }

@@ -1,10 +1,12 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Check, ChevronsUpDown, GitMerge, Trash2, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useMergeUsers, useUsers } from "@/api/hooks/use-users";
-import type { User } from "@/api/types";
+import { useMergeUsers, useUserMergeJob, useUsers } from "@/api/hooks/use-users";
+import type { User, UserMergeJob } from "@/api/types";
+import { StatusLine } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +35,22 @@ function userInitials(name: string): string {
   return (name.slice(0, 2) || "?").toUpperCase();
 }
 
+/** Human phrasing of a merge job phase (`workflow-context`, `<table>.<column>`, `delete-user`). */
+function describePhase(job: UserMergeJob): string {
+  if (job.status === "pending") return "Waiting for the runner";
+  if (!job.phase) return "Starting";
+  if (job.phase === "workflow-context") return "Rewriting workflow run context";
+  if (job.phase === "delete-user") return "Deleting the source user";
+  return `Rewriting ${job.phase}`;
+}
+
+/** Rows moved so far, across every phase except the final delete. */
+function rowsMoved(job: UserMergeJob): number {
+  return Object.entries(job.progress)
+    .filter(([phase]) => phase !== "delete-user")
+    .reduce((sum, [, count]) => sum + count, 0);
+}
+
 /**
  * Three-step vertical merge flow.
  *
@@ -44,6 +62,11 @@ function userInitials(name: string): string {
  * `user_email_aliases` are deleted; on the target a `manual_merge` event is
  * recorded. We name that explicitly in the explainer and in the destructive
  * CTA label ("Merge & delete source") so the operator can't miss it.
+ *
+ * The server answers 202 with a job: identities and aliases move at once, the
+ * attribution rewrite and the source deletion run in the background. The
+ * modal polls the job every second and shows the phase and the rows moved
+ * until it is done or failed.
  */
 export function MergeModal({
   open,
@@ -57,11 +80,16 @@ export function MergeModal({
   initialSourceId?: string;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: users } = useUsers({ recentEvents: 0 });
   const merge = useMergeUsers();
 
   const [sourceId, setSourceId] = useState<string | null>(initialSourceId ?? null);
   const [targetId, setTargetId] = useState<string | null>(initialTargetId ?? null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const jobQuery = useUserMergeJob(jobId);
+  const job = jobQuery.data ?? null;
+  const merging = !!jobId && job?.status !== "done" && job?.status !== "failed";
 
   const userList = useMemo(() => users ?? [], [users]);
 
@@ -75,28 +103,49 @@ export function MergeModal({
   );
 
   const sameUser = !!sourceId && sourceId === targetId;
-  const canSubmit = !!source && !!target && !sameUser && !merge.isPending;
+  const failed = job?.status === "failed";
+  // A failed job is re-queued by the same request, so the button stays usable.
+  const canSubmit = !!source && !!target && !sameUser && !merge.isPending && (!jobId || failed);
 
   function reset() {
     setSourceId(initialSourceId ?? null);
     setTargetId(initialTargetId ?? null);
+    setJobId(null);
   }
 
   async function submit() {
     if (!source || !target || sameUser) return;
     try {
-      const merged = await merge.mutateAsync({
+      const queued = await merge.mutateAsync({
         targetId: target.id,
         sourceUserId: source.id,
       });
-      toast.success("Merged. Source user deleted. manual_merge event recorded.");
-      onOpenChange(false);
-      reset();
-      void navigate(`/people/${merged.id}`);
+      // A retry re-queues the same job id, so the poll (stopped on "failed")
+      // must see the pending row again to resume its interval.
+      queryClient.setQueryData(["user-merge-job", queued.id], queued);
+      void queryClient.invalidateQueries({ queryKey: ["user-merge-job", queued.id] });
+      setJobId(queued.id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to merge users");
     }
   }
+
+  // The job finished: refresh the directory and land on the surviving user.
+  // A failed job stays in the dialog with its error and a "Retry merge" button.
+  // The ref makes the transition one-shot, whatever re-renders the poll causes.
+  const finishedJobId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!job || job.status !== "done" || finishedJobId.current === job.id) return;
+    finishedJobId.current = job.id;
+    void queryClient.invalidateQueries({ queryKey: ["users"] });
+    void queryClient.invalidateQueries({ queryKey: ["user", job.targetUserId] });
+    void queryClient.invalidateQueries({ queryKey: ["user", job.sourceUserId] });
+    void queryClient.invalidateQueries({ queryKey: ["user-events", job.targetUserId] });
+    toast.success("Merged. Source user deleted. manual_merge event recorded.");
+    onOpenChange(false);
+    reset();
+    void navigate(`/people/${job.targetUserId}`);
+  });
 
   // Preview math — what moves from source into target.
   const movingIdentities = source?.identities ?? [];
@@ -164,6 +213,7 @@ export function MergeModal({
               users={userList}
               excludeId={targetId}
               placeholder="Search users to delete…"
+              disabled={!!jobId}
               accent="destructive"
             />
             {source && <SelectedUserCard user={source} variant="source" />}
@@ -187,7 +237,7 @@ export function MergeModal({
               users={userList}
               excludeId={sourceId}
               placeholder="Search users to keep…"
-              disabled={!source}
+              disabled={!source || !!jobId}
               accent="success"
             />
             {sameUser && (
@@ -292,14 +342,53 @@ export function MergeModal({
           )}
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-border bg-background shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button variant="destructive" onClick={submit} disabled={!canSubmit}>
-            <Trash2 className="h-3.5 w-3.5" />
-            {merge.isPending ? "Merging…" : "Merge & delete source"}
-          </Button>
+        <DialogFooter className="px-6 py-4 border-t border-border bg-background shrink-0 sm:justify-between sm:items-center gap-3">
+          <output
+            aria-live="polite"
+            className="min-w-0 flex-1 text-xs text-muted-foreground"
+            data-testid="merge-job-status"
+          >
+            {job && merging && (
+              <StatusLine tone="busy" className="leading-snug">
+                <span className="break-words">
+                  {describePhase(job)}
+                  {rowsMoved(job) > 0 && (
+                    <span className="font-mono">
+                      {" "}
+                      · {rowsMoved(job).toLocaleString()} rows moved
+                    </span>
+                  )}
+                </span>
+              </StatusLine>
+            )}
+            {job && merging && job.error && (
+              <span className="mt-0.5 block break-words text-status-warning-strong">
+                Attempt {job.attempts} failed: {job.error}. Retrying.
+              </span>
+            )}
+            {jobId && !job && <StatusLine tone="busy">Queued</StatusLine>}
+            {failed && (
+              <StatusLine tone="error" className="leading-snug text-status-error-strong">
+                <span className="break-words">
+                  Merge failed after {job.attempts} {job.attempts === 1 ? "attempt" : "attempts"}:{" "}
+                  {job.error ?? "unknown error"}. Retry to continue from the last moved rows.
+                </span>
+              </StatusLine>
+            )}
+          </output>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              {failed ? "Close" : "Cancel"}
+            </Button>
+            <Button variant="destructive" onClick={submit} disabled={!canSubmit}>
+              <Trash2 className="h-3.5 w-3.5" />
+              {merge.isPending || merging
+                ? "Merging…"
+                : failed
+                  ? "Retry merge"
+                  : "Merge & delete source"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
