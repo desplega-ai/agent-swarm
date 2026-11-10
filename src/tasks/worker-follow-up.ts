@@ -908,10 +908,17 @@ export async function createResumeFollowUp(args: {
   ].join("\n");
 
   const priority = Math.min(100, (parent.priority ?? 50) + 10);
+  // A provider fallback (key retry or profile hop) is a deliberate route
+  // around a provider error, bounded by `nextFallback`, not a crash: it
+  // carries the parent's generation so it never spends the crash-recovery budget.
+  const generation =
+    args.reason === "provider_fallback"
+      ? getResumeGeneration(parent)
+      : getNextResumeGeneration(parent);
   const tags = [
     "auto-resume",
     `reason:${args.reason}`,
-    `${RESUME_GENERATION_TAG_PREFIX}${getNextResumeGeneration(parent)}`,
+    ...(generation > 0 ? [`${RESUME_GENERATION_TAG_PREFIX}${generation}`] : []),
   ];
   // Mark a GENUINE same-agent crash pin (crash_recovery that actually pinned to
   // the original agent) so the heartbeat reaper can scope to these only. A
