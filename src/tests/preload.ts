@@ -59,6 +59,13 @@ for (const key of Object.keys(process.env)) {
 // drain set API_DRAIN_MAX_MS for their own server.
 process.env.API_DRAIN_MAX_MS = "0";
 
+// A test file stops the `bun src/http.ts` server it spawned in `afterAll`. A run
+// that ends without teardown (SIGKILL, the hang watchdog, a dead `--parallel`
+// coordinator) skips that, and a worker's own process group hides the server from
+// a group kill, so it lived on under PID 1. This is the env form of Bun's
+// `--no-orphans`: every Bun child that inherits it exits when its parent dies.
+process.env.BUN_FEATURE_FLAG_NO_ORPHANS = "1";
+
 // A server spawned on a fresh database is a new install, so it would store the
 // default retention values and run live sweeps (src/be/db-retention-defaults.ts).
 // A key the env sets at first boot is left alone, and `0` is not a valid

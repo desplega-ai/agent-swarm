@@ -2,7 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
+import {
+  CHILD_PROCESS_TEST_BUDGET_MS,
+  CHILD_PROCESS_TIMEOUT_MS,
+  expectChildOk,
+  runChild,
+} from "./test-proc";
 
 test(
   "preload clears inherited worker configuration before test files load",
@@ -60,4 +65,59 @@ test("suite configuration survives between tests", () => {
     }
   },
   CHILD_PROCESS_TEST_BUDGET_MS,
+);
+
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test(
+  "a Bun child spawned by a test file dies when its test run is SIGKILLed",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "swarm-preload-orphan-"));
+    const fixture = join(directory, "spawns-child.test.ts");
+    const pidFile = join(directory, "child.pid");
+    // Same shape as the suites that boot `bun src/http.ts`: inherited env, stopped in afterAll.
+    await Bun.write(
+      fixture,
+      `import { test } from "bun:test";
+test("holds a child open", async () => {
+  const child = Bun.spawn(["bun", "-e", "setInterval(() => {}, 1000)"], { env: { ...process.env } });
+  await Bun.write(${JSON.stringify(pidFile)}, String(child.pid));
+  await new Promise(() => {});
+}, 60_000);
+`,
+    );
+    // The run starts without the flag, as the pre-push hook and CI start it.
+    const { BUN_FEATURE_FLAG_NO_ORPHANS: _flag, ...env } = process.env;
+    const run = Bun.spawn([process.execPath, "test", fixture], {
+      cwd: join(import.meta.dir, "../.."),
+      env,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    let childPid = 0;
+    try {
+      const deadline = Date.now() + CHILD_PROCESS_TIMEOUT_MS;
+      while (Date.now() < deadline && !(await Bun.file(pidFile).exists())) await Bun.sleep(50);
+      childPid = Number(await Bun.file(pidFile).text());
+      expect(isAlive(childPid)).toBe(true);
+
+      run.kill("SIGKILL");
+      await run.exited;
+      const gone = Date.now() + 10_000;
+      while (Date.now() < gone && isAlive(childPid)) await Bun.sleep(50);
+      expect(isAlive(childPid)).toBe(false);
+    } finally {
+      run.kill("SIGKILL");
+      if (childPid && isAlive(childPid)) process.kill(childPid, "SIGKILL");
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS + 10_000,
 );
