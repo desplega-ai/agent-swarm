@@ -29,6 +29,7 @@ import { recoverIncompleteRuns } from "../workflows/recovery";
 import { retryFailedRun } from "../workflows/resume";
 import { calculateDelay, startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 import { interpolate } from "../workflows/template";
+import { waitForRunStatus, waitUntil } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-retry-v2.sqlite";
 
@@ -275,9 +276,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
 
       try {
         startRetryPoller(registry, 5);
-        for (let i = 0; i < 100 && (await getWorkflowRun(runId))?.status !== "completed"; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-        }
+        await waitForRunStatus(runId, "completed");
       } finally {
         stopRetryPoller();
       }
@@ -310,13 +309,10 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       const runId = await startWorkflowExecution(workflow, {}, registry, {
         requestedByUserId: user.id,
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
 
       try {
         startRetryPoller(registry, 10);
-        for (let i = 0; i < 20 && (await getWorkflowRun(runId))?.status !== "completed"; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+        await waitForRunStatus(runId, "completed");
       } finally {
         stopRetryPoller();
       }
@@ -357,10 +353,11 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       expect(step.nextRetryAt).toBeTruthy();
       expect(step.retryCount).toBe(1);
 
-      // Wait for nextRetryAt to pass
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // Verify getRetryableSteps finds it
+      // Verify getRetryableSteps finds it once nextRetryAt has passed
+      await waitUntil(
+        async () => (await getRetryableSteps()).some((s) => s.runId === runId),
+        () => `step n1 of run ${runId} never became retryable`,
+      );
       const retryable = await getRetryableSteps();
       expect(retryable.length).toBeGreaterThanOrEqual(1);
       const ourStep = retryable.find((s) => s.runId === runId);
@@ -400,17 +397,15 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       const step = steps.find((s) => s.nodeId === "n1")!;
 
       if (step.status === "failed" && step.nextRetryAt) {
-        // Was given one retry chance — let it expire and start poller
-        await new Promise((resolve) => setTimeout(resolve, 10));
-
-        // Start poller with very short interval
-        startRetryPoller(registry, 10);
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        stopRetryPoller();
-
+        // Was given one retry chance: the poller picks it up once it expires.
         // After retry, the second failure should be terminal (retryCount >= maxRetries)
-        const updatedRun = await getWorkflowRun(runId);
-        expect(updatedRun!.status).toBe("failed");
+        startRetryPoller(registry, 10);
+        try {
+          const updatedRun = await waitForRunStatus(runId, "failed");
+          expect(updatedRun.status).toBe("failed");
+        } finally {
+          stopRetryPoller();
+        }
       } else {
         // Already terminal
         expect(run!.status).toBe("failed");
