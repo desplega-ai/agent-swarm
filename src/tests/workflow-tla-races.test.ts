@@ -28,6 +28,7 @@ import {
   failStepAndRunIfWaiting,
 } from "../workflows/task-step-routing";
 import { interpolate } from "../workflows/template";
+import { waitForRunStatus } from "./workflow-wait";
 
 // Counterexamples from the TLA+ model in specs/tla/workflows/. Each test calls
 // the production functions in the order of the TLC trace named in its title
@@ -322,9 +323,13 @@ describe("TLA+ workflow counterexamples", () => {
     // With A excluded nothing is ready, and recovery must not complete the run
     // while A's retry is pending.
     expect((await getWorkflowRun(runId))?.status).toBe("running");
-    await sleep(5);
     // P1..P6: the poller retries the original failed A row.
-    await runPollerOnce();
+    startRetryPoller(registry, 1);
+    try {
+      await waitForRunStatus(runId, "completed");
+    } finally {
+      stopRetryPoller();
+    }
 
     // One original attempt plus one retry.
     expect(callsOf("A")).toBe(2);

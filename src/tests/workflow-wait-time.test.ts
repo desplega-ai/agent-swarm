@@ -17,6 +17,7 @@ import { InProcessEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
 import { resumeWaitState } from "../workflows/resume";
+import { waitUntil } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-workflow-wait-time.sqlite";
 
@@ -100,9 +101,12 @@ describe("WaitExecutor — time mode end-to-end", () => {
     expect(waitState?.status).toBe("pending");
     expect(waitState?.mode).toBe("time");
 
-    // Wait long enough that wakeUpAt is in the past, then drive the same
-    // resume path the poller would use.
-    await new Promise((r) => setTimeout(r, 80));
+    // Wait until wakeUpAt is in the past, then drive the same resume path the
+    // poller would use.
+    await waitUntil(
+      async () => (await getDueWaitStates()).some((d) => d.id === waitState!.id),
+      () => `wait state ${waitState!.id} never became due`,
+    );
 
     const due = await getDueWaitStates();
     expect(due.find((d) => d.id === waitState!.id)).toBeDefined();

@@ -1,5 +1,28 @@
 # Database retention runbook
 
+## Defaults on new installs
+
+A new install starts with retention on. On the boot that creates the database, the server stores these values as global config rows. They show in Settings → Configuration → Database and you edit them like any stored setting.
+
+| Key | Default | Permanently deleted |
+| --- | --- | --- |
+| `SESSION_LOG_RETENTION_DAYS` | 30 | Session transcripts older than 30 days |
+| `SCRIPT_RUNS_RETENTION_DAYS` | 30 | Finished script runs older than 30 days, with their journal |
+| `EVENTS_RETENTION_DAYS` | 90 | Telemetry events older than 90 days |
+| `AGENT_LOG_RETENTION_DAYS` | 90 | Task and agent history older than 90 days |
+| `CONTEXT_VERSIONS_KEEP_LATEST` | 100 | Profile versions beyond the newest 100 per agent and field |
+
+`WORKFLOW_RUNS_RETENTION_DAYS` is not in this table. Terminal workflow runs stay until an operator sets it, on a new install and on an existing one.
+
+These defaults delete for real: `DB_RETENTION_DRY_RUN` stays `false`. The sections below describe what each table loses.
+
+- **An existing install does not change.** A database that already exists when the server boots gets no row, on upgrade or on any later boot. A restored backup or a copied database file counts as existing. Retention there stays off until you set it.
+- **Turn a default off:** delete its key in Settings → Configuration (or `DELETE /api/config/{id}`). It stays off. The server stores the defaults once, when it creates the database, and never again.
+- **Change a default:** edit the key. The accepted range is 1 through 1,000,000.
+- **Start a new install without a default:** set the key in the deployment environment before the first boot. The server stores no row for a key the environment sets. `0` keeps that table's sweep off, and a value from 1 through 1,000,000 applies as is. Set `DB_RETENTION_DRY_RUN=true` there to make the stored defaults count rows without deleting them.
+- **A stored row wins over the environment.** Setting a key in the environment after the first boot does not change a stored default. Edit or delete the row.
+- **Import old data only after you choose the limits.** A new database holds no row old enough to delete. Rows you import with an old timestamp are deleted on the next hourly sweep.
+
 ## Permanent-loss warning
 
 Database retention permanently deletes rows. Unsetting a retention key stops future sweeps. It cannot restore deleted rows. Activate retention only when you have verified backups for the data you need.

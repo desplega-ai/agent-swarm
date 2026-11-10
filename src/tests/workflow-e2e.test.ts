@@ -22,6 +22,7 @@ import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
 import { setupWorkflowResumeListener } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { waitForRunStatus } from "./workflow-wait";
 
 const spawnDescribe = describe.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -79,15 +80,6 @@ async function saveScript(name: string, source: string) {
     agentId,
     typeChecked: true,
   });
-}
-
-async function waitForRunStatus(runId: string, status: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if ((await getWorkflowRun(runId))?.status === status) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for workflow run ${runId} to reach ${status}`);
 }
 
 beforeAll(async () => {

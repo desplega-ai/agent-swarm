@@ -31,15 +31,13 @@ export async function searchMemoryCandidates(
   store: MemoryStore,
   embedding: Float32Array,
   agentId: string,
-  {
-    excludeReviewTaskCompletions = false,
-    ...options
-  }: MemorySearchOptions & { limit: number; excludeReviewTaskCompletions?: boolean },
+  options: MemorySearchOptions & { limit: number },
 ): Promise<MemoryCandidate[]> {
-  // Dropping rows after the fetch would leave the window short, so the filter
-  // sits inside the widening loop: dropped rows count as missing documents.
+  // The store excludes review completions in its query, so they never fill the
+  // window. The filter here is the net for a store that ignores the option;
+  // any row it drops counts as a missing document and widens the fetch.
   const keep = (rows: MemoryCandidate[]) =>
-    excludeReviewTaskCompletions ? dropReviewTaskCompletions(rows) : Promise.resolve(rows);
+    options.excludeReviewTaskCompletions ? dropReviewTaskCompletions(rows) : Promise.resolve(rows);
   let fetchLimit = options.limit;
   let raw = await store.search(embedding, agentId, { ...options, limit: fetchLimit });
   let rows = await keep(raw);

@@ -201,7 +201,9 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 
 ### Database retention
 
-`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `WORKFLOW_RUNS_RETENTION_DAYS`, and `CONTEXT_VERSIONS_KEEP_LATEST` are disabled until you set them. Each `*_RETENTION_DAYS` value permanently deletes rows older than its window. `CONTEXT_VERSIONS_KEEP_LATEST` is a count, not a window: it keeps that many newest `context_versions` rows per agent and field and deletes older profile history, never the newest version. `SCRIPT_RUNS_RETENTION_DAYS` deletes only finished script runs and their journal, never a running or paused run or a run with an idempotency key. `WORKFLOW_RUNS_RETENTION_DAYS` measures terminal run age from completion, keeps trees with live or recent descendants, and removes steps and unreferenced snapshots with expired runs. Tasks and accepted trigger deduplication survive; old run links return 404. Its dry-run count is the currently deletable tree frontier, which grows as parents are removed. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
+**New installs start with retention on.** On the boot that creates the database, the server stores `SESSION_LOG_RETENTION_DAYS=30`, `SCRIPT_RUNS_RETENTION_DAYS=30`, `EVENTS_RETENTION_DAYS=90`, `AGENT_LOG_RETENTION_DAYS=90` and `CONTEXT_VERSIONS_KEEP_LATEST=100` as global config rows, and rows past those limits are permanently deleted. Delete a key in Settings → Configuration to turn its sweep off; the server never stores it again. To start without a default, set the key in the environment before the first boot: `0` keeps the sweep off, and a valid value applies as is. An install that already exists is not changed on upgrade, and the next paragraph describes it. `WORKFLOW_RUNS_RETENTION_DAYS` is not stored on that boot.
+
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, and `CONTEXT_VERSIONS_KEEP_LATEST` are disabled until you set them. Each `*_RETENTION_DAYS` value permanently deletes rows older than its window. `CONTEXT_VERSIONS_KEEP_LATEST` is a count, not a window: it keeps that many newest `context_versions` rows per agent and field and deletes older profile history, never the newest version. `SCRIPT_RUNS_RETENTION_DAYS` deletes only finished script runs and their journal, never a running or paused run or a run with an idempotency key. `WORKFLOW_RUNS_RETENTION_DAYS` stays off until set, on a new install and on an existing one. It measures terminal run age from completion, keeps trees with live or recent descendants, and removes steps and unreferenced snapshots with expired runs. Tasks and accepted trigger deduplication survive; old run links return 404. Its dry-run count is the currently deletable tree frontier, which grows as parents are removed. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
 
 The sweep reads three tuning values on every tick: `DB_RETENTION_TICK_BUDGET_MS` (default `30000`, range `1000`–`300000`), `DB_RETENTION_CATCHUP_INTERVAL_MS` (default `60000`, range `5000`–`3600000`), and `DB_RETENTION_MAX_STATEMENT_MS` (default `250`, range `25`–`5000`). See [runbooks/db-retention.md](./runbooks/db-retention.md) before activation.
 
@@ -256,14 +258,14 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.319)
+# Override the pinned Claude Code version (default: 2.1.322)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.319`
-- `PI_CODING_AGENT_VERSION=1.5.0`
+- `CLAUDE_CODE_VERSION=2.1.322`
+- `PI_CODING_AGENT_VERSION=1.5.1`
 - `CODEX_VERSION=0.167.0`
 - `OPENCODE_VERSION=2.2.6` (installs `@opencode/cli` and `@opencode/sdk`)
 
@@ -523,7 +525,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.23. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.24. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
