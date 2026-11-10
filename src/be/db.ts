@@ -256,6 +256,14 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import {
+  USER_REFERENCE_COLUMNS_SQL,
+  type UserReferenceRow,
+  userReferenceRewriteSql,
+  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
+  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
+} from "./db/user-references";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
@@ -12426,6 +12434,7 @@ type UserRow = {
   metadata: string | null;
   dailyBudgetUsd: number | null;
   status: string;
+  mergedIntoUserId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -12443,6 +12452,7 @@ function rowToUser(row: UserRow): User {
     metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
+    ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12575,15 +12585,14 @@ export async function updateUser(
   return row ? rowToUser(row) : null;
 }
 
-type UserReferenceRow = {
-  tableName: string;
-  columnName: string;
-};
-
-function quoteSqlIdentifier(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
+/**
+ * Delete a user in one transaction, moving every retained reference to
+ * `replacementUserId` (or clearing it). Used by the manage-user tool. The
+ * merge route queues the same rewrite as a background job instead
+ * (src/be/user-merge-jobs.ts, built on the same SQL from
+ * src/be/db/user-references.ts), because on a large database this holds the
+ * event loop for minutes.
+ */
 export async function deleteUser(id: string, replacementUserId?: string): Promise<boolean> {
   if (replacementUserId === id) {
     throw new Error("Replacement user must differ from deleted user");
@@ -12613,28 +12622,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
     // recreating that table, so discover those two known logical references as
     // well until the table is next rebuilt with its original constraints.
-    const references = await tx.query<UserReferenceRow>(
-      `SELECT tables.name AS tableName, foreign_keys."from" AS columnName
-       FROM sqlite_schema AS tables
-       JOIN pragma_foreign_key_list(tables.name) AS foreign_keys
-       JOIN pragma_table_info(tables.name) AS columns
-         ON columns.name = foreign_keys."from"
-       WHERE tables.type = 'table'
-         AND foreign_keys."table" = 'users'
-         AND foreign_keys.on_delete IN ('NO ACTION', 'RESTRICT')
-         AND columns."notnull" = 0
-       UNION ALL
-       SELECT 'scheduled_tasks' AS tableName, columns.name AS columnName
-       FROM pragma_table_info('scheduled_tasks') AS columns
-       WHERE columns.name IN ('created_by', 'updated_by')
-         AND columns."notnull" = 0
-         AND NOT EXISTS (
-           SELECT 1
-           FROM pragma_foreign_key_list('scheduled_tasks') AS foreign_keys
-           WHERE foreign_keys."from" = columns.name
-             AND foreign_keys."table" = 'users'
-         )`,
-    );
+    const references = await tx.query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
     const replacement = replacementUserId ?? null;
     // The human-free rule only asks whether a task's requester or its workflow
     // run's creator is NULL, so only clearing them (no replacement) can change a
@@ -12651,22 +12639,15 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
             [id, id],
           )
         ).map((row) => row.id);
-    for (const reference of references) {
-      const table = quoteSqlIdentifier(reference.tableName);
-      const column = quoteSqlIdentifier(reference.columnName);
-      await tx.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [replacement, id]);
-    }
-
     // Workflow context is persisted JSON rather than a relational column, but
     // it exposes the same requester identity to downstream interpolation. Keep
     // it consistent with workflow_runs.created_by inside this transaction.
-    // The sealed replay copy is what a resume reads, so rewrite it first, while
-    // the scrubbed column still matches the filter.
+    // Migration 319 indexes the context requester expression, so these passes
+    // touch only this user's runs instead of parsing the JSON of every row
+    // (153 s on 493k prod rows). The sealed replay copy is what a resume
+    // reads, so rewrite it first, while the scrubbed column still matches.
     const sealedContexts = await tx.query<{ id: string; context_replay: string }>(
-      `SELECT id, context_replay FROM workflow_runs
-       WHERE context_replay IS NOT NULL
-         AND json_valid(context)
-         AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+      WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
       [id],
     );
     for (const row of sealedContexts) {
@@ -12688,21 +12669,15 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       ]);
     }
     if (replacementUserId) {
-      await tx.run(
-        `UPDATE workflow_runs
-         SET context = json_set(context, '$.swarm.requestedByUserId', ?)
-         WHERE json_valid(context)
-           AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-        [replacementUserId, id],
-      );
+      await tx.run(WORKFLOW_CONTEXT_SET_REQUESTER_SQL, [replacementUserId, id]);
     } else {
-      await tx.run(
-        `UPDATE workflow_runs
-         SET context = json_remove(context, '$.swarm.requestedByUserId')
-         WHERE json_valid(context)
-           AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
-        [id],
-      );
+      await tx.run(WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL, [id]);
+    }
+
+    // Migration 319 indexes every discovered column (the user-delete-perf test
+    // pins the plans), so these are index lookups rather than table scans.
+    for (const reference of references) {
+      await tx.run(userReferenceRewriteSql(reference), [replacement, id]);
     }
 
     await reclassifyTaskHumanFree(reclassifySeedIds);

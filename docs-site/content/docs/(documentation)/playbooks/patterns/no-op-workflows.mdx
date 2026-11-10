@@ -36,6 +36,8 @@ The first node of a recurring workflow is a cheap check: were there merged PRs, 
 - Distinguish "nothing changed" (no-op) from "I failed to check" (real failure that *should* alert).
 - When something *does* change, make the output proportional — a one-line change gets a one-line note.
 
+An illustrative adaptation to an external policy page, where a silent run and a failed check must not look alike, is in [reviewing changes to external rules](https://www.agent-swarm.dev/blog/omnia/ai-external-policy-change-review).
+
 ## Used in
 
 - [Code Health & Alert Management](/docs/playbooks/code-health-alert-management)

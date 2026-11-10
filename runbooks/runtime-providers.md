@@ -192,6 +192,11 @@ Termination and status use explicit handles. Controllers must obtain those handl
 
 The built-in Kubernetes provider calls the cluster API directly. It needs no `kubectl` binary or Kubernetes SDK.
 Create a controller with `kind: "k8s"` and `placement: "builtin"`.
+In the dashboard, open **Settings > Runtime pools > Controllers**, then choose **New controller**.
+Select **Kubernetes**. The form fixes placement to **Built in** and explains the cluster settings.
+Store bearer tokens under **Secrets**. Add the namespace and worker API URL under **Config**.
+After saving the controller, create a Kubernetes pool and select that controller.
+The pool detail page shows its runtimes, pod names under **External id**, and provision errors.
 Configure these keys on the controller:
 
 | Key | Purpose |

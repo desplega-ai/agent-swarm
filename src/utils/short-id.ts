@@ -12,25 +12,31 @@ const BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
  * constraint should regenerate on the (astronomically unlikely) conflict.
  */
 export function generateShortId(len = 12): string {
-  // Rejection-sample bytes into the 52-letter alphabet to avoid modulo bias:
-  // accept bytes < 208 (= 52 * 4, the largest multiple of 52 ≤ 255) and reject
-  // the rest so every letter is equally likely.
+  return randomChars(LETTERS, len);
+}
+
+/**
+ * Pick `len` uniformly random characters from `alphabet`. Rejection-samples
+ * bytes to avoid modulo bias: accept bytes below the largest multiple of the
+ * alphabet size that fits in a byte (208 for 52 letters, 248 for base62) and
+ * reject the rest so every character is equally likely. `source` is
+ * injectable for tests.
+ */
+export function randomChars(
+  alphabet: string,
+  len: number,
+  source: (size: number) => Uint8Array = randomBytes,
+): string {
+  const accept = 256 - (256 % alphabet.length);
   let out = "";
   while (out.length < len) {
-    for (const byte of randomBytes((len - out.length) * 2)) {
-      if (byte < 208) {
-        out += LETTERS[byte % 52];
+    for (const byte of source((len - out.length) * 2)) {
+      if (byte < accept) {
+        out += alphabet[byte % alphabet.length];
         if (out.length === len) break;
       }
     }
   }
-  return out;
-}
-
-/** base62-encode raw bytes (URL-safe, unambiguous), mirroring the user-token util. */
-function base62(bytes: Uint8Array): string {
-  let out = "";
-  for (const byte of bytes) out += BASE62[byte % 62];
   return out;
 }
 
@@ -40,5 +46,5 @@ function base62(bytes: Uint8Array): string {
  * {@link generateShortId} this IS a secret and must be stored encrypted.
  */
 export function generateBearerToken(): string {
-  return `xsk_${base62(randomBytes(24))}`;
+  return `xsk_${randomChars(BASE62, 24)}`;
 }

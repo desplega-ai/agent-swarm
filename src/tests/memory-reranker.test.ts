@@ -339,8 +339,35 @@ describe("usefulness", () => {
     expect(usefulness(10, 1)).toBeCloseTo(1.8181818, 5);
   });
 
-  test("Beta(1,10) → 1.0 (floored at default MEMORY_DEMOTION_FLOOR=1.0)", () => {
+  test("Beta(1,10) with no rating evidence → 1.0 (off-topic votes never demote)", () => {
     expect(usefulness(1, 10)).toBe(1.0);
+  });
+
+  const noEvidence = { selfAlpha: 0, selfBeta: 0, llmAlpha: 0, llmBeta: 0, llmCount: 0 };
+
+  test("explicit-self net-negative demotes to the 0.5 default floor", () => {
+    expect(usefulness(1, 10, { ...noEvidence, selfBeta: 1 })).toBe(0.5);
+    // Above the floor the pooled score is kept: 2 * 3/5 = 1.2 is not demoted,
+    // 2 * 2/5 = 0.8 is.
+    expect(usefulness(2, 3, { ...noEvidence, selfBeta: 1 })).toBeCloseTo(0.8, 10);
+  });
+
+  test("explicit-self net-positive vetoes LLM-driven demotion", () => {
+    expect(usefulness(1, 10, { ...noEvidence, selfAlpha: 1, llmBeta: 20, llmCount: 30 })).toBe(1.0);
+  });
+
+  test("LLM-only negatives demote only with enough ratings and a mean below 0.25", () => {
+    const strong = { ...noEvidence, llmBeta: 8, llmAlpha: 0, llmCount: 10 };
+    expect(usefulness(1, 10, strong)).toBe(0.5);
+    // 9 ratings: not enough evidence.
+    expect(usefulness(1, 10, { ...strong, llmCount: 9 })).toBe(1.0);
+    // LLM mean (1+2)/(2+2+8) = 0.25: not clearly negative.
+    expect(usefulness(1, 10, { ...strong, llmAlpha: 2 })).toBe(1.0);
+  });
+
+  test("a positive pooled posterior is never demoted, whatever the evidence", () => {
+    expect(usefulness(10, 1, { ...noEvidence, selfBeta: 5 })).toBeCloseTo((2 * 10) / 11, 10);
+    expect(usefulness(1, 1, { ...noEvidence, selfBeta: 5 })).toBe(1.0);
   });
 
   test("Beta(50,1) → 2 * 50/51 ≈ 1.961 (approaches ceiling, never above 2.0)", () => {
@@ -352,9 +379,17 @@ describe("usefulness", () => {
     expect(usefulness(10, 0)).toBe(2.0);
   });
 
-  test("MEMORY_DEMOTION_FLOOR=0.5 lowers the floor and enables demotion", () => {
-    process.env.MEMORY_DEMOTION_FLOOR = "0.5";
-    expect(usefulness(1, 10)).toBe(0.5);
+  test("MEMORY_DEMOTION_FLOOR=1.0 restores no demotion", () => {
+    process.env.MEMORY_DEMOTION_FLOOR = "1.0";
+    expect(usefulness(1, 10, { ...noEvidence, selfBeta: 1 })).toBe(1.0);
+    expect(usefulness(10, 1)).toBeCloseTo((2 * 10) / 11, 10);
+  });
+
+  test("MEMORY_DEMOTION_FLOOR overrides the default floor", () => {
+    process.env.MEMORY_DEMOTION_FLOOR = "0.2";
+    expect(usefulness(1, 10, { ...noEvidence, selfBeta: 1 })).toBe(0.2);
+    process.env.MEMORY_DEMOTION_FLOOR = "not-a-number";
+    expect(usefulness(1, 10, { ...noEvidence, selfBeta: 1 })).toBe(0.5);
   });
 });
 

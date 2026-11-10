@@ -245,6 +245,8 @@ export type ComposedUser = {
   email?: string | null;
   emailAliases: string[];
   status: string;
+  /** Set while a merge job still moves this user into another one. */
+  mergedIntoUserId?: string | null;
   identities: Array<{ kind: string; externalId: string }>;
   tokens: Array<{
     id: string;
