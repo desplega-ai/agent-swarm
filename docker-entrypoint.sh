@@ -500,7 +500,7 @@ fi
 # GitHub App worker auth: when the API mints installation tokens (GITHUB_APP_ID,
 # GITHUB_APP_PRIVATE_KEY and GITHUB_APP_INSTALLATION_ID on the API), git and gh
 # fetch them through swarm-github-token, which falls back to GITHUB_TOKEN. The
-# probe runs as the worker so the token cache is worker-owned. Any other answer
+# probe runs as the worker, with the env git and gh will have. Any other answer
 # (404 = no App) keeps the PAT setup below exactly as before.
 SWARM_GITHUB_TOKEN_BIN="${SWARM_GITHUB_TOKEN_BIN:-/usr/local/bin/swarm-github-token}"
 GH_WRAPPER_LINK="${GH_WRAPPER_LINK:-/usr/local/bin/gh}"

@@ -13,10 +13,10 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -32,7 +32,7 @@ const AGENT_ID = "0b0b0b0b-0000-4000-8000-000000000001";
 const APP_TOKEN = "ghs_fixtureAppToken0000000000000000"; // gitleaks:allow (synthetic)
 const PAT = "ghp_fixtureStaticPat000000000000000000"; // gitleaks:allow (synthetic)
 
-let mode: "ok" | "unconfigured" | "short" = "ok";
+let mode: "ok" | "unconfigured" = "ok";
 let calls = 0;
 let server: ReturnType<typeof Bun.serve>;
 const tempDirs: string[] = [];
@@ -54,10 +54,9 @@ beforeAll(() => {
         return Response.json({ error: "denied" }, { status: 403 });
       }
       if (mode === "unconfigured") return Response.json({ error: "no app" }, { status: 404 });
-      const ttl = mode === "short" ? 4 * 60_000 : 60 * 60_000;
       return Response.json({
         token: APP_TOKEN,
-        expiresAt: new Date(Date.now() + ttl).toISOString(),
+        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
       });
     },
   });
@@ -87,9 +86,19 @@ function sandbox() {
     MCP_BASE_URL: `http://127.0.0.1:${server.port}`,
     API_KEY,
     AGENT_ID,
+    // The helper no longer reads this; it keeps any cache an older helper would
+    // write inside the sandbox, where the no-file assertions look for it.
     SWARM_GITHUB_TOKEN_CACHE_DIR: join(home, "cache"),
   };
   return { home, env };
+}
+
+/** Every regular file under `dir` whose bytes contain `needle`. */
+function filesContaining(dir: string, needle: string): string[] {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .filter((path) => readFileSync(path, "utf8").includes(needle));
 }
 
 const helper = (env: Record<string, string>, args: string[] = [], stdin?: string) =>
@@ -97,43 +106,19 @@ const helper = (env: Record<string, string>, args: string[] = [], stdin?: string
 
 describe("swarm-github-token", () => {
   test(
-    "prints the App token and serves repeat calls from a private cache",
+    "mints on every call and leaves no token file a same-uid process could read",
     async () => {
-      const { env } = sandbox();
+      const { home, env } = sandbox();
       const first = expectChildOk(await helper(env), "first");
       expect(first.stdout.trim()).toBe(APP_TOKEN);
-      expect(expectChildOk(await helper(env), "second").stdout.trim()).toBe(APP_TOKEN);
-      expect(calls).toBe(1);
-      const cacheDir = env.SWARM_GITHUB_TOKEN_CACHE_DIR!;
-      expect(statSync(cacheDir).mode & 0o777).toBe(0o700);
-      expect(statSync(join(cacheDir, "token")).mode & 0o777).toBe(0o600);
       expect(first.stderr).not.toContain(APP_TOKEN);
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "never caches into a pre-existing dir that is not mode 700",
-    async () => {
-      const { env } = sandbox();
-      const cacheDir = env.SWARM_GITHUB_TOKEN_CACHE_DIR!;
-      mkdirSync(cacheDir, { mode: 0o755 });
-      chmodSync(cacheDir, 0o755);
-      expect(expectChildOk(await helper(env), "first").stdout.trim()).toBe(APP_TOKEN);
-      expect(existsSync(join(cacheDir, "token"))).toBe(false);
-      expectChildOk(await helper(env), "second");
+      expect(expectChildOk(await helper(env), "second").stdout.trim()).toBe(APP_TOKEN);
       expect(calls).toBe(2);
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "refetches a token inside the 5-minute refresh window",
-    async () => {
-      mode = "short";
-      const { env } = sandbox();
-      expectChildOk(await helper(env), "first");
-      expectChildOk(await helper(env), "second");
+      expect(filesContaining(home, APP_TOKEN)).toEqual([]);
+      // An ACP harness runs as the same uid with a curated env and no API key:
+      // after the worker minted a token, it still gets none.
+      const { API_KEY: _key, AGENT_ID: _agent, ...acpEnv } = env;
+      expect((await helper(acpEnv, ["--app-only"])).exitCode).toBe(1);
       expect(calls).toBe(2);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
@@ -166,18 +151,17 @@ describe("swarm-github-token", () => {
   );
 
   test(
-    "git credential protocol: get returns the App token, erase drops the cache",
+    "git credential protocol: get returns the App token, store and erase keep nothing",
     async () => {
-      const { env } = sandbox();
+      const { home, env } = sandbox();
       const get = expectChildOk(
         await helper(env, ["git-credential", "get"], "protocol=https\nhost=github.com\n\n"),
         "get",
       );
       expect(get.stdout).toBe(`username=x-access-token\npassword=${APP_TOKEN}\n`);
       expectChildOk(await helper(env, ["git-credential", "store"], "x\n"), "store");
-      expect(existsSync(join(env.SWARM_GITHUB_TOKEN_CACHE_DIR!, "token"))).toBe(true);
       expectChildOk(await helper(env, ["git-credential", "erase"], "x\n"), "erase");
-      expect(existsSync(join(env.SWARM_GITHUB_TOKEN_CACHE_DIR!, "token"))).toBe(false);
+      expect(filesContaining(home, APP_TOKEN)).toEqual([]);
       mode = "unconfigured";
       const fallback = expectChildOk(
         await helper({ ...env, GITHUB_TOKEN: PAT }, ["git-credential", "get"], "\n"),

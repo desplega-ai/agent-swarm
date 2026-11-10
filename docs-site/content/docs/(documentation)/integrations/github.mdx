@@ -158,7 +158,7 @@ At boot each worker asks `POST /api/github/installation-token` (swarm API key pl
 - sets `swarm-github-token git-credential` as the git credential helper for the GitHub host, and
 - links a `gh` wrapper that passes the current token to `gh` on each call.
 
-Tokens are cached in a worker-private file and refreshed 5 minutes before their 1-hour expiry. The token never goes into a URL, a git remote or `~/.gitconfig`. When the API cannot mint a token, git and `gh` fall back to `GITHUB_TOKEN`, so keep a PAT on workers if you want a fallback. Without `GITHUB_APP_INSTALLATION_ID` the API answers 404 and workers use `GITHUB_TOKEN` exactly as before. Boot logs `GitHub App worker auth configured` in App mode.
+Each git or `gh` call asks the API for a token. The API caches it in memory until 10 minutes before its 1-hour expiry, and the worker never writes it to disk. The API refuses ACP task tokens. ACP harnesses still run as the worker user and can read the worker's own env, so give untrusted ACP targets a worker without GitHub credentials. The token never goes into a URL, a git remote or `~/.gitconfig`. When the API cannot mint a token, git and `gh` fall back to `GITHUB_TOKEN`, so keep a PAT on workers if you want a fallback. Without `GITHUB_APP_INSTALLATION_ID` the API answers 404 and workers use `GITHUB_TOKEN` exactly as before. Boot logs `GitHub App worker auth configured` in App mode.
 
 Only one installation is supported: workers can reach the repos that installation can see. Commits still use `GITHUB_EMAIL` / `GITHUB_NAME`.
 
