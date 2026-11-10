@@ -2534,6 +2534,11 @@ export const RuntimePoolCacheSchema = z
   })
   .strict();
 
+/** Persistent `/workspace/personal` per (agent, slot). `sizeGb` applies to k8s only. */
+export const RuntimePoolWorkspaceSchema = z
+  .object({ sizeGb: z.number().int().min(1).max(1024).optional() })
+  .strict();
+
 export const RuntimePoolCreateSchema = z
   .object({
     name: z.string().min(1).max(200),
@@ -2549,6 +2554,7 @@ export const RuntimePoolCreateSchema = z
     env: z.record(z.string(), z.string()).default({}),
     resources: RuntimeResourcesSchema.nullable().default(null),
     cache: RuntimePoolCacheSchema.nullable().default(null),
+    workspace: RuntimePoolWorkspaceSchema.nullable().default(null),
     ttlSec: z.number().int().positive().nullable().default(null),
     enabled: z.boolean().default(true),
   })
@@ -2563,6 +2569,7 @@ export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend(
   env: z.record(z.string(), z.string()).optional(),
   resources: RuntimeResourcesSchema.nullable().optional(),
   cache: RuntimePoolCacheSchema.nullable().optional(),
+  workspace: RuntimePoolWorkspaceSchema.nullable().optional(),
   ttlSec: z.number().int().positive().nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -2612,6 +2619,8 @@ export const RuntimeInstanceSchema = z
     idleSince: z.string().nullable().optional(),
     leaseExpiresAt: z.string().nullable().optional(),
     taskId: z.string().nullable().optional(),
+    /** Persistent workspace slot (lowest free per agent); null without a pool workspace. */
+    workspaceSlot: z.number().int().nullable().optional(),
     /** Runtime-local concurrent task capacity, self-reported at registration. */
     reportedSlots: z.number().int(),
     /** Process-local credential readiness; null when never reported. */

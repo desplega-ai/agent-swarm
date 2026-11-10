@@ -4,7 +4,11 @@ import {
   type ControllerCommands,
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
-import { RUNTIME_LABELS, type RuntimeHandle } from "../../runtime-providers/types";
+import {
+  RUNTIME_LABELS,
+  type RuntimeHandle,
+  workspaceVolumeKey,
+} from "../../runtime-providers/types";
 import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { scrubSecrets } from "../../utils/secret-scrubber";
@@ -98,10 +102,11 @@ export async function reconcileRemoteProvisions(
       const labels = handle.meta;
       const runtimeId = labels?.[RUNTIME_LABELS.runtimeId];
       if (labels?.[RUNTIME_LABELS.owner] !== ownerId || !runtimeId) continue;
-      await tx.run(
+      const adopted = await tx.get<{ agent_id: string; workspace_slot: number | null }>(
         `UPDATE runtime_instances SET external_handle = ?, updated_at = ?
          WHERE id = ? AND controller_id = ? AND agent_id = ? AND pool_id = ?
-         AND status != 'offline' AND external_handle IS NULL`,
+         AND status != 'offline' AND external_handle IS NULL
+         RETURNING agent_id, workspace_slot`,
         [
           JSON.stringify(handle),
           new Date().toISOString(),
@@ -111,6 +116,16 @@ export async function reconcileRemoteProvisions(
           labels[RUNTIME_LABELS.poolId] ?? "",
         ],
       );
+      // The provision response never arrived, so its mount was never checked. Retiring the row
+      // with its handle stored lets orphan reconciliation terminate the container next.
+      if (adopted && adopted.workspace_slot !== null) {
+        const key = workspaceVolumeKey(adopted.agent_id, adopted.workspace_slot);
+        if (labels.workspaceKey !== key)
+          await markRuntimeTerminated(
+            runtimeId,
+            `Persistent workspace: recovered runtime did not mount ${key}`,
+          );
+      }
     }
     const missing = await tx.query<{ id: string }>(
       "SELECT id FROM runtime_instances WHERE controller_id = ? AND status = 'provisioning' AND external_handle IS NULL",

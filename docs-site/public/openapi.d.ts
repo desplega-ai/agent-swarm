@@ -2770,6 +2770,7 @@ export interface paths {
                                 idleSince?: string | null;
                                 leaseExpiresAt?: string | null;
                                 taskId?: string | null;
+                                workspaceSlot?: number | null;
                                 reportedSlots: number;
                                 credentialReady?: boolean | null;
                                 /** Format: date-time */
@@ -32853,6 +32854,10 @@ export interface components {
                 mountPath: string;
             } | null;
             /** @default null */
+            workspace: {
+                sizeGb?: number;
+            } | null;
+            /** @default null */
             ttlSec: number | null;
             /** @default true */
             enabled: boolean;
@@ -32884,6 +32889,7 @@ export interface components {
             idleSince?: string | null;
             leaseExpiresAt?: string | null;
             taskId?: string | null;
+            workspaceSlot?: number | null;
             reportedSlots: number;
             credentialReady?: boolean | null;
             metadata: {
@@ -36924,6 +36930,10 @@ export interface operations {
                         mountPath: string;
                     } | null;
                     /** @default null */
+                    workspace?: {
+                        sizeGb?: number;
+                    } | null;
+                    /** @default null */
                     ttlSec?: number | null;
                     /** @default true */
                     enabled?: boolean;
@@ -37129,6 +37139,9 @@ export interface operations {
                     } | null;
                     cache?: {
                         mountPath: string;
+                    } | null;
+                    workspace?: {
+                        sizeGb?: number;
                     } | null;
                     ttlSec?: number | null;
                     enabled?: boolean;
