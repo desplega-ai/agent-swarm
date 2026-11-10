@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { RUNTIME_WORKSPACE_KINDS } from "../../apps/ui/src/lib/runtime-pool-workspace";
 import { canProvisionKind, createRuntimeProvider } from "../runtime-providers";
 import { type RuntimeProviderKind, RuntimeProviderKindSchema } from "../types";
 
@@ -88,6 +89,13 @@ describe("runtime provider registration", () => {
   test("static provisioning lookup matches adapter traits", async () => {
     for (const kind of kinds)
       expect(canProvisionKind(kind)).toBe((await createRuntimeProvider(kind)).traits.canProvision);
+  });
+
+  test("dashboard workspace kinds match adapter traits", async () => {
+    for (const kind of kinds)
+      expect(RUNTIME_WORKSPACE_KINDS.includes(kind)).toBe(
+        (await createRuntimeProvider(kind)).traits.persistentWorkspace === true,
+      );
   });
 
   for (const kind of kinds) {

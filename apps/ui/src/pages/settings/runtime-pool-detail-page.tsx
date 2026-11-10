@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Skeleton } from "@/components/ui/skeleton";
+import { workspaceLabel } from "@/lib/runtime-pool-workspace";
 import {
   deliveryLabel,
   isCircuitOpen,
@@ -330,6 +331,7 @@ function PoolEditor({
           }
           mono
         />
+        <QuickStat label="Persistent workspace" value={workspaceLabel(pool.workspace)} />
         <QuickStat label="Created" value={formatSmartTime(pool.createdAt)} />
         <QuickStat label="Updated" value={formatSmartTime(pool.updatedAt)} />
       </QuickStats>
