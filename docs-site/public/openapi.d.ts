@@ -28526,7 +28526,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Merge another user into this one — moves identities + email aliases, deletes source */
+        /**
+         * Merge another user into this one: moves identities + email aliases, queues the rest
+         * @description Moves the source's identities and email aliases to the target, revokes the source's credentials and records a manual_merge event, all in one short transaction. The attribution rewrite across every table and the deletion of the source run as a background job; poll GET /api/users/merge-jobs/{jobId} until its status is done or failed. While the job runs, the source cannot authenticate and identity lookups resolve to the target.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -28544,37 +28547,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Merged user */
-                200: {
+                /** @description The queued merge job */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            user: (components["schemas"]["User"] & {
-                                identities: {
-                                    kind: string;
-                                    externalId: string;
-                                }[];
-                                tokens: {
-                                    id: string;
-                                    userId: string;
-                                    label: string | null;
-                                    tokenPreview: string;
-                                    createdAt: string;
-                                    lastUsedAt: string | null;
-                                    revokedAt: string | null;
-                                }[];
-                                recentEvents: {
-                                    id: string;
-                                    userId: string;
-                                    eventType: string;
-                                    actor: string;
-                                    before?: unknown;
-                                    after?: unknown;
-                                    createdAt: string;
-                                }[];
-                            }) | null;
+                            job: components["schemas"]["UserMergeJob"];
                         };
                     };
                 };
@@ -28614,7 +28594,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Source is the last active admin (last_admin) */
+                /** @description Source is the last active admin (last_admin), or a merge job for the source or target is still running (merge_in_progress) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -28625,6 +28605,114 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List background user merge jobs, newest first */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "running" | "done" | "failed";
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Merge jobs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            jobs: components["schemas"]["UserMergeJob"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/merge-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A background user merge job (poll until status is done or failed) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The merge job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            job: components["schemas"]["UserMergeJob"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Job not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -32289,10 +32377,28 @@ export interface components {
              * @enum {string}
              */
             status: "invited" | "active" | "suspended";
+            mergedIntoUserId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        UserMergeJob: {
+            id: string;
+            sourceUserId: string;
+            targetUserId: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "done" | "failed";
+            phase: string | null;
+            progress: {
+                [key: string]: number;
+            };
+            error: string | null;
+            attempts: number;
+            nextAttemptAt: string | null;
+            createdAt: string;
+            startedAt: string | null;
+            finishedAt: string | null;
         };
         WorkflowDefinition: {
             nodes: components["schemas"]["WorkflowNode"][];
