@@ -12,7 +12,7 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
-import type { Workflow, WorkflowDefinition } from "../types";
+import type { Workflow, WorkflowDefinition, WorkflowRun } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus, workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -26,6 +26,23 @@ import { setupWorkflowResumeListener } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-async-v2.sqlite";
+
+async function waitForRun(
+  runId: string,
+  ready: (run: WorkflowRun) => boolean | Promise<boolean> = (run) =>
+    ["completed", "failed", "cancelled"].includes(run.status),
+): Promise<WorkflowRun> {
+  const deadline = Date.now() + 2000;
+  let run = await getWorkflowRun(runId);
+  while (Date.now() < deadline) {
+    if (run && (await ready(run))) return run;
+    await Bun.sleep(10);
+    run = await getWorkflowRun(runId);
+  }
+  throw new Error(
+    `Workflow ${runId} did not reach the expected state within 2000ms (status: ${run?.status})`,
+  );
+}
 
 // ─── Test Executors ──────────────────────────────────────────
 
@@ -246,11 +263,8 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      // Give the async handler time to process
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
       // Workflow should be completed now
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRun(runId);
       expect(updatedRun!.status).toBe("completed");
 
       // Both steps should be completed (task1 + done)
@@ -292,7 +306,10 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: firstStep.id,
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForRun(runId, async (run) => {
+        const step = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === "task2");
+        return run.status === "waiting" && !!step && !!(await getTaskByWorkflowRunStepId(step.id));
+      });
 
       const secondStep = (await getWorkflowRunStepsByRunId(runId)).find(
         (step) => step.nodeId === "task2",
@@ -333,9 +350,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRun(runId);
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("Agent could not complete");
     });
@@ -364,9 +379,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunStepId: taskStep.id,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const updatedRun = await getWorkflowRun(runId);
+      const updatedRun = await waitForRun(runId);
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("cancelled");
     });
@@ -528,7 +541,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-a")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRun(
+        runId,
+        async (run) =>
+          run.status === "waiting" &&
+          (await getWorkflowRunStepsByRunId(runId)).some(
+            (step) => step.nodeId === "review-a" && step.status === "completed",
+          ),
+      );
 
       // After A completes — merge should NOT have been created yet (B, C still pending)
       steps = await getWorkflowRunStepsByRunId(runId);
@@ -545,7 +565,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-b")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRun(
+        runId,
+        async (run) =>
+          run.status === "waiting" &&
+          (await getWorkflowRunStepsByRunId(runId)).some(
+            (step) => step.nodeId === "review-b" && step.status === "completed",
+          ),
+      );
 
       // After B completes — merge STILL should not exist (C still pending)
       steps = await getWorkflowRunStepsByRunId(runId);
@@ -562,11 +589,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-c")!.id,
       });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForRun(runId);
 
       // Now ALL 3 are done — merge should execute exactly ONCE
-      // Allow extra time for serialized queue processing
-      await new Promise((r) => setTimeout(r, 10));
 
       steps = await getWorkflowRunStepsByRunId(runId);
       const mergeSteps = steps.filter((s) => s.nodeId === "merge");
