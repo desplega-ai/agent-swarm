@@ -25,6 +25,7 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { Switch } from "@/components/ui/switch";
 import {
   RUNTIME_WORKSPACE_KINDS,
+  WORKSPACE_DEFAULT_SIZE_GB,
   type WorkspaceForm,
   workspaceFormFromPool,
   workspaceHasSize,
@@ -489,13 +490,13 @@ export function PoolFields({
         {workspaceSupported && form.workspace && workspaceHasSize(form.kind) ? (
           <NumberField
             id="pool-workspace-size"
-            label="Workspace size (GiB)"
+            label="New claim size (GiB)"
             value={form.workspaceSizeGb}
             onChange={(value) =>
               setForm({ ...form, workspaceSizeGb: value, workspaceTouched: true })
             }
             error={errors.workspaceSizeGb}
-            helper="Size of each workspace claim. Blank uses 20."
+            helper={`Size of each new workspace claim. Blank uses ${WORKSPACE_DEFAULT_SIZE_GB}. Existing claims keep their size. Resize them in Kubernetes.`}
           />
         ) : null}
       </div>

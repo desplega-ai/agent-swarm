@@ -12,6 +12,9 @@ export function workspaceHasSize(kind: RuntimeProviderKind): boolean {
   return kind === "k8s";
 }
 
+/** The Kubernetes provider's claim size when the pool sets none. */
+export const WORKSPACE_DEFAULT_SIZE_GB = 20;
+
 export interface WorkspaceForm {
   workspace: boolean;
   workspaceSizeGb: string;
@@ -46,8 +49,22 @@ export function workspaceInput(
   return { input: { workspace: on ? (size ? { sizeGb: Number(size) } : {}) : null } };
 }
 
-/** Rail readout: "Off", "On", or "On, 40 GiB". */
+/** Rail readout: "Off" or "On". The size has its own row, `workspaceNewClaimSize`. */
 export function workspaceLabel(workspace: RuntimePoolWorkspace | null | undefined): string {
-  if (!workspace) return "Off";
-  return workspace.sizeGb === undefined ? "On" : `On, ${workspace.sizeGb} GiB`;
+  return workspace ? "On" : "Off";
+}
+
+/**
+ * Rail readout of the size a newly created claim gets, or null when the workspace
+ * is off or the kind has no size. The provider reuses an existing claim unchanged,
+ * so this is never shown as the size of the claims already in the cluster.
+ */
+export function workspaceNewClaimSize(
+  kind: RuntimeProviderKind,
+  workspace: RuntimePoolWorkspace | null | undefined,
+): string | null {
+  if (!workspace || !workspaceHasSize(kind)) return null;
+  return workspace.sizeGb === undefined
+    ? `${WORKSPACE_DEFAULT_SIZE_GB} GiB (default)`
+    : `${workspace.sizeGb} GiB`;
 }

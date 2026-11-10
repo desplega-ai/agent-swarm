@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { workspaceFormFromPool, workspaceInput, workspaceLabel } from "./runtime-pool-workspace";
+import {
+  workspaceFormFromPool,
+  workspaceInput,
+  workspaceLabel,
+  workspaceNewClaimSize,
+} from "./runtime-pool-workspace";
 
 describe("runtime pool workspace form", () => {
   test("an untouched form sends no workspace key, whatever is stored", () => {
@@ -50,10 +55,21 @@ describe("runtime pool workspace form", () => {
     expect(workspaceInput("k8s", { ...hidden, workspace: false }).error).toBeUndefined();
   });
 
-  test("the label shows the state and the size when set", () => {
+  // The provider reuses an existing claim unchanged, so the stored size is never
+  // shown as the state of the workspace, only as the size of a new claim.
+  test("the label shows the state without the stored size", () => {
     expect(workspaceLabel(null)).toBe("Off");
     expect(workspaceLabel(undefined)).toBe("Off");
     expect(workspaceLabel({})).toBe("On");
-    expect(workspaceLabel({ sizeGb: 40 })).toBe("On, 40 GiB");
+    expect(workspaceLabel({ sizeGb: 40 })).toBe("On");
+  });
+
+  test("the new claim size shows for an enabled k8s workspace only", () => {
+    expect(workspaceNewClaimSize("k8s", { sizeGb: 40 })).toBe("40 GiB");
+    expect(workspaceNewClaimSize("k8s", {})).toBe("20 GiB (default)");
+    expect(workspaceNewClaimSize("k8s", null)).toBeNull();
+    expect(workspaceNewClaimSize("k8s", undefined)).toBeNull();
+    // Docker ignores a size stored through the API.
+    expect(workspaceNewClaimSize("docker", { sizeGb: 40 })).toBeNull();
   });
 });

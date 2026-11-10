@@ -295,7 +295,7 @@ export interface RuntimeControllerInput {
   secretConfig?: Record<string, string | null>;
 }
 
-/** Persistent `/workspace/personal` per agent and slot. `sizeGb` applies to k8s only. */
+/** Persistent `/workspace/personal` per agent and slot. `sizeGb` sizes new k8s claims only. */
 export interface RuntimePoolWorkspace {
   sizeGb?: number;
 }
