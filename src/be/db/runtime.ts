@@ -11,6 +11,18 @@ import { sealedReplayExistsSql } from "../sealed-json";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
+let dbCreatedThisBoot = false;
+
+/**
+ * True when this process opened a database file that held no schema object
+ * at all, so this boot is the one that created it. Seeds meant for new
+ * installs only read it (src/be/db-retention-defaults.ts). An upgraded
+ * install, a restored backup and the test template all report false.
+ */
+export function wasDbCreatedThisBoot(): boolean {
+  getDb();
+  return dbCreatedThisBoot;
+}
 
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
@@ -132,6 +144,8 @@ function bootOpenedDb(
   resolvePromptTemplate: typeof import("../db").resolvePromptTemplate,
   autoEncryptLegacyPlaintextSecrets: typeof import("../db").autoEncryptLegacyPlaintextSecrets,
 ): Database {
+  // Read before anything below can create a table.
+  dbCreatedThisBoot = database.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get() === null;
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");
@@ -344,6 +358,7 @@ export function closeDb(): void {
     db = null;
   }
   sqliteVecAvailable = false;
+  dbCreatedThisBoot = false;
 }
 
 // Async seam over the shared connection. The client resolves the underlying
