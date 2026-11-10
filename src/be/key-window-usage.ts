@@ -181,6 +181,7 @@ export const KEY_WINDOW_USAGE_SQL = `
   SELECT NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, 0, 0, '', NULL, 0, sc.createdAt, NULL
   FROM session_costs sc
   WHERE (sc.credentialKeyType IS NULL OR sc.credentialKeySuffix IS NULL)
+    AND sc.kind = 'harness'
     AND sc.createdAt >= ? AND sc.createdAt < ?
   LIMIT ${MAX_USAGE_ROWS + 1}`;
 

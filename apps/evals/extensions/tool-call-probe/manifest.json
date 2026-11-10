@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../templates/extensions/manifest.schema.json",
+  "name": "tool-call-probe",
+  "description": "Pass-through pre.tool.call hook that only counts calls. Measures which tool calls an extension gate can see.",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

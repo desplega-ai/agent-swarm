@@ -400,7 +400,9 @@ export class LastAdminError extends Error {
 
 /**
  * Throw LastAdminError when removing this user would leave the swarm without
- * an active grant-all user. Joins the caller's transaction.
+ * an active grant-all user. A merge source (users.mergedIntoUserId set) can no
+ * longer authenticate and is about to be deleted, so it never counts as a
+ * live admin. Joins the caller's transaction.
  */
 export async function assertNotLastAdmin(userId: string): Promise<void> {
   const client = getDbClient();
@@ -409,7 +411,7 @@ export async function assertNotLastAdmin(userId: string): Promise<void> {
      FROM users u
      JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
      JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
-     WHERE u.status = 'active' AND u.id = ?`,
+     WHERE u.status = 'active' AND u.mergedIntoUserId IS NULL AND u.id = ?`,
     [userId],
   );
   if ((self?.n ?? 0) === 0) return;
@@ -418,7 +420,7 @@ export async function assertNotLastAdmin(userId: string): Promise<void> {
      FROM users u
      JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
      JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
-     WHERE u.status = 'active' AND u.id <> ?`,
+     WHERE u.status = 'active' AND u.mergedIntoUserId IS NULL AND u.id <> ?`,
     [userId],
   );
   if ((others?.n ?? 0) === 0) throw new LastAdminError();
@@ -489,7 +491,7 @@ export async function setUserRoles(
            FROM users u
            JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
            JOIN roles r ON r.id = pr.roleId AND r.grantsAll = 1
-           WHERE u.status = 'active' AND u.id <> ?`,
+           WHERE u.status = 'active' AND u.mergedIntoUserId IS NULL AND u.id <> ?`,
           [userId],
         );
         if ((others?.n ?? 0) === 0) throw new LastAdminError();

@@ -152,10 +152,15 @@ async function render({ scoped }: { scoped: boolean }) {
       </QueryClientProvider>,
     ),
   );
-  // The body loads lazily.
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 20));
-  });
+  // The body loads lazily: wait for it, not for a fixed time. A cold dynamic
+  // import on a busy CI runner outlasts any short sleep.
+  const deadline = Date.now() + 5000;
+  while (!document.querySelector('[data-testid="task-preview-body"]')) {
+    if (Date.now() > deadline) throw new Error("the task preview body did not load");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+  }
 }
 
 const text = (testId: string) =>

@@ -477,8 +477,17 @@ describe("writers that rewrite replay state", () => {
     const workflow = await newWorkflow();
     const user = await createUser({ name: "replay requester" });
     const replacement = await createUser({ name: "replay replacement" });
-    const runId = await newRunningRun(workflow.id);
+    // The engine writes created_by and context.swarm.requestedByUserId from
+    // the same requester; deleteUser narrows its JSON pass by created_by.
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({
+      id: runId,
+      workflowId: workflow.id,
+      triggerType: "manual",
+      createdBy: user.id,
+    });
     await updateWorkflowRun(runId, {
+      status: "running",
       context: { swarm: { requestedByUserId: user.id }, input: { key: secret.value } },
     });
     expect(await deleteUser(user.id, replacement.id)).toBe(true);

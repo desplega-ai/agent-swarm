@@ -39,7 +39,9 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
         "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
-        "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret).",
+        "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). " +
+        "WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, " +
+        "before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event).",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to update"),
         key: AssetKeySchema.optional().describe("Move to a logical namespace."),

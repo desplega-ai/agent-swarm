@@ -3,7 +3,7 @@ import { setAssetsEnabled } from "../be/extensions/assets";
 import { insertExtensionRun, recordExtensionFailure, setExtensionState } from "../be/extensions/db";
 import { grantLeadEquivalence, revokeLeadEquivalence } from "../rbac/elevated-agents";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import type { SwarmEventMap } from "./contract";
+import type { SwarmEventMap, ToolSource } from "./contract";
 import { buildCtx } from "./ctx";
 import type { ExtensionHandler, LoadedExtension } from "./loader";
 
@@ -91,9 +91,19 @@ function positiveEnv(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
-function handlersFor(event: keyof SwarmEventMap, opts?: DispatchOptions) {
+/** The tool source of a tool event, or undefined for every other event. */
+function toolSourceOf(event: keyof SwarmEventMap, payload: unknown): ToolSource | undefined {
+  if (event !== "pre.tool.call" && event !== "post.tool.call") return undefined;
+  return stringField(payload, "requestInfo", "callOrigin") === "native" ? "native" : "mcp";
+}
+
+function handlersFor(event: keyof SwarmEventMap, payload: unknown, opts?: DispatchOptions) {
+  const toolSource = toolSourceOf(event, payload);
   return [...registry.values()]
     .filter((loaded) => loaded.record.id !== opts?.skipExtensionId)
+    .filter(
+      (loaded) => !toolSource || (loaded.manifest.toolSources ?? ["mcp"]).includes(toolSource),
+    )
     .flatMap((loaded) =>
       loaded.handlers
         .filter((handler) => handler.event === event)
@@ -392,7 +402,7 @@ export async function dispatchPre<E extends PreEventName>(
   let currentPayload: Record<string, unknown> = { ...payload };
   const mergedData: Record<string, unknown> = {};
   let modified = false;
-  for (const { loaded, handler } of handlersFor(event, opts)) {
+  for (const { loaded, handler } of handlersFor(event, payload, opts)) {
     if (!isRegistered(loaded.record.id)) continue;
     const run = await runHandler(loaded, handler, event, currentPayload);
     if (!run.ok) continue;
@@ -498,7 +508,7 @@ export async function dispatchPost<E extends PostEventName>(
   payload: SwarmEventMap[E]["event"],
   opts?: DispatchOptions,
 ): Promise<void> {
-  for (const { loaded, handler } of handlersFor(event, opts)) {
+  for (const { loaded, handler } of handlersFor(event, payload, opts)) {
     if (!isRegistered(loaded.record.id)) continue;
     const run = await runHandler(loaded, handler, event, payload);
     if (run.ok) {
