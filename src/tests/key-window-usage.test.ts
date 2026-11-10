@@ -361,6 +361,21 @@ test("does not assign historical unknown credentials to one key or guess unknown
   });
 });
 
+test("a SystemOne decision row is not an unattributed provider session", async () => {
+  await quota();
+  await cost();
+  // SystemOne rows never carry a credential; they bill no provider key window.
+  await cost({
+    kind: "system-one",
+    harness: null,
+    model: "cloudflare/clef",
+    credentialKeyType: null,
+    credentialKeySuffix: null,
+  });
+  const windows = (await read("?keyType=CODEX_OAUTH&keySuffix=key-a")).windows;
+  expect(windows[0]!.usage).toMatchObject({ sessions: 1, swarmUnattributedSessions: 0 });
+});
+
 test("filters retain separate populations while callers share the same visible cache", async () => {
   await quota();
   await quota("key-b");

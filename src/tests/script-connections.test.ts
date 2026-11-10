@@ -710,6 +710,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "318_superseded_workflow_cut_backfill.sql");
       // 319 indexes user FK columns on tables this fixture does not create.
       markMigrationApplied(database, "319_user_fk_indexes.sql");
+      // 320 alters session_costs, which this fixture lacks.
+      markMigrationApplied(database, "320_session_costs_kind.sql");
       // 322 alters runtime_pools and runtime_instances, which this fixture lacks.
       markMigrationApplied(database, "322_runtime_pool_workspace.sql");
 
