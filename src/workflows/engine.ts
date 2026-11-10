@@ -561,6 +561,8 @@ async function walkGraphOwned(
   // Track nodes executed in THIS walk to prevent re-execution within the same
   // walkGraph call, while still allowing loop targets from prior walks.
   const executedInThisWalk = new Set<string>();
+  // True while the walk's last batch left a step waiting.
+  let parked = false;
 
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
@@ -615,7 +617,10 @@ async function walkGraphOwned(
       }
     }
 
-    if (hasWaiting) return; // Run paused, will be resumed by event
+    // A waiting step pauses only its own branch: its completed siblings'
+    // successors still run in this walk. The check below holds any join the
+    // waiting step feeds, and no resume path re-queues a dropped successor.
+    parked = hasWaiting;
 
     // Convergence check — only wait for predecessors with active edges to
     // this node, not all structural predecessors. This prevents deadlocks
@@ -653,6 +658,8 @@ async function walkGraphOwned(
 
     pendingNodes = readyNext;
   }
+
+  if (parked) return; // Run paused, will be resumed by event
 
   // No more nodes to execute — check if the run should be completed.
   // Stay in current state if any steps are still waiting (async tasks
