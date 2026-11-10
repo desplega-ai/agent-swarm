@@ -271,6 +271,10 @@
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]
     },
+    "mcp-user-events": {
+      "description": "MCP Events webhooks on /mcp-user: events/list, subscribe with a verified local callback, signed task.completed and task.failed deliveries, a plain client unchanged, unsubscribe stops delivery",
+      "scenarios": ["mcp-user-events"]
+    },
     "cost-and-orphan-recovery": {
       "description": "Session costs priced and billed, active sessions, orphan task recovery",
       "scenarios": ["core-session-data"]

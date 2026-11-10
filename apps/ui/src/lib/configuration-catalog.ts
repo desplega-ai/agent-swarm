@@ -1005,6 +1005,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
+        key: "WORKFLOW_RUNS_RETENTION_DAYS",
+        label: "Workflow run retention",
+        description:
+          "Delete terminal workflow runs this many days after completion, with their steps and unused definition snapshots. Active runs and trees with a live or recent descendant are kept. Tasks and trigger deduplication survive. Leave unset to disable; deleted run links return 404.",
+        kind: "number",
+        unit: "days",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
         key: "DB_RETENTION_DRY_RUN",
         label: "Database retention dry run",
         description:
@@ -1128,6 +1138,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       "Kill switches for the built-in integrations. Credentials themselves are managed on the Integrations page.",
     icon: Plug,
     entries: [
+      {
+        key: "MCP_USER_EVENTS_ENABLED",
+        label: "User MCP events",
+        description:
+          "Offer MCP Events webhooks (task.completed, task.failed) on /mcp-user. Enabled by default; turn off to stop advertising the capability, answer events/* with method not found, and stop deliveries.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/mcp-events`,
+      },
       {
         key: "SLACK_MODE",
         label: "Slack transport",
@@ -1642,6 +1661,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Let MCP OAuth flows target private-network hosts, overriding the SSRF guard. Enable only for trusted local development.",
         kind: "boolean",
         defaultValue: "false",
+      },
+      {
+        key: "MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS",
+        label: "Allow private MCP Events callbacks",
+        description:
+          "Let /mcp-user event subscriptions deliver to http:// and private-network callback URLs, overriding the SSRF guard. Enable only for trusted local development and tests.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/mcp-events`,
       },
       {
         key: "BUDGET_ADMISSION_DISABLED",

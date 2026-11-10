@@ -20,6 +20,7 @@ import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
 import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { initMcpEventsDispatcher } from "../be/mcp-events/dispatcher";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
@@ -132,6 +133,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRanking } from "./ranking";
 import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
+import { handleRequestComposition } from "./request-composition";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleRuntimePools } from "./runtime-pools";
@@ -373,6 +375,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
         () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
         () => handleContext(req, res, pathSegments, queryParams, myAgentId),
+        () => handleRequestComposition(req, res, pathSegments, queryParams, myAgentId),
         () => handleAssets(req, res, pathSegments, queryParams, myAgentId),
         () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
         () => handleStats(req, res, pathSegments, queryParams, myAgentId),
@@ -877,6 +880,9 @@ httpServer
     // Initialize Azure DevOps service-hook handler (if configured)
     initAzureDevOps();
     initAzureDevOpsOutbound();
+
+    // MCP Events webhook delivery for /mcp-user subscribers (gated per event by MCP_USER_EVENTS_ENABLED)
+    initMcpEventsDispatcher();
 
     // Initialize Bitbucket Cloud webhook handler (if configured)
     initBitbucket();
