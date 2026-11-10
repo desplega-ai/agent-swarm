@@ -343,8 +343,8 @@ The workflow maps its trigger to the tracker's trigger field:
 |---|---|
 | `pull_request` | `pr` |
 | `push` to `main` | `main` |
-| `schedule` (nightly cron) | `nightly` |
-| `workflow_dispatch` | `manual`. The open PR for the branch is resolved, if one exists. |
+| `workflow_dispatch` on `main` (the nightly run an external scheduler dispatches) | `nightly` |
+| `workflow_dispatch` on any other ref | `manual`. The open PR for the branch is resolved, if one exists. |
 
 Local install of the tracker: the template lives at `desplega-ai/agent-work`, `workflows/ui-e2e-tracker/`. Follow its README for the install steps. Boot a local API with `MCP_BASE_URL` on its own port, since the scripts runtime calls back through that variable. `--no-env-file` stops a repo `.env` from overriding `PORT`.
 

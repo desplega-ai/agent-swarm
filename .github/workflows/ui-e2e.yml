@@ -13,7 +13,7 @@ on:
       - "bunfig.toml"
       - ".github/workflows/ui-e2e.yml"
   # Same paths as pull_request: an unfiltered push to main ran the suite on every
-  # merge and most runs were cancelled by the next one. The nightly schedule still
+  # merge and most runs were cancelled by the next one. The nightly run still
   # covers main in full.
   push:
     branches: [main]
@@ -27,13 +27,13 @@ on:
       - "package.json"
       - "bunfig.toml"
       - ".github/workflows/ui-e2e.yml"
-  # Runs on main and is reported to the tracker as a nightly run.
-  schedule:
-    - cron: "0 3 * * *"
+  # An external scheduler dispatches this on main daily at 03:00 UTC. A dispatch
+  # on main is the nightly run and is reported to the tracker as one; a dispatch
+  # on any other ref stays a manual run.
   workflow_dispatch:
 
 concurrency:
-  group: ui-e2e-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
+  group: ui-e2e-${{ github.event.pull_request.number || format('{0}-{1}', (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') && 'nightly' || github.event_name, github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -149,7 +149,7 @@ jobs:
             sha="$GITHUB_SHA"
             ref="$GITHUB_REF_NAME"
             pr=""
-          elif [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
             trigger="nightly"
             sha="$GITHUB_SHA"
             ref="$GITHUB_REF_NAME"
