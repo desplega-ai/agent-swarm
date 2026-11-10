@@ -19,8 +19,9 @@ import { getDbClient } from "../runtime";
  * `reclassifyTaskHumanFree` in the same transaction. The inputs are
  * `agent_tasks.{taskType,tags,source,requestedByUserId,requestedByUserIdInherited,parentTaskId,workflowRunId}`,
  * `workflow_runs.{triggerType,created_by}`, and the existence of the parent and
- * run rows. Today these mutate in four places: `deleteUser` (requester and
- * workflow creator cleared), `deleteWorkflow` (run link cleared, runs deleted),
+ * run rows. Today these mutate in five places: `deleteUser` (requester and
+ * workflow creator cleared), `deleteWorkflow` and `deleteWorkflowRunRetentionBatch`
+ * (run link cleared, runs deleted),
  * `deleteTask` (a parent row disappears) and `completeTask` with `addTags`,
  * which only needs it when `tagWriteChangesHumanFree` says the tag write can
  * change the outcome.

@@ -259,6 +259,90 @@ async function contextSnapshots(ctx: ScenarioContext, agentId: string) {
   await cancelQuietly(ctx, taskId);
 }
 
+/** Request composition manifests: per-session seq, server-side token estimates, owner-only posts. */
+async function requestComposition(ctx: ScenarioContext, agentId: string, otherId: string) {
+  const taskId = await createAssignedTask(ctx, agentId, `composition task ${ctx.nonce}`);
+  await claimTask(ctx, agentId, taskId);
+  const path = `/api/tasks/${taskId}/request-composition`;
+  const body = {
+    sessionId: `rc-${ctx.nonce}`,
+    provider: "claude",
+    model: "sonnet",
+    toolLoading: "none",
+    parts: [
+      { kind: "system_section", id: "base", label: "base prompt", chars: 4_000 },
+      { kind: "task_prompt", id: "task", label: "task prompt", chars: 800, fidelity: "estimate" },
+    ],
+  };
+
+  let response = await ctx.api("POST", path, { agentId, body });
+  expectStatus(response, [200], "record the first manifest");
+  expect(
+    asRecord(response.json).ok === true &&
+      UUID.test(String(asRecord(response.json).id)) &&
+      asRecord(response.json).seq === 0,
+    `First manifest response is malformed: ${JSON.stringify(response.json)}`,
+  );
+  response = await ctx.api("POST", path, { agentId, body: { ...body, model: undefined } });
+  expectStatus(response, [200], "record the second manifest");
+  expect(asRecord(response.json).seq === 1, "The second manifest did not take seq 1");
+
+  response = await ctx.api("GET", path);
+  expectStatus(response, [200], "read the manifests");
+  const manifests = asRecords(response.json, "manifests");
+  expect(manifests.length === 2, `Expected 2 manifests, got ${manifests.length}`);
+  const first = manifests[0] ?? {};
+  expect(
+    first.taskId === taskId &&
+      first.agentId === agentId &&
+      first.seq === 0 &&
+      first.model === "sonnet" &&
+      first.source === "worker",
+    `First manifest is wrong: ${JSON.stringify(first)}`,
+  );
+  const parts = asRecords(first, "parts");
+  expect(
+    parts.length === 2 &&
+      parts.every((part) => typeof part.estTokens === "number" && part.estTokens > 0) &&
+      parts[0]?.fidelity === "exact" &&
+      parts[1]?.fidelity === "estimate",
+    `Parts lack server estimates or fidelity defaults: ${JSON.stringify(parts)}`,
+  );
+  expect(manifests[1]?.model === null, "An omitted model was not stored as null");
+  response = await ctx.api("GET", `${path}?limit=1`);
+  expect(asRecords(response.json, "manifests").length === 1, "limit=1 returned more than one row");
+  expect(
+    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM request_composition WHERE taskId = ?", [
+      taskId,
+    ])?.n === 2,
+    "request_composition does not hold both rows",
+  );
+
+  expectStatus(await ctx.api("POST", path, { body }), [400], "manifest without X-Agent-ID");
+  expectStatus(
+    await ctx.api("POST", path, { agentId, body: { ...body, toolLoading: "nonsense" } }),
+    [400],
+    "manifest with an unknown tool loading",
+  );
+  expectStatus(
+    await ctx.api("POST", path, { agentId: otherId, body }),
+    [403],
+    "manifest from an agent that does not own the task",
+  );
+  expectStatus(
+    await ctx.api("POST", `/api/tasks/${GHOST}/request-composition`, { agentId, body }),
+    [404],
+    "manifest of an unknown task",
+  );
+  expectStatus(
+    await ctx.api("GET", `/api/tasks/${GHOST}/request-composition`),
+    [404],
+    "manifests of an unknown task",
+  );
+  expectStatus(await ctx.api("GET", `${path}?limit=0`), [400], "limit=0");
+  await cancelQuietly(ctx, taskId);
+}
+
 /** Pause, resume and the paused-task list. */
 async function pauseAndResume(ctx: ScenarioContext, agentId: string, otherId: string) {
   const taskId = await createAssignedTask(ctx, agentId, `pause task ${ctx.nonce}`);
@@ -522,6 +606,7 @@ export const coreTaskControls: Scenario = {
     const otherId = await registerWorker(ctx, "controls-other");
     await taskMetadata(ctx, agentId, otherId);
     await contextSnapshots(ctx, agentId);
+    await requestComposition(ctx, agentId, otherId);
     await pauseAndResume(ctx, agentId, otherId);
     await supersede(ctx, agentId, otherId);
     await drafts(ctx, agentId);
