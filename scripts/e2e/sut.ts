@@ -205,6 +205,8 @@ export async function startSut(
     OAUTH_KEEPALIVE_DISABLE: "true",
     // MCP OAuth discovery refuses private hosts by default; scenarios run a loopback authorization server.
     MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
+    // The mcp-user-events scenario's webhook receiver listens on http://127.0.0.1.
+    MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS: "true",
     CODEX_OAUTH_DEVICE_BASE_URL: `http://127.0.0.1:${codexDevicePort}`,
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",

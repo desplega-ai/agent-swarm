@@ -20,6 +20,7 @@ import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
 import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../be/event-loop-lag";
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
+import { initMcpEventsDispatcher } from "../be/mcp-events/dispatcher";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
 import {
   enqueueAuditRow,
@@ -877,6 +878,9 @@ httpServer
     // Initialize Azure DevOps service-hook handler (if configured)
     initAzureDevOps();
     initAzureDevOpsOutbound();
+
+    // MCP Events webhook delivery for /mcp-user subscribers (gated per event by MCP_USER_EVENTS_ENABLED)
+    initMcpEventsDispatcher();
 
     // Initialize Bitbucket Cloud webhook handler (if configured)
     initBitbucket();
