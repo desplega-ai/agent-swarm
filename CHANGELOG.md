@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-10
+
+### Added
+- Runtime pools: a built-in Kubernetes pool provider (#2908), enabled in the dashboard (#2929).
+- Models: model groups with a schema, REST CRUD and seeded tier groups (#2850).
+- UI spec: card buttons can run `script` actions, limited to global scripts pinned by content hash in `UI_SPEC_SCRIPT_ACTIONS` (#2894).
+- Extensions: `POST /api/tool-hooks` runs `pre.tool.call` hooks for harness-native tool calls (#2937).
+- Workflows: a webhook trigger can drop deliveries by event type with `events` and `eventHeader` (#2936).
+- GitHub: mention and review tasks need a trusted sender; `GITHUB_ALLOWED_SENDERS` adds logins to the trusted set (#2891).
+- Costs: SystemOne decisions are recorded on the task's session costs, with an optional `taskId` on `system-one-decide` (#2938).
+- Users: a user merge runs as a resumable background job (#2942).
+- Dreaming: memory-rating correction notes are applied as memory edits (#2925).
+- Evals: opt-in API extension install for a run (#2927).
+
+### Changed
+- agent-fs pins bumped 0.18.23 -> 0.18.24.
+- Deploy: prod deploys from `:prod` three times a day; `:latest` still moves on every merge (#2934).
+- Memory: `MEMORY_DEMOTION_FLOOR` defaults to `0.5`, so only memories rated wrong are demoted (#2922).
+- Dependencies: bumped the ACP SDK, amp and qwen (#2940), and amp again (#2906).
+- CI: fork PRs whose description fails the PR Body check get a comment (#2915).
+- Docs: new guides for customer renewal review (#2950) and support knowledge conflict review (#2907); playbook cross-links (#2902, #2904, #2945, #2946); the PR description rule moved to where outside contributors read first (#2916); workflows spec synced (#2931); env var and MCP tool references cover `UI_SPEC_SCRIPT_ACTIONS` and webhook event filters.
+
+### Fixed
+- DB: the event loop is handed back between DB statements (#2935).
+- Users: user audit columns are indexed and `deleteUser` no longer scans JSON (#2933).
+- Workflows: a cut task is superseded when its workflow step carries on (#2932); event wait subscriptions survive a run resume (#2928).
+- Memory: review tasks stop recalling other review tasks' `task_completion` memories (#2924).
+- Security: bearer, user and session tokens are generated without modulo bias (#2882).
+- ACP: `ACP_TARGET` values are normalized (#2920).
+- Chat SDK: spaces at message boundaries are preserved (#2888).
+- Slack: code is preserved during mrkdwn conversion (#2910).
+- GitLab remotes are detected by hostname (#2919).
+- Specs: the run-props verdict cache is keyed on the root module (#2923); TLC runs in heartbeat `run-props.sh` are resumable and shared (#2921).
+- Tests: the UI task preview test waits for the lazy body instead of 20 ms (#2930).
+
 ## [2.9.1] - 2026-11-09
 
 ### Added
