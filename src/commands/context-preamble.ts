@@ -28,8 +28,14 @@ export function prependContextPreamble(prompt: string, preamble: string): string
   return `${firstLine}\n${preamble}${rest}`;
 }
 
-export const CONTEXT_PREAMBLE_MAX_TOKENS = Number(
-  process.env.CONTEXT_PREAMBLE_MAX_TOKENS || "2000",
+function parseTokenBudget(value: string | undefined, defaultTokens: number): number {
+  const tokens = Number(value);
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : defaultTokens;
+}
+
+export const CONTEXT_PREAMBLE_MAX_TOKENS = parseTokenBudget(
+  process.env.CONTEXT_PREAMBLE_MAX_TOKENS,
+  2000,
 );
 // ~4 chars per token (conservative approximation for mixed code/prose)
 export const CONTEXT_PREAMBLE_MAX_CHARS = CONTEXT_PREAMBLE_MAX_TOKENS * 4;
@@ -40,8 +46,9 @@ export const CONTEXT_PREAMBLE_MAX_ANCESTORS = 5;
  * preamble, since the resume agent needs the original task brief verbatim
  * plus a tool-call summary to avoid redoing completed work.
  */
-export const CONTEXT_PREAMBLE_RESUME_MAX_TOKENS = Number(
-  process.env.CONTEXT_PREAMBLE_RESUME_MAX_TOKENS || "4000",
+export const CONTEXT_PREAMBLE_RESUME_MAX_TOKENS = parseTokenBudget(
+  process.env.CONTEXT_PREAMBLE_RESUME_MAX_TOKENS,
+  4000,
 );
 export const CONTEXT_PREAMBLE_RESUME_MAX_CHARS = CONTEXT_PREAMBLE_RESUME_MAX_TOKENS * 4;
 /** How many of the most recent session_logs rows to inspect for tool-call summary. */
