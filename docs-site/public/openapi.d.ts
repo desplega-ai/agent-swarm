@@ -29678,10 +29678,26 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
-                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
                             events?: string[];
-                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
                             eventHeader?: string;
+                            /**
+                             * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                             * @enum {string}
+                             */
+                            preset?: "github" | "gitlab" | "standard-webhooks";
+                            /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                            filter?: {
+                                /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                                headers?: {
+                                    [key: string]: string | string[];
+                                };
+                                /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                                body?: {
+                                    [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                                };
+                            };
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -29874,10 +29890,26 @@ export interface paths {
                                  */
                                 toleranceSeconds?: number;
                             };
-                            /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                            /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
                             events?: string[];
-                            /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                            /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
                             eventHeader?: string;
+                            /**
+                             * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                             * @enum {string}
+                             */
+                            preset?: "github" | "gitlab" | "standard-webhooks";
+                            /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                            filter?: {
+                                /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                                headers?: {
+                                    [key: string]: string | string[];
+                                };
+                                /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                                body?: {
+                                    [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                                };
+                            };
                         } | {
                             /** @enum {string} */
                             type: "schedule";
@@ -30696,7 +30728,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Delivery skipped: its event is not in the trigger's `events` allowlist. No run was created. */
+                /** @description Delivery skipped after signature verification and before a run was saved. event-not-allowed: the events allowlist missed. filter-not-matched: a header or JSON body field missed. The received value is not echoed for a filter miss. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -30708,6 +30740,16 @@ export interface paths {
                             /** @enum {string} */
                             reason: "event-not-allowed";
                             event: string | null;
+                        } | {
+                            /** @enum {boolean} */
+                            skipped: true;
+                            /** @enum {string} */
+                            reason: "filter-not-matched";
+                            match: {
+                                /** @enum {string} */
+                                source: "header" | "body";
+                                path: string;
+                            };
                         };
                     };
                 };
@@ -32524,10 +32566,26 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
-                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
                 events?: string[];
-                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
                 eventHeader?: string;
+                /**
+                 * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                 * @enum {string}
+                 */
+                preset?: "github" | "gitlab" | "standard-webhooks";
+                /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                filter?: {
+                    /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                    headers?: {
+                        [key: string]: string | string[];
+                    };
+                    /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                    body?: {
+                        [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                    };
+                };
             } | {
                 /** @enum {string} */
                 type: "schedule";
@@ -32778,10 +32836,26 @@ export interface components {
                      */
                     toleranceSeconds: number;
                 };
-                /** @description Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event. */
+                /** @description Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause. */
                 events?: string[];
-                /** @description Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event. */
+                /** @description Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted. */
                 eventHeader?: string;
+                /**
+                 * @description Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.
+                 * @enum {string}
+                 */
+                preset?: "github" | "gitlab" | "standard-webhooks";
+                /** @description Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run. */
+                filter?: {
+                    /** @description Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match. */
+                    headers?: {
+                        [key: string]: string | string[];
+                    };
+                    /** @description Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match. */
+                    body?: {
+                        [key: string]: string | number | boolean | null | (string | number | boolean | null)[];
+                    };
+                };
             } | {
                 /** @enum {string} */
                 type: "schedule";

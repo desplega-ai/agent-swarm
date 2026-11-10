@@ -789,6 +789,192 @@ describe("handleWebhookTrigger — events allowlist", () => {
   });
 });
 
+describe("handleWebhookTrigger — delivery filter", () => {
+  const secret = "example-github-org-secret";
+
+  function sign(body: string): string {
+    return `sha256=${crypto.createHmac("sha256", secret).update(body).digest("hex")}`;
+  }
+
+  function countStepRows(): number {
+    return (getDb().prepare("SELECT COUNT(*) AS n FROM workflow_run_steps").get() as { n: number })
+      .n;
+  }
+
+  test("a matching header and body filter persists the parsed payload", async () => {
+    const body = JSON.stringify({
+      action: "opened",
+      pull_request: { number: 17, draft: false },
+    });
+    const workflow = await makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          hmacSecret: secret,
+          filter: {
+            headers: { "x-github-event": ["pull_request"] },
+            body: {
+              action: ["opened", "reopened", "ready_for_review", "synchronize"],
+              "pull_request.draft": false,
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sign(body), "x-github-event": "pull_request" },
+      registry,
+    );
+
+    expect(result.skipped).toBeUndefined();
+    const run = await getWorkflowRun(result.runId!);
+    expect(run?.triggerData).toEqual({
+      action: "opened",
+      pull_request: { number: 17, draft: false },
+    });
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  test("a body miss writes no run or step rows", async () => {
+    const body = JSON.stringify({ action: "closed", pull_request: { draft: false } });
+    const workflow = await makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          hmacSecret: secret,
+          events: ["pull_request"],
+          filter: { body: { action: ["opened", "synchronize"] } },
+        },
+      ],
+    });
+    const stepsBefore = countStepRows();
+
+    const result = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": sign(body), "X-GitHub-Event": "pull_request" },
+      registry,
+    );
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "filter-not-matched",
+      match: { source: "body", path: "action" },
+    });
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+    expect(countStepRows()).toBe(stepsBefore);
+  });
+
+  test("a bad signature is still 401 when the filter would also drop the delivery", async () => {
+    const body = JSON.stringify({ action: "closed" });
+    const workflow = await makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          hmacSecret: secret,
+          filter: { body: { action: ["opened"] } },
+        },
+      ],
+    });
+
+    const err = await handleWebhookTrigger(
+      workflow.id,
+      body,
+      { "x-hub-signature-256": "sha256=invalid", "x-github-event": "pull_request" },
+      registry,
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(WebhookError);
+    expect((err as WebhookError).statusCode).toBe(401);
+    expect(await countWorkflowRuns(workflow.id)).toBe(0);
+  });
+
+  test("standard-webhooks preset reads body type and a non-JSON body creates no run", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          preset: "standard-webhooks",
+          events: ["contact.created"],
+          filter: { body: { "data.id": ["1"] } },
+        },
+      ],
+    });
+
+    const started = await handleWebhookTrigger(
+      workflow.id,
+      JSON.stringify({ type: "contact.created", data: { id: "1" } }),
+      {},
+      registry,
+    );
+    expect(started.skipped).toBeUndefined();
+
+    const dropped = await handleWebhookTrigger(
+      workflow.id,
+      JSON.stringify({ type: "user.deleted", data: { id: "1" } }),
+      {},
+      registry,
+    );
+    expect(dropped).toEqual({ skipped: true, reason: "event-not-allowed", event: "user.deleted" });
+
+    // The preset's events clause is first, so a non-JSON body misses `type`
+    // before the data.id filter clause.
+    const notJson = await handleWebhookTrigger(workflow.id, "not-json", {}, registry);
+    expect(notJson).toEqual({ skipped: true, reason: "event-not-allowed", event: null });
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  test("an object payload is filtered like a chat dispatch", async () => {
+    const workflow = await makeWorkflow({
+      triggers: [{ type: "webhook", filter: { body: { action: ["opened"] } } }],
+    });
+
+    const started = await handleWebhookTrigger(
+      workflow.id,
+      { action: "opened", text: "hi" },
+      {},
+      registry,
+      { alreadyAuthenticated: true },
+    );
+    expect(started.skipped).toBeUndefined();
+
+    const dropped = await handleWebhookTrigger(
+      workflow.id,
+      { action: "closed", text: "hi" },
+      {},
+      registry,
+      { alreadyAuthenticated: true },
+    );
+    expect(dropped).toMatchObject({ skipped: true, reason: "filter-not-matched" });
+    expect(await countWorkflowRuns(workflow.id)).toBe(1);
+  });
+
+  test("an invalid stored filter or preset returns 500 and writes no run", async () => {
+    const filterWorkflow = await makeWorkflow({
+      triggers: [{ type: "webhook", filter: { nope: true } } as Workflow["triggers"][number]],
+    });
+    const filterErr = await handleWebhookTrigger(filterWorkflow.id, "{}", {}, registry).catch(
+      (e: unknown) => e,
+    );
+    expect(filterErr).toBeInstanceOf(WebhookError);
+    expect((filterErr as WebhookError).statusCode).toBe(500);
+    expect(await countWorkflowRuns(filterWorkflow.id)).toBe(0);
+
+    const presetWorkflow = await makeWorkflow({
+      triggers: [{ type: "webhook", preset: "bitbucket" } as Workflow["triggers"][number]],
+    });
+    const presetErr = await handleWebhookTrigger(presetWorkflow.id, "{}", {}, registry).catch(
+      (e: unknown) => e,
+    );
+    expect(presetErr).toBeInstanceOf(WebhookError);
+    expect((presetErr as WebhookError).statusCode).toBe(500);
+    expect(await countWorkflowRuns(presetWorkflow.id)).toBe(0);
+  });
+});
+
 describe("handleWebhookTrigger — verification formats", () => {
   function signTimestamped(secret: string, body: string, timestamp: number): string {
     return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");

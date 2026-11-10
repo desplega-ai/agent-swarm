@@ -40,8 +40,12 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
         "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). " +
-        "WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, " +
-        "before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event).",
+        "WEBHOOK DELIVERY FILTER: optional filter on a webhook trigger drops deliveries after signature verification and before any run is saved " +
+        "(200 { skipped: true, reason }). filter.headers and filter.body are allowlists (a string or an array of scalars); every field must match. " +
+        "Header names are case-insensitive; values and JSON paths are exact, with no type coercion. " +
+        'preset "github" | "gitlab" | "standard-webhooks" selects where the deprecated events allowlist is read ' +
+        "(X-GitHub-Event, X-Gitlab-Event, or JSON body type). events and eventHeader still work and are AND-ed with filter; eventHeader overrides preset. " +
+        "Omit filter and events to accept every delivery.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to update"),
         key: AssetKeySchema.optional().describe("Move to a logical namespace."),
@@ -52,7 +56,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
+            "New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. A webhook filter drops deliveries by header or JSON field before a run is saved.",
           ),
         cooldown: CooldownConfigSchema.optional()
           .nullable()

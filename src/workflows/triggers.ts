@@ -4,6 +4,7 @@ import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";
+import { decideWebhookDelivery, type WebhookDeliverySkip } from "./webhook-filter";
 
 type WebhookTriggerConfig = Extract<TriggerConfig, { type: "webhook" }>;
 
@@ -12,9 +13,6 @@ const DEFAULT_HMAC_HEADER = "X-Hub-Signature-256";
 
 /** Fallback header names checked (case-insensitive) after the trigger's configured header. */
 const FALLBACK_HMAC_HEADERS = ["x-hub-signature-256", "x-signature", "x-webhook-signature"];
-
-/** Header read for a webhook trigger's `events` allowlist when it configures no `eventHeader`. */
-const DEFAULT_EVENT_HEADER = "X-GitHub-Event";
 
 /** A bag of HTTP headers — values may be a string, a string array, or absent. */
 export type HeaderBag = Record<string, string | string[] | undefined>;
@@ -155,24 +153,10 @@ export async function verifyWebhookRequest(
   }
 }
 
-/**
- * Event of a delivery a webhook trigger's `events` allowlist does not admit,
- * or `undefined` when the delivery may start a run. A missing header counts
- * as not admitted (`null`): an allowlist is a closed gate.
- */
-function filteredWebhookEvent(
-  trigger: WebhookTriggerConfig,
-  headers: HeaderBag,
-): string | null | undefined {
-  if (!trigger.events || trigger.events.length === 0) return undefined;
-  const event = getHeader(headers, trigger.eventHeader || DEFAULT_EVENT_HEADER) ?? null;
-  return event !== null && trigger.events.includes(event) ? undefined : event;
-}
-
-/** Outcome of a webhook delivery: a started run, or a delivery the trigger's `events` allowlist dropped. */
+/** Outcome of a webhook delivery: a started run, or a delivery the trigger filter dropped. */
 export type WebhookTriggerResult =
   | { runId: string; skipped?: undefined }
-  | { runId?: undefined; skipped: true; reason: "event-not-allowed"; event: string | null };
+  | (WebhookDeliverySkip & { runId?: undefined });
 
 export interface HandleWebhookTriggerOptions {
   /**
@@ -196,13 +180,12 @@ export interface HandleWebhookTriggerOptions {
  *    trigger — being reachable over `/api/webhooks/:workflowId` is opt-in
  * 3. If `hmacSecret` / `verification` is set, resolves the signature header +
  *    secret and verifies the signature against the raw body bytes
- * 4. If the trigger sets an `events` allowlist, drops a delivery whose event
- *    header is missing or not listed: no run is persisted, and the caller
- *    gets a `skipped` result to acknowledge with a 2xx
- * 5. Parses the raw body as JSON (falling back to the raw string when the
- *    body is non-JSON) so downstream `{{trigger.deep.path}}` interpolation
- *    can traverse the object — matches the shape produced by the
- *    `trigger-workflow` MCP tool.
+ * 4. Parses the raw body as JSON (falling back to the raw string when the
+ *    body is non-JSON) so the delivery filter and downstream
+ *    `{{trigger.deep.path}}` interpolation see the same value
+ * 5. Applies `filter` and the deprecated `events` allowlist. A miss returns
+ *    a `skipped` result and does not persist a run. A trigger whose filter
+ *    or preset is not the documented shape fails closed with 500
  * 6. Starts the workflow execution with the parsed payload
  */
 export async function handleWebhookTrigger(
@@ -246,19 +229,21 @@ export async function handleWebhookTrigger(
       typeof payload === "string" ? payload : JSON.stringify(payload),
       headers,
     );
-
-    // After verification, so a bad signature is still a 401 for any event.
-    // Before the run is persisted, so a dropped delivery writes no rows.
-    const filtered = filteredWebhookEvent(webhookTrigger, headers);
-    if (filtered !== undefined) {
-      return { skipped: true, reason: "event-not-allowed", event: filtered };
-    }
   }
 
-  // Parse the raw body so downstream nodes can interpolate deep paths
-  // (e.g. `{{trigger.message.from}}`). A non-JSON body falls back to the raw
-  // string so non-JSON webhooks don't break.
+  // Parse after verification. A non-JSON body stays a string: body clauses
+  // miss on it, and a delivery with no body clause still starts a run.
+  // Downstream `{{trigger.deep.path}}` uses this value.
   const triggerData = parseTriggerPayload(payload);
+  if (webhookTrigger) {
+    // After verification, so a bad signature is still a 401. Before the run
+    // is persisted, so a dropped delivery writes no rows.
+    const decision = decideWebhookDelivery(webhookTrigger, headers, triggerData);
+    if (decision.action === "invalid") {
+      throw new WebhookError(decision.message, 500);
+    }
+    if (decision.action === "skip") return decision.skip;
+  }
 
   const runId = await startWorkflowExecution(workflow, triggerData, registry, {
     triggerType: "event",

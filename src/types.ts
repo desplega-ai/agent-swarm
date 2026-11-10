@@ -2898,6 +2898,131 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
 ]);
 export type WebhookVerification = z.infer<typeof WebhookVerificationSchema>;
 
+const WEBHOOK_FILTER_MAX_FIELDS = 32;
+const WEBHOOK_FILTER_MAX_VALUES = 64;
+const WEBHOOK_FILTER_MAX_STRING = 512;
+const WEBHOOK_FILTER_MAX_HEADER_NAME = 128;
+const WEBHOOK_FILTER_MAX_PATH = 256;
+const WEBHOOK_FILTER_MAX_SEGMENTS = 12;
+const WEBHOOK_FILTER_MAX_SEGMENT = 128;
+/** HTTP token (RFC 9110 tchar), so header names cannot carry spaces or control characters. */
+const WEBHOOK_FILTER_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+export const WEBHOOK_FILTER_PRESETS = ["github", "gitlab", "standard-webhooks"] as const;
+export const WebhookFilterPresetSchema = z.enum(WEBHOOK_FILTER_PRESETS);
+
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function webhookBodyPathIssue(path: string): string | null {
+  if (path.length > WEBHOOK_FILTER_MAX_PATH) {
+    return `body path is longer than ${WEBHOOK_FILTER_MAX_PATH} characters`;
+  }
+  const segments = path.split(".");
+  if (segments.length > WEBHOOK_FILTER_MAX_SEGMENTS) {
+    return `body path has more than ${WEBHOOK_FILTER_MAX_SEGMENTS} segments`;
+  }
+  for (const segment of segments) {
+    if (segment.length === 0) return "body path has an empty segment";
+    if (segment.length > WEBHOOK_FILTER_MAX_SEGMENT) {
+      return `body path segment is longer than ${WEBHOOK_FILTER_MAX_SEGMENT} characters`;
+    }
+    if (hasControlCharacter(segment)) return "body path segment has a control character";
+  }
+  return null;
+}
+
+const webhookFilterHeaderValueSchema = z.union([
+  z.string().min(1).max(WEBHOOK_FILTER_MAX_STRING),
+  z.array(z.string().min(1).max(WEBHOOK_FILTER_MAX_STRING)).min(1).max(WEBHOOK_FILTER_MAX_VALUES),
+]);
+
+const webhookFilterBodyScalarSchema = z.union([
+  z.string().max(WEBHOOK_FILTER_MAX_STRING),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+
+const webhookFilterBodyValueSchema = z.union([
+  webhookFilterBodyScalarSchema,
+  z.array(webhookFilterBodyScalarSchema).min(1).max(WEBHOOK_FILTER_MAX_VALUES),
+]);
+
+export const WebhookDeliveryFilterSchema = z
+  .strictObject({
+    headers: z
+      .record(z.string().min(1).max(WEBHOOK_FILTER_MAX_HEADER_NAME), webhookFilterHeaderValueSchema)
+      .optional()
+      .describe(
+        "Header name to one exact value, or a list of exact values. Names are matched case-insensitively. Every entry must match.",
+      ),
+    body: z
+      .record(z.string().min(1).max(WEBHOOK_FILTER_MAX_PATH), webhookFilterBodyValueSchema)
+      .optional()
+      .describe(
+        "Dot path into the JSON body, to one exact scalar or a list of scalars. A numeric segment indexes an array (commits.0.id). No type coercion. Every entry must match.",
+      ),
+  })
+  .superRefine((filter, ctx) => {
+    const headerNames = filter.headers ? Object.keys(filter.headers) : [];
+    const bodyPaths = filter.body ? Object.keys(filter.body) : [];
+    if (headerNames.length + bodyPaths.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "filter needs at least one header or body field",
+      });
+    }
+    if (headerNames.length > WEBHOOK_FILTER_MAX_FIELDS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `filter has more than ${WEBHOOK_FILTER_MAX_FIELDS} headers`,
+        path: ["headers"],
+      });
+    }
+    if (bodyPaths.length > WEBHOOK_FILTER_MAX_FIELDS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `filter has more than ${WEBHOOK_FILTER_MAX_FIELDS} body fields`,
+        path: ["body"],
+      });
+    }
+    const seenHeaders = new Set<string>();
+    for (const name of headerNames) {
+      if (!WEBHOOK_FILTER_HEADER_NAME.test(name)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "header name must be an HTTP token",
+          path: ["headers", name],
+        });
+      }
+      const folded = name.toLowerCase();
+      if (seenHeaders.has(folded)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "duplicate header name",
+          path: ["headers", name],
+        });
+      }
+      seenHeaders.add(folded);
+    }
+    for (const path of bodyPaths) {
+      const issue = webhookBodyPathIssue(path);
+      if (issue) {
+        ctx.addIssue({ code: "custom", message: issue, path: ["body", path] });
+      }
+    }
+  })
+  .describe(
+    "AND of header and JSON body allowlists. A delivery that misses is acknowledged with 200 and creates no run.",
+  );
+export type WebhookDeliveryFilter = z.infer<typeof WebhookDeliveryFilterSchema>;
+
 export const TriggerConfigSchema = z
   .discriminatedUnion("type", [
     z.object({
@@ -2916,15 +3041,21 @@ export const TriggerConfigSchema = z
         .array(z.string().min(1))
         .optional()
         .describe(
-          "Optional event allowlist, matched exactly against the eventHeader value after signature verification. A delivery whose event is not listed (or that has no event header) gets a 2xx `skipped` reply and creates no run. Omit or leave empty to accept every event.",
+          "Deprecated alias of one delivery-filter clause, AND-ed with filter. Matched exactly against eventHeader, or against the preset event field when eventHeader is omitted: X-GitHub-Event (github, and the default), X-Gitlab-Event (gitlab), or JSON body type (standard-webhooks). A miss returns 200 skipped with reason event-not-allowed and creates no run. Omit or leave empty to add no event clause.",
         ),
       eventHeader: z
         .string()
         .min(1)
         .optional()
         .describe(
-          "Request header holding the event name for `events` (case-insensitive lookup). Defaults to X-GitHub-Event.",
+          "Deprecated. Header read for events. The name lookup is case-insensitive and the value is exact. Overrides preset. Defaults to X-GitHub-Event when preset is omitted.",
         ),
+      preset: WebhookFilterPresetSchema.optional().describe(
+        "Optional sender preset for the events allowlist. github reads X-GitHub-Event, gitlab reads X-Gitlab-Event, and standard-webhooks reads the JSON body field type. A preset alone does not filter. Ignored when eventHeader is set.",
+      ),
+      filter: WebhookDeliveryFilterSchema.optional().describe(
+        "Header and JSON body allowlists, AND-ed with events. Evaluated after signature verification and before a run is saved. A miss returns 200 skipped with reason filter-not-matched and creates no run.",
+      ),
     }),
     z.object({
       type: z.literal("schedule"),
