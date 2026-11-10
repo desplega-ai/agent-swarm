@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { dehydrate, QueryClient } from "@tanstack/react-query";
 import { paletteSearchKey } from "../lib/command-palette/identity";
-import { shouldPersistQuery } from "./query-persistence";
+import { MAX_PERSISTED_SESSION_TASKS, shouldPersistQuery } from "./query-persistence";
 
 const connection = { apiUrl: "http://swarm.test", apiKey: "operator-key" };
 
@@ -22,6 +22,23 @@ describe("shouldPersistQuery", () => {
       (query) => query.queryKey[0],
     );
     expect(keys.sort()).toEqual(["status", "tasks"]);
+    client.clear();
+  });
+
+  test("session logs and long session details stay in memory, short sessions persist", () => {
+    const client = new QueryClient();
+    const tasks = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${i}` }));
+    client.setQueryData(["task", "t1", "session-logs"], [{ id: "log" }]);
+    client.setQueryData(["task", "t1"], { id: "t1" });
+    client.setQueryData(["session", "short", null], { chain: tasks(MAX_PERSISTED_SESSION_TASKS) });
+    client.setQueryData(["session", "long", null], {
+      chain: tasks(MAX_PERSISTED_SESSION_TASKS + 1),
+    });
+
+    const keys = dehydrate(client, { shouldDehydrateQuery: shouldPersistQuery }).queries.map(
+      (query) => query.queryKey.slice(0, 3).join("/"),
+    );
+    expect(keys.sort()).toEqual(["session/short/", "task/t1"]);
     client.clear();
   });
 });

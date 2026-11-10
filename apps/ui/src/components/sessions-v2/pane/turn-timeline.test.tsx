@@ -13,6 +13,9 @@ mock.module("@/api/hooks/use-agents", () => ({ useAgents: () => ({ data: [] }) }
 mock.module("@/components/sessions/task-card", () => ({ TaskCard: () => null }));
 mock.module("@/components/shared/empty-state", () => ({ EmptyState: () => null }));
 mock.module("@/components/shared/user-avatar", () => ({ UserAvatar: () => null }));
+mock.module("@/components/ui/button", () => ({
+  Button: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
+}));
 mock.module("@/components/shared/animated-reveal", () => ({
   AnimatedReveal: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
@@ -88,4 +91,34 @@ test("a part places approvals after its answer and steps, before its live line",
   for (let i = 1; i < labels.length; i++) {
     expect(html.indexOf(labels[i - 1])).toBeLessThan(html.indexOf(labels[i]));
   }
+});
+
+test("windowStart keeps the newest turns within the task budget, at least MIN_TURNS", () => {
+  const { windowStart, MIN_TURNS } = require("./turn-timeline") as typeof import("./turn-timeline");
+  const one = (n: number) => n;
+  // Ten turns of 10 tasks: a 35-task budget holds the newest three.
+  expect(windowStart(Array(10).fill(10), one, 35)).toBe(7);
+  // A small session fits whole.
+  expect(windowStart([1, 2, 3], one, 60)).toBe(0);
+  // Heavy turns still show MIN_TURNS.
+  expect(windowStart([100, 100, 100, 100], one, 60)).toBe(4 - MIN_TURNS);
+});
+
+test("a long session renders only the newest turns, with a control for earlier ones", () => {
+  const total = 100;
+  const chain = Array.from({ length: total }, (_, i) =>
+    task(`t${i}`, {
+      source: "ui",
+      parentTaskId: i === 0 ? undefined : `t${i - 1}`,
+      createdAt: new Date(Date.UTC(2026, 10, 7, 12, i)).toISOString(),
+      task: `Question ${i}`,
+      output: `Answer ${i}`,
+    }),
+  );
+  const html = renderToStaticMarkup(
+    <TurnTimeline rootTaskId="t0" chain={chain} approvals={[]} showHandoffs={false} typing={[]} />,
+  );
+  expect(html).toContain(`Answer ${total - 1}<`);
+  expect(html).not.toContain("Answer 0<");
+  expect(html).toContain("Show earlier messages");
 });

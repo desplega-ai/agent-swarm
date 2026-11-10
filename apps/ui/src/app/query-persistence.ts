@@ -9,7 +9,23 @@ const MEMORY_ONLY = new Set<unknown>([
   PALETTE_QUERY_ROOT,
 ]);
 
+/**
+ * A session detail with more tasks than this stays in memory. The persister
+ * writes the whole cache to localStorage synchronously on the main thread
+ * after every poll, and a long session's chain runs to megabytes.
+ */
+export const MAX_PERSISTED_SESSION_TASKS = 100;
+
 /** Which queries the localStorage persister writes. */
 export function shouldPersistQuery(query: Query): boolean {
-  return defaultShouldDehydrateQuery(query) && !MEMORY_ONLY.has(query.queryKey[0]);
+  if (!defaultShouldDehydrateQuery(query)) return false;
+  const [root, , part] = query.queryKey;
+  if (MEMORY_ONLY.has(root)) return false;
+  // Raw harness logs: large, and refetched whenever a task card opens them.
+  if (root === "task" && part === "session-logs") return false;
+  if (root === "session") {
+    const chain = (query.state.data as { chain?: unknown } | undefined)?.chain;
+    if (Array.isArray(chain) && chain.length > MAX_PERSISTED_SESSION_TASKS) return false;
+  }
+  return true;
 }

@@ -1,12 +1,13 @@
-import { MessageSquarePlus } from "lucide-react";
+import { ChevronUp, MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { TaskCard } from "@/components/sessions/task-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { EmptyState } from "@/components/shared/empty-state";
 import { UserAvatar } from "@/components/shared/user-avatar";
+import { Button } from "@/components/ui/button";
 import { agentName } from "@/lib/agent-name";
 import { CHAT_COLUMN } from "@/lib/chat-width";
 import type { SessionViewer } from "@/lib/session-presence";
@@ -47,6 +48,71 @@ function useClock(ticking: boolean): number {
 
 /** A step block opens and closes in 150/120 ms (`AnimatedReveal` fast). */
 const REVEAL_MS = 200;
+
+/**
+ * Tasks rendered at first, and added per "Show earlier" click. A long-running
+ * case holds hundreds of tasks; the newest turns are what a person opens it
+ * for. A turn always renders whole, and at least `MIN_TURNS` show.
+ */
+export const TASK_BUDGET = 60;
+export const MIN_TURNS = 3;
+
+/** The nearest ancestor that scrolls vertically. */
+function scrollParent(el: Element): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node;
+  }
+  return null;
+}
+
+/** The first turn to render: the newest turns that fit `budget` tasks. */
+export function windowStart<T>(turns: T[], weight: (turn: T) => number, budget: number): number {
+  let used = 0;
+  let start = turns.length;
+  while (start > 0) {
+    const next = used + weight(turns[start - 1]);
+    if (next > budget && turns.length - start >= MIN_TURNS) break;
+    used = next;
+    start -= 1;
+  }
+  return start;
+}
+
+/**
+ * The newest turns within the task budget, plus a `showEarlier` that adds a
+ * budget above and keeps the turn the person was looking at in place.
+ * Resets per session.
+ */
+function useTurnWindow<T>(rootTaskId: string, turns: T[], weight: (turn: T) => number) {
+  const [shown, setShown] = useState({ rootTaskId, pages: 1 });
+  const pages = shown.rootTaskId === rootTaskId ? shown.pages : 1;
+  const hidden = windowStart(turns, weight, TASK_BUDGET * pages);
+  const anchor = useRef<{ el: Element; top: number } | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the earlier turns render.
+  useLayoutEffect(() => {
+    const kept = anchor.current;
+    if (!kept) return;
+    anchor.current = null;
+    const scroller = scrollParent(kept.el);
+    if (scroller) scroller.scrollTop += kept.el.getBoundingClientRect().top - kept.top;
+  }, [pages]);
+
+  const showEarlier = (firstShown: Element | null) => {
+    if (firstShown)
+      anchor.current = { el: firstShown, top: firstShown.getBoundingClientRect().top };
+    setShown({ rootTaskId, pages: pages + 1 });
+  };
+  return { visible: hidden > 0 ? turns.slice(hidden) : turns, hidden, showEarlier };
+}
+
+/** Tasks a turn renders: its person message, and each part's reply and steps. */
+function turnWeight(turn: { person?: unknown; parts: TurnPart[] }): number {
+  return (
+    (turn.person ? 1 : 0) +
+    turn.parts.reduce((sum, part) => sum + 1 + partSteps(part).length + part.internal.length, 0)
+  );
+}
 
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
@@ -99,6 +165,8 @@ export function TurnTimeline({
     return approvalsByPart(turns, shown);
   }, [rootTaskId, turns, approvals]);
   const pendingIds = useMemo(() => new Set(approvals.map((approval) => approval.id)), [approvals]);
+  const { visible, hidden, showEarlier } = useTurnWindow(rootTaskId, turns, turnWeight);
+  const earlierRef = useRef<HTMLDivElement>(null);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
   const blocks = useStepBlocks(rootTaskId, showHandoffs);
@@ -133,7 +201,21 @@ export function TurnTimeline({
 
   return (
     <div className={cn("@container/turns flex min-w-0 flex-col gap-6", CHAT_COLUMN)}>
-      {turns.map((turn) => (
+      {hidden > 0 ? (
+        <div ref={earlierRef} className="flex justify-center">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-xs text-muted-foreground"
+            onClick={() => showEarlier(earlierRef.current?.nextElementSibling ?? null)}
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Show earlier messages ({hidden})
+          </Button>
+        </div>
+      ) : null}
+      {visible.map((turn) => (
         <Fragment key={turn.id}>
           {turn.person ? (
             <PersonBubble
