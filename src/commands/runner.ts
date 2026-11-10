@@ -1361,9 +1361,9 @@ function resolveMaxConcurrent(
   defaultMaxTasks: number,
 ): number {
   const raw = env.MAX_CONCURRENT_TASKS;
-  if (raw) {
-    const parsed = parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  if (raw && /^\d+$/.test(raw)) {
+    const parsed = Number(raw);
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   }
   return templateMax ?? defaultMaxTasks;
 }
