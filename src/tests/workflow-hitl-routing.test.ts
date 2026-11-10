@@ -122,6 +122,55 @@ class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoE
 
 import * as db from "../be/db";
 
+/**
+ * Resume listeners are async and the bus does not await them. A fixed sleep
+ * samples the run while walkGraph is still in flight (CI saw `waiting` /
+ * `running` instead of the terminal status). This bus records those handler
+ * promises so tests can wait until the walk finishes.
+ */
+class ResumeTrackingBus extends InProcessEventBus {
+  private readonly pending = new Set<Promise<void>>();
+
+  override on(event: string, handler: (data: unknown) => void): void {
+    super.on(event, (data) => {
+      const result = handler(data) as undefined | Promise<unknown>;
+      if (!result || typeof (result as Promise<unknown>).then !== "function") return;
+      const tracked = Promise.resolve(result).then(
+        () => undefined,
+        () => undefined,
+      );
+      this.pending.add(tracked);
+      void tracked.finally(() => {
+        this.pending.delete(tracked);
+      });
+    });
+  }
+
+  async settleHandlers(): Promise<void> {
+    const deadline = Date.now() + 2000;
+    while (this.pending.size > 0) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`resume handler still running after 2000ms (${this.pending.size} pending)`);
+      }
+      const batch = [...this.pending];
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(`resume handler still running after 2000ms (${this.pending.size} pending)`),
+          );
+        }, remaining);
+      });
+      try {
+        await Promise.race([Promise.all(batch), timeout]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+}
+
 const mockDeps: ExecutorDependencies = {
   db: db as typeof import("../be/db"),
   eventBus: { emit: () => {}, on: () => {}, off: () => {} },
@@ -148,7 +197,7 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
  */
 async function runHITLWorkflow(
   approvalStatus: "approved" | "rejected" | "timeout" | "cancelled",
-  eventBus: InProcessEventBus,
+  eventBus: ResumeTrackingBus,
   registry: ExecutorRegistry,
 ) {
   const def: WorkflowDefinition = {
@@ -187,13 +236,7 @@ async function runHITLWorkflow(
   const requestId = hitlExecutor.lastRequestId!;
   expect(requestId).toBeTruthy();
 
-  // Emit approval.resolved event — this triggers resumeFromApprovalResolution
-  // Use a small delay to let the event handler finish
-  const resumePromise = new Promise<void>((resolve) => {
-    // Give the event handler time to run walkGraph
-    setTimeout(resolve, 10);
-  });
-
+  // resumeFromApprovalResolution runs on the bus and is not awaited by emit.
   eventBus.emit("approval.resolved", {
     requestId,
     status: approvalStatus,
@@ -201,8 +244,7 @@ async function runHITLWorkflow(
     workflowRunId: runId,
     workflowRunStepId: reviewStep!.id,
   });
-
-  await resumePromise;
+  await eventBus.settleHandlers();
 
   return { runId, workflow };
 }
@@ -238,7 +280,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("approved → routes to 'approved' port successor (deploy)", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -263,7 +305,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("rejected → routes to 'rejected' port successor (generate-question), NOT 'deploy'", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -288,7 +330,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("cancelled → routes to no port; the step stays waiting", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -309,7 +351,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("timeout → routes to 'timeout' port successor (notify-timeout)", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
@@ -334,7 +376,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("loop: rejected → loops back to generate-question → review again → approved → deploy", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
     registry.register(hitlExecutor);
@@ -381,7 +423,6 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -389,7 +430,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await reject1Promise;
+    await eventBus.settleHandlers();
 
     // After rejection: generate-question should have re-executed (2nd time),
     // and review-question should be waiting again (2nd time)
@@ -413,7 +454,6 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1); // Different request
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -421,7 +461,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await approve2Promise;
+    await eventBus.settleHandlers();
 
     // Final state: completed with all steps
     run = await getWorkflowRun(runId);
@@ -437,7 +477,7 @@ describe("HITL port-based routing", () => {
   });
 
   test("loop with async generate: rejected → async generate → HITL pauses again on 2nd iteration", async () => {
-    const eventBus = new InProcessEventBus();
+    const eventBus = new ResumeTrackingBus();
     const registry = new ExecutorRegistry();
     const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
     const asyncTaskExecutor = new MockAsyncTaskExecutor({ ...mockDeps, eventBus });
@@ -479,14 +519,13 @@ describe("HITL port-based routing", () => {
 
     // Simulate async task completion for generate-question (1st iteration)
     const genMeta1 = asyncTaskExecutor.lastMeta!;
-    const taskComplete1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-1",
       output: JSON.stringify({ question: "What is 2+2?" }),
       workflowRunId: runId,
       workflowRunStepId: genMeta1.stepId,
     });
-    await taskComplete1Promise;
+    await eventBus.settleHandlers();
 
     // Now review-question should be waiting for HITL approval
     run = await getWorkflowRun(runId);
@@ -499,7 +538,6 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question (async)
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -507,7 +545,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep1!.id,
     });
-    await reject1Promise;
+    await eventBus.settleHandlers();
 
     // After rejection: generate-question should be waiting again (2nd async task)
     run = await getWorkflowRun(runId);
@@ -517,14 +555,13 @@ describe("HITL port-based routing", () => {
     expect(genMeta2.stepId).not.toBe(genMeta1.stepId); // Different step
 
     // Simulate async task completion for generate-question (2nd iteration)
-    const taskComplete2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-2",
       output: JSON.stringify({ question: "What is 3+3?" }),
       workflowRunId: runId,
       workflowRunStepId: genMeta2.stepId,
     });
-    await taskComplete2Promise;
+    await eventBus.settleHandlers();
 
     // KEY ASSERTION: review-question should be WAITING again (not auto-completed)
     // This is the bug: without the fix, findReadyNodes would skip review-question
@@ -544,7 +581,6 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1);
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -552,7 +588,7 @@ describe("HITL port-based routing", () => {
       workflowRunId: runId,
       workflowRunStepId: reviewStep2!.id,
     });
-    await approve2Promise;
+    await eventBus.settleHandlers();
 
     // Final state: completed
     run = await getWorkflowRun(runId);

@@ -72,12 +72,29 @@ afterEach(() => {
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 1000,
+  label = "condition",
 ): Promise<void> {
   const t0 = Date.now();
   while (!(await predicate())) {
-    if (Date.now() - t0 > timeoutMs) throw new Error("waitFor: timeout");
+    if (Date.now() - t0 > timeoutMs) {
+      throw new Error(`waitFor: timeout after ${timeoutMs}ms waiting for ${label}`);
+    }
     await new Promise((r) => setTimeout(r, 10));
   }
+}
+
+/** The bus listener marks a wait fired, then walks the event port without the emitter awaiting it. */
+async function waitForEventPortWalk(runId: string, doneNodeId = "done"): Promise<void> {
+  await waitFor(
+    async () => {
+      const done = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === doneNodeId);
+      return done?.status === "completed" && !isWorkflowRunActive(runId);
+    },
+    2000,
+    `run ${runId} ${doneNodeId} step to complete`,
+  );
+  // The listener's cleanup runs after walkGraph returns.
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 describe("WaitExecutor — event mode end-to-end", () => {
@@ -127,6 +144,8 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const fired = await getWaitStateByStepId(w1!.id);
     expect(fired?.status).toBe("fired");
     expect((fired?.firedPayload as { ok?: boolean })?.ok).toBe(true);
+
+    await waitForEventPortWalk(runId);
 
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
     const w1After = finalSteps.find((s) => s.nodeId === "w1");
@@ -450,6 +469,10 @@ describe("WaitExecutor — event mode end-to-end", () => {
       expect(payload?.sequence).toBe(42);
       expect(fired?.resolvedAt).toBeTruthy();
     }
+
+    // Fired is recorded before the listener walks each event port.
+    await waitForEventPortWalk(runIdA);
+    await waitForEventPortWalk(runIdB);
 
     // Both runs advanced via the `event` port and the downstream notify ran.
     for (const runId of [runIdA, runIdB]) {
