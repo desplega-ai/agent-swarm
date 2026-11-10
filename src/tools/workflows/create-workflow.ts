@@ -78,7 +78,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. A webhook filter drops deliveries by header or JSON field before a run is saved.",
+            "Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",

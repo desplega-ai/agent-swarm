@@ -666,7 +666,7 @@ Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event
 | `name` | string | Yes | Unique workflow name |
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
-| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
+| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `event`. A webhook trigger accepts `filter` (`headers` and `body` allowlists) and `preset` (`github`, `gitlab`, or `standard-webhooks`). `events` and `eventHeader` remain a deprecated alias. |
 | `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds, from? }`; `from: "start"` counts only from run starts |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
@@ -696,7 +696,7 @@ default (with `nodeCount` instead of the full DAG definition); pass
 
 ### update-workflow
 
-Update a workflow's definition, name, description, or enabled status.
+Update a workflow's definition, name, description, triggers, or enabled status. `triggers` replaces the stored list. `patch-workflow` edits nodes and `triggerSchema`; it does not change triggers.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -704,6 +704,7 @@ Update a workflow's definition, name, description, or enabled status.
 | `name` | string | No | New name |
 | `description` | string | No | New description |
 | `definition` | object | No | Updated DAG definition |
+| `triggers` | array | No | Replacement trigger list. A webhook trigger accepts `filter` (`headers` and `body` allowlists) and `preset` (`github`, `gitlab`, or `standard-webhooks`). `events` and `eventHeader` remain a deprecated alias. |
 | `enabled` | boolean | No | Enable or disable |
 | `key` | string | No | Move the workflow to another logical asset namespace |
 
