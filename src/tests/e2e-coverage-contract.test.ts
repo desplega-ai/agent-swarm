@@ -19,6 +19,7 @@ function coverage(overrides: Partial<Coverage> = {}): Coverage {
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
+    cliCommands: { ...empty },
     stateSurfaces: [],
     flows: [],
     scenariosWithoutFlow: [],
@@ -49,6 +50,7 @@ describe("e2e strict coverage contract", () => {
         },
         mcpTools: { total: 1, covered: 0, excluded: 0, percent: 0, uncovered: ["kv-get"] },
         nodeTypes: { total: 1, covered: 0, excluded: 0, percent: 0, uncovered: ["wait"] },
+        cliCommands: { total: 1, covered: 0, excluded: 0, percent: 0, uncovered: ["onboard"] },
         staleExclusions: ["route POST /api/old"],
         deadExclusions: ["mcp tool gone-tool"],
         unknownFlowScenarios: ["no-such-scenario"],
@@ -63,7 +65,9 @@ describe("e2e strict coverage contract", () => {
         ],
       }),
     );
-    expect(failures).toHaveLength(7);
+    expect(failures).toHaveLength(8);
+    expect(failures.join("\n")).toContain("CLI command(s) have no scenario");
+    expect(failures.join("\n")).toContain("onboard");
     expect(failures.join("\n")).toContain("GET /api/missing");
     expect(failures.join("\n")).toContain("kv-get");
     expect(failures.join("\n")).toContain("wait");
@@ -123,7 +127,7 @@ describe("e2e strict coverage contract", () => {
       expect(entry.operation).toMatch(/^(GET|POST|PUT|PATCH|DELETE) \//);
       expect(entry.reason.length).toBeGreaterThanOrEqual(10);
     }
-    for (const entry of [...manifest.mcpTools, ...manifest.nodeTypes]) {
+    for (const entry of [...manifest.mcpTools, ...manifest.nodeTypes, ...manifest.cliCommands]) {
       expect(entry.reason.length).toBeGreaterThanOrEqual(10);
     }
     for (const [name, flow] of Object.entries(manifest.flows)) {

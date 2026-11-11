@@ -93,6 +93,32 @@
   "routes": [],
   "mcpTools": [],
   "nodeTypes": [],
+  "cliCommands": [
+    {
+      "command": "worker",
+      "reason": "worker command: it runs the agent harness, which the contract suite never starts; the nightly harness legs (bun run e2e --harness, LOCAL_TESTING.md Black-box E2E) spawn it"
+    },
+    {
+      "command": "lead",
+      "reason": "worker command: it runs the agent harness, which the contract suite never starts; the nightly harness legs (bun run e2e --harness, LOCAL_TESTING.md Black-box E2E) spawn it"
+    },
+    {
+      "command": "claude",
+      "reason": "worker command: launches the Claude CLI against a real model; the nightly harness legs run the worker that starts it"
+    },
+    {
+      "command": "hook",
+      "reason": "worker command: Claude Code hook events on stdin, fired by the harness the nightly legs spawn"
+    },
+    {
+      "command": "codex-hook",
+      "reason": "worker command: Codex hook events on stdin, fired by the harness the nightly legs spawn"
+    },
+    {
+      "command": "session-summary-stdin",
+      "reason": "worker command: internal session-summary helper the worker runtime calls; nightly harness legs"
+    }
+  ],
   "stateSurfaces": [
     {
       "name": "task-statuses",
@@ -580,6 +606,21 @@
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
+    },
+    "cli": {
+      "description": "Operator CLI commands as a black box: exit code, output and written files",
+      "scenarios": [
+        "cli-help",
+        "cli-onboard",
+        "cli-connect",
+        "cli-worker-token",
+        "cli-x",
+        "cli-e2b",
+        "cli-provider-setup",
+        "cli-database-commands",
+        "cli-api",
+        "cli-controller"
+      ]
     }
   }
 }
