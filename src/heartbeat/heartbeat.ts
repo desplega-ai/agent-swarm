@@ -1020,6 +1020,14 @@ export async function runRebootSweep(): Promise<void> {
           continue;
         }
 
+        // Workflow carve-out: failTask above emitted task.failed with the step
+        // ids, and the engine retries the step or fails the run. A standalone
+        // retry here would run the same work a second time, outside the run.
+        if (task.workflowRunStepId != null) {
+          rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+          continue;
+        }
+
         // Auto-retry: create a replacement task with parentTaskId
         // A corrupt persisted affinity is never converted into an untagged
         // retry by this independent recovery path.

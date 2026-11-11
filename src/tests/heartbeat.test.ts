@@ -6,6 +6,9 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createWorkflow,
+  createWorkflowRun,
+  createWorkflowRunStep,
   failTask,
   getActiveSessionForTask,
   getDbClient,
@@ -733,6 +736,41 @@ describe("Heartbeat Triage", () => {
 
       const affected = getRebootAffectedTasks();
       expect(affected.length).toBe(0);
+    });
+
+    test("fails a workflow-step task without creating a standalone retry", async () => {
+      const agent = await createAgent({ name: "dead-wf-worker", isLead: false, status: "busy" });
+      const workflow = await createWorkflow({
+        name: `reboot-sweep-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({ id: stepId, runId, nodeId: "work", nodeType: "agent-task" });
+      const task = await createTaskExtended("Interrupted workflow step", {
+        agentId: agent.id,
+        workflowRunId: runId,
+        workflowRunStepId: stepId,
+      });
+      await startTask(task.id);
+      const past = new Date(Date.now() - 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
+
+      await runRebootSweep();
+
+      expect((await getTaskById(task.id))?.status).toBe("failed");
+      const affected = getRebootAffectedTasks().filter((a) => a.original.id === task.id);
+      expect(affected.length).toBe(1);
+      expect(affected[0]!.retryTaskId).toBeNull();
+      const children = await getDbClient().query<{ id: string }>(
+        "SELECT id FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
+      expect(children.length).toBe(0);
     });
 
     test("auto-fails in_progress task with no session and pins retry to the recovered agent", async () => {
