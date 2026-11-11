@@ -20,6 +20,7 @@ const busyMessages = Array.from({ length: FULL_MESSAGE_COUNT }, (_, index) => ({
   username: "Agent",
   text: `busy-message-${index}:${"x".repeat(900)}`,
   ts: `1700000000.${String(index).padStart(6, "0")}`,
+  files: [{ id: `F_VIDEO_${index}`, name: "recording.mp4", mimetype: "video/mp4" }],
 }));
 
 // Spread the real module so a later file in the same process still finds
@@ -121,7 +122,7 @@ describe("slack-read response boundaries", () => {
   test("script bridge read returns the complete messages array", async () => {
     const raw = JSON.stringify({
       tool: "slack-read",
-      args: { channelId: CHANNEL_ID, limit: FULL_MESSAGE_COUNT, includeFiles: false },
+      args: { channelId: CHANNEL_ID, limit: FULL_MESSAGE_COUNT },
     });
     const req = Readable.from([Buffer.from(raw)]) as IncomingMessage;
     req.method = "POST";
@@ -158,6 +159,7 @@ describe("slack-read response boundaries", () => {
       busyMessages.map((message) => message.text),
     );
     expect(body).not.toHaveProperty("truncation");
+    expect(body.messages.every((message) => message.files === undefined)).toBe(true);
   });
 
   spawnTest("ctx.swarm.slack_read receives all messages inside a real script sandbox", async () => {
@@ -210,7 +212,6 @@ describe("slack-read response boundaries", () => {
             ctx.swarm.slack_read({
               channelId: "${CHANNEL_ID}",
               limit: ${FULL_MESSAGE_COUNT},
-              includeFiles: false,
             });
         `,
       });
@@ -225,6 +226,7 @@ describe("slack-read response boundaries", () => {
       expect(result.status).toBe(200);
       expect(result.data.messages).toHaveLength(FULL_MESSAGE_COUNT);
       expect(result.data).not.toHaveProperty("truncation");
+      expect(result.data.messages.every((message) => message.files === undefined)).toBe(true);
     } finally {
       server.stop(true);
     }

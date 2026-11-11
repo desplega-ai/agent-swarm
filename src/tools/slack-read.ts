@@ -78,9 +78,9 @@ export const registerSlackReadTool = (server: McpServer) => {
           .describe("Maximum number of messages to retrieve (default: 20, max: 100)."),
         includeFiles: z
           .boolean()
-          .default(true)
+          .optional()
           .describe(
-            "Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task.",
+            "Include and download file attachments. Defaults to false for direct channelId reads, and true for taskId or inboxMessageId reads. From a task, files are also stored as attachments of that task.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -90,7 +90,14 @@ export const registerSlackReadTool = (server: McpServer) => {
       }),
     },
     async (
-      { inboxMessageId, taskId, channelId, threadTs, limit = 20, includeFiles = true },
+      {
+        inboxMessageId,
+        taskId,
+        channelId,
+        threadTs,
+        limit = 20,
+        includeFiles = Boolean(inboxMessageId || taskId),
+      },
       requestInfo,
       _meta,
     ) => {

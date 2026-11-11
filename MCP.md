@@ -2179,7 +2179,7 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 | `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). A user ID (U…/W…) reads the bot's DM with that user. |
 | `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
 | `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
-| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task. |
+| `includeFiles` | `boolean` | No | - | Include and download file attachments. Defaults to false for direct channelId reads, and true for taskId or inboxMessageId reads. From a task, files are also stored as attachments of that task. |
 
 ### slack-post
 
