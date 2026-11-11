@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-11
+
+### Added
+- GitHub: workers authenticate `git` and `gh` with GitHub App installation tokens when `GITHUB_APP_INSTALLATION_ID` is set (#2988).
+- Workflows: webhook triggers filter deliveries by header and JSON body field, with `github`, `gitlab` and `standard-webhooks` presets (#2953).
+- Workflows: opt-in terminal run retention with `WORKFLOW_RUNS_RETENTION_DAYS` (#2819).
+- DB retention: new installs start with retention on (#2956).
+- MCP: `/mcp-user` sessions can subscribe to task-completion webhooks through MCP Events (#2972).
+- Context: a per-session request composition manifest (#2458), with exact pi/opencode parts and a per-provider token ratio (#2469).
+- Tasks: a key-limited task retries on another key of the same profile (#2964).
+- Slack: task-tree presentation is optional (#2971).
+- Runtime pools: persistent per-agent workspace volumes on Docker (#2941), with a workspace switch on the pool form (#2958).
+
+### Changed
+- Deploy: prod deploys after every release (#2975).
+- CI: GitHub schedule triggers dropped; an external scheduler dispatches those workflows (#2968).
+- Dependencies: bumped claude-code, pi, amp, copilot, goose and the Anthropic SDK (#2959), pi, opencode and amp (#2987), and `docker/login-action` (#2990).
+- Docs: new supplier invoice discrepancy review guide (#2949); playbook and pattern cross-links (#2944, #2947, #2961); TLA+ specs synced (#2976); env var reference covers `WORKFLOW_RUNS_RETENTION_DAYS` and the MCP Events flags.
+
+### Fixed
+- UI: long sessions open fast and stay pinned to the end (#2992).
+- Workflows: completed siblings' successors run when a parallel node parks (#2957); a join's successors are owed from the commit that closes it (#2974); step outputs and queued successors survive two walkers finalizing a run (#2966); stopped retry and wait pollers stay stopped (#2963, #2991).
+- Tasks: a fallback resume keeps the crash budget (#2970); no key retry when the task did not record its failed key (#2967).
+- Memory: search no longer blocks the event loop (#2960); health counts and FTS sync stop scanning whole tables (#2977).
+- Slack: no outcome cards for long-finished tasks (#2989); lifecycle icons can be explicitly disabled (#2978).
+- Config: malformed worker concurrency values (#2984), e2b stack wizard integers (#2983) and context-preamble token budgets (#2985) are rejected or fall back to defaults.
+- DB retention: an empty retention env value stays authoritative on first boot (#2965).
+- Docker: the worker Playwright version is pinned to the ui-e2e version (#2979).
+- Models: Helmcode DeepSeek V4.1 Flash display name corrected (#2952).
+- Tests: spawned API servers exit with their test run (#2962); fixed sleeps replaced with polling (#2955, #2969, #2986).
+
 ## [2.10.0] - 2026-11-10
 
 ### Added

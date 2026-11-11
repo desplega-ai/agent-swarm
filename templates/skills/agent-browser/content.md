@@ -36,6 +36,7 @@ agent-browser close
 ```
 
 - Re-run `snapshot` after every navigation or state change. Refs are only valid for the snapshot that produced them.
+- Pass `--session <task-or-name>` on every `agent-browser` command, including the first `open`. Parallel tasks in one container share the `default` session and collide without it.
 - Run one browser session at a time. Call `store-progress` between page batches so the heartbeat watchdog sees you.
 - The browser is headless. Local servers inside the worker container are reachable at `http://localhost:<port>`.
 - The image launches Chromium with `--no-sandbox,--disable-dev-shm-usage` through `AGENT_BROWSER_ARGS`. If you pass your own `--args`, include `--no-sandbox` again or Chrome will not start.

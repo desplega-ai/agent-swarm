@@ -1,0 +1,94 @@
+---
+title: 'Coordinating delivery delay investigations between operations and support with AI agents'
+description: "Agent Swarm gathers a delayed order's records, flags a missed promised date or a missing scan, and hands operations a source-linked handoff. People decide."
+agent:
+  when: "Someone wants operations and support to share source-linked context on a delayed customer delivery before anyone updates the customer"
+---
+
+Agent Swarm can gather the authorized order and carrier records for a delayed delivery, run deterministic checks against the promised date, and hand a named operations owner a source-linked handoff while people decide what the customer is told and whether to replace or refund. What it takes off the team is the assembly: finding the order, promised date and tracking events across systems, and naming the gap neither team can see from its own screen.
+
+The scope is one exception: a physical order's delivery after dispatch. A booking mismatch, a failed payment, the impact of an outage, a supplier invoice mismatch, a renewal decision or generic support triage is a different handoff with a different owner.
+
+## When another tool fits better
+
+Two options cover most of this ground.
+
+**Your order-management or shipping system's exception queue.** If the order and the tracking events already live in one system, and a rule settles the case, that queue closes it. A promised date that has passed or a scan that never arrived is a rule, not a judgement.
+
+**A simple manual process.** At low volume, a shared channel and a checklist are the honest answer, and cheaper to run than any integration. Keep them while one person can open two tabs and see the case.
+
+Agent Swarm fits the cross-team shape: order in one system, carrier status in another, the customer thread in support, owner somewhere else. That work is gathering evidence across systems and people and putting it in front of the owner who decides. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in logistics product, carrier integration or customer case. It needs data access, integrations and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative delivery delay flow, from a flagged delay to a customer update a person sends." chart={`flowchart LR
+  A["Delay flagged<br/>(missed promised date<br/>or customer asks)"] --> B["Gather authorized records<br/>(order, shipment,<br/>tracking events)"]
+  B --> C["Deterministic checks<br/>swarm-script to JSON"]
+  C --> D["Agent prepares<br/>source-linked handoff"]
+  D --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "approve" --> R["Support drafts<br/>customer update"]
+  G -- "reject" --> S["Return, hold<br/>or escalate"]
+`} />
+
+**1. A delay is flagged.** Either the promised date in the order record has passed, or a customer asks support where the order is.
+
+**2. The swarm gathers the authorized records.** Configured connections pull the order, its promised date, the shipment and the carrier tracking events with their timestamps. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**3. Deterministic checks flag the gap.** A `swarm-script` node compares the promised date with the last tracking update and the scan history, flags a missed promised date or a missing scan beyond a threshold the team sets, and emits JSON. The date arithmetic runs the same way every time and no model does the subtraction. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split.
+
+**4. An agent writes the handoff.** The Researcher turns the JSON and the source records into one document: the known facts with a source link per fact, the missing information and who has it, and the named operations owner who decides.
+
+**5. A person clears the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only on a human response, with a short summary and a link to the full handoff.
+
+**6. Support drafts the customer update.** A person writes or edits the message and sends it. Nothing reaches the customer on its own.
+
+**How can AI agents help operations and support investigate delayed customer deliveries?** By doing the collection and the comparison: pulling the order and the carrier events, then stating which promised date is missed and which scan has not arrived, with a link on every claim.
+
+**How can teams share delivery exception context before updating a customer?** One document, written before anyone replies: the facts and their sources, the gaps and who can fill them, and one named operations owner. Support and operations read the same document, so the update rests on evidence rather than on the last message in two threads.
+
+## Delivery cases
+
+Every case below is illustrative. No company or carrier is named.
+
+| Case | What the deterministic check compares | Evidence the agent attaches | Question, and to whom |
+| --- | --- | --- | --- |
+| Partial shipment | Units dispatched against units ordered | Both counts per line, the dispatch date, the promised date | "Did the rest ship separately?" to the operations owner. "Which date was promised?" to support |
+| Conflicting timestamps | The order system's status and timestamp against the carrier's event for the same step | Both records with their timestamps and links, and the difference between them | "Which record reflects what happened?" to the operations owner |
+| Stale carrier data | The last tracking event against now, and the refresh interval the team configures | The last event, its timestamp, how long the record has been silent | "Is this the real position of the shipment?" to the operations owner |
+| Missing scan | The scan sequence the team expects for the route against the scans on record | The expected step, the last scan received, the promised date | "Where is the parcel now?" to the operations owner |
+
+## Conflicting records, privacy and escalation
+
+**Sources that disagree.** When the order record and the carrier's events contradict each other, the handoff reports both with links and does not pick one. It names the records and the owner who settles them.
+
+**Data that has gone quiet.** A tracking record with no update since a set time is labelled with its last-updated time and presented as stale, never as the current position of the order. Anyone quoting the handoff to a customer quotes the timestamp with it.
+
+**Privacy and least privilege.** The handoff carries only the order and contact fields the workflow is authorized to read, and nothing else from the customer record. When a record sits behind a system the swarm cannot reach, the handoff names it and the owner who can grant access. It does not fill the gap by pasting customer data into a chat, and it does not estimate a value. Access belongs in the workflow's [governance](/docs/guides/ai-operations-governance) record: who may read the order, the tracking events and the contact fields.
+
+**Escalation when the owner does not answer.** The gate carries a timeout and a fallback path, which the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends for every blocking approval. A workable shape: a reminder before the timeout, then a named backup owner, then an explicit hold so the case appears on the aged list. The reject branch needs its own definition: return it with the reason, hold it, or escalate it. The workflow never proceeds on silence.
+
+## What stays human-owned
+
+Four decisions stay with people in every version.
+
+- **Whether the customer is contacted at all.** A delivery late by a day and a delivery that has gone missing are different conversations, and a person decides which one this is.
+- **What the update says, and when it is sent.** The wording, the promise it makes and the timing belong to the person who will answer the reply.
+- **Replacing an order.** A re-ship carries a cost, so it is a commercial decision. The agent does not create one and does not mark an order as reshipped.
+- **Refunding or crediting.** The agent has no path to a refund, a credit or a payment instruction. The workflow ends at a decision a person recorded.
+
+The agent sends nothing to the customer, and it has no path to a refund.
+
+The HITL guide's rule holds here: gate the irreversible steps and let the reversible ones run. Pulling records and writing a handoff are reversible. Telling a customer where their order is, is not.
+
+## Building blocks
+
+Every piece below ships in agent-swarm and is documented.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how scripts reach the order and carrier systems with the raw secret out of script source.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow, approval thresholds and source-of-truth rules.
+- [Team collaboration](/docs/features/team-collaboration): shared context across operations, support and whoever inherits the case.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): the shipping system's exception queue, a manual checklist or a shared agent platform.
