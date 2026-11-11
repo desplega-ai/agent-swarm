@@ -1,5 +1,6 @@
 import { ArrowLeftRight, Cpu, Info } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AddProviderMenu } from "@/components/providers/add-provider-menu";
 import { PROVIDER_GRID } from "@/components/providers/pool-key-row";
 import { ProviderListRow } from "@/components/providers/provider-row";
@@ -101,7 +102,7 @@ function LlmList({
         description={
           searching
             ? "Clear the search, or add a provider."
-            : "Agents need at least one model. Pick a provider from Add provider."
+            : "Add a key, subscription or gateway from Add provider. Agents can still run on a harness login kept on the worker, such as a mounted opencode auth.json."
         }
         compact
       />
@@ -254,7 +255,19 @@ export default function AiProvidersPage() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
-        <TabsContent value="llm">
+        <TabsContent value="llm" className="flex flex-col gap-3">
+          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+            <Info aria-hidden className="mt-px size-3.5 shrink-0" />
+            <span>
+              Providers are the accounts, keys and gateways that authorize model calls. The harness
+              each agent runs (Claude Code, Codex, opencode, pi) and its credential status show on
+              the{" "}
+              <Link to="/agents" className="underline underline-offset-2 hover:text-foreground">
+                Agents page
+              </Link>
+              .
+            </span>
+          </p>
           <LlmList
             rows={matchRows(rows, search)}
             loading={loading}
