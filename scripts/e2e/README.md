@@ -27,8 +27,10 @@ This file is the authoring guide.
 
 | Path | Role |
 |---|---|
-| `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, computes coverage, applies gates, writes reports. |
-| `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
+| `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, reruns failures once on a fresh SUT, computes coverage, applies gates, writes reports. |
+| `rerun.ts` | Rerun plan (`needs`, transitively) and how two attempts settle into one result (`flaky` or `fail`). |
+| `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
+| `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
 | `slack.ts` | `@desplega.ai/slack-mock` lifecycle (Socket Mode, started before the SUT). |
 | `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. |
 | `mocks/llm.ts` | Mock inference host: OpenAI chat + responses + embeddings, SystemOne decisions and extraction. |
@@ -82,9 +84,37 @@ Rules, enforced by the registry, the boundary check, or review:
    you set. A lead agent changes routing for everything after it: register one only when
    the flow needs it, and prefer `isLead: true` on a dedicated agent.
 7. **Deterministic.** No sleeps for luck; use `pollUntil` with a bounded timeout and a
-   message that says what never happened.
+   message that says what never happened. An absence check ("this never posts") watches
+   for `slackAbsenceWindowMs(ctx)` from `scenarios/slack-helpers.ts`: 3 watcher ticks,
+   at least 10 s.
 8. **Keep it fast.** The suite runs on every PR. Prefer one scenario that walks a resource's
    whole lifecycle over ten that each boot a fixture.
+9. **Pass alone, or declare `needs`.** A failed scenario reruns once on a fresh API and
+   database (see below). If it reads state an earlier scenario left (a config flag, a
+   registered lead), list those scenarios in `needs: ["name"]`; they must have a lower
+   `order`, and the registry throws otherwise. Check with `bun run e2e --only <name>`.
+
+### Reruns, flaky and quarantine
+
+After the main pass, each failed scenario reruns once, alone, on a fresh API process,
+database, Slack mock and inference mock. Its `needs` replay first, in run order; if one
+of them fails, the rerun decides nothing and the first failure stands.
+
+- **Pass on rerun:** status `flaky`. The run stays green. The console prints `FLAKY`, the
+  JSON row carries `attempts` and the first attempt's `error`, and the Markdown summary lists
+  it under "Flaky (passed on rerun)".
+- **Fail twice:** status `fail`, with the rerun's error.
+- **Coverage:** one result row per scenario, whatever the attempt count. The prerequisite
+  replay records no coverage. The rerun's own calls join the covered sets, which are unions,
+  so nothing counts twice; node types and state values it produced are read from its
+  database before it stops. The universe probe never changes.
+
+`quarantine.json` holds `{ "scenario", "owner", "reason", "expires": "YYYY-MM-DD" }`
+entries. A quarantined scenario runs, reruns and reports (`FAIL (quarantined)`), and its
+failure fails neither the run nor its flows. The run fails when an entry is past its
+`expires` date (UTC), names no scenario, or repeats one. There is no auto-quarantine:
+adding an entry is a review decision with an owner. A quarantined failure still leaves the
+routes only it would have reached uncovered, so the strict gate can still name them.
 
 ### Order bands
 

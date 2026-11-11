@@ -187,6 +187,9 @@ export async function startSut(
     // Legacy Slack scenarios pin their renderer; v2 scenarios opt in via config.
     SLACK_RENDER_V2: "false",
     SLACK_THREAD_STEERING: "off",
+    // 1 s Slack watcher tick, not the 10 s default: Slack scenarios wait on it, and the
+    // full run drops from about 505 s to 340 s. `--sut-env` can still set it back.
+    SLACK_TASK_WATCHER_INTERVAL_MS: "1000",
     // Background boot triage at T+90s must not steal a scenario's next poll.
     HEARTBEAT_CHECKLIST_DISABLE: "true",
     // Every tool group registers, so the MCP coverage denominator is the whole surface.
