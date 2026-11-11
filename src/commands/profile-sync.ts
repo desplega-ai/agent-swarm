@@ -29,7 +29,7 @@
 
 import { rename } from "node:fs/promises";
 import { resolveTemplateAsync } from "../prompts/resolver.ts";
-import type { Agent, ProfileExpectedHashes, SwarmEvent } from "../types.ts";
+import type { Agent, ProfileExpectedHashes, SwarmEvent, VersionableField } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
 import { withFileLock } from "../utils/file-lock.ts";
 import {
@@ -62,8 +62,20 @@ export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 //      so a file edited once is not re-sent over a later DB-side edit.
 // ──────────────────────────────────────────────────────────────────────────
 export const IDENTITY_BASELINES_PATH = "/tmp/identity-baselines.json";
+export const PROFILE_UPLOADS_HELD_ENV = "AGENT_SWARM_PROFILE_UPLOADS_HELD";
 
-export type IdentityBaselines = Record<string, string>;
+export type IdentityBaselines = Partial<Record<VersionableField, string>> & {
+  /** DB lineage, separate from the local hashes used to skip untouched files. */
+  expected?: ProfileExpectedHashes;
+};
+const CAS_FIELDS = ["soulMd", "identityMd", "toolsMd", "heartbeatMd", "setupScript"] as const;
+const PROFILE_PATHS = {
+  soulMd: SOUL_MD_PATH,
+  identityMd: IDENTITY_MD_PATH,
+  toolsMd: TOOLS_MD_PATH,
+  heartbeatMd: HEARTBEAT_MD_PATH,
+  setupScript: SETUP_SCRIPT_PATH,
+};
 
 export function contentSha256(content: string): string {
   return new Bun.CryptoHasher("sha256").update(content).digest("hex");
@@ -359,21 +371,24 @@ export interface ProfileFileIO {
 }
 
 export const PROFILE_FILE_IO: ProfileFileIO = {
-  readFile: readFileIfExists,
+  readFile: readProfileFile,
   writeFile: writeFileAtomic,
 };
 
 /**
  * Replace the baselines at boot. Taken under the baselines lock so an advance
  * still in flight from an earlier session cannot reapply its pre-boot read; if
- * the lock is unavailable the boot baselines are written anyway.
+ * the lock is unavailable, the caller holds uploads instead of reusing old tokens.
  */
-export async function writeIdentityBaselines(baselines: IdentityBaselines): Promise<void> {
-  const write = () => writeFileAtomic(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
-  const locked = await withFileLock(IDENTITY_BASELINES_LOCK_PATH, write, {
+export async function writeIdentityBaselines(
+  baselines: IdentityBaselines,
+  io: ProfileFileIO = PROFILE_FILE_IO,
+): Promise<void> {
+  const write = () => io.writeFile(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
+  const locked = await withFileLock(io.baselinesLockPath ?? IDENTITY_BASELINES_LOCK_PATH, write, {
     waitMs: BASELINES_LOCK_WAIT_MS,
   });
-  if (!locked.acquired) await write();
+  if (!locked.acquired) throw new Error(`Boot baselines not recorded: lock ${locked.reason}`);
 }
 
 /**
@@ -382,6 +397,8 @@ export async function writeIdentityBaselines(baselines: IdentityBaselines): Prom
  * and is never rewritten at boot, so it is baselined too; otherwise the empty
  * file that survives a restart would count as an edit and be sent over a later
  * DB edit. The setup script is baselined from the entrypoint-composed file.
+ * `dbProfile` is the /me snapshot plus only confirmed default uploads: local
+ * defaults and the trimmed setup extract are not necessarily DB values.
  */
 export function bootIdentityBaselines(
   profile: {
@@ -390,9 +407,11 @@ export function bootIdentityBaselines(
     toolsMd?: string;
     heartbeatMd?: string | null;
     claudeMd?: string;
+    setupScript?: string;
   },
   setupScriptFile: string | undefined,
   agentId = "unknown",
+  dbProfile: Partial<Record<VersionableField, string | null | undefined>> = profile,
 ): IdentityBaselines {
   const baselines: IdentityBaselines = {};
   if (profile.soulMd) baselines.soulMd = contentSha256(profile.soulMd);
@@ -405,6 +424,8 @@ export function bootIdentityBaselines(
   const setupContent =
     setupScriptFile === undefined ? null : extractSetupScriptContent(setupScriptFile, agentId);
   if (setupContent) baselines.setupScript = contentSha256(setupContent);
+  baselines.expected = {};
+  for (const field of CAS_FIELDS) baselines.expected[field] = contentSha256(dbProfile[field] ?? "");
   return baselines;
 }
 
@@ -434,7 +455,7 @@ export async function advanceIdentityBaselines(
   const update = async () => {
     const baselines = (await readIdentityBaselines(io.readFile)) ?? {};
     for (const [field, content] of Object.entries(synced)) {
-      baselines[field] = contentSha256(content);
+      baselines[field as VersionableField] = contentSha256(content);
     }
     await io.writeFile(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
   };
@@ -646,19 +667,19 @@ export async function writeProfileFileFromDb(
   filePath: string,
   dbContent: string,
   now: () => Date = () => new Date(),
+  io: ProfileFileIO = PROFILE_FILE_IO,
 ): Promise<string | null> {
-  const file = Bun.file(filePath);
+  const localContent = await io.readFile(filePath);
   let backupPath: string | null = null;
 
-  if (await file.exists()) {
-    const localContent = await file.text();
+  if (localContent !== undefined) {
     if (localContent !== dbContent) {
       backupPath = `${filePath}.pre-boot-${now().toISOString()}.bak`;
-      await Bun.write(backupPath, localContent);
+      await io.writeFile(backupPath, localContent);
     }
   }
 
-  await Bun.write(filePath, dbContent);
+  await io.writeFile(filePath, dbContent);
   return backupPath;
 }
 
@@ -836,11 +857,21 @@ export type FileReader = (path: string) => Promise<string | undefined>;
 /** Default file reader — reads from the worker's local FS via Bun. */
 export async function readFileIfExists(path: string): Promise<string | undefined> {
   try {
-    const file = Bun.file(path);
-    if (!(await file.exists())) return undefined;
-    return await file.text();
+    return await readProfileFile(path);
   } catch {
     return undefined;
+  }
+}
+
+/** Preservation must distinguish a missing file from a failed read. */
+async function readProfileFile(path: string): Promise<string | undefined> {
+  try {
+    return await Bun.file(path).text();
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
   }
 }
 
@@ -919,8 +950,9 @@ export async function collectProfilePayloads(
   const payloads: ProfilePayload[] = [];
 
   const baselines = await readIdentityBaselines(readFile);
+  const uploadsHeld = Boolean(process.env[PROFILE_UPLOADS_HELD_ENV]);
 
-  if (fields.includes("identity")) {
+  if (!uploadsHeld && fields.includes("identity")) {
     const updates = buildIdentityPayload(
       {
         soulMd: await readFile(SOUL_MD_PATH),
@@ -931,7 +963,14 @@ export async function collectProfilePayloads(
       baselines,
       agentId,
     );
-    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource));
+    for (const payload of buildIndependentIdentityPayloads(updates, changeSource)) {
+      const field = CAS_FIELDS.find((field) => typeof payload.body[field] === "string");
+      const token = field && baselines?.expected?.[field];
+      if (field && token) {
+        payload.body.expectedHashes = { [field]: token };
+        payloads.push(payload);
+      }
+    }
   }
 
   if (fields.includes("claude")) {
@@ -954,12 +993,23 @@ export async function collectProfilePayloads(
     }
   }
 
-  if (fields.includes("setup")) {
+  if (!uploadsHeld && fields.includes("setup")) {
     const raw = await readFile(SETUP_SCRIPT_PATH);
     if (raw !== undefined) {
       const content = extractSetupScriptContent(raw, agentId);
-      if (content !== null && baselines?.setupScript !== contentSha256(content)) {
-        payloads.push({ label: "setup", body: { setupScript: content, changeSource } });
+      if (
+        content !== null &&
+        baselines?.setupScript !== contentSha256(content) &&
+        baselines?.expected?.setupScript
+      ) {
+        payloads.push({
+          label: "setup",
+          body: {
+            setupScript: content,
+            changeSource,
+            expectedHashes: { setupScript: baselines.expected.setupScript },
+          },
+        });
       }
     }
   }
@@ -971,12 +1021,19 @@ export async function collectProfilePayloads(
  * POST a single profile update. NON-FATAL but VISIBLE: a non-2xx response or a
  * thrown error is logged (scrubbed) and swallowed so it never fails the task,
  * but — unlike the original copies — it is never silently ignored. Resolves to
- * whether the API accepted it.
+ * HTTP success; CAS acceptance is determined separately from each stored field.
  */
 export async function postProfileUpdate(
   opts: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "fetchImpl">,
   payload: ProfilePayload,
 ): Promise<boolean> {
+  return (await sendProfileUpdate(opts, payload)) !== null;
+}
+
+async function sendProfileUpdate(
+  opts: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "fetchImpl">,
+  payload: ProfilePayload,
+): Promise<Response | null> {
   const doFetch = opts.fetchImpl ?? fetch;
   try {
     const resp = await doFetch(`${opts.apiUrl}/api/agents/${opts.agentId}/profile`, {
@@ -1001,26 +1058,62 @@ export async function postProfileUpdate(
         ),
       );
     }
-    return resp.ok;
+    if (!resp.ok) return null;
+    return resp;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[profile-sync] ${payload.label} sync errored: ${msg}`));
-    return false;
+    return null;
   }
 }
 
-/**
- * The baseline-tracked profile fields a payload carried. Only for payloads sent
- * outside the CLAUDE.md lock: the hook-owned personal CLAUDE.md keeps its own
- * lineage record, but an unconditional CLAUDE.md sync (the workspace copy, or a
- * self_edit) is tracked by its baseline like every other file.
+/** Reconcile one response under #2600's shared baselines lock. HTTP 2xx alone
+ * does not prove acceptance: the route returns the stored value even on CAS conflict.
  */
-function baselineFieldsOf(payload: ProfilePayload): Record<string, string> {
-  const fields: Record<string, string> = {};
-  for (const [field, value] of Object.entries(payload.body)) {
-    if (field !== "changeSource" && typeof value === "string") fields[field] = value;
-  }
-  return fields;
+async function settleProfileUpdate(
+  payload: ProfilePayload,
+  stored: Record<string, unknown> | null,
+  io: ProfileFileIO,
+): Promise<void> {
+  const field = CAS_FIELDS.find((field) => typeof payload.body[field] === "string");
+  if (!field || !stored || !(field in stored)) return;
+  const dbValue = stored[field] ?? "";
+  if (typeof dbValue !== "string") return;
+  const sent = payload.body[field] as string;
+  const locked = await withFileLock(
+    io.baselinesLockPath ?? IDENTITY_BASELINES_LOCK_PATH,
+    async () => {
+      const baselines = await readIdentityBaselines(io.readFile);
+      if (!baselines?.expected?.[field]) return;
+      let localValue = dbValue;
+      if (dbValue !== sent) {
+        const path = PROFILE_PATHS[field];
+        if (field === "setupScript") {
+          const raw = await io.readFile(path);
+          // Without the current composed file we cannot preserve its operator section.
+          if (raw === undefined) return;
+          const start = raw.indexOf(SETUP_MARKER_START);
+          const end = raw.indexOf(SETUP_MARKER_END);
+          localValue =
+            start !== -1 && end > start
+              ? `${raw.slice(0, start + SETUP_MARKER_START.length)}\n${dbValue}\n${raw.slice(end)}`
+              : `#!/bin/bash\n${dbValue}\n`;
+        }
+        await writeProfileFileFromDb(path, localValue, undefined, io);
+      }
+      // An accepted setup value is already extracted. Parsing it again would
+      // remove a shebang belonging to the managed section itself.
+      baselines[field] = contentSha256(
+        field === "setupScript" && dbValue !== sent
+          ? (extractSetupScriptContent(localValue) ?? "")
+          : localValue,
+      );
+      baselines.expected[field] = contentSha256(dbValue);
+      await io.writeFile(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
+    },
+    { waitMs: BASELINES_LOCK_WAIT_MS },
+  );
+  if (!locked.acquired) console.warn(`[profile-sync] ${field} not settled: lock ${locked.reason}`);
 }
 
 /**
@@ -1045,18 +1138,37 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   const unlockedFields = claudeUnderLock ? fields.filter((f) => f !== "claude") : fields;
 
   const io = opts.io ?? PROFILE_FILE_IO;
-  const payloads = await collectProfilePayloads(
-    unlockedFields,
-    changeSource,
-    io.readFile,
-    claudeMdPath,
-    opts.agentId,
-  );
-  const synced: Record<string, string> = {};
-  for (const payload of payloads) {
-    if (await postProfileUpdate(opts, payload)) Object.assign(synced, baselineFieldsOf(payload));
+  let payloads: ProfilePayload[];
+  try {
+    payloads = await collectProfilePayloads(
+      unlockedFields,
+      changeSource,
+      io.readFile,
+      claudeMdPath,
+      opts.agentId,
+    );
+  } catch (error) {
+    console.warn(scrubSecrets(`[profile-sync] could not read profile files: ${String(error)}`));
+    return;
   }
-  await advanceIdentityBaselines(synced, io);
+  for (const payload of payloads) {
+    try {
+      const response = await sendProfileUpdate(opts, payload);
+      if (!response) continue;
+      if (typeof payload.body.claudeMd === "string") {
+        // Keep #2600's workspace CLAUDE.md advancement; the personal file is
+        // still owned by the separate CLAUDE.md lineage lock below.
+        await advanceIdentityBaselines({ claudeMd: payload.body.claudeMd }, io);
+      } else {
+        const stored: unknown = await response.json();
+        if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+          await settleProfileUpdate(payload, stored as Record<string, unknown>, io);
+        }
+      }
+    } catch (err) {
+      console.warn(scrubSecrets(`[profile-sync] ${payload.label} not settled: ${String(err)}`));
+    }
+  }
 
   if (claudeUnderLock) {
     const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs = RUNNER_LOCK_WAIT_MS } =

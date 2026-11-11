@@ -83,7 +83,11 @@ function baselinesOf(io: ReturnType<typeof memoryIO>): Record<string, string> {
 
 /** The workspace right after runner boot: files and baselines from the DB. */
 function bootedWorkspace(profile: Record<string, string>) {
-  const baselines: Record<string, string> = {};
+  const baselines: Record<string, unknown> = {
+    expected: Object.fromEntries(
+      Object.entries(profile).map(([field, value]) => [field, contentSha256(value)]),
+    ),
+  };
   for (const [field, content] of Object.entries(profile)) {
     baselines[field] = contentSha256(content);
   }
@@ -95,6 +99,7 @@ function bootedWorkspace(profile: Record<string, string>) {
 
 describe("profile sync never writes an untouched file over a DB edit", () => {
   let db: Record<string, string> = {};
+  let lastExpectedHashes: unknown;
   let server: ReturnType<typeof Bun.serve>;
   let config: SwarmHooksConfig;
 
@@ -104,10 +109,11 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
       async fetch(req) {
         if (req.method !== "PUT") return new Response("not found", { status: 404 });
         const body = (await req.json()) as Record<string, string>;
+        lastExpectedHashes = body.expectedHashes;
         for (const [field, value] of Object.entries(body)) {
-          if (field !== "changeSource") db[field] = value;
+          if (field !== "changeSource" && field !== "expectedHashes") db[field] = value;
         }
-        return Response.json({ ok: true });
+        return Response.json(db);
       },
     });
     config = {
@@ -227,7 +233,7 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     });
 
     expect(db.claudeMd).toBe(`${boot}\nagent rule\n`);
-    expect(db.expectedHashes).toEqual({ claudeMd: contentSha256(boot) });
+    expect(lastExpectedHashes).toEqual({ claudeMd: contentSha256(boot) });
     expect(io.files[CLAUDE_MD_LINEAGE_PATH]).toBe(lineage);
     expect(io.files[IDENTITY_BASELINES_PATH]).toBe(bootBaselines);
   });
@@ -256,6 +262,10 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     io.files[IDENTITY_BASELINES_PATH] = JSON.stringify({
       identityMd: contentSha256(BOOT_IDENTITY),
       setupScript: contentSha256("echo boot"),
+      expected: {
+        setupScript: contentSha256("echo boot"),
+        identityMd: contentSha256(BOOT_IDENTITY),
+      },
     });
     io.files[IDENTITY_MD_PATH] = EDITED_IDENTITY;
     io.files[SETUP_SCRIPT_PATH] = "#!/bin/bash\necho edited\n";
@@ -313,13 +323,18 @@ describe("collectProfilePayloads (claude hook + runner)", () => {
         identityMd: contentSha256(BOOT_IDENTITY),
         toolsMd: contentSha256("tools"),
         heartbeatMd: contentSha256("heartbeat"),
+        expected: { heartbeatMd: contentSha256("heartbeat") },
       }),
     });
 
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
 
     expect(payloads.map((payload) => payload.body)).toEqual([
-      { heartbeatMd: "heartbeat, edited", changeSource: "self_edit" },
+      {
+        heartbeatMd: "heartbeat, edited",
+        changeSource: "self_edit",
+        expectedHashes: { heartbeatMd: contentSha256("heartbeat") },
+      },
     ]);
   });
 

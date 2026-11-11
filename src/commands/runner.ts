@@ -157,9 +157,13 @@ import {
 import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   bootIdentityBaselines,
+  contentSha256,
   fetchProfileSyncRejectionBanner,
+  PROFILE_FILE_IO,
+  PROFILE_UPLOADS_HELD_ENV,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
+  SETUP_SCRIPT_PATH,
   syncProfileFilesToServer,
   WORKSPACE_CLAUDE_MD_PATH,
   writeIdentityBaselines,
@@ -6287,13 +6291,15 @@ async function saveGeneratedProfile({
   agentId,
   role,
   profileUpdate,
+  expectedHashes,
 }: {
   apiUrl: string;
   apiKey: string;
   agentId: string;
   role: string;
   profileUpdate: Record<string, string>;
-}): Promise<void> {
+  expectedHashes: Record<string, string>;
+}): Promise<Record<string, string>> {
   try {
     const response = await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
       method: "PUT",
@@ -6302,14 +6308,27 @@ async function saveGeneratedProfile({
         "X-Agent-ID": agentId,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(profileUpdate),
+      body: JSON.stringify({ ...profileUpdate, expectedHashes }),
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     }
-    console.log(`[${role}] Generated and saved default identity templates`);
+    const stored = (await response.json()) as Record<string, unknown>;
+    const accepted: Record<string, string> = {};
+    for (const [field, value] of Object.entries(profileUpdate)) {
+      if (stored[field] === value) accepted[field] = value;
+    }
+    if (Object.keys(accepted).length === Object.keys(profileUpdate).length) {
+      console.log(`[${role}] Generated and saved default identity templates`);
+    } else {
+      console.warn(
+        `[${role}] Only ${Object.keys(accepted).length} generated profile fields confirmed`,
+      );
+    }
+    return accepted;
   } catch (err) {
     console.warn(scrubSecrets(`[${role}] Could not save generated templates to server: ${err}`));
+    return {};
   }
 }
 
@@ -6519,6 +6538,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let serverCapabilities: string[] | undefined;
 
   // Agent identity fields — populated after registration by fetching full profile
+  let profileDb: Parameters<typeof bootIdentityBaselines>[3] | null = null;
+  let profileMaterializationFailed = false;
   let agentSoulMd: string | undefined;
   let agentIdentityMd: string | undefined;
   let agentSetupScript: string | undefined;
@@ -7122,6 +7143,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         name?: string;
         description?: string;
       };
+      profileDb = { ...profile };
       agentSoulMd = profile.soulMd;
       agentIdentityMd = profile.identityMd;
       agentSetupScript = profile.setupScript;
@@ -7184,7 +7206,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (!profile.setupScript && agentSetupScript) profileUpdate.setupScript = agentSetupScript;
         if (!profile.heartbeatMd && agentHeartbeatMd) profileUpdate.heartbeatMd = agentHeartbeatMd;
 
-        await saveGeneratedProfile({ apiUrl, apiKey, agentId, role, profileUpdate });
+        const expectedHashes = Object.fromEntries(
+          Object.keys(profileUpdate).map((field) => [
+            field,
+            contentSha256(profile[field as keyof typeof profile] ?? ""),
+          ]),
+        );
+        const accepted = await saveGeneratedProfile({
+          apiUrl,
+          apiKey,
+          agentId,
+          role,
+          profileUpdate,
+          expectedHashes,
+        });
+        profileDb = { ...profileDb, ...accepted };
       }
 
       // Fetch installed MCP servers for system prompt
@@ -7241,6 +7277,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (backupPath) console.warn(`[${role}] Archived differing SOUL.md at ${backupPath}`);
       console.log(`[${role}] Wrote SOUL.md to workspace`);
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write SOUL.md: ${(err as Error).message}`);
     }
   }
@@ -7250,6 +7287,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (backupPath) console.warn(`[${role}] Archived differing IDENTITY.md at ${backupPath}`);
       console.log(`[${role}] Wrote IDENTITY.md to workspace`);
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
     }
   }
@@ -7263,6 +7301,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Wrote start-up.sh to workspace`);
       }
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write start-up.sh: ${(err as Error).message}`);
     }
   }
@@ -7274,6 +7313,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (backupPath) console.warn(`[${role}] Archived differing TOOLS.md at ${backupPath}`);
       console.log(`[${role}] Wrote TOOLS.md to workspace`);
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
     }
   }
@@ -7285,6 +7325,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (backupPath) console.warn(`[${role}] Archived differing HEARTBEAT.md at ${backupPath}`);
       console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
     }
   }
@@ -7299,6 +7340,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (backupPath) console.warn(`[${role}] Archived differing CLAUDE.md at ${backupPath}`);
       console.log(`[${role}] Wrote CLAUDE.md to workspace`);
     } catch (err) {
+      profileMaterializationFailed = true;
       console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
     }
   }
@@ -7310,7 +7352,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   try {
     // start-up.sh is not rewritten here when it exists: the entrypoint composed
     // it from the DB at container start, so its agent-managed section is the base.
-    const setupFile = Bun.file("/workspace/start-up.sh");
+    if (!profileDb) throw new Error("Boot could not read the DB profile");
+    if (profileMaterializationFailed)
+      throw new Error("Boot could not preserve or materialize profile files");
+    const setupFile = await PROFILE_FILE_IO.readFile(SETUP_SCRIPT_PATH);
     const baselines = bootIdentityBaselines(
       {
         soulMd: agentSoulMd,
@@ -7319,13 +7364,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         heartbeatMd: agentHeartbeatMd,
         claudeMd: agentClaudeMd,
       },
-      (await setupFile.exists()) ? await setupFile.text() : undefined,
+      setupFile,
       agentId,
+      profileDb,
     );
     await writeIdentityBaselines(baselines);
     console.log(`[${role}] Recorded identity file baselines for session-end sync`);
-  } catch {
-    // Non-fatal — worst case, session-end sync proceeds as before (blind overwrite)
+  } catch (error) {
+    // Children (including hook processes) must not reuse a previous boot's tokens.
+    process.env[PROFILE_UPLOADS_HELD_ENV] = "boot baselines unavailable";
+    console.warn(scrubSecrets(`[${role}] Profile uploads held: ${String(error)}`));
   }
 
   // ========== Boot-time skill load (signature-gated, replaces the standalone
