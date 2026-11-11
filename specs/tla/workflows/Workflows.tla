@@ -41,7 +41,9 @@ CONSTANTS
   FixJoinWaitsLive,  \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
   FixTaskRetry,      \* F7 (#1832): a failed agent task honors node.retry (task.failed handler and recovery sweep), fenced on the task still bound to the step; finalizeOrWait counts retry-pending rows as live
   FixStepFence,      \* F8 (#2364): executor result writes are fenced on the claim (step running, same retryCount, run live), an exhausted failure writes step and run in one transaction; with ChildRunResume: one child per attempt, an orphaned running row is re-claimed, a failed child honors node.retry, and a sweep re-walks orphaned rows
-  FixCancelTree      \* F9 (#2377): a cancel also drops queued retries and every open task of the run; a step's task is inserted only while the step runs in a live run; finalizeOrWait and the task/child claims write nothing in a run that is no longer live (cancelled tree)
+  FixCancelTree,     \* F9 (#2377): a cancel also drops queued retries and every open task of the run; a step's task is inserted only while the step runs in a live run; finalizeOrWait and the task/child claims write nothing in a run that is no longer live (cancelled tree)
+  FixParkSiblings,   \* F10 (#2957, #2966): a parked step pauses only its own branch; the walk keeps routing its siblings' successors and then runs its finalizer
+  FixSuccessorDebt   \* F11 (#2966, #2974): a walk holds its run from entry until just before its finalizer (a claim's hold is handed to the walk it starts); every run finalizer leaves a held run to the holder
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -83,7 +85,7 @@ vars == <<run, steps, thr, active, execLive, okCount, hbLeft, crashes>>
 
 Idle == [pc |-> "idle", ret |-> "idle", pend |-> {}, cur |-> "T", sid |-> 0,
          done |-> {}, edges |-> {}, nxt |-> {}, ex |-> {}, hasW |-> FALSE,
-         R |-> {}, rs |-> "running", rc |-> 0, g |-> 0, rf |-> "idle", fl |-> FALSE]
+         R |-> {}, rs |-> "running", rc |-> 0, g |-> 0, rf |-> "idle", fl |-> FALSE, dh |-> FALSE]
 
 StepIds == DOMAIN steps
 \* F7: task generation `g` of row i is still the task bound to it
@@ -139,6 +141,16 @@ OrphanRow(n) == {i \in StepIds : steps[i].node = n /\ steps[i].st = "running" /\
 \* implies it; the task and child claims below check it explicitly.
 TreeLive == ~(FixCancelTree /\ run = "cancelled")
 
+\* F11 successor-routing.ts hasOwedSuccessors: some walk still holds the run
+\* (process-local, cleared by a crash). A claim that completes a step with
+\* successors takes the hold in its transaction (claimAndOweWalk) and hands it
+\* to the walk it starts (holdSuccessorRouting); every other walk takes one at
+\* entry. The model fuses each claim with the walkGraph call it is followed
+\* by, so the hold is the walking thread's `dh`. A walk releases it just
+\* before its finalizer transaction (engine.ts `routed()`), or in its
+\* `finally` when it stops early.
+Owed == \E u \in Threads : thr[u].dh
+
 \* The node the retry poller currently holds (step flipped to running, not yet checkpointed).
 PollerHeld == IF thr[TPoll].pc \in {"p5", "p6", "p7", "p8", "p9", "p10"}
               THEN {thr[TPoll].cur} ELSE {}
@@ -162,8 +174,9 @@ Init ==
 SetT(t, r) == thr' = [thr EXCEPT ![t] = r]
 
 \* walkGraph(startNodes): enter the walk, returning to `ret` afterwards.
+\* F11: walkGraph takes its successor-routing hold before its first await.
 Call(t, starts, ret) ==
-  /\ SetT(t, [thr[t] EXCEPT !.pc = "wStart", !.ret = ret, !.pend = starts])
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "wStart", !.ret = ret, !.pend = starts, !.dh = FixSuccessorDebt])
   /\ active' = active + 1
 
 ----------------------------------------------------------------------------
@@ -345,10 +358,13 @@ XCkWait(t) ==
 
 \* W3 engine.ts:371-392 — end of batch: pause on waiting, else in-walk
 \* convergence check over the in-memory completed set.
+\* F10 (#2957, #2966) engine.ts:631: a waiting outcome pauses only its own
+\* branch; the walk keeps routing (Awaited holds any join the parked step
+\* feeds) and ends in its finalizer instead of returning.
 WBatchEnd(t) ==
   /\ thr[t].pc = "wPick"
   /\ thr[t].pend = {}
-  /\ IF thr[t].hasW \/ (thr[t].fl /\ run = "failed")
+  /\ IF (thr[t].hasW /\ ~FixParkSiblings) \/ (thr[t].fl /\ run = "failed")
      THEN \* RF: engine.ts:421-427, a failed outcome re-reads the run and stops when it is failed
           SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
      ELSE LET w == thr[t]
@@ -360,15 +376,17 @@ WBatchEnd(t) ==
                              \subseteq wd}
           IN IF rn # {}
              THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd, !.fl = FALSE])
-             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd])
+             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd, !.dh = FALSE])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* W4 engine.ts:403-453 — finalization transaction (guarded on running).
 \* F6: a node whose latest step is running belongs to another walker, which
-\* finalizes the run when it settles.
+\* finalizes the run when it settles. F11 engine.ts:698: so does a run another
+\* walk still holds (this walk released its own hold first, engine.ts:688).
 WFinal(t) ==
   /\ thr[t].pc = "wFinal"
   /\ IF run = "running" /\ ~(FixJoinWaitsLive /\ LatestIn({"running"}) # {})
+       /\ ~(FixSuccessorDebt /\ Owed)
      THEN LET hasW == \E i \in StepIds : steps[i].st = "waiting"
                         \/ (FixPendingRetryGate /\ steps[i].st \in {"running", "pending"})
               hasPR == \E i \in StepIds : PendingRetry(i)
@@ -382,11 +400,12 @@ WFinal(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* W5 engine.ts:229-233 — leave the walk (activeWalks decrement).
+\* W5 engine.ts:229-233 — leave the walk (activeWalks decrement). F11: the
+\* `finally` also drops a successor-routing hold still held (early stop).
 WRet(t) ==
   /\ thr[t].pc = "wRet"
   /\ active' = active - 1
-  /\ SetT(t, [thr[t] EXCEPT !.pc = thr[t].ret])
+  /\ SetT(t, [thr[t] EXCEPT !.pc = thr[t].ret, !.dh = FALSE])
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
 ----------------------------------------------------------------------------
@@ -543,12 +562,14 @@ P6 ==
 
 \* P9 retry-poller.ts:196-200 — no successors: run -> completed (blind).
 \* F1: finalize through the guarded finalizeOrWait-shaped transaction.
+\* F11 retry-poller.ts:360: not while some walk holds the run.
 P9 ==
   /\ thr[TPoll].pc = "p9"
   /\ run' = IF FixPollerRunGuard
             THEN IF run \notin {"running", "waiting"} THEN run
-                 ELSE IF \E i \in StepIds : steps[i].st = "waiting" \/ steps[i].st = "running"
-                                            \/ PendingRetry(i)
+                 ELSE IF (\E i \in StepIds : steps[i].st = "waiting" \/ steps[i].st = "running"
+                                             \/ PendingRetry(i))
+                         \/ (FixSuccessorDebt /\ Owed)
                       THEN run ELSE "completed"
             ELSE "completed"
   /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "pRel"])
@@ -622,8 +643,9 @@ Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ 
 FinalizeOrWait ==
   IF FixCancelTree /\ run \notin {"running", "waiting"}
   THEN run
-  ELSE IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
-  THEN \* F6: leave it to the live walk, whose finalizer needs `running`
+  ELSE IF (FixJoinWaitsLive /\ LatestIn({"running"}) # {}) \/ (FixSuccessorDebt /\ Owed)
+  THEN \* F6: leave it to the live walk, whose finalizer needs `running`.
+       \* F11 resume.ts:326: also while some walk holds the run.
        IF run = "waiting" THEN "running" ELSE run
   ELSE IF \E j \in StepIds : steps[j].st = "waiting"
        \/ (FixTaskRetry /\ PendingRetry(j))
@@ -684,12 +706,13 @@ H3 ==
 \* H4 recovery.ts:88-94 — run -> completed (blind write, no transaction).
 \* F4 recovery.ts:159-179 completeIfSettled: one transaction, only while the
 \* run is still running, no row is pending retry, and no node's latest row is
-\* live.
+\* live. F11 recovery.ts:238: and no walk holds the run.
 H4 ==
   /\ thr[THb].pc = "h4"
   /\ run' = IF FixRecoveryRetry
             THEN IF /\ run = "running"
                     /\ ~\E i \in StepIds : PendingRetry(i)
+                    /\ ~(FixSuccessorDebt /\ Owed)
                     /\ ~\E i \in LatestIds : steps[i].st \in {"waiting", "running", "pending"}
                  THEN "completed" ELSE run
             ELSE "completed"
@@ -1172,6 +1195,15 @@ JoinWaitsForBranches ==
 \* Model sanity (F7): a row dispatches at most 1 + MaxRetries tasks, so every
 \* task generation has a handler thread in EvThreads.
 TaskGenBound == \A i \in StepIds : steps[i].tg <= MaxRetries + 1
+
+\* Inv3d (F10, F11): a completed run has a row for every node one of whose
+\* predecessors' latest row completed: no routed successor was dropped, by a
+\* walk that stopped at a park or by a finalizer that completed the run before
+\* the walk owing the successor claimed it (XDedup then halts). Checked by
+\* Probe-successor-debt*.cfg.
+CompletedRunRouted ==
+  run = "completed" =>
+    \A n \in Nodes : (\E p \in Preds(n) : p \in LatestIn({"completed"})) => HasRow(n)
 
 \* Inv5 (liveness): the run eventually leaves running/waiting.
 EventuallySettles == <>[](run \in RunTerminal)
