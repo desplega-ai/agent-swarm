@@ -39,9 +39,16 @@ export interface ArtifactRecord {
   shardIndex: number;
 }
 
+// The tracker's v2 `coverage` block, per run: whole-run lines and lines per file.
+export interface CoverageSummary {
+  total: { covered: number; total: number };
+  files: Array<{ path: string; covered: number; total: number }>;
+}
+
 export interface IngestPayload {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   run: RunContext & {
+    suite?: "ui";
     isFork: false;
     shardIndex: number;
     shardTotal: number;
@@ -68,6 +75,7 @@ export interface IngestPayload {
       }
     | { kind: "report"; storage: "github"; url: string }
   >;
+  coverage?: CoverageSummary;
 }
 
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
@@ -169,4 +177,20 @@ export function buildShardPayload(
     results,
     artifacts: payloadArtifacts,
   };
+}
+
+// Upgrades a run's shard payloads to v2 (`suite: "ui"`). The tracker keeps one coverage block
+// per run group, so only the first shard carries it, as the contract suite does.
+export function withCoverage(
+  payloads: IngestPayload[],
+  coverage: CoverageSummary,
+): IngestPayload[] {
+  return [...payloads]
+    .sort((left, right) => left.run.shardIndex - right.run.shardIndex)
+    .map((payload, position) => ({
+      ...payload,
+      schemaVersion: 2,
+      run: { ...payload.run, suite: "ui" },
+      ...(position === 0 ? { coverage } : {}),
+    }));
 }

@@ -51,8 +51,11 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * v12 = the gitleaks global allowlist `^true|false|null$` is anchored as a
  * whole, so a secret containing "false", starting with "true" or ending with
  * "null" is no longer allowed.
+ * v13 = pass 2 redacts Convex deploy keys (`prod:`, `dev:`, `preview:`,
+ * `project:`; `|` or `%7C`), and pass 1 also matches each known value's
+ * URL-decoded and URL-encoded forms.
  */
-export const SCRUBBER_RULES_VERSION = 12;
+export const SCRUBBER_RULES_VERSION = 13;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -185,13 +188,39 @@ export function normalizeKey(key: string): string {
 const MIN_VALUE_LENGTH = 12;
 
 /**
- * Every form a known value can take in a log line: raw, escaped inside shell
- * double quotes (`declare -x` / `export -p` prefix `\`, `$`, `"` and backtick
- * with a backslash), inside shell single quotes, and each of those again as a
- * JSON string body (session logs are JSONL).
+ * A known value, its URL-decoded form and that form URL-encoded. A secret
+ * stored percent-encoded (`a%7Cb`) is often decoded before use
+ * (`${KEY//%7C/|}`), and a raw one is encoded into URLs, so either form can
+ * reach a log without equalling the stored value.
+ */
+export function urlForms(value: string): string[] {
+  const forms = new Set([value]);
+  try {
+    const decoded = decodeURIComponent(value);
+    forms.add(decoded);
+    forms.add(encodeURIComponent(decoded));
+  } catch {
+    // Not valid percent-encoding, or a lone surrogate: the raw value only.
+  }
+  return [...forms];
+}
+
+/**
+ * Every form a known value can take in a log line: raw, URL-decoded and
+ * URL-encoded (see `urlForms`), each escaped inside shell double quotes
+ * (`declare -x` / `export -p` prefix `\`, `$`, `"` and backtick with a
+ * backslash), inside shell single quotes, and each of those again as a JSON
+ * string body (session logs are JSONL). A URL form shorter than
+ * MIN_VALUE_LENGTH is dropped; the caller has already checked `value`.
  */
 function escapedForms(value: string): string[] {
-  const forms = new Set([value, value.replace(/[\\$"`]/g, "\\$&"), value.replaceAll("'", "'\\''")]);
+  const forms = new Set<string>();
+  for (const base of urlForms(value)) {
+    if (base !== value && base.length < MIN_VALUE_LENGTH) continue;
+    forms.add(base);
+    forms.add(base.replace(/[\\$"`]/g, "\\$&"));
+    forms.add(base.replaceAll("'", "'\\''"));
+  }
   for (const form of [...forms]) forms.add(JSON.stringify(form).slice(1, -1));
   return [...forms];
 }
@@ -504,6 +533,9 @@ const TB = String.raw`(?:(?<=\\[nrtbfu0])|(?<!\w))`;
 // ending in `-` has no word boundary after it, so `\b` backtracks and leaves
 // the last character behind.
 
+/** A Convex deployment name, team slug or project slug. */
+const CONVEX_SLUG = "[a-z0-9][a-z0-9-]{0,63}";
+
 const TOKEN_REGEXES: ReadonlyArray<{ name: string; lits: string[]; re: RegExp }> = [
   // GitHub fine-grained PATs
   { name: "github_pat", lits: ["github_pat_"], re: /github_pat_[A-Za-z0-9_]{20,}/g },
@@ -659,6 +691,20 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; lits: string[]; re: RegExp }>
     name: "telegram_bot_token",
     lits: [":AA"],
     re: new RegExp(String.raw`${TB}\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])`, "g"),
+  },
+  // Convex deploy keys and project tokens (docs.convex.dev/cli/deploy-key-types):
+  // `prod:<deployment>|<token>`, `dev:<deployment>|<token>`,
+  // `preview:<team>:<project>|<token>`, `project:<team>:<project>|<token>`.
+  // The `|` often arrives URL-encoded as `%7C`, and the base64 token's `+`, `/`
+  // and `=` as `%2B`, `%2F` and `%3D`. The 20-char token floor keeps prose
+  // (`prod: done`) and short URL params (`q=dev:a%7Cb`) out.
+  {
+    name: "convex_deploy_key",
+    lits: ["prod:", "dev:", "preview:", "project:"],
+    re: new RegExp(
+      String.raw`${TB}(?:(?:prod|dev):${CONVEX_SLUG}|(?:preview|project):${CONVEX_SLUG}:${CONVEX_SLUG})(?:\||%7[Cc])(?:[A-Za-z0-9+/_-]|%2[BbFf]){20,}(?:=|%3[Dd]){0,2}`,
+      "g",
+    ),
   },
 ];
 

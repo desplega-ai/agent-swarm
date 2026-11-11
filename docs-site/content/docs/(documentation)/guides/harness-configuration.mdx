@@ -1,18 +1,22 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, Grok, or fx) that powers your agents
+description: Configure the harness (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, Grok, or fx) that powers your agents
 agent:
   offer: true
-  when: "Someone wants agents to run on a different AI provider or coding CLI"
+  when: "Someone wants agents to run on a different harness or coding CLI"
 ---
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
-Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
+Agent Swarm uses a **harness** abstraction to decouple task execution from the model behind it. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which harness is underneath.
 
-## Supported Providers
+## Harness vs. provider
 
-| Provider | `HARNESS_PROVIDER` | Description |
+A **harness** is the runtime that drives the model: Claude Code, Codex, opencode, pi-mono and the others below. `HARNESS_PROVIDER` picks it, one per worker. A **provider** is the account, key or gateway that authorizes model calls: an Anthropic or OpenAI API key, a Claude or ChatGPT subscription, DeepSeek, or a gateway such as OpenRouter. One harness can use several providers, and one provider can serve several harnesses. The dashboard's [AI providers](/docs/ui#ai-providers) page manages provider credentials, not harnesses; [Model Gateways](/docs/guides/provider-auth/model-gateways) covers routing a harness through a gateway.
+
+## Supported harnesses
+
+| Harness | `HARNESS_PROVIDER` | Description |
 |----------|-------------------|-------------|
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
 | **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
@@ -29,7 +33,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 
 ## How It Works
 
-The `HARNESS_PROVIDER` environment variable selects which provider adapter is used. The runner creates the adapter at startup:
+The `HARNESS_PROVIDER` environment variable selects which harness adapter is used. The runner creates the adapter at startup:
 
 ```
 HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
@@ -50,7 +54,7 @@ HARNESS_PROVIDER=grok            →  GrokAdapter           →  starts `grok ag
 HARNESS_PROVIDER=fx              →  FxAdapter             →  starts `fx acp` through ACP
 ```
 
-Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
+Every adapter implements the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
 When the runner refreshes an already-cloned repo for a new task, dirty working trees are auto-stashed instead of forcing a skipped pull. Any resulting `swarm-autostash` refs are appended to the composed prompt so the agent can restore them intentionally with `git stash apply <ref>` or `git stash pop <ref>` when that work matters to the current task.
 
@@ -462,7 +466,7 @@ Default: `claude-sonnet-5`. Override per-worker via `MANAGED_AGENT_MODEL`, or pe
 - **System prompt rides in the user message** with a `cache_control: { type: "ephemeral" }` breakpoint between the static prefix and the per-task body, so the static prefix is cache-hit across tasks for the same agent.
 - **Repo provisioning** uses `resources: [{ type: "github_repository", url, authorization_token, checkout: { type: "branch", name: "main" } }]` on `sessions.create` when the task carries `vcsRepo`. Anthropic clones into `/workspace/<repo-name>` server-side before the agent runs.
 
-For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#12-claude-managed-agents-pre-existing-agent-environment-pattern).
+For full harness design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#12-claude-managed-agents-pre-existing-agent-environment-pattern).
 
 ---
 
@@ -622,7 +626,7 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 
 - **The target receives a session-scoped `aseph_` token.** `newSession`'s swarm MCP server entry carries this token as an `Authorization` header (see [How it works](#how-it-works) above). The adapter mints it for the session's agent and task, with a 24-hour expiry, and fails closed if minting fails; it never falls back to the operator key. Session completion starts best-effort revocation. If revocation fails, the token remains valid until expiry. `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that agent's swarm MCP access for up to 24 hours.
 - **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode`, `gemini`, `copilot`, `qwen`, `kiro-cli` or `goose` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
-- **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
+- **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported harness always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
 
 For full adapter internals (the `SwarmAcpClient`/`ACPSession` classes, MCP server translation, event mapping), see [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) and [Adding a Harness Provider](/docs/guides/harness-providers).
@@ -692,7 +696,7 @@ ACU usage.
 
 ---
 
-## Choosing a Provider
+## Choosing a harness
 
 | Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed | ACP |
 |---------------|-------------|-------|----------|---------|----------------|-----|
@@ -729,7 +733,7 @@ A running worker sees a changed key when its idle poll returns, within about a m
 Workers repeat the tests every 10 minutes while a key is rejected.
 A key that the provider rejects with HTTP 401 is skipped until it passes or leaves the pool.
 A key that gets HTTP 403 shows a failed check, but workers keep using it: a valid key can lack the scope that the check endpoint needs.
-The provider keys on Connect → AI providers and the setup step show these results.
+The provider keys on [Connect → AI providers](/docs/ui#ai-providers) and the setup step show these results.
 Other users of a pooled key also send one member per call: memory embeddings, internal AI calls (memory rating, session summaries, workflow LLM nodes), audio transcription, and the claude-managed integration test.
 When the memory setup step reuses a pooled key, it tests and saves the first member.
 
@@ -868,7 +872,7 @@ GITHUB_TOKEN=ghp_...
 
 ### Mixed Swarm
 
-You can run different providers for different agents in the same swarm. For example, a Claude Code lead with pi-mono workers:
+You can run different harnesses for different agents in the same swarm. For example, a Claude Code lead with pi-mono workers:
 
 ```bash
 # .env.docker-lead
@@ -893,7 +897,7 @@ The container booted but no harness credentials are present. This is expected �
 
 The `claude` binary must be in `$PATH` inside the Docker container. The worker Docker image includes it by default. If using a custom image, set `CLAUDE_BINARY=/path/to/claude`.
 
-### Wrong provider selected
+### Wrong harness selected
 
 Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If it says `claude` when you expected `pi`, ensure `HARNESS_PROVIDER=pi` is in your env file and not being overridden.
 

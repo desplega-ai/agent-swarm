@@ -499,8 +499,8 @@ const READ_RETRY_STATUSES = new Set([502, 503, 504]);
 
 // MCP tool names that only read. Prefix/suffix rules cover get-* / list-* /
 // *-get / *-list / *-search; the set lists the rest. A tool missing here is
-// treated as a write, which is the safe default. tool-annotations.test.ts
-// fails when a tool annotated `readOnlyHint: true` is missing here.
+// treated as a write, which is the safe default. Nothing checks this list
+// against `readOnlyHint` annotations; add a read-only tool here by hand.
 // read-messages may mark messages read; repeating that is harmless.
 const READ_TOOL_PATTERN = /^(get|list)-|-(get|list|search)$/;
 const READ_TOOLS = new Set([

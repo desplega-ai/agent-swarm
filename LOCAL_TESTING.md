@@ -278,13 +278,16 @@ Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/R
 
 ### CI
 
-`.github/workflows/ui-e2e.yml` runs the suite in two shards on pull requests that touch the UI, the API, or the package, and on pushes to `main`.
-It is informational: it is not a required check. It merges the shard reports into the `ui-e2e-html-report` artifact and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results.
+Merge Gate runs the suite in four duration-balanced shards (`.github/workflows/ui-e2e-shards.yml`, weights in `packages/ui-e2e/shard-weights.json`) on pull requests and merge groups that touch the UI, the API, or the package, and needs it: it is a required check.
+A spec reruns once. A pass on the rerun is reported as `flaky` and does not fail the shard.
+Each shard records dashboard line coverage (`UI_E2E_COVERAGE=1`: a sourcemapped build plus V8 JS coverage per test, written as `packages/ui-e2e/coverage/lcov.info`).
+`.github/workflows/ui-e2e-report.yml` merges the shard reports into the `ui-e2e-html-report` artifact, merges the coverage, and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results and the coverage line. Merge Gate does not need the report job.
+`.github/workflows/ui-e2e.yml` is the nightly and manual entry to the same two workflows.
 Screenshot links in the comment need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only.
 
 ### Tracker ingest and artifacts
 
-After a run, the `report` job in `.github/workflows/ui-e2e.yml` uploads artifacts to agent-fs and posts one payload per shard to the UI E2E tracker.
+After a run, `.github/workflows/ui-e2e-report.yml` uploads artifacts to agent-fs and posts one payload per shard to the UI E2E tracker. With coverage, the payloads are v2 (`suite: "ui"`) and the first carries the `coverage` block (total and per-file lines).
 
 Screenshots, traces, and each shard's `summary.json` go to agent-fs under `e2e/desplega-ai__agent-swarm/<pr-N|main>/<sha>/<shard>/`. The publish step writes `artifacts.json` (agent-fs paths, kinds, spec ids, sizes) and `images.json` (7-day signed URLs for the comment, failures first, capped at 24).
 

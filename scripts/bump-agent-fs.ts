@@ -52,7 +52,7 @@ export const PINS: Pin[] = [
     pattern: AGENT_FS_HELM_TAG_PATTERN,
   },
   {
-    path: ".github/workflows/ui-e2e.yml",
+    path: ".github/workflows/ui-e2e-report.yml",
     pattern: /^([ \t]*npm i -g @desplega\.ai\/agent-fs@)(\S+)$/m,
   },
   {
