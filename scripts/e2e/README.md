@@ -11,7 +11,9 @@ scenario nor excluded with a reason in `coverage-manifest.json`. CI runs strict.
 
 ```bash
 bun run e2e                       # every scenario, coverage report, no gate
-bun run e2e --strict              # the CI contract
+bun run e2e --strict              # the full contract, one process
+bun run e2e --shard 2/3           # one fixed band, as each CI shard runs it
+bun scripts/e2e/merge.ts --strict shard-1.json shard-2.json shard-3.json  # gate the union
 bun run e2e --only <name>,<name>  # while authoring
 bun run e2e --list                # scenario names in run order
 bun run e2e --keep                # keep the db, logs and temp dirs after the run
@@ -28,6 +30,7 @@ This file is the authoring guide.
 | Path | Role |
 |---|---|
 | `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, reruns failures once on a fresh SUT, computes coverage, applies gates, writes reports. |
+| `shard.ts`, `merge.ts` | `--shard i/3` bands (`SHARD_CUTS`) and the raw coverage observations a shard writes; `merge.ts` unions them and applies `--strict` and the minimums once. |
 | `rerun.ts` | Rerun plan (`needs`, transitively) and how two attempts settle into one result (`flaky` or `fail`). |
 | `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
@@ -127,6 +130,20 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 500-599 | knowledge: memory, skills, prompt templates, pages, assets, apps, rooms |
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
+
+### Shards
+
+CI splits the run into three bands by `order`, cut at 130 and 140 (`SHARD_CUTS` in
+`shard.ts`): shard 1 runs below 130, shard 2 runs 130 up to 140, shard 3 runs 140 on. Each
+band boots its own API process and database, so a band starts from a fresh server. The cuts
+sit where the Slack renderer flags change for the rest of a process: `SLACK_RENDER_V2` goes
+on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
+
+- A scenario's `needs` must sit in its own band. `--shard` refuses to start when one crosses
+  a cut.
+- A scenario at the start of a band must set the flag state it asserts itself. Placing a
+  scenario that relied on an earlier band's leftovers just after a cut breaks it in CI only.
+  Check with `bun run e2e --shard i/3 --only <name>` before you pick an order near a cut.
 
 ## The scenario context
 
