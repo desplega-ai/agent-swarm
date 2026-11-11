@@ -871,19 +871,11 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
+    // The task is already `superseded` (terminal), so `failTask` would be a no-op:
+    // it stays superseded and is not an auto-failure. Dependents fail as before.
     await settleSupersededTaskDependents(task.id, null);
-    const failed = await failTask(task.id, reason);
-    if (failed) {
-      findings.autoFailedTasks.push({
-        taskId: task.id,
-        agentId: task.agentId,
-        reason,
-      });
-    }
     console.warn(
-      `[Heartbeat] Task ${task.id.slice(0, 8)} failed because no resume was created (${
-        resume.kind === "skipped" ? resume.reason : "workflow-skip"
-      })`,
+      `[Heartbeat] Task ${task.id.slice(0, 8)} left superseded: no resume was created (${reason})`,
     );
   }
 

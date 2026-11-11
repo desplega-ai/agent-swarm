@@ -499,7 +499,7 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 # supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:
 if resume created: backfillSupersedeTaskResumeTaskId(parent, resume)   # log entry + settle(parent, resume)
-else:              settleSupersededTaskDependents(parent, null); failTask(parent, resume_creation_skipped_<reason>)
+else:              settleSupersededTaskDependents(parent, null)   # parent stays superseded (terminal); failTask would no-op; warn only
 clean session when stale or pooled
 restore agent state
 if pooled: recover sibling sessions under the same runtime lock
