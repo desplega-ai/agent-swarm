@@ -200,6 +200,8 @@ export interface PrimitiveObject {
   title: string | null;
   fileVersion: number | null;
   ownerAgentId: string | null;
+  /** Set when agent-fs reported the file deleted. */
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   /** Live app link to the file. */
@@ -208,10 +210,13 @@ export interface PrimitiveObject {
 
 export interface PrimitiveReindexReport {
   scanned: number;
+  /** Files whose version matched the index: checked, not re-read. */
+  unchanged: number;
   adopted: string[];
   restored: string[];
   missing: string[];
   conflicts: Array<{ path: string; reason: string }>;
+  /** More files remain (at most 50 reads per call): run again. */
   truncated: boolean;
 }
 

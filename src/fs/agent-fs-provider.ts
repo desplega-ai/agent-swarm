@@ -307,6 +307,13 @@ export class AgentFsProvider implements FileStorageProvider {
     return (await this.ops({ op: "comment-get", id }, drive)) as AgentFsCommentThread;
   }
 
+  /** Current version of one file from the `stat` op; null when agent-fs reports none. */
+  async currentVersion(scope: FileScope): Promise<number | null> {
+    const result = asRecord(await this.ops({ op: "stat", path: providerPath(scope) }, scope));
+    const version = result?.currentVersion;
+    return typeof version === "number" && Number.isFinite(version) ? version : null;
+  }
+
   /** `log` of one file (at most 200 versions). */
   async getFileVersions(drive: AgentFsDrive, path: string): Promise<AgentFsFileVersion[]> {
     const result = asRecord(await this.ops({ op: "log", path, limit: 200 }, drive));
@@ -429,7 +436,13 @@ export class AgentFsProvider implements FileStorageProvider {
           cause: error,
         });
       }
-      throw error;
+      // fetch rejects only when no response arrived: a refused or reset
+      // connection, DNS, TLS. Callers handle it like any other provider error.
+      throw new FilesError(
+        "Provider",
+        `agent-fs is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     } finally {
       clearTimeout(timer);
     }

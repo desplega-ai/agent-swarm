@@ -22,6 +22,7 @@ const objectOutputSchema = z.looseObject({
   title: z.string().nullable().optional(),
   fileVersion: z.number().nullable().optional(),
   ownerAgentId: z.string().nullable().optional(),
+  deletedAt: z.string().nullable().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   link: z.string().nullable().optional(),
@@ -124,7 +125,7 @@ export const registerObjectListTool = (server: McpServer) => {
     {
       title: "List primitive objects",
       description:
-        "List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.",
+        "List primitive objects on your default agent-fs drive, newest first. Hides objects whose file agent-fs reported deleted. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.",
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         kind: KindSchema.optional(),
@@ -159,11 +160,12 @@ export const registerObjectReindexTool = (server: McpServer) => {
       title: "Reindex primitive objects",
       annotations: { readOnlyHint: false, idempotentHint: true },
       description:
-        "Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.",
+        "Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, so run it again while `truncated` is true. agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.",
       inputSchema: z.object({ kind: KindSchema.optional() }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         scanned: z.number().optional(),
+        unchanged: z.number().optional(),
         adopted: z.array(z.string()).optional(),
         restored: z.array(z.string()).optional(),
         missing: z.array(z.string()).optional(),
@@ -178,7 +180,7 @@ export const registerObjectReindexTool = (server: McpServer) => {
       if ("error" in result) return result.error;
       const report = result.value;
       return toolOk(
-        `Scanned ${report.scanned} files: ${report.adopted.length} adopted, ${report.restored.length} restored, ${report.missing.length} missing, ${report.conflicts.length} skipped${report.truncated ? " (truncated)" : ""}.`,
+        `Scanned ${report.scanned} files: ${report.unchanged} unchanged, ${report.adopted.length} adopted, ${report.restored.length} restored, ${report.missing.length} missing, ${report.conflicts.length} skipped${report.truncated ? " (truncated)" : ""}.`,
         { data: { yourAgentId: requestInfo.agentId, ...report } },
       );
     },

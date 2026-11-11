@@ -54,7 +54,7 @@ export const PRIMITIVE_KIND_NAMES = Object.keys(PRIMITIVE_KINDS) as [string, ...
 export class ObjectsError extends Error {}
 
 export const NO_AGENT_FS_IDENTITY =
-  "agent has no own AGENT_FS_API_KEY (agent-scoped config) or no AGENT_FS_API_URL / AGENT_FS_DEFAULT_ORG_ID / AGENT_FS_DEFAULT_DRIVE_ID";
+  "agent-fs is not configured for this agent: objects need the agent's own AGENT_FS_API_KEY (agent-scoped config) plus AGENT_FS_API_URL, AGENT_FS_DEFAULT_ORG_ID and AGENT_FS_DEFAULT_DRIVE_ID";
 
 type ObjectRow = {
   id: string;
@@ -65,6 +65,8 @@ type ObjectRow = {
   title: string | null;
   fileVersion: number | null;
   ownerAgentId: string | null;
+  /** Set when agent-fs reported the file deleted; object-list hides the row. */
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -72,8 +74,13 @@ type ObjectRow = {
 export type PrimitiveObject = ObjectRow & { link: string | null };
 
 const MAX_LIST_LIMIT = 200;
-// shortcut: one reindex call reads at most this many files sequentially; page by kind or add a cursor when a drive outgrows it.
+// shortcut: one reindex call considers at most this many files; page by kind or add a cursor when a drive outgrows it.
 const MAX_REINDEX_FILES = 500;
+// Full downloads per reindex call. Unchanged files cost one `stat` and no read,
+// so repeated calls converge: each one reads at most this many changed files.
+const MAX_REINDEX_READS = 50;
+// shortcut: in-process only; two API replicas can still reindex one drive at once (each pass is safe, just duplicated work).
+const reindexing = new Set<string>();
 
 const withLink = (row: ObjectRow): PrimitiveObject => ({ ...row, link: buildAgentFsLiveUrl(row) });
 
@@ -107,7 +114,9 @@ const versionOf = (value: string | null | undefined): number | null =>
  * Point the row with `id` at `path`. A row at the same path with another id is
  * replaced: the file there now carries `id`, and the file wins.
  */
-async function saveRow(row: Omit<ObjectRow, "createdAt" | "updatedAt">): Promise<ObjectRow> {
+async function saveRow(
+  row: Omit<ObjectRow, "createdAt" | "updatedAt" | "deletedAt">,
+): Promise<ObjectRow> {
   const now = new Date().toISOString();
   return getDbClient().transaction(async (tx) => {
     await tx.run(
@@ -121,7 +130,7 @@ async function saveRow(row: Omit<ObjectRow, "createdAt" | "updatedAt">): Promise
        ON CONFLICT(id) DO UPDATE SET
          kind = excluded.kind, orgId = excluded.orgId, driveId = excluded.driveId,
          path = excluded.path, title = COALESCE(excluded.title, primitive_objects.title),
-         fileVersion = excluded.fileVersion, updatedAt = excluded.updatedAt`,
+         fileVersion = excluded.fileVersion, deletedAt = NULL, updatedAt = excluded.updatedAt`,
       [
         row.id,
         row.kind,
@@ -179,7 +188,18 @@ export async function createObject(input: {
     fileVersion: versionOf(version),
     ownerAgentId: input.agentId ?? null,
   });
+  watchDrive(orgId, driveId);
   return withLink(row);
+}
+
+/**
+ * Best-effort: make sure agent-fs tells the swarm about changes on this drive
+ * (object-webhooks.ts). Not awaited, never throws: object tools work without it.
+ */
+function watchDrive(orgId: string, driveId: string): void {
+  void import("./object-webhooks")
+    .then(({ ensureObjectWebhook }) => ensureObjectWebhook(orgId, driveId))
+    .catch(() => undefined);
 }
 
 export async function getObject(input: {
@@ -241,7 +261,7 @@ export async function listObjects(input: {
 }): Promise<{ objects: PrimitiveObject[]; total: number }> {
   if (input.kind) kindFor(input.kind);
   const { orgId, driveId } = await clientFor(input.agentId);
-  const where = ["orgId = ?", "driveId = ?"];
+  const where = ["orgId = ?", "driveId = ?", "deletedAt IS NULL"];
   const params: string[] = [orgId, driveId];
   if (input.kind) {
     where.push("kind = ?");
@@ -268,6 +288,8 @@ export async function listObjects(input: {
 
 export type ReindexReport = {
   scanned: number;
+  /** Files whose version matches the row's: checked with `stat`, not read. */
+  unchanged: number;
   /** Files with no embedded id that got one written back. */
   adopted: string[];
   /** Files whose embedded id had no row on this drive. */
@@ -276,6 +298,7 @@ export type ReindexReport = {
   missing: string[];
   /** Files skipped: changed during write-back, or not valid JSON. */
   conflicts: Array<{ path: string; reason: string }>;
+  /** More files remain: over the file cap or the read cap. Run again to continue. */
   truncated: boolean;
 };
 
@@ -285,18 +308,42 @@ export async function reindexObjects(input: {
 }): Promise<ReindexReport> {
   const kinds = input.kind ? [input.kind] : PRIMITIVE_KIND_NAMES;
   for (const kind of kinds) kindFor(kind);
-  const { provider, orgId, driveId, scope } = await clientFor(input.agentId);
+  const client = await clientFor(input.agentId);
+  const lock = `${client.orgId}\u0000${client.driveId}`;
+  if (reindexing.has(lock)) {
+    throw new ObjectsError(
+      "object-reindex is already running on this drive; run it again when it finishes",
+    );
+  }
+  reindexing.add(lock);
+  try {
+    const report = await reindexDrive(client, kinds, input.agentId);
+    watchDrive(client.orgId, client.driveId);
+    return report;
+  } finally {
+    reindexing.delete(lock);
+  }
+}
+
+async function reindexDrive(
+  { provider, orgId, driveId, scope }: Awaited<ReturnType<typeof clientFor>>,
+  kinds: string[],
+  agentId: string | undefined,
+): Promise<ReindexReport> {
   const db = getDbClient();
   const report: ReindexReport = {
     scanned: 0,
+    unchanged: 0,
     adopted: [],
     restored: [],
     missing: [],
     conflicts: [],
     truncated: false,
   };
+  let reads = 0;
 
   for (const kindName of kinds) {
+    if (report.truncated) break;
     const kind = kindFor(kindName);
     const all = (await provider.glob(kind.glob)).map((p) => p.replace(/^\/+/, ""));
     const paths = all.slice(0, MAX_REINDEX_FILES - report.scanned);
@@ -306,7 +353,32 @@ export async function reindexObjects(input: {
     const claimed = new Map<string, string>();
 
     for (const path of paths) {
+      const atPath = await db.get<ObjectRow>(
+        "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
+        [orgId, driveId, path],
+      );
+      if (atPath && !atPath.deletedAt && atPath.fileVersion !== null) {
+        let current: number | null = null;
+        try {
+          current = await provider.currentVersion(scope(path));
+        } catch (error) {
+          if (error instanceof FilesError && error.code === "Unauthorized") throw error;
+          // No stat (older agent-fs, a flaky call): fall through to a full read.
+        }
+        if (current === atPath.fileVersion) {
+          report.scanned += 1;
+          report.unchanged += 1;
+          claimed.set(atPath.id, path);
+          continue;
+        }
+      }
+      if (reads >= MAX_REINDEX_READS) {
+        report.truncated = true;
+        break;
+      }
+      reads += 1;
       report.scanned += 1;
+
       let json: Json;
       let version: string | null;
       try {
@@ -323,10 +395,6 @@ export async function reindexObjects(input: {
         continue;
       }
 
-      const atPath = await db.get<ObjectRow>(
-        "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
-        [orgId, driveId, path],
-      );
       let id = kind.readId(json);
       if (id) {
         const byId = await db.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
@@ -371,7 +439,7 @@ export async function reindexObjects(input: {
         path,
         title: typeof title === "string" ? title : (atPath?.title ?? null),
         fileVersion: versionOf(version),
-        ownerAgentId: atPath?.ownerAgentId ?? input.agentId ?? null,
+        ownerAgentId: atPath?.ownerAgentId ?? agentId ?? null,
       });
     }
 
@@ -384,4 +452,114 @@ export async function reindexObjects(input: {
     }
   }
   return report;
+}
+
+/** One `file.changed` event from agent-fs: metadata only, never content. */
+export type FileChange = {
+  orgId: string;
+  driveId: string;
+  path: string;
+  version: number;
+  operation: string;
+};
+
+/** Reads the changed file's drive. The webhook path never writes to agent-fs. */
+export type FileChangeReader = {
+  download(path: string): Promise<Response>;
+  exists(path: string): Promise<boolean>;
+};
+
+export type FileChangeResult = {
+  action: "updated" | "tombstoned" | "restored" | "moved" | "ignored";
+  path: string;
+  id?: string;
+  reason?: string;
+};
+
+/**
+ * Apply one agent-fs `file.changed` event to the pointer rows. Idempotent and
+ * order-safe: an event at or below the row's `fileVersion` is a no-op, so a
+ * replayed or late delivery changes nothing. Never writes to agent-fs (that
+ * would emit another event); a file with no id, or a copy, is left for
+ * object-reindex.
+ */
+export async function applyFileChange(
+  change: FileChange,
+  reader: FileChangeReader,
+): Promise<FileChangeResult> {
+  const path = change.path.replace(/^\/+/, "");
+  const [kindName, kind] =
+    Object.entries(PRIMITIVE_KINDS).find(([, k]) => path.endsWith(k.suffix)) ?? [];
+  if (!kindName || !kind) return { action: "ignored", path, reason: "not an object path" };
+  const db = getDbClient();
+  const { orgId, driveId, version } = change;
+  const now = new Date().toISOString();
+  const atPath = await db.get<ObjectRow>(
+    "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
+    [orgId, driveId, path],
+  );
+  const stale = (row: ObjectRow) => row.fileVersion !== null && version <= row.fileVersion;
+
+  if (change.operation === "delete") {
+    if (!atPath) return { action: "ignored", path, reason: "no object at this path" };
+    if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
+    await db.run(
+      "UPDATE primitive_objects SET deletedAt = ?, fileVersion = ?, updatedAt = ? WHERE id = ?",
+      [now, version, now, atPath.id],
+    );
+    return { action: "tombstoned", path, id: atPath.id };
+  }
+
+  if (atPath) {
+    if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
+    await db.run(
+      "UPDATE primitive_objects SET deletedAt = NULL, fileVersion = ?, updatedAt = ? WHERE id = ?",
+      [version, now, atPath.id],
+    );
+    return { action: "updated", path, id: atPath.id };
+  }
+
+  // A file with no row: a move target, a restored file, or a new or copied one.
+  let json: Json;
+  let fileVersion: number | null;
+  try {
+    const response = await reader.download(path);
+    fileVersion = versionOf(response.headers.get("x-agent-fs-version"));
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error("not an object");
+    json = parsed as Json;
+  } catch (error) {
+    if (error instanceof FilesError && error.code === "NotFound") {
+      return { action: "ignored", path, reason: "file is already gone" };
+    }
+    if (error instanceof FilesError) throw error;
+    return { action: "ignored", path, reason: "not a JSON object; object-reindex reports it" };
+  }
+  const id = kind.readId(json);
+  if (!id) return { action: "ignored", path, reason: "no embedded id; object-reindex adopts it" };
+  const byId = await db.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
+  if (byId && (byId.orgId !== orgId || byId.driveId !== driveId)) {
+    return { action: "ignored", path, id, reason: "the id belongs to another drive" };
+  }
+  if (byId && !byId.deletedAt && (await reader.exists(byId.path))) {
+    return {
+      action: "ignored",
+      path,
+      id,
+      reason: `copy of ${byId.path}; object-reindex gives it a new id`,
+    };
+  }
+  const title = swarmBlock(json).title;
+  await saveRow({
+    id,
+    kind: kindName,
+    orgId,
+    driveId,
+    path,
+    title: typeof title === "string" ? title : (byId?.title ?? null),
+    fileVersion: fileVersion ?? version,
+    ownerAgentId: byId?.ownerAgentId ?? null,
+  });
+  return { action: byId ? "moved" : "restored", path, id };
 }

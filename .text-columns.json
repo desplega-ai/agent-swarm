@@ -45,6 +45,48 @@
       "exempt": "identifier"
     }
   },
+  "agent_fs_object_webhooks": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "orgId": {
+      "exempt": "identifier"
+    },
+    "driveId": {
+      "exempt": "identifier"
+    },
+    "subscriptionId": {
+      "exempt": "identifier"
+    },
+    "url": {
+      "exempt": "receiver URL built from MCP_BASE_URL and the row id; must match what agent-fs stores"
+    },
+    "secretCiphertext": {
+      "exempt": "ciphertext"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastError": "scrubbed",
+    "claimedAt": {
+      "exempt": "timestamp"
+    },
+    "attemptedAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "agent_log": {
     "id": {
       "exempt": "identifier"
@@ -1948,6 +1990,9 @@
     },
     "updated_by": {
       "exempt": "identifier"
+    },
+    "deletedAt": {
+      "exempt": "timestamp"
     }
   },
   "principal_roles": {

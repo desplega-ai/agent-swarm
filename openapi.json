@@ -33246,6 +33246,103 @@
         }
       }
     },
+    "/api/objects/agent-fs-webhook/{id}": {
+      "post": {
+        "summary": "Receive agent-fs file.changed events that keep primitive objects in sync",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Receiver id the swarm registered with agent-fs"
+            },
+            "required": true,
+            "description": "Receiver id the swarm registered with agent-fs",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event applied or ignored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "updated",
+                        "tombstoned",
+                        "restored",
+                        "moved",
+                        "ignored"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "path"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not a valid event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown receiver, missing headers or invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 64 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent-fs could not be read; agent-fs retries the delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/oauth/refresh-locks/{key}": {
       "post": {
         "summary": "Acquire a cross-process OAuth refresh lock",

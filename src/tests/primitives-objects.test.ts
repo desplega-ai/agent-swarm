@@ -67,11 +67,15 @@ const fake = Bun.serve({
 const agentId = crypto.randomUUID();
 const keylessAgentId = crypto.randomUUID();
 const savedServiceKey = process.env.API_AGENT_FS_API_KEY;
+const savedPublicBase = process.env.PUBLIC_MCP_BASE_URL;
 
 beforeAll(async () => {
   initDb(":memory:");
   // The service key is configured too: the objects path must never use it.
   process.env.API_AGENT_FS_API_KEY = SERVICE_KEY;
+  // Webhook registration (which does use the service key) needs an https base
+  // URL; keep it off here. primitives-object-webhooks.test.ts covers it.
+  process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
   const global = { scope: "global" as const, scopeId: null, isSecret: false };
   await upsertSwarmConfig({
     ...global,
@@ -100,6 +104,8 @@ afterAll(() => {
   closeDb();
   if (savedServiceKey === undefined) delete process.env.API_AGENT_FS_API_KEY;
   else process.env.API_AGENT_FS_API_KEY = savedServiceKey;
+  if (savedPublicBase === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
+  else process.env.PUBLIC_MCP_BASE_URL = savedPublicBase;
 });
 
 beforeEach(async () => {

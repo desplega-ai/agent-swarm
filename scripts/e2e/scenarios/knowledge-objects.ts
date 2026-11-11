@@ -135,7 +135,38 @@ export const knowledgeObjects: Scenario = {
 
       await withMcp(ctx, keyless, async (mcp) => {
         const refused = await callToolErr(mcp, "object-list", {});
-        expect(toolText(refused).includes("no own AGENT_FS_API_KEY"), "an agent without a key is refused");
+        expect(
+          toolText(refused).includes("agent-fs is not configured for this agent"),
+          "an agent without a key is refused",
+        );
+      });
+
+      // The agent-fs file.changed receiver is public but signature-gated. The SUT has no
+      // https base URL or agent-fs service key, so no hook registers and every delivery is
+      // refused before it touches a row (the full flow is in primitives-object-webhooks.test.ts).
+      const event = JSON.stringify({
+        type: "file.changed",
+        data: { orgId: org, driveId: drive, path: `/${path}`, version: 99, operation: "delete" },
+      });
+      const receiver = `/api/objects/agent-fs-webhook/${ctx.nonce}`;
+      const signed = await ctx.api("POST", receiver, {
+        apiKey: null,
+        rawBody: event,
+        headers: {
+          "content-type": "application/json",
+          "webhook-id": `msg_${ctx.nonce}`,
+          "webhook-timestamp": String(Math.floor(Date.now() / 1000)),
+          "webhook-signature": "v1,AAAA",
+        },
+      });
+      expectStatus(signed, [401], "unknown receiver with a forged signature");
+      const unsigned = await ctx.api("POST", receiver, { apiKey: null, rawBody: event });
+      expectStatus(unsigned, [401], "receiver without signature headers");
+      const huge = await ctx.api("POST", receiver, { apiKey: null, rawBody: "x".repeat(70_000) });
+      expectStatus(huge, [413], "receiver body cap");
+      await withMcp(ctx, agentId, async (mcp) => {
+        const after = structured(await callToolOk(mcp, "object-get", { path }));
+        expect(asRecord(after.object).deletedAt === null, "a refused delivery tombstones nothing");
       });
 
       // ctx.objects in both executors: unwrapped results, refusals throw.
