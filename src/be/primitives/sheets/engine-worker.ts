@@ -124,8 +124,9 @@ function evaluate(model: Model, { tabs, patches, maxCells }: EngineRequest) {
   for (const patch of patches) {
     const sheet = tabs.findIndex((tab) => tab.name === patch.tab);
     if (sheet < 0) throw new Error(`no such tab: ${patch.tab}`);
-    if (patch.input === "")
-      model.rangeClearContents(sheet, patch.row, patch.col, patch.row, patch.col);
+    // rangeClearAll, not rangeClearContents: clearing a text cell (built with the `'` prefix) leaves a stray `'` that reads back as 0.
+    // A cleared cell is dropped from the file either way, so losing its style costs nothing.
+    if (patch.input === "") model.rangeClearAll(sheet, patch.row, patch.col, patch.row, patch.col);
     else model.setUserInput(sheet, patch.row, patch.col, patch.input);
     touched[sheet]?.add(refOf(patch.row, patch.col));
   }

@@ -374,6 +374,105 @@ declare module "swarm-sdk" {
     exportXlsx(args: SheetExportXlsxArgs): Promise<SheetExportXlsxResult>;
   }
 
+  /** Palette names (Excalidraw's open-color) or a #rrggbb background. */
+  export type BoardColor =
+    | "blue"
+    | "green"
+    | "yellow"
+    | "red"
+    | "violet"
+    | "orange"
+    | "gray"
+    | "teal"
+    | (string & {});
+
+  export interface BoardShape {
+    /** Your name for the shape, so arrows in the same call can point at it. */
+    key?: string;
+    type: "rectangle" | "ellipse" | "diamond" | "text";
+    x?: number;
+    y?: number;
+    /** Minimum size; a shape grows to fit its label. */
+    width?: number;
+    height?: number;
+    /** Text inside the shape; required for `text`. */
+    label?: string;
+    color?: BoardColor;
+  }
+
+  /** `from` / `to`: a shape key from the same call or an existing element id. */
+  export interface BoardArrow {
+    from: string;
+    to: string;
+    label?: string;
+  }
+
+  export interface BoardElementPatch {
+    elementId: string;
+    /** An empty string removes a shape's label. */
+    label?: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    color?: BoardColor;
+  }
+
+  export interface BoardElementSummary {
+    id: string;
+    type: string;
+    /** Free text, or a shape's label; null when it has none. */
+    text: string | null;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    /** Arrow: [from, to] element ids (null when unbound). Shape: ids of its bound arrows. */
+    boundTo: Array<string | null>;
+  }
+
+  export type BoardLayout = "row" | "column" | "grid";
+  export type BoardRef = { id: string; path?: string } | { id?: string; path: string };
+
+  /** What a board call returns besides its own fields. */
+  export interface BoardResult {
+    message: string;
+    object: PrimitiveObject;
+    version: number | null;
+  }
+  export type BoardAdded = BoardResult & { added: Record<string, string> };
+  export type BoardElements<E> = BoardResult & { elements: E[] };
+  export interface BoardAddArgs {
+    shapes?: BoardShape[];
+    arrows?: BoardArrow[];
+    /** How shapes without x/y are placed, below existing content. Default `row`. */
+    layout?: BoardLayout;
+  }
+  export type BoardCreateArgs = BoardAddArgs & { path: string; title?: string };
+  export type BoardPatchArgs = BoardRef & { patches: BoardElementPatch[] };
+  export type BoardRemoveArgs = BoardRef & { elementIds: string[] };
+  export type BoardListArgs = { prefix?: string; limit?: number; offset?: number };
+  export type BoardList = { message: string; objects: PrimitiveObject[]; total: number };
+
+  /**
+   * Excalidraw boards (`.excalidraw`) on your default agent-fs drive, edited as
+   * element JSON. Writes guard on the file version and re-apply on a concurrent
+   * change. Each method throws on a refusal.
+   */
+  export interface BoardsNamespace {
+    /** Create-only. `added` maps each shape key (or `shapes[i]`) and `arrows[i]` to its element id. */
+    create(args: BoardCreateArgs): Promise<BoardAdded>;
+    get(args: BoardRef & { detail?: "summary" }): Promise<BoardElements<BoardElementSummary>>;
+    /** Raw Excalidraw elements (live only) instead of summaries. */
+    get(args: BoardRef & { detail: "full" }): Promise<BoardElements<Record<string, unknown>>>;
+    list(args?: BoardListArgs): Promise<BoardList>;
+    /** Arrows bind both ends to shapes. */
+    addElements(args: BoardRef & BoardAddArgs): Promise<BoardAdded>;
+    updateElements(args: BoardPatchArgs): Promise<BoardResult & { updated: string[] }>;
+    /** Sets `isDeleted: true`; a shape takes its label with it and unbinds its arrows. */
+    removeElements(args: BoardRemoveArgs): Promise<BoardResult & { removed: string[] }>;
+  }
+
   export interface SwarmSdk {
     // --- memory ---
     memory_search(args: {
@@ -490,6 +589,13 @@ declare module "swarm-sdk" {
     sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
     sheets_importXlsx(args: SheetImportXlsxArgs): Promise<unknown>;
     sheets_exportXlsx(args: SheetExportXlsxArgs): Promise<unknown>;
+    // --- boards (prefer ctx.boards.*, which unwraps and throws) ---
+    boards_create(args: BoardCreateArgs): Promise<unknown>;
+    boards_get(args: BoardRef & { detail?: "summary" | "full" }): Promise<unknown>;
+    boards_list(args?: BoardListArgs): Promise<unknown>;
+    boards_addElements(args: BoardRef & BoardAddArgs): Promise<unknown>;
+    boards_updateElements(args: BoardPatchArgs): Promise<unknown>;
+    boards_removeElements(args: BoardRemoveArgs): Promise<unknown>;
     // --- repos ---
     repo_list(args?: Record<string, unknown>): Promise<unknown>;
     // --- schedules ---
@@ -1143,6 +1249,8 @@ declare module "swarm-sdk" {
     objects: ObjectsNamespace;
     /** Sheets on your default agent-fs drive (sheet-* tools). */
     sheets: SheetsNamespace;
+    /** Excalidraw boards on your default agent-fs drive (board-* tools). */
+    boards: BoardsNamespace;
   }
 
   /**

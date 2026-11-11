@@ -92,10 +92,15 @@ export function usedExtent(tab: SheetTab): { rows: number; cols: number } {
   return { rows, cols };
 }
 
-/** What a person would type to store this constant. A string that would parse as a number, boolean or formula gets the `'` text prefix. */
+/**
+ * What a person would type to store this constant. Every string gets the `'` text
+ * prefix: the engine otherwise coerces `$12`, ` 007`, `12%` and `1e3` to numbers.
+ * The engine strips one leading `'` and keeps the rest as text. Formulas never
+ * come through here (`cell.f` and `inputFor` handle them), and "" clears the cell.
+ */
 export function constantInput(v: SheetCell["v"] | undefined): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
   if (typeof v === "number") return String(v);
-  return /^(=|'|[+-]?[\d.]|true$|false$|#)/i.test(v) ? `'${v}` : v;
+  return v === "" ? "" : `'${v}`;
 }

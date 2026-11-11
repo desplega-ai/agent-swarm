@@ -317,10 +317,11 @@ export async function setSheetRange(
   const single = spec.r1 === spec.r2 && spec.c1 === spec.c2;
   // A single cell names the top-left corner; a bigger range must match the values exactly.
   const range = single ? { ...spec, r2: spec.r1 + rows - 1, c2: spec.c1 + cols - 1 } : spec;
-  if (areaOf(range) !== rows * cols) {
-    throw new ObjectsError(
-      `values is ${rows}x${cols} but the range is ${range.r2 - range.r1 + 1}x${range.c2 - range.c1 + 1}`,
-    );
+  const height = range.r2 - range.r1 + 1;
+  const width = range.c2 - range.c1 + 1;
+  // Compare both sides: equal area with another shape (1x4 into 2x2) would write outside the named range.
+  if (height !== rows || width !== cols) {
+    throw new ObjectsError(`values is ${rows}x${cols} but the range is ${height}x${width}`);
   }
   refuse(() => assertInBounds(range));
   checkArea(range, "the range");
