@@ -251,7 +251,8 @@ function steps(adapter: ChatSdkAdapterName, { docsUrl, inviteUrl }: StepContext)
         </>,
         <>
           On the bot's account, open <b>My Account › Personal Access Tokens</b> and generate one.
-          Copy the token into <b>Personal access token</b> and the user id into <b>Bot user ID</b>.
+          Copy the token into <b>Personal access token</b>, the user id into <b>Bot user ID</b>, and
+          that account's username into <b>Bot user name</b> — a mention is matched against it.
         </>,
         <>
           In <b>Administration › Workspace › Integrations</b>, create an <b>Outgoing WebHook</b> of

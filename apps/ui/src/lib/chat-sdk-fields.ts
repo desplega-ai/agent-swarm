@@ -205,7 +205,11 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
         required: true,
         hint: "The Token of the Outgoing WebHook integration. Rocket.Chat sends it with every webhook call.",
       },
-      USER_NAME,
+      {
+        ...USER_NAME,
+        required: true,
+        hint: "The bot account's username, without the @. A mention is matched against it, so a wrong one means the bot never answers.",
+      },
     ],
   },
 ];
