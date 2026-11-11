@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
 import { z } from "zod";
-import { isAgentDeleted } from "../be/agent-history";
 import {
   computeContentHash,
   createAgent,
@@ -15,6 +14,7 @@ import {
   getDbClient,
   getResolvedConfig,
   getSwarmConfigs,
+  isAgentDeleted,
   ReservedAgentRoleError,
   resetEmptyPollCount,
   setAgentHarnessProvider,
@@ -720,11 +720,6 @@ export async function handleAgentRegister(
     }
 
     const agentId = myAgentId || crypto.randomUUID();
-    // A deleted id is not re-created by a restarted worker; restore brings it back.
-    if (await isAgentDeleted(agentId)) {
-      jsonError(res, "agent_deleted", 410);
-      return true;
-    }
     const auth = getRequestAuth(req);
     if (auth?.kind === "agent") {
       parsed.body = { ...parsed.body, isLead: (await getAgentById(auth.agentId))?.isLead ?? false };
@@ -811,6 +806,10 @@ export async function handleAgentRegister(
         return { agent: await getAgentById(agentId), created: false };
       }
 
+      // A deleted id is not re-created by a restarted worker; restore brings it back.
+      // Checked in this transaction so an operator delete cannot commit after the check.
+      if (await isAgentDeleted(agentId)) return null;
+
       const agent = await createAgent({
         id: agentId,
         name: parsed.body.name,
@@ -844,6 +843,10 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     });
+    if (!result) {
+      jsonError(res, "agent_deleted", 410);
+      return true;
+    }
 
     if (parsed.body.harnessCliVersion !== undefined) {
       await setAgentHarnessCliVersion(agentId, parsed.body.harnessCliVersion.trim() || null);

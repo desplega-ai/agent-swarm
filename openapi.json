@@ -58107,6 +58107,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "An operator deleted this agent id (`agent_deleted`); restore it first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },

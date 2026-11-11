@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { isAgentDeleted } from "@/be/agent-history";
 import { createAgent, getAllAgents, getDbClient, updateAgentProfile } from "@/be/db";
 import {
   generateDefaultClaudeMd,
@@ -92,9 +91,6 @@ export const registerJoinSwarmTool = (server: McpServer) => {
 
           if (existingIdAgent) {
             throw new Error(`Agent with ID "${agentId}" already exists.`);
-          }
-          if (await isAgentDeleted(agentId)) {
-            throw new Error(`Agent "${agentId}" was deleted by an operator. Restore it first.`);
           }
 
           const existingAgent = agents.find((agent) => agent.name === name);

@@ -25,6 +25,11 @@ async function deleteAndRestore(ctx: ScenarioContext): Promise<void> {
   });
   expectStatus(response, [410], "re-register a deleted agent");
   expect(asRecord(response.json).error === "agent_deleted", "Register did not say agent_deleted");
+  // Nor can a worker-token mint, which creates a missing agent when given a name.
+  response = await ctx.api("POST", `/api/agents/${agentId}/token`, {
+    body: { name: `core-lifecycle-${ctx.nonce}` },
+  });
+  expectStatus(response, [410], "mint a token for a deleted agent");
 
   response = await ctx.api("POST", `/api/agents/${agentId}/restore`, {
     body: { reason: "bring it back" },

@@ -14,11 +14,11 @@ import {
 import {
   AgentHistoryError,
   deleteAgentToHistory,
-  isAgentDeleted,
   listAgentHistory,
   restoreAgentFromHistory,
 } from "../be/agent-history";
 import {
+  AgentDeletedError,
   closeDb,
   createAgent,
   createScheduledTask,
@@ -27,6 +27,7 @@ import {
   getAgentById,
   getDbClient,
   initDb,
+  isAgentDeleted,
 } from "../be/db";
 import {
   mintAgentToken,
@@ -35,6 +36,7 @@ import {
   mintSessionToken,
 } from "../be/users";
 import { ensureExtensionAgent } from "../extensions/identity";
+import { handleAgentRegister } from "../http/agents";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -84,6 +86,7 @@ beforeAll(async () => {
     const pathSegments = getPathSegments(req.url ?? "");
     const query = parseQueryParams(req.url ?? "");
     if (await handleTasks(req, res, pathSegments, query, myAgentId)) return;
+    if (await handleAgentRegister(req, res, pathSegments, myAgentId)) return;
     res.writeHead(404);
     res.end(JSON.stringify({ error: "Not found" }));
   });
@@ -202,6 +205,58 @@ describe("delete and restore", () => {
       "append-only",
     );
     await expect(getDbClient().run("DELETE FROM agent_history")).rejects.toThrow("append-only");
+  });
+});
+
+describe("registration racing an operator delete", () => {
+  test("a delete that commits before the register transaction gets 410, not a recreated row", async () => {
+    const worker = await offlineWorker("ah-race");
+    // Pause the register request at its transaction, the window where a pre-transaction
+    // history check went stale, and run the whole operator delete there.
+    const client = getDbClient();
+    const transaction = client.transaction;
+    let paused!: () => void;
+    const atTransaction = new Promise<void>((resolve) => (paused = resolve));
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    let armed = true;
+    client.transaction = (async (...args: Parameters<typeof transaction>) => {
+      if (armed) {
+        armed = false;
+        paused();
+        await gate;
+      }
+      return await transaction.apply(client, args);
+    }) as typeof transaction;
+    try {
+      const registration = fetch(`${baseUrl}/api/agents`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "X-Agent-ID": worker.id,
+          "Content-Type": "application/json",
+        },
+        // Accepted with the multi-runtime flag on or off.
+        body: JSON.stringify({ name: "ah-race", runtimeInstanceId: `rt-${crypto.randomUUID()}` }),
+      });
+      await atTransaction;
+      await deleteAgentToHistory(worker.id, "retired worker", OP);
+      resume();
+      const response = await registration;
+      expect({ status: response.status, body: await response.json() }).toEqual({
+        status: 410,
+        body: { error: "agent_deleted" },
+      });
+    } finally {
+      client.transaction = transaction;
+    }
+    expect(await getAgentById(worker.id)).toBeNull();
+    expect(await isAgentDeleted(worker.id)).toBe(true);
+    // createAgent is the shared insert (register, join-swarm, token mint, pools, extensions).
+    await expect(
+      createAgent({ id: worker.id, name: "ah-race", isLead: false, status: "offline" }),
+    ).rejects.toBeInstanceOf(AgentDeletedError);
+    await restoreAgentFromHistory(worker.id, { reason: "back" }, OP);
   });
 });
 

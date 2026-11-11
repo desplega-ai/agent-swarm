@@ -139,11 +139,6 @@ async function latestEvent(agentId: string): Promise<HistoryRow | null> {
   );
 }
 
-/** Whether `agentId` was deleted and not restored; register and join-swarm refuse it. */
-export async function isAgentDeleted(agentId: string): Promise<boolean> {
-  return (await latestEvent(agentId))?.event === "deleted";
-}
-
 export async function deleteAgentToHistory(
   agentId: string,
   reason: string,
