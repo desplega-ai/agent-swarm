@@ -23,6 +23,7 @@
     "external-apis",
     "fs",
     "favorites",
+    "github",
     "heartbeat",
     "improvements",
     "inbox-state",

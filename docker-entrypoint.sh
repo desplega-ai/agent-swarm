@@ -497,7 +497,21 @@ if [ -n "$GITHUB_WEB_URL" ]; then
     esac
     if [ "$GITHUB_HOST_BARE" = "www.github.com" ]; then GITHUB_HOST_BARE="github.com"; fi
 fi
-if [ -n "$GITHUB_TOKEN" ]; then
+# GitHub App worker auth: when the API mints installation tokens (GITHUB_APP_ID,
+# GITHUB_APP_PRIVATE_KEY and GITHUB_APP_INSTALLATION_ID on the API), git and gh
+# fetch them through swarm-github-token, which falls back to GITHUB_TOKEN. The
+# probe runs as the worker, with the env git and gh will have. Any other answer
+# (404 = no App) keeps the PAT setup below exactly as before.
+SWARM_GITHUB_TOKEN_BIN="${SWARM_GITHUB_TOKEN_BIN:-/usr/local/bin/swarm-github-token}"
+GH_WRAPPER_LINK="${GH_WRAPPER_LINK:-/usr/local/bin/gh}"
+GITHUB_APP_AUTH=""
+# A restarted container keeps its filesystem: drop a wrapper link from an earlier App-mode boot.
+if [ -L "$GH_WRAPPER_LINK" ]; then rm -f "$GH_WRAPPER_LINK"; fi
+if [ -n "${AGENT_ID:-}" ] && [ -x "$SWARM_GITHUB_TOKEN_BIN" ] && \
+    gosu worker env MCP_BASE_URL="$MCP_URL" "$SWARM_GITHUB_TOKEN_BIN" --app-only > /dev/null 2>&1; then
+    GITHUB_APP_AUTH=1
+fi
+if [ -n "$GITHUB_TOKEN" ] || [ -n "$GITHUB_APP_AUTH" ]; then
     echo "Configuring GitHub authentication..."
 
     if [ "$GITHUB_HOST_BARE" != "github.com" ]; then
@@ -512,18 +526,33 @@ if [ -n "$GITHUB_TOKEN" ]; then
         # The shell keeps GITHUB_TOKEN for the checks below. The runner applies
         # the same rule to session env (scopeGitHubTokenToEnterprise).
         export GH_HOST="$GITHUB_HOST_BARE"
-        export GH_ENTERPRISE_TOKEN="$GITHUB_TOKEN"
-        export -n GITHUB_TOKEN
+        if [ -n "$GITHUB_TOKEN" ]; then
+            export GH_ENTERPRISE_TOKEN="$GITHUB_TOKEN"
+            export -n GITHUB_TOKEN
+        fi
         unset GH_TOKEN
         # git: env-reading helper (same as GitLab below) in place of
         # `gh auth setup-git`, scoped to the GHES host; the token never lands in ~/.gitconfig.
-        git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
-            '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN}"; }; f'
+        if [ -n "$GITHUB_APP_AUTH" ]; then
+            git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
+                "!$SWARM_GITHUB_TOKEN_BIN git-credential"
+        else
+            git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
+                '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN}"; }; f'
+        fi
         echo "GitHub Enterprise auth configured (host: $GH_HOST)"
+    elif [ -n "$GITHUB_APP_AUTH" ]; then
+        git config --global --replace-all "credential.https://github.com.helper" \
+            "!$SWARM_GITHUB_TOKEN_BIN git-credential"
     else
         # gh CLI will automatically use GITHUB_TOKEN env var for API calls
         # Just need to configure git to use gh as credential helper
         gh auth setup-git
+    fi
+    if [ -n "$GITHUB_APP_AUTH" ]; then
+        # gh reads only env or hosts.yml, so a wrapper ahead of /usr/bin/gh hands it a current token.
+        ln -sf /usr/local/lib/agent-swarm/gh-app-auth-wrapper "$GH_WRAPPER_LINK"
+        echo "GitHub App worker auth configured (installation tokens from the swarm API, GITHUB_TOKEN fallback)"
     fi
 
     # Set git user config for commits (use env vars or defaults)
@@ -573,7 +602,7 @@ elif [ -n "$GITLAB_TOKEN" ]; then
     GITLAB_GIT_EMAIL="${GITLAB_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
     GITLAB_GIT_NAME="${GITLAB_NAME:-${GITHUB_NAME:-Worker Agent}}"
     # Only override git config if GitHub didn't set it already
-    if [ -z "$GITHUB_TOKEN" ]; then
+    if [ -z "$GITHUB_TOKEN" ] && [ -z "${GITHUB_APP_AUTH:-}" ]; then
         git config --global user.email "$GITLAB_GIT_EMAIL"
         git config --global user.name "$GITLAB_GIT_NAME"
         export GIT_AUTHOR_NAME="$GITLAB_GIT_NAME"
@@ -621,7 +650,7 @@ elif [ -n "$AZURE_DEVOPS_TOKEN" ]; then
     AZDO_GIT_EMAIL="${AZURE_DEVOPS_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
     AZDO_GIT_NAME="${AZURE_DEVOPS_NAME:-${GITHUB_NAME:-Worker Agent}}"
     # Only override git config if GitHub/GitLab didn't set it already
-    if [ -z "$GITHUB_TOKEN" ] && [ -z "$GITLAB_TOKEN" ]; then
+    if [ -z "$GITHUB_TOKEN" ] && [ -z "${GITHUB_APP_AUTH:-}" ] && [ -z "$GITLAB_TOKEN" ]; then
         git config --global user.email "$AZDO_GIT_EMAIL"
         git config --global user.name "$AZDO_GIT_NAME"
         export GIT_AUTHOR_NAME="$AZDO_GIT_NAME"
@@ -655,7 +684,7 @@ elif [ -n "$BITBUCKET_TOKEN" ]; then
     BITBUCKET_GIT_EMAIL="${BITBUCKET_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
     BITBUCKET_GIT_NAME="${BITBUCKET_NAME:-${GITHUB_NAME:-Worker Agent}}"
     # Only override git config if GitHub/GitLab/Azure DevOps didn't set it already
-    if [ -z "$GITHUB_TOKEN" ] && [ -z "$GITLAB_TOKEN" ] && [ -z "$AZURE_DEVOPS_TOKEN" ]; then
+    if [ -z "$GITHUB_TOKEN" ] && [ -z "${GITHUB_APP_AUTH:-}" ] && [ -z "$GITLAB_TOKEN" ] && [ -z "$AZURE_DEVOPS_TOKEN" ]; then
         git config --global user.email "$BITBUCKET_GIT_EMAIL"
         git config --global user.name "$BITBUCKET_GIT_NAME"
         export GIT_AUTHOR_NAME="$BITBUCKET_GIT_NAME"

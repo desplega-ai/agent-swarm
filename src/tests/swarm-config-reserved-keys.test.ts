@@ -158,6 +158,7 @@ describe("swarm-config reserved keys guard", () => {
     "CODEX_OAUTH_DEVICE_BASE_URL",
     "DESPLEGA_TELEMETRY_ENDPOINT",
     "CLOUDFLARE_API_BASE_URL",
+    "GITHUB_APP_INSTALLATION_ID",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };
