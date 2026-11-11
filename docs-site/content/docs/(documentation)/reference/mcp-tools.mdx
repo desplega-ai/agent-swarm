@@ -68,7 +68,7 @@ See the [Rooms API reference](/docs/api-reference/rooms) for request schemas.
 
 ## Primitive objects
 
-The `primitives` capability (off by default; scripts always reach it through the SDK bridge) exposes four tools over agent-fs files on the caller's default drive. Every call runs as the caller's own agent-scoped `AGENT_FS_API_KEY`.
+The `primitives` capability (off by default; scripts always reach it through the SDK bridge) exposes tools over agent-fs files on the caller's default drive. Every call runs as the caller's own agent-scoped `AGENT_FS_API_KEY`.
 
 | Tool | Purpose |
 |------|---------|
@@ -78,6 +78,19 @@ The `primitives` capability (off by default; scripts always reach it through the
 | `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, and `cutBy` names the limit that stopped it. |
 
 Scripts use `ctx.objects.create/get/list/reindex`.
+
+Boards are `.excalidraw` objects edited as raw element JSON. Writes guard on the agent-fs file version and re-apply up to three times on a concurrent change.
+
+| Tool | Purpose |
+|------|---------|
+| `board-create` | Create a board, optionally with shapes and arrows bound on both ends. |
+| `board-get` | Read a board's live elements as summaries, or `detail: "full"` for raw elements. |
+| `board-list` | List boards by path `prefix`. |
+| `board-add-elements` | Add rectangles, ellipses, diamonds, text and bound arrows. Shapes without x/y are laid out below existing content. |
+| `board-update-elements` | Patch label, position, size or color. Labels and bound arrows follow, and each touched element gets a new version. |
+| `board-remove-elements` | Set `isDeleted` on elements. A shape takes its label with it and unbinds its arrows. |
+
+Scripts use `ctx.boards.create/get/list/addElements/updateElements/removeElements`.
 
 ## Core Tools
 

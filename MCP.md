@@ -178,6 +178,12 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [object-get](#object-get)
   - [object-list](#object-list)
   - [object-reindex](#object-reindex)
+  - [board-create](#board-create)
+  - [board-get](#board-get)
+  - [board-list](#board-list)
+  - [board-add-elements](#board-add-elements)
+  - [board-update-elements](#board-update-elements)
+  - [board-remove-elements](#board-remove-elements)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -2153,7 +2159,7 @@ Decode a room snapshot value that the caller already holds.
 
 ## Primitives Tools
 
-*Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).*
+*Primitives capability: object-* and board-* tools over agent-fs files (src/be/primitives/).*
 
 Capability: `primitives` — **disabled by default**; add `primitives` to `CAPABILITIES` to enable.
 
@@ -2203,6 +2209,74 @@ Rebuild the object index from the files on your default agent-fs drive. Keeps ea
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `kind` | `unknown` | No | - | - |
+
+### board-create
+
+**Create board**
+
+Create an Excalidraw board (`.excalidraw`) on your default agent-fs drive, as your own agent-fs identity, optionally with shapes and bound arrows. Create-only: refuses when the path exists. `added` maps each shape key (or `shapes[i]`) and `arrows[i]` to its element id.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | `string` | Yes | - | Drive path ending in .excalidraw. |
+| `title` | `string` | No | - | - |
+| `shapes` | `array` | No | - | - |
+| `arrows` | `array` | No | - | - |
+| `layout` | `unknown` | No | - | How shapes without x/y are placed, below existing content. Default `row`. |
+
+### board-get
+
+**Get board**
+
+Read a board by `id` or `path`. `detail: summary` (default) lists live elements as id, type, text, x, y, width, height and boundTo (arrow: [from, to]; shape: its arrow ids); a shape's label folds into its text. `detail: full` returns the raw Excalidraw elements.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `detail` | `summary \| full` | No | - | - |
+
+### board-list
+
+**List boards**
+
+List boards on your default agent-fs drive, newest first. Filter by path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### board-add-elements
+
+**Add board elements**
+
+Add shapes (rectangle, ellipse, diamond, text) and arrows to a board. Arrows bind both ends to shapes, named by a `key` from this call or an existing element id. Shapes without x/y are laid out below existing content. Writes with the file version and re-applies on a concurrent change (3 retries).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `shapes` | `array` | No | - | - |
+| `arrows` | `array` | No | - | - |
+| `layout` | `unknown` | No | - | How shapes without x/y are placed, below existing content. Default `row`. |
+
+### board-update-elements
+
+**Update board elements**
+
+Patch board elements by id: label (empty string removes a shape's label), x, y, width, height, color. Bound labels and arrows follow; arrows themselves take only label and color. Each touched element gets a new version, so an open editor repaints it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `patches` | `array` | No | - | - |
+
+### board-remove-elements
+
+**Remove board elements**
+
+Remove board elements by id (sets `isDeleted: true`, the Excalidraw convention). A shape's label goes with it and its arrows are unbound; a removed arrow leaves its shapes. Refuses unknown ids before writing.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `elementIds` | `array` | Yes | - | - |
 
 ## Slack Tools
 
