@@ -227,6 +227,14 @@ export const DEFERRED_TOOLS = new Set([
   "object-list",
   "object-reindex",
 
+  // Boards (6)
+  "board-create",
+  "board-get",
+  "board-list",
+  "board-add-elements",
+  "board-update-elements",
+  "board-remove-elements",
+
   // Reusable scripts and extensions (13)
   "script-upsert",
   "script-delete",
