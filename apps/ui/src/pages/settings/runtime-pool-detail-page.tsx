@@ -388,7 +388,12 @@ function PoolDetail() {
   const pool = useRuntimePool(id);
   const controllers = useRuntimeControllers();
 
-  if ((id && pool.isLoading) || controllers.isLoading) return <PageSkeleton />;
+  // The editor copies the pool into form state once, at mount. The query cache is persisted to
+  // localStorage, so a reload right after a save restores the pre-save pool, and the form would
+  // keep the old values after the fresh fetch lands. Mount it on fetched data only.
+  if ((id && (pool.isLoading || !pool.isFetchedAfterMount)) || controllers.isLoading) {
+    return <PageSkeleton />;
+  }
 
   if (id && !pool.data) {
     const notFound = pool.error instanceof RuntimePoolApiError && pool.error.status === 404;

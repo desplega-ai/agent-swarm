@@ -1,0 +1,110 @@
+name: UI E2E Shards
+
+# The Playwright suite in 4 shards, one runner each. Merge Gate calls it on pull_request and
+# merge_group and needs it; ui-e2e.yml calls it on main and the nightly dispatch. Results,
+# the PR comment and the tracker come from ui-e2e-report.yml, which never blocks the gate.
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: Playwright
+    if: github.repository == 'desplega-ai/agent-swarm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Read Playwright version
+        id: playwright
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/ui-e2e/package.json').devDependencies['@playwright/test']")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+        working-directory: packages/ui-e2e
+
+      # Best effort: the runner image already has Chromium's libraries, and this adds only
+      # fonts. A hung apt mirror (all shards, Nov 11: 190 s each, then every shard passed
+      # without the fonts) must not turn the required gate red or slow it for long. A library
+      # that is really missing still fails the shard in the next step.
+      - name: Install Chromium system dependencies
+        continue-on-error: true
+        timeout-minutes: 1
+        run: npx playwright install-deps chromium
+        working-directory: packages/ui-e2e
+
+      # retries: 1 in playwright.config.ts. A spec that passes on its rerun is flaky, which
+      # exits 0, so it never fails the gate. UI_E2E_COVERAGE builds with sourcemaps and
+      # writes packages/ui-e2e/coverage/lcov.info.
+      - name: Run UI E2E shard
+        id: run
+        continue-on-error: true
+        env:
+          UI_E2E_COVERAGE: "1"
+        run: bun run e2e:ui -- --shard=${{ matrix.shard }}/4
+
+      - name: Upload blob report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-blob-${{ matrix.shard }}
+          path: packages/ui-e2e/blob-report
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-results-${{ matrix.shard }}
+          path: packages/ui-e2e/test-results
+          if-no-files-found: warn
+
+      - name: Upload shard coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-coverage-${{ matrix.shard }}
+          path: packages/ui-e2e/coverage/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Fail when the shard failed
+        if: always()
+        run: |
+          if [ "${{ steps.run.outcome }}" != "success" ]; then
+            echo "UI E2E shard ${{ matrix.shard }} failed. See the uploaded artifacts." >&2
+            exit 1
+          fi
