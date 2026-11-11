@@ -64,6 +64,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
 - [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-delivery-delay-handoff). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
