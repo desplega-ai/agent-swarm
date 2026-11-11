@@ -1,0 +1,54 @@
+---
+title: Deleting and Restoring Agents
+description: Operator-only soft delete for agents, with blockers, acknowledged warnings, restore, and an audit of who, when and why
+---
+
+An operator can retire an agent without losing anything it owns. A delete is a soft delete: the agent row stays, it disappears from every listing, routing, pool and dispatch path, and a restore brings it back. Every delete and restore records who did it, when, and why.
+
+Only people can do this. The routes check `agent.lifecycle.manage`, which the shared API key without `X-Agent-ID` (operator) and dashboard user tokens hold. Every agent, the lead included, gets `403`. There is no MCP tool.
+
+## Flow
+
+1. `GET /api/agents/{id}/delete-preview` returns `blockers`, `warnings` and a `warningsHash`.
+2. Resolve every blocker.
+3. `POST /api/agents/{id}/delete` with `{ "reason": "...", "warningsHash": "..." }`. If the warnings changed since the preview, the delete answers `409 warnings_changed` with the new preview; review it and confirm again.
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" "$MCP_BASE_URL/api/agents/$AGENT/delete-preview"
+curl -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+  -d '{"reason":"retired after the migration","warningsHash":"<from the preview>"}' \
+  "$MCP_BASE_URL/api/agents/$AGENT/delete"
+```
+
+## Blockers
+
+| Code | Fix |
+|---|---|
+| `open_tasks` | Finish, cancel or reassign every non-terminal task assigned or offered to the agent. |
+| `pool_bound` | Unbind the agent from its runtime pool (`PUT /api/agents/{id}/runtime-pool` with `poolId: null`). |
+| `not_offline` | Stop the worker; the agent goes offline when its container stops. |
+| `lead` | The lead cannot be deleted. |
+| `extension` | Extension identities follow their extension; uninstall the extension instead. |
+| `already_deleted` | Nothing to do. |
+
+## Warnings
+
+Warnings do not refuse the delete. The preview lists each with a count and up to 20 ids and names, never secret values: enabled schedules that target the agent, workflow `agent-task` nodes pinned to it, agent-scoped scripts, memories, credential bindings, connections and config keys, PRs it worked on in the last 30 days, AgentMail inboxes, owned skills and MCP servers, and whether it is the last worker.
+
+The delete disables the agent's enabled schedules in the same transaction. Workflow nodes stay as they are and fail with an explicit message until you edit them or restore the agent.
+
+## After a delete
+
+- `GET /api/agents` no longer lists it; `GET /api/agents?deleted=only` does.
+- A task assigned or offered to it fails with `Agent "<name>" (<id>) was deleted on <date>. Restore it or pick another agent.`
+- A worker that starts with its id gets `410 agent_deleted` on register, ping or poll, logs one line and exits.
+- Its name is free for a new agent.
+- Historical tasks keep their `agentId`.
+
+## Restore
+
+`POST /api/agents/{id}/restore` with `{ "reason": "...", "newName"?: "..." }`. The agent comes back offline and unbound, with its profile, scripts, memories, config, credentials, skills, MCP servers and history. Rebind it to a pool and start its worker yourself. The schedules the delete disabled stay off; the response returns their ids as `disabledScheduleIds`. If another agent took its name, the restore answers `409 name_taken` until you pass `newName`.
+
+## Audit
+
+`GET /api/agents/{id}/lifecycle-events` returns every delete and restore, newest first: action, actor (`user:<id>` or the operator key fingerprint), time, reason, and a snapshot of the warnings and disabled schedules. Nothing sweeps these rows.

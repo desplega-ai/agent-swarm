@@ -210,6 +210,10 @@
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
       "scenarios": ["core-agent-access"]
     },
+    "agent-lifecycle": {
+      "description": "Operator-only agent soft delete: blockers, preview hash, delete, 410 on reconnect, restore, audit, and 403 for every agent caller",
+      "scenarios": ["core-agent-lifecycle"]
+    },
     "agent-fs-public-edge": {
       "description": "public share/site pages through the agent-fs proxy and the Comb review-batch gate",
       "scenarios": ["knowledge-agentfs-edges"]

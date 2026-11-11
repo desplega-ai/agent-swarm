@@ -3851,7 +3851,11 @@ export async function updateAgentProfile(
 ): Promise<Agent | null> {
   return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
-    const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
+    // A soft-deleted agent's profile is frozen until restore.
+    const current = await tx.get<AgentRow>(
+      `SELECT * FROM agents WHERE id = ? AND ${NOT_DELETED_AGENT_SQL}`,
+      [id],
+    );
     if (!current) return null;
 
     const roleViolation = reservedRoleViolation(current.role, updates.role, {

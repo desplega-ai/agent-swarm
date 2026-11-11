@@ -42,7 +42,7 @@ const previewRoute = route({
   pattern: ["api", "agents", null, "delete-preview"],
   summary: "Preview an agent soft delete",
   description:
-    "Blockers refuse the delete (open tasks, pool binding, a live worker, the lead, already deleted). Warnings list what stays pinned to the agent; echo `warningsHash` to the delete to confirm you saw them.",
+    "Blockers refuse the delete (open tasks, pool binding, a live worker, the lead, an extension identity, already deleted). Warnings list what stays pinned to the agent; echo `warningsHash` to the delete to confirm you saw them.",
   tags: ["Agents"],
   params,
   responses: {

@@ -38,6 +38,7 @@ import {
   listAgentsForPool,
 } from "../be/runtime-pools/db";
 import { exitIfAgentDeleted } from "../commands/runner";
+import { ensureExtensionAgent } from "../extensions/identity";
 import { handleAgentLifecycle } from "../http/agent-lifecycle";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { handleCore } from "../http/core";
@@ -145,6 +146,10 @@ describe("blockers", () => {
     await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [leadId]);
     expect(await refusal(deleteNow(leadId))).toBe("lead");
     await getDbClient().run("UPDATE agents SET status = 'idle' WHERE id = ?", [leadId]);
+
+    const extId = await ensureExtensionAgent("sd-tracker");
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [extId]);
+    expect(await refusal(deleteNow(extId))).toBe("extension");
 
     const gone = await offlineWorker("sd-twice");
     await deleteNow(gone.id);

@@ -7,7 +7,7 @@ import type {
 } from "../../types";
 import { TERMINAL_TASK_STATUSES } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { getAgentById, NOT_EXTENSION_AGENT_SQL } from "./agents";
+import { getAgentById, isExtensionAgent, NOT_EXTENSION_AGENT_SQL } from "./agents";
 import { getDbClient } from "./runtime";
 
 /** A refused delete or restore; `code` is the machine-readable reason. */
@@ -52,6 +52,12 @@ async function buildPreview(agent: Agent): Promise<AgentDeletePreview> {
   }
   if (agent.isLead) {
     blockers.push({ code: "lead", message: "The lead agent cannot be deleted." });
+  }
+  if (isExtensionAgent(agent)) {
+    blockers.push({
+      code: "extension",
+      message: "Extension identities follow their extension; uninstall the extension instead.",
+    });
   }
   const openTasks = await getDbClient().get<{ n: number }>(
     `SELECT COUNT(*) AS n FROM agent_tasks WHERE (agentId = ? OR offeredTo = ?) AND ${NON_TERMINAL_SQL}`,

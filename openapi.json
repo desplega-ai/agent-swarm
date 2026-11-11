@@ -669,6 +669,340 @@
           }
         }
       },
+      "AgentDeletePreview": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ]
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "count",
+                "items"
+              ]
+            }
+          },
+          "warningsHash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "blockers",
+          "warnings",
+          "warningsHash"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "isLead": {
+            "type": "boolean",
+            "default": false
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "busy",
+              "offline",
+              "waiting_for_credentials"
+            ]
+          },
+          "runtimePoolId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeProvisionAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "runtimeProvisionRetryAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "claudeMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "soulMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "identityMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "setupScript": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "toolsMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "heartbeatMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "maxTasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "emptyPollCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx"
+            ]
+          },
+          "harnessProvider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
+          "credentialMissing": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "credStatus": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentCredStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatar": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "lucide"
+                    ]
+                  },
+                  "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "icon"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
+              }
+            ]
+          },
+          "slackIcon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentSlackIcon"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deletedAt": {
+            "type": "string"
+          },
+          "deletedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
       "AgentCredStatus": {
         "type": "object",
         "properties": {
@@ -1183,254 +1517,59 @@
           }
         ]
       },
-      "Agent": {
+      "AgentLifecycleEvent": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "isLead": {
-            "type": "boolean",
-            "default": false
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "idle",
-              "busy",
-              "offline",
-              "waiting_for_credentials"
-            ]
-          },
-          "runtimePoolId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "runtimeProvisionAttempts": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "runtimeProvisionRetryAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "description": {
+          "agentId": {
             "type": "string"
           },
-          "role": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "capabilities": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": []
-          },
-          "claudeMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "soulMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "identityMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "setupScript": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "toolsMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "heartbeatMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "maxTasks": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100
-          },
-          "emptyPollCount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "lastActivityAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "provider": {
+          "action": {
             "type": "string",
             "enum": [
-              "claude",
-              "codex",
-              "pi",
-              "devin",
-              "claude-managed",
-              "opencode",
-              "acp",
-              "dsh",
-              "amp",
-              "cursor",
-              "grok",
-              "fx"
+              "deleted",
+              "restored"
             ]
           },
-          "harnessProvider": {
+          "actorKind": {
+            "type": "string",
+            "enum": [
+              "user",
+              "operator"
+            ]
+          },
+          "actorRef": {
+            "type": "string"
+          },
+          "createdBy": {
             "type": [
               "string",
               "null"
-            ],
-            "enum": [
-              "claude",
-              "codex",
-              "pi",
-              "devin",
-              "claude-managed",
-              "opencode",
-              "acp",
-              "dsh",
-              "amp",
-              "cursor",
-              "grok",
-              "fx",
-              null
             ]
           },
-          "credentialMissing": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "type": "string"
-            }
+          "reason": {
+            "type": "string"
           },
-          "credStatus": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AgentCredStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatar": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "lucide"
-                    ]
-                  },
-                  "icon": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "pattern": "^[a-z0-9-]+$"
-                  },
-                  "color": {
-                    "type": "string",
-                    "pattern": "^#[0-9a-fA-F]{6}$"
-                  }
-                },
-                "required": [
-                  "type",
-                  "icon"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "url"
-                    ]
-                  },
-                  "url": {
-                    "type": "string",
-                    "maxLength": 2048,
-                    "format": "uri"
-                  }
-                },
-                "required": [
-                  "type",
-                  "url"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "agent-fs"
-                    ]
-                  },
-                  "path": {
-                    "type": "string",
-                    "minLength": 2,
-                    "maxLength": 1024
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "driveId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "type",
-                  "path"
-                ]
-              }
-            ]
-          },
-          "slackIcon": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AgentSlackIcon"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": {}
           },
           "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "lastUpdatedAt": {
-            "type": "string",
-            "format": "date-time"
+            "type": "string"
           }
         },
         "required": [
           "id",
-          "name",
-          "status",
-          "createdAt",
-          "lastUpdatedAt"
+          "agentId",
+          "action",
+          "actorKind",
+          "actorRef",
+          "createdBy",
+          "reason",
+          "snapshot",
+          "createdAt"
         ]
       },
       "ProfileCheckResult": {
@@ -7769,6 +7908,389 @@
         }
       }
     },
+    "/api/agents/{id}/delete-preview": {
+      "get": {
+        "summary": "Preview an agent soft delete",
+        "description": "Blockers refuse the delete (open tasks, pool binding, a live worker, the lead, an extension identity, already deleted). Warnings list what stays pinned to the agent; echo `warningsHash` to the delete to confirm you saw them.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDeletePreview"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/delete": {
+      "post": {
+        "summary": "Soft-delete an agent",
+        "description": "Marks the agent deleted, disables schedules that target it, and records who, when and why. The row and everything it owns stay, so restore is lossless.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2000
+                  },
+                  "warningsHash": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "reason",
+                  "warningsHash"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "disabledScheduleIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "event": {
+                      "$ref": "#/components/schemas/AgentLifecycleEvent"
+                    }
+                  },
+                  "required": [
+                    "agent",
+                    "disabledScheduleIds",
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A blocker refuses the delete, or the warnings changed since the preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "$ref": "#/components/schemas/AgentDeletePreview"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/restore": {
+      "post": {
+        "summary": "Restore a soft-deleted agent",
+        "description": "The agent comes back offline and unbound from any pool. Schedules the delete disabled stay off; their ids are returned for a manual re-enable.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2000
+                  },
+                  "newName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "disabledScheduleIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "event": {
+                      "$ref": "#/components/schemas/AgentLifecycleEvent"
+                    }
+                  },
+                  "required": [
+                    "agent",
+                    "disabledScheduleIds",
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not deleted, or its name is taken (`name_taken`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "$ref": "#/components/schemas/AgentDeletePreview"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/lifecycle-events": {
+      "get": {
+        "summary": "List an agent's delete and restore audit events",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentLifecycleEvent"
+                      }
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/mcp-bridge": {
       "post": {
         "summary": "Generic MCP tool proxy for the scripts SDK bridge",
@@ -7893,6 +8415,16 @@
           },
           "404": {
             "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {
@@ -11832,6 +12364,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -11888,6 +12430,17 @@
             },
             "required": false,
             "name": "fields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "only"
+              ]
+            },
+            "required": false,
+            "name": "deleted",
             "in": "query"
           }
         ],
@@ -11957,6 +12510,16 @@
                   "required": [
                     "agents"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`deleted=only` without operator or user credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -43655,6 +44218,16 @@
           },
           "404": {
             "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {
