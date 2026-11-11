@@ -18,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { fingerprintApiKey, type IdentityActor } from "../be/users";
 import { getApiKey } from "../utils/api-key";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { verifyTokenEquality } from "../workflows/triggers";
 import { authUserId, isOperatorAuth, rejectGuest } from "./request-principal";
 import { jsonError } from "./utils";
 
@@ -63,7 +64,7 @@ export function getOperatorActor(req: IncomingMessage, res: ServerResponse): Ide
     return { kind: "operator", id: fingerprintApiKey("") };
   }
 
-  if (!rawKey || rawKey !== swarmKey) {
+  if (!rawKey || !verifyTokenEquality(swarmKey, rawKey)) {
     jsonError(res, "Unauthorized", 401);
     return null;
   }
