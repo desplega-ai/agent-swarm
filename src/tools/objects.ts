@@ -52,6 +52,7 @@ export const registerObjectCreateTool = (server: McpServer) => {
     "object-create",
     {
       title: "Create primitive object",
+      annotations: { readOnlyHint: false, idempotentHint: false },
       description:
         "Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.",
       inputSchema: z.object({
@@ -156,6 +157,7 @@ export const registerObjectReindexTool = (server: McpServer) => {
     "object-reindex",
     {
       title: "Reindex primitive objects",
+      annotations: { readOnlyHint: false, idempotentHint: true },
       description:
         "Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.",
       inputSchema: z.object({ kind: KindSchema.optional() }),

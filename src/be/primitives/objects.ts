@@ -1,5 +1,6 @@
 import { type FileScope, FilesError, normalizeStoredKey } from "@/fs/provider";
 import { buildAgentFsLiveUrl } from "@/utils/constants";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { agentFsClientFor } from "../agent-fs-identity";
 import { getDbClient } from "../db";
 
@@ -127,7 +128,8 @@ async function saveRow(row: Omit<ObjectRow, "createdAt" | "updatedAt">): Promise
         row.orgId,
         row.driveId,
         row.path,
-        row.title,
+        // The only writer of `title` (.text-columns.json: scrubbed).
+        row.title === null ? null : scrubSecrets(row.title),
         row.fileVersion,
         row.ownerAgentId,
         now,

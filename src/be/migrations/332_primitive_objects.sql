@@ -23,3 +23,9 @@ CREATE TABLE IF NOT EXISTS primitive_objects (
 
 CREATE INDEX IF NOT EXISTS idx_primitive_objects_kind
   ON primitive_objects(orgId, driveId, kind, updatedAt);
+
+-- deleteUser rewrites the audit columns; keep that an index search.
+CREATE INDEX IF NOT EXISTS idx_primitive_objects_created_by
+  ON primitive_objects(created_by) WHERE created_by IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_primitive_objects_updated_by
+  ON primitive_objects(updated_by) WHERE updated_by IS NOT NULL;
