@@ -8,7 +8,7 @@ import {
   putConfig,
   reloadConfig,
 } from "./platform-helpers";
-import { registerWorker } from "./platformb-helpers";
+import { registerLead, registerWorker, retireAgent } from "./platformb-helpers";
 
 // Inbound provider webhooks. Every provider is off in the test SUT, so each route must first
 // answer its disabled contract (503). The shared secret is then supplied through swarm_config
@@ -41,6 +41,86 @@ function svixHeaders(secret: string, body: string): Record<string, string> {
   const key = Buffer.from(secret.slice("whsec_".length), "base64");
   const signature = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64");
   return { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": `v1,${signature}` };
+}
+
+/**
+ * Verified AgentMail deliveries reach task routing. The sender is linked to a user only when
+ * AgentMail authenticated it, and the sender filter reads the mailbox, not the display name.
+ */
+async function checkAgentMailSenders(
+  ctx: ScenarioContext,
+  secret: string,
+  domain: string,
+): Promise<void> {
+  const boss = await ctx.api("POST", "/api/users", {
+    body: { name: `Boss ${ctx.nonce}`, email: `boss@${domain}`, role: "admin" },
+  });
+  expectStatus(boss, [200], "create the user the mail names");
+  const bossId = String(asRecord(asRecord(boss.json).user).id);
+  const leadId = await registerLead(ctx, `e2e-agentmail-lead-${ctx.nonce}`);
+  try {
+    const deliver = async (eventType: string, from: string, subject: string) => {
+      const body = JSON.stringify({
+        event_type: eventType,
+        event_id: `evt_${subject}`,
+        message: {
+          inbox_id: `inb_${ctx.nonce}`,
+          thread_id: `thr_${subject}`,
+          message_id: `msg_${subject}`,
+          from_: [from],
+          to: [`inb_${ctx.nonce}@agentmail.to`],
+          labels: eventType.endsWith(".unauthenticated") ? ["unauthenticated"] : [],
+          subject,
+          text: "hello",
+        },
+      });
+      const response = await ctx.api("POST", "/api/agentmail/webhook", {
+        apiKey: null,
+        rawBody: body,
+        headers: svixHeaders(secret, body),
+      });
+      expectStatus(response, [200], `agentmail ${subject}`);
+    };
+    const taskFor = (subject: string) =>
+      ctx.db.get<{ requestedByUserId: string | null; task: string }>(
+        "SELECT requestedByUserId, task FROM agent_tasks WHERE task LIKE ?",
+        [`%Subject: ${subject}%`],
+      );
+    const waitForTask = async (subject: string) => {
+      expect(
+        await pollUntil(() => taskFor(subject) !== null, 10_000),
+        `a task for ${subject} never appeared`,
+      );
+      return taskFor(subject);
+    };
+    const merges = () =>
+      ctx.db.query("SELECT 1 FROM user_identity_events WHERE userId = ? AND eventType = ?", [
+        bossId,
+        "auto_merge",
+      ]).length;
+
+    // The mailbox is the trailing <...>; an address inside the display name is ignored.
+    const quoted = `quoted-${ctx.nonce}`;
+    await deliver("message.received", `"Boss <boss@${domain}>" <other@elsewhere.test>`, quoted);
+    const signed = `signed-${ctx.nonce}`;
+    await deliver("message.received", `Boss <boss@${domain}>`, signed);
+    expect((await waitForTask(signed))?.requestedByUserId === bossId, "signed mail is linked");
+    expect(merges() === 1, `signed mail links the user once, got ${merges()}`);
+    expect(taskFor(quoted) === null, "the sender filter reads the mailbox, not the display name");
+
+    // A sender AgentMail could not authenticate still reaches the lead, unlinked.
+    const unsigned = `unsigned-${ctx.nonce}`;
+    await deliver("message.received.unauthenticated", `Boss <boss@${domain}>`, unsigned);
+    const task = await waitForTask(unsigned);
+    expect(task?.requestedByUserId === null, "unauthenticated mail is not linked to a user");
+    expect(
+      task?.task.includes(`From: email:boss@${domain} (unknown user)`) === true,
+      `unauthenticated mail shows the address as unknown, got ${task?.task}`,
+    );
+    expect(merges() === 1, `unauthenticated mail adds no identity event, got ${merges()}`);
+  } finally {
+    await retireAgent(ctx, leadId);
+  }
 }
 
 async function expectDisabled(ctx: ScenarioContext, label: string) {
@@ -101,6 +181,8 @@ export const platformWebhooks: Scenario = {
       await set("GITHUB_WEBHOOK_SECRET", secret("github"), true);
       await set("AGENTMAIL_DISABLE", "false");
       await set("AGENTMAIL_WEBHOOK_SECRET", agentmailSecret, true);
+      const mailDomain = `corp-${ctx.nonce}.test`;
+      await set("AGENTMAIL_SENDER_DOMAIN_FILTER", mailDomain);
       await set("KAPSO_WEBHOOK_HMAC_SECRET", secret("kapso"), true);
       const reloaded = await reloadConfig(ctx);
       const reinitialized = reloaded.integrationsReinitialized as string[];
@@ -300,14 +382,16 @@ export const platformWebhooks: Scenario = {
         [401],
         "agentmail signed with another secret",
       );
-      // A verified delivery must be archived before it is acknowledged. The test SUT has no
-      // AgentMail API key, so the archive is unavailable and the sender is told to retry.
+      // A verified delivery must be archived before it is acknowledged. This one has no
+      // thread ID, so it cannot be archived and the sender is told to retry.
       const archived = await agentmail(mail, svixHeaders(agentmailSecret, mail));
       expectStatus(archived, [503], "agentmail with a verified signature");
       expect(
         asRecord(archived.json).error === "Inbound archive unavailable",
         "a verified delivery that cannot be archived asks for a retry",
       );
+
+      await checkAgentMailSenders(ctx, agentmailSecret, mailDomain);
 
       // ── Kapso (HMAC secret read straight from config) ──────────────────────
       const kapso = (body: string, signature?: string) =>
