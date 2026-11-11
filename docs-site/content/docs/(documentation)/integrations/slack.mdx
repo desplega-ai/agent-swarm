@@ -223,6 +223,8 @@ Terminal task output is automatically delivered through the thread's outcome car
 
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
+Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.
+
 ### Delegated-Result Delivery and the Deferred Conclusion Card
 
 Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt in to a lifecycle built around each ask's **closure**: the ask task plus every delegated task, transitive child, follow-up task, resume task, and reroute-decision task reachable from it in the same thread.

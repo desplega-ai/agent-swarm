@@ -30,6 +30,8 @@ import {
   closeSlackTreeIfSettled,
   getSlackProcessingThreads,
   getSlackThreadsOfTasks,
+  type SlackOutcomeWindow,
+  slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
 import { getTaskCitations } from "../be/task-citations";
@@ -1902,13 +1904,52 @@ type RenderPassContext = {
   activatedAt: string;
   delegationEnabled: boolean;
   delegationActivatedAt: string | null;
+  outcomeWindow: SlackOutcomeWindow;
   statusTick: ReturnType<typeof beginSlackStatusTick>;
 };
+
+/**
+ * See SlackOutcomeWindow. A card may post for one conclusion timeout after
+ * its task ends, never less than an hour so delivery retries fit. A closure's
+ * timeout card fires only after a conclusion timeout of idle time, so its
+ * window starts after that.
+ */
+function slackOutcomeWindow(delegationEnabled: boolean, now = Date.now()): SlackOutcomeWindow {
+  const timeoutMs = (Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240) * 60_000;
+  const windowMs = Math.max(timeoutMs, 60 * 60_000);
+  return {
+    finishedAfter: new Date(now - windowMs).toISOString(),
+    closureActiveAfter: new Date(now - timeoutMs - windowMs).toISOString(),
+    delegationEnabled,
+  };
+}
+
+function endedBefore(task: AgentTask, cutoff: string): boolean {
+  return Date.parse(task.finishedAt ?? task.lastUpdatedAt) < Date.parse(cutoff);
+}
+
+/** A Lead wake whose answer already reached the thread. Mirrors SLACK_WAKE_ALREADY_ANSWERED_SQL. */
+async function isWakeAnsweredByReply(task: AgentTask): Promise<boolean> {
+  if (!task.slackChannelId || !task.slackThreadTs) return false;
+  if ((await getTaskById(task.id))?.slackReplySent) return true;
+  return slackThreadHasBotReplySince(
+    task.slackChannelId,
+    task.slackThreadTs,
+    task.createdAt,
+    task.id,
+  );
+}
 
 /** Process outcomes by physical thread, regardless of its optional tree message. */
 async function processSlackThread(
   thread: SlackThreadAddress,
-  { activatedAt, delegationEnabled, delegationActivatedAt, statusTick }: RenderPassContext,
+  {
+    activatedAt,
+    delegationEnabled,
+    delegationActivatedAt,
+    outcomeWindow,
+    statusTick,
+  }: RenderPassContext,
 ): Promise<"stop" | "open" | "closed"> {
   if (!isSlackRenderV2Enabled()) return "stop";
   const tasks = await getSlackTasksInThread(thread.channelId, thread.threadTs);
@@ -1964,6 +2005,7 @@ async function processSlackThread(
     if (task.source === "slack") continue;
     const card = await getSlackOutcomeMessage(task.id);
     if (card && isSettledSlackMessage(card)) continue;
+    if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
     if (!delegationEnabled || delegationActivatedAt === null) continue;
     if (!isChildCardCandidate(task, delegationActivatedAt) || task.slackReplySent) continue;
     const askId = ownerAskId.get(task.id);
@@ -2002,6 +2044,15 @@ async function processSlackThread(
       task.createdAt >= delegationActivatedAt;
 
     if (!deferByClosure) {
+      // Before the age cutoff: an answered wake posts no card at any age, but
+      // its trigger reaction still settles.
+      if (!card && (await isSlackContinuation(task)) && (await isWakeAnsweredByReply(task))) {
+        // The reply is the answer; settle the reaction the card would have settled.
+        await finalizeTerminalSlackReactions([task]);
+        continue;
+      }
+      // An in-flight card keeps its bounded retries; only a new card is refused.
+      if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         const outcome = await streamOutcomeCard(task, { statusBudget: statusTick.budget });
@@ -2017,6 +2068,8 @@ async function processSlackThread(
     }
 
     const closure = closuresByAskId.get(task.id) ?? buildAskClosure(task, tasks);
+    const quietSince = Math.max(...[task, ...closure].map((m) => Date.parse(m.lastUpdatedAt)));
+    if (!card && quietSince < Date.parse(outcomeWindow.closureActiveAfter)) continue;
     // A conclusion is immutable, so wait until every eligible terminal
     // child has its card. The per-tick cap may leave overflow children
     // uncarded even though the closure itself is otherwise settled.
@@ -2028,6 +2081,9 @@ async function processSlackThread(
       // represented in the conclusion digest rather than blocking it.
       if (existingChildCards >= CHILD_CARDS_PER_ASK) break;
       const memberCard = await getSlackOutcomeMessage(member.id);
+      // The child pass never starts a card past the cutoff, so do not wait
+      // for one; an in-flight card is still awaited.
+      if (!memberCard && endedBefore(member, outcomeWindow.finishedAfter)) continue;
       if (!memberCard || !isSettledSlackMessage(memberCard)) {
         childCardPending = true;
         break;
@@ -2084,7 +2140,7 @@ async function processSlackThread(
     }
   }
   await statusTick.reconcile(thread.channelId, thread.threadTs);
-  return (await slackThreadHasOutcomeWork(thread)) ? "open" : "closed";
+  return (await slackThreadHasOutcomeWork(thread, outcomeWindow)) ? "open" : "closed";
 }
 
 /** Task events that can change what a thread's tree or cards should show. */
@@ -2200,6 +2256,7 @@ async function beginRenderPass(): Promise<RenderPassContext> {
     activatedAt,
     delegationEnabled,
     delegationActivatedAt,
+    outcomeWindow: slackOutcomeWindow(delegationEnabled),
     statusTick: beginSlackStatusTick(),
   };
 }
@@ -2234,6 +2291,7 @@ async function reconcileAllThreads(): Promise<void> {
   const threads = await getSlackProcessingThreads(
     context.delegationEnabled,
     isSlackTaskTreeEnabled(),
+    context.outcomeWindow,
   );
   for (const thread of threads) {
     if ((await processSlackThread(thread, context)) === "stop") return;
