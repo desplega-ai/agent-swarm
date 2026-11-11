@@ -525,6 +525,7 @@ const READ_TOOLS = new Set([
   "app-query",
   "resolve-user",
   "room-decode",
+  "sheet-get-range",
   "read-messages",
   "check-model-profile",
   "preview-prompt-template",

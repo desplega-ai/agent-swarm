@@ -382,7 +382,7 @@ describe("Tool Annotations & Classification", () => {
     // the six Chat SDK tools (chat-* + register/unregister-chat-channel),
     // and the seven app row tools plus app-action-run.
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(176);
+    expect(count).toBeLessThanOrEqual(184);
   });
 
   test("core tools are fewer than deferred tools", () => {

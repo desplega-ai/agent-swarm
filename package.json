@@ -223,6 +223,7 @@
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-coding-agent": "^1.5.2",
     "@inkjs/ui": "^2.0.0",
+    "@ironcalc/wasm": "0.9.1",
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
     "@json-render/chat": "0.22.0",
     "@json-render/core": "0.22.0",

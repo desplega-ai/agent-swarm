@@ -150,6 +150,16 @@ import { registerScriptRunsTools } from "./tools/script-runs";
 import { registerScriptSearchTool } from "./tools/script-search";
 import { registerScriptUpsertTool } from "./tools/script-upsert";
 import { registerSendTaskTool } from "./tools/send-task";
+import {
+  registerSheetAddTabTool,
+  registerSheetAppendRowsTool,
+  registerSheetClearRangeTool,
+  registerSheetCreateTool,
+  registerSheetGetRangeTool,
+  registerSheetGetTool,
+  registerSheetListTool,
+  registerSheetSetRangeTool,
+} from "./tools/sheets";
 // Skills capability
 import {
   registerSkillCreateTool,
@@ -693,12 +703,20 @@ export async function createServer(
     registerRoomDecodeTool(server);
   }
 
-  // Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).
+  // Primitives capability: object-* and sheet-* tools over agent-fs files (src/be/primitives/).
   if (hasCapability("primitives")) {
     registerObjectCreateTool(server);
     registerObjectGetTool(server);
     registerObjectListTool(server);
     registerObjectReindexTool(server);
+    registerSheetCreateTool(server);
+    registerSheetGetTool(server);
+    registerSheetListTool(server);
+    registerSheetGetRangeTool(server);
+    registerSheetSetRangeTool(server);
+    registerSheetAppendRowsTool(server);
+    registerSheetClearRangeTool(server);
+    registerSheetAddTabTool(server);
   }
 
   // Slack capability - Slack integration tools (no-op if Slack is not configured)

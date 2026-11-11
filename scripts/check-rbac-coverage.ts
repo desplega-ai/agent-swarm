@@ -70,6 +70,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
   "src/tools/objects.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
+  "src/tools/sheets.ts":
+    "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
   "src/tools/chat-reply.ts":
     "own-scoped: posts only to the chat thread of a task the caller owns or created",
   "src/tools/chat-post.ts":
