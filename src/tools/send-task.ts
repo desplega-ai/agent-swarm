@@ -3,7 +3,6 @@ import * as z from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
-  agentDeletedMessage,
   createTaskExtended,
   extensionAgentAssignmentError,
   findExistingLinearTrackerContextWork,
@@ -692,7 +691,7 @@ export async function sendTaskHandler(
       };
     }
 
-    const agent = await getAgentById(targetAgentId, { includeDeleted: true });
+    const agent = await getAgentById(targetAgentId);
 
     if (!agent) {
       return {
@@ -700,7 +699,6 @@ export async function sendTaskHandler(
         message: `Agent with ID "${targetAgentId}" not found.`,
       };
     }
-    if (agent.deletedAt) return { success: false, message: agentDeletedMessage(agent) };
 
     if (ctx.kind === "user" && (!agent.isLead || !(await isAgentReachable(agent)))) {
       return {

@@ -194,7 +194,7 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
     [since24h, since24h],
   );
   const agents = await q(
-    "SELECT status, COUNT(*) AS n FROM agents WHERE COALESCE(role, '') != 'extension' AND deleted_at IS NULL GROUP BY status",
+    "SELECT status, COUNT(*) AS n FROM agents WHERE COALESCE(role, '') != 'extension' GROUP BY status",
   );
 
   // Only the producer's receipt proves which full IDs the checklist actually showed.

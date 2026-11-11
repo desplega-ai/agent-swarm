@@ -211,7 +211,7 @@
       "scenarios": ["core-agent-access"]
     },
     "agent-lifecycle": {
-      "description": "Operator-only agent soft delete: blockers, preview hash, delete, 410 on reconnect, restore, audit, and 403 for every agent caller",
+      "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
       "scenarios": ["core-agent-lifecycle"]
     },
     "agent-fs-public-edge": {

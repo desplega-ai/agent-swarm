@@ -542,7 +542,7 @@ export async function bindAgentToPool(
 export async function listAgentsForPool(poolId: string): Promise<Agent[]> {
   return (
     await getDbClient().query<AgentRow>(
-      "SELECT * FROM agents WHERE runtime_pool_id = ? AND deleted_at IS NULL ORDER BY name",
+      "SELECT * FROM agents WHERE runtime_pool_id = ? ORDER BY name",
       [poolId],
     )
   ).map((row) => rowToAgent(row));

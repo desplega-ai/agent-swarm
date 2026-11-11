@@ -22,7 +22,7 @@ CREATE TABLE agent_tasks (id TEXT PRIMARY KEY, agentId TEXT, tags TEXT, status T
 CREATE TABLE session_costs (taskId TEXT, totalCostUsd REAL, inputTokens INTEGER, outputTokens INTEGER, cacheReadTokens INTEGER, model TEXT, createdAt TEXT);
 CREATE TABLE users (id TEXT, name TEXT, email TEXT, role TEXT, status TEXT, timezone TEXT, preferredChannel TEXT, metadata TEXT, notes TEXT);
 CREATE TABLE user_external_ids (userId TEXT, kind TEXT);
-CREATE TABLE agents (id TEXT, name TEXT, role TEXT, isLead INTEGER, harness_provider TEXT, provider TEXT, deleted_at TEXT);
+CREATE TABLE agents (id TEXT, name TEXT, role TEXT, isLead INTEGER, harness_provider TEXT, provider TEXT);
 CREATE TABLE swarm_repos (id TEXT, name TEXT, url TEXT, defaultBranch TEXT, clonePath TEXT, autoClone INTEGER);
 CREATE TABLE skills (name TEXT, description TEXT, isEnabled INTEGER);
 CREATE TABLE scripts (name TEXT, description TEXT, scope TEXT, isScratch INTEGER);

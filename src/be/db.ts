@@ -196,7 +196,6 @@ import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import {
-  AgentDeletedError,
   type AgentRow,
   configureAgentDependencies,
   ExtensionAgentAssignmentError,
@@ -205,7 +204,6 @@ import {
   getAllAgents,
   isAgentEligibleForTask,
   isExtensionAgent,
-  NOT_DELETED_AGENT_SQL,
   NOT_EXTENSION_AGENT_SQL,
   ReservedAgentRoleError,
   reservedRoleViolation,
@@ -301,8 +299,6 @@ export {
   SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
 } from "./db/active-sessions";
 export {
-  AgentDeletedError,
-  agentDeletedMessage,
   buildRoutingAffinityFromAgent,
   createAgent,
   deleteAgent,
@@ -324,7 +320,6 @@ export {
   isPoolAffinityEnforcementEnabled,
   listAgentsWithCredStatusByProvider,
   MAX_EMPTY_POLLS,
-  NOT_DELETED_AGENT_SQL,
   NOT_EXTENSION_AGENT_SQL,
   ReservedAgentRoleError,
   reservedRoleViolation,
@@ -2470,7 +2465,7 @@ async function findLatestRoutingCandidate(
     `SELECT id AS taskId, ${ROUTING_HOLDER_SQL} AS agentId
        FROM agent_tasks
        WHERE ${where}
-         AND ${ROUTING_HOLDER_SQL} IN (SELECT id FROM agents WHERE isLead = 0 AND ${NOT_DELETED_AGENT_SQL})
+         AND ${ROUTING_HOLDER_SQL} IN (SELECT id FROM agents WHERE isLead = 0)
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
     params,
@@ -2494,7 +2489,7 @@ async function captureRoutingDecisionSnapshot(
          SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
        FROM agents agent
        LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
-       WHERE agent.isLead = 0 AND agent.deleted_at IS NULL
+       WHERE agent.isLead = 0
        GROUP BY agent.id, agent.status
        ORDER BY agent.id`,
     [...OPEN_TASK_STATUSES],
@@ -2910,13 +2905,10 @@ export async function createTaskExtended(
   // runs, apps, Slack fan-out, pre.task.create hook rewrites).
   for (const id of new Set([options.agentId, options.offeredTo])) {
     if (!id) continue;
-    const target = await getAgentById(id, { includeDeleted: true });
+    const target = await getAgentById(id);
     if (target && isExtensionAgent(target)) {
       throw new ExtensionAgentAssignmentError(target);
     }
-    // Same chokepoint for soft-deleted agents: fail loudly instead of leaving
-    // a pending task nobody will claim.
-    if (target?.deletedAt) throw new AgentDeletedError(target);
   }
   if (options.routingAffinity && targetAgentId && !routingAffinityIsInheritedProvenance) {
     const target = await getAgentById(targetAgentId);
@@ -3851,11 +3843,7 @@ export async function updateAgentProfile(
 ): Promise<Agent | null> {
   return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
-    // A soft-deleted agent's profile is frozen until restore.
-    const current = await tx.get<AgentRow>(
-      `SELECT * FROM agents WHERE id = ? AND ${NOT_DELETED_AGENT_SQL}`,
-      [id],
-    );
+    const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
 
     const roleViolation = reservedRoleViolation(current.role, updates.role, {
@@ -3946,7 +3934,7 @@ export async function updateAgentProfile(
 
     if (updates.name !== undefined) {
       const existingAgent = await tx.get<AgentRow>(
-        `SELECT * FROM agents WHERE name = ? AND id != ? AND ${NOT_DELETED_AGENT_SQL}`,
+        "SELECT * FROM agents WHERE name = ? AND id != ?",
         [updates.name, id],
       );
       if (existingAgent) throw new Error("Agent name already exists");
@@ -7501,7 +7489,7 @@ export async function failPendingResumeIfUnclaimed(
 export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
   const rows = await getDbClient().query<AgentRow>(
     `SELECT * FROM agents
-       WHERE status = 'idle' AND isLead = 0 AND ${NOT_DELETED_AGENT_SQL}`,
+       WHERE status = 'idle' AND isLead = 0`,
   );
   const agents = rows.map((row) => rowToAgent(row));
 
@@ -13615,7 +13603,7 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
        FROM agents
        WHERE lastActivityAt IS NOT NULL
          AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
-         AND status != 'offline' AND ${NOT_DELETED_AGENT_SQL}`,
+         AND status != 'offline'`,
     [minutes],
   );
   return {
@@ -13634,7 +13622,7 @@ export async function getReadyAgentCounts(): Promise<{ leads: number; workers: n
     `SELECT SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads,
             SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers
        FROM agents
-      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL} AND ${NOT_DELETED_AGENT_SQL}`,
+      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL}`,
   );
   return { leads: row?.leads ?? 0, workers: row?.workers ?? 0 };
 }
@@ -13709,7 +13697,7 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
 
   return {
     tasks: await groupCounts("agent_tasks"),
-    agents: await groupCounts("agents", `${NOT_EXTENSION_AGENT_SQL} AND ${NOT_DELETED_AGENT_SQL}`),
+    agents: await groupCounts("agents", NOT_EXTENSION_AGENT_SQL),
     workflows: { total: workflowRow?.total ?? 0, enabled: workflowRow?.enabled ?? 0 },
     pages: { total: pagesRow?.count ?? 0 },
     sessions: { active: sessionsRow?.count ?? 0 },

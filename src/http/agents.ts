@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
 import { z } from "zod";
+import { isAgentDeleted } from "../be/agent-history";
 import {
   computeContentHash,
   createAgent,
@@ -94,7 +95,6 @@ import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { canManageAgentLifecycle } from "./agent-lifecycle";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { readableByFor, resolveSessionActor } from "./session-access";
 import { agentWithCapacity, json, jsonError } from "./utils";
@@ -196,7 +196,9 @@ const registerAgent = route({
       schema: RegisterAgentResponseSchema,
     },
     400: { description: "Validation error" },
-    410: { description: "Agent was soft-deleted (`agent_deleted`); the worker must stop" },
+    410: {
+      description: "An operator deleted this agent id (`agent_deleted`); the worker must stop",
+    },
   },
 });
 
@@ -436,15 +438,12 @@ const listAgents = route({
     limit: z.coerce.number().int().min(1).max(500).optional(),
     /** `full` restores the legacy shape (includes identity markdown); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
-    /** `only` lists soft-deleted agents instead; needs `agent.lifecycle.manage`. */
-    deleted: z.enum(["only"]).optional(),
   }),
   responses: {
     200: {
       description: "Agent list with capacity info",
       schema: z.object({ agents: z.array(AgentListItemSchema) }),
     },
-    403: { description: "`deleted=only` without operator or user credentials" },
   },
 });
 
@@ -721,9 +720,8 @@ export async function handleAgentRegister(
     }
 
     const agentId = myAgentId || crypto.randomUUID();
-    // A soft-deleted id must not be revived or re-created (its row still
-    // holds the id). 410 tells the runner to stop instead of retrying.
-    if ((await getAgentById(agentId, { includeDeleted: true }))?.deletedAt) {
+    // A deleted id is not re-created by a restarted worker; restore brings it back.
+    if (await isAgentDeleted(agentId)) {
       jsonError(res, "agent_deleted", 410);
       return true;
     }
@@ -932,16 +930,12 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const deleted = parsed.query.deleted;
-    if (deleted && !(await canManageAgentLifecycle(req, res, myAgentId))) return true;
-    const allAgents = deleted
-      ? await getAllAgents({ slim, deleted })
-      : includeTasks
-        ? await getAllAgentsWithTasks({
-            slim,
-            readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
-          })
-        : await getAllAgents({ slim });
+    const allAgents = includeTasks
+      ? await getAllAgentsWithTasks({
+          slim,
+          readableBy: readableByFor(await resolveSessionActor(req, myAgentId)),
+        })
+      : await getAllAgents({ slim });
     // Filtered before the per-agent capacity lookups.
     const agents = searchAgents(allAgents, parsed.query.q, parsed.query.limit);
     const [agentsWithCapacity, transports] = await Promise.all([

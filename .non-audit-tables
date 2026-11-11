@@ -78,4 +78,4 @@ automation_savings_days  # system-written rollup day markers, no user attributio
 automation_savings_links # system-written savings rollup links between jobs, no user attribution (290)
 import_items             # importer ownership map, system-written at boot (294)
 import_pending_assignments # importer-written assignments awaiting agent registration (294)
-agent_lifecycle_events   # append-only delete/restore audit; created_by is the actor, rows are never updated (334)
+agent_history            # append-only delete/restore history; actor_ref names the actor, triggers forbid updates (334)

@@ -348,65 +348,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{id}/delete-preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Preview an agent soft delete
-         * @description Blockers refuse the delete (open tasks, pool binding, a live worker, the lead, an extension identity, already deleted). Warnings list what stays pinned to the agent; echo `warningsHash` to the delete to confirm you saw them.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Preview */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AgentDeletePreview"];
-                    };
-                };
-                /** @description Operator or user credentials required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{id}/delete": {
         parameters: {
             query?: never;
@@ -417,8 +358,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Soft-delete an agent
-         * @description Marks the agent deleted, disables schedules that target it, and records who, when and why. The row and everything it owns stay, so restore is lossless.
+         * Delete an agent into agent_history
+         * @description Appends the agent row to `agent_history`, revokes its session tokens, and deletes the row. Refused with 409 while the agent is the lead, an extension identity, not offline, pool-bound, holds open tasks or enabled schedules, or owns skills, MCP servers or inboxes.
          */
         post: {
             parameters: {
@@ -433,7 +374,6 @@ export interface paths {
                 content: {
                     "application/json": {
                         reason: string;
-                        warningsHash: string;
                     };
                 };
             };
@@ -445,9 +385,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            agent: components["schemas"]["Agent"];
-                            disabledScheduleIds: string[];
-                            event: components["schemas"]["AgentLifecycleEvent"];
+                            event: components["schemas"]["AgentHistoryEvent"];
                         };
                     };
                 };
@@ -478,7 +416,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A blocker refuses the delete, or the warnings changed since the preview */
+                /** @description A blocker refuses the delete */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -487,7 +425,10 @@ export interface paths {
                         "application/json": {
                             error: string;
                             code: string;
-                            preview?: components["schemas"]["AgentDeletePreview"];
+                            blockers: {
+                                code: string;
+                                message: string;
+                            }[];
                         };
                     };
                 };
@@ -509,8 +450,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Restore a soft-deleted agent
-         * @description The agent comes back offline and unbound from any pool. Schedules the delete disabled stay off; their ids are returned for a manual re-enable.
+         * Restore a deleted agent from agent_history
+         * @description Reinserts the latest deleted snapshot under the same id. Rows a cascading foreign key removed on delete do not come back.
          */
         post: {
             parameters: {
@@ -538,8 +479,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             agent: components["schemas"]["Agent"];
-                            disabledScheduleIds: string[];
-                            event: components["schemas"]["AgentLifecycleEvent"];
+                            event: components["schemas"]["AgentHistoryEvent"];
                         };
                     };
                 };
@@ -561,7 +501,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Agent not found */
+                /** @description No deleted agent with this id */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -570,7 +510,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Not deleted, or its name is taken (`name_taken`) */
+                /** @description The agent exists, or its name is taken */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -579,7 +519,10 @@ export interface paths {
                         "application/json": {
                             error: string;
                             code: string;
-                            preview?: components["schemas"]["AgentDeletePreview"];
+                            blockers: {
+                                code: string;
+                                message: string;
+                            }[];
                         };
                     };
                 };
@@ -591,33 +534,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{id}/lifecycle-events": {
+    "/api/agent-history": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List an agent's delete and restore audit events */
+        /**
+         * List agent delete and restore events
+         * @description Newest first, at most 500. Filter by `agentId`.
+         */
         get: {
             parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
+                query?: {
+                    agentId?: string;
                 };
+                header?: never;
+                path?: never;
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Events, newest first */
+                /** @description Events */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            events: components["schemas"]["AgentLifecycleEvent"][];
+                            events: components["schemas"]["AgentHistoryEvent"][];
                         };
                     };
                 };
@@ -757,15 +703,6 @@ export interface paths {
                 };
                 /** @description Agent not found */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Agent was soft-deleted (`agent_deleted`); the worker must stop */
-                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2584,7 +2521,6 @@ export interface paths {
                     q?: string;
                     limit?: number;
                     fields?: "full" | "slim";
-                    deleted?: "only";
                 };
                 header?: never;
                 path?: never;
@@ -2612,15 +2548,6 @@ export interface paths {
                                 onDemand?: boolean;
                             })[];
                         };
-                    };
-                };
-                /** @description `deleted=only` without operator or user credentials */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -2695,7 +2622,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Agent was soft-deleted (`agent_deleted`); the worker must stop */
+                /** @description An operator deleted this agent id (`agent_deleted`); the worker must stop */
                 410: {
                     headers: {
                         [name: string]: unknown;
@@ -18944,15 +18871,6 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Agent was soft-deleted (`agent_deleted`); the worker must stop */
-                410: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
             };
         };
         put?: never;
@@ -31855,21 +31773,17 @@ export interface components {
             capabilities: string[];
             leadOnly?: boolean;
         };
-        AgentDeletePreview: {
+        AgentHistoryEvent: {
+            id: string;
             agentId: string;
-            blockers: {
-                code: string;
-                message: string;
-            }[];
-            warnings: {
-                kind: string;
-                count: number;
-                items: {
-                    id: string;
-                    name: string | null;
-                }[];
-            }[];
-            warningsHash: string;
+            /** @enum {string} */
+            event: "deleted" | "restored";
+            actorRef: string;
+            reason: string;
+            snapshot: {
+                [key: string]: unknown;
+            };
+            createdAt: string;
         };
         Agent: {
             id: string;
@@ -31923,8 +31837,6 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
-            deletedAt?: string;
-            deletedBy?: string | null;
         };
         AgentCredStatus: {
             ready: boolean;
@@ -32050,21 +31962,6 @@ export interface components {
         } | {
             /** @enum {string} */
             type: "app";
-        };
-        AgentLifecycleEvent: {
-            id: string;
-            agentId: string;
-            /** @enum {string} */
-            action: "deleted" | "restored";
-            /** @enum {string} */
-            actorKind: "user" | "operator";
-            actorRef: string;
-            createdBy: string | null;
-            reason: string;
-            snapshot: {
-                [key: string]: unknown;
-            };
-            createdAt: string;
         };
         ProfileCheckResult: {
             agentId: string;

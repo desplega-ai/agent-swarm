@@ -126,13 +126,11 @@ type:UpsertAssetKeyMappingInput
 type:WorkflowFilters
 type:WorkflowRunListOptions
 type:WorkflowRunPage
-value:AgentDeletedError
 value:AssetKeyMovesBlockedError
 value:EXTENSION_AGENT_ROLE
 value:ExtensionAgentAssignmentError
 value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
-value:NOT_DELETED_AGENT_SQL
 value:NOT_EXTENSION_AGENT_SQL
 value:PINNED_WORKFLOW_KEYS
 value:ReservedAgentRoleError
@@ -145,7 +143,6 @@ value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
 value:abandonSlackOutcomeDelivery
 value:acceptTask
-value:agentDeletedMessage
 value:assertAssetKeyMovesAllowed
 value:assignUnassignedTaskPending
 value:autoEncryptLegacyPlaintextSecrets

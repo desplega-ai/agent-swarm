@@ -430,7 +430,6 @@ const pingRoute = route({
     204: { description: "Liveness recorded (or accepted as a no-op)" },
     400: { description: "Missing X-Agent-ID header" },
     404: { description: "Agent not found" },
-    410: { description: "Agent was soft-deleted (`agent_deleted`); the worker must stop" },
   },
 });
 
@@ -770,12 +769,11 @@ export async function handleCore(
     const multiRuntime = isMultiRuntimeEnabled();
 
     const found = await getDbClient().transaction(async () => {
-      const agent = await getAgentById(myAgentId, { includeDeleted: true });
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return false;
       }
-      if (agent.deletedAt) return "deleted";
 
       if (multiRuntime) {
         // Prove the identity before touching the agent: the status ladder
@@ -808,11 +806,6 @@ export async function handleCore(
     if (!found) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
-      return true;
-    }
-    if (found === "deleted") {
-      res.writeHead(410, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "agent_deleted" }));
       return true;
     }
 

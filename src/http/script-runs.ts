@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  AgentDeletedError,
   countActiveScriptRuns,
   countScriptRunJournalAgentTaskSteps,
   countScriptRunJournalSteps,
@@ -818,7 +817,7 @@ export async function handleScriptRuns(
           return { task: created, created: true, override };
         });
       } catch (error) {
-        if (error instanceof ExtensionAgentAssignmentError || error instanceof AgentDeletedError) {
+        if (error instanceof ExtensionAgentAssignmentError) {
           jsonError(res, error.message, 400);
           return true;
         }

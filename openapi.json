@@ -669,79 +669,44 @@
           }
         }
       },
-      "AgentDeletePreview": {
+      "AgentHistoryEvent": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "agentId": {
             "type": "string"
           },
-          "blockers": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "code",
-                "message"
-              ]
-            }
+          "event": {
+            "type": "string",
+            "enum": [
+              "deleted",
+              "restored"
+            ]
           },
-          "warnings": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "integer"
-                },
-                "items": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "name"
-                    ]
-                  }
-                }
-              },
-              "required": [
-                "kind",
-                "count",
-                "items"
-              ]
-            }
+          "actorRef": {
+            "type": "string"
           },
-          "warningsHash": {
+          "reason": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "createdAt": {
             "type": "string"
           }
         },
         "required": [
+          "id",
           "agentId",
-          "blockers",
-          "warnings",
-          "warningsHash"
+          "event",
+          "actorRef",
+          "reason",
+          "snapshot",
+          "createdAt"
         ]
       },
       "Agent": {
@@ -984,15 +949,6 @@
           "lastUpdatedAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "deletedAt": {
-            "type": "string"
-          },
-          "deletedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
           }
         },
         "required": [
@@ -1515,61 +1471,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "AgentLifecycleEvent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string",
-            "enum": [
-              "deleted",
-              "restored"
-            ]
-          },
-          "actorKind": {
-            "type": "string",
-            "enum": [
-              "user",
-              "operator"
-            ]
-          },
-          "actorRef": {
-            "type": "string"
-          },
-          "createdBy": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "reason": {
-            "type": "string"
-          },
-          "snapshot": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "createdAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "agentId",
-          "action",
-          "actorKind",
-          "actorRef",
-          "createdBy",
-          "reason",
-          "snapshot",
-          "createdAt"
         ]
       },
       "ProfileCheckResult": {
@@ -7908,67 +7809,10 @@
         }
       }
     },
-    "/api/agents/{id}/delete-preview": {
-      "get": {
-        "summary": "Preview an agent soft delete",
-        "description": "Blockers refuse the delete (open tasks, pool binding, a live worker, the lead, an extension identity, already deleted). Warnings list what stays pinned to the agent; echo `warningsHash` to the delete to confirm you saw them.",
-        "tags": [
-          "Agents"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Preview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentDeletePreview"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Operator or user credentials required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{id}/delete": {
       "post": {
-        "summary": "Soft-delete an agent",
-        "description": "Marks the agent deleted, disables schedules that target it, and records who, when and why. The row and everything it owns stay, so restore is lossless.",
+        "summary": "Delete an agent into agent_history",
+        "description": "Appends the agent row to `agent_history`, revokes its session tokens, and deletes the row. Refused with 409 while the agent is the lead, an extension identity, not offline, pool-bound, holds open tasks or enabled schedules, or owns skills, MCP servers or inboxes.",
         "tags": [
           "Agents"
         ],
@@ -7998,15 +7842,10 @@
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 2000
-                  },
-                  "warningsHash": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "required": [
-                  "reason",
-                  "warningsHash"
+                  "reason"
                 ]
               }
             }
@@ -8020,22 +7859,11 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "agent": {
-                      "$ref": "#/components/schemas/Agent"
-                    },
-                    "disabledScheduleIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
                     "event": {
-                      "$ref": "#/components/schemas/AgentLifecycleEvent"
+                      "$ref": "#/components/schemas/AgentHistoryEvent"
                     }
                   },
                   "required": [
-                    "agent",
-                    "disabledScheduleIds",
                     "event"
                   ]
                 }
@@ -8073,7 +7901,7 @@
             }
           },
           "409": {
-            "description": "A blocker refuses the delete, or the warnings changed since the preview",
+            "description": "A blocker refuses the delete",
             "content": {
               "application/json": {
                 "schema": {
@@ -8085,13 +7913,29 @@
                     "code": {
                       "type": "string"
                     },
-                    "preview": {
-                      "$ref": "#/components/schemas/AgentDeletePreview"
+                    "blockers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "error",
-                    "code"
+                    "code",
+                    "blockers"
                   ]
                 }
               }
@@ -8102,8 +7946,8 @@
     },
     "/api/agents/{id}/restore": {
       "post": {
-        "summary": "Restore a soft-deleted agent",
-        "description": "The agent comes back offline and unbound from any pool. Schedules the delete disabled stay off; their ids are returned for a manual re-enable.",
+        "summary": "Restore a deleted agent from agent_history",
+        "description": "Reinserts the latest deleted snapshot under the same id. Rows a cascading foreign key removed on delete do not come back.",
         "tags": [
           "Agents"
         ],
@@ -8157,19 +8001,12 @@
                     "agent": {
                       "$ref": "#/components/schemas/Agent"
                     },
-                    "disabledScheduleIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
                     "event": {
-                      "$ref": "#/components/schemas/AgentLifecycleEvent"
+                      "$ref": "#/components/schemas/AgentHistoryEvent"
                     }
                   },
                   "required": [
                     "agent",
-                    "disabledScheduleIds",
                     "event"
                   ]
                 }
@@ -8197,7 +8034,7 @@
             }
           },
           "404": {
-            "description": "Agent not found",
+            "description": "No deleted agent with this id",
             "content": {
               "application/json": {
                 "schema": {
@@ -8207,7 +8044,7 @@
             }
           },
           "409": {
-            "description": "Not deleted, or its name is taken (`name_taken`)",
+            "description": "The agent exists, or its name is taken",
             "content": {
               "application/json": {
                 "schema": {
@@ -8219,13 +8056,29 @@
                     "code": {
                       "type": "string"
                     },
-                    "preview": {
-                      "$ref": "#/components/schemas/AgentDeletePreview"
+                    "blockers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "error",
-                    "code"
+                    "code",
+                    "blockers"
                   ]
                 }
               }
@@ -8234,9 +8087,10 @@
         }
       }
     },
-    "/api/agents/{id}/lifecycle-events": {
+    "/api/agent-history": {
       "get": {
-        "summary": "List an agent's delete and restore audit events",
+        "summary": "List agent delete and restore events",
+        "description": "Newest first, at most 500. Filter by `agentId`.",
         "tags": [
           "Agents"
         ],
@@ -8251,14 +8105,14 @@
               "type": "string",
               "minLength": 1
             },
-            "required": true,
-            "name": "id",
-            "in": "path"
+            "required": false,
+            "name": "agentId",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Events, newest first",
+            "description": "Events",
             "content": {
               "application/json": {
                 "schema": {
@@ -8267,7 +8121,7 @@
                     "events": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/AgentLifecycleEvent"
+                        "$ref": "#/components/schemas/AgentHistoryEvent"
                       }
                     }
                   },
@@ -8415,16 +8269,6 @@
           },
           "404": {
             "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {
@@ -12366,7 +12210,7 @@
             }
           },
           "410": {
-            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
+            "description": "An operator deleted this agent id (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {
@@ -12430,17 +12274,6 @@
             },
             "required": false,
             "name": "fields",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "only"
-              ]
-            },
-            "required": false,
-            "name": "deleted",
             "in": "query"
           }
         ],
@@ -12510,16 +12343,6 @@
                   "required": [
                     "agents"
                   ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`deleted=only` without operator or user credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -44218,16 +44041,6 @@
           },
           "404": {
             "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Agent was soft-deleted (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {

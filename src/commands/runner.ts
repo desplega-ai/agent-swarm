@@ -780,28 +780,11 @@ export function scheduleSteeringDispatch(
 }
 
 /**
- * The API answers 410 `agent_deleted` on register, ping and poll once an
- * operator soft-deletes this agent. Retrying can never succeed, so log once
- * and exit; a restart policy just repeats this one line.
- */
-export function exitIfAgentDeleted(
-  status: number,
-  role: string,
-  exit: (code: number) => never = process.exit,
-): void {
-  if (status !== 410) return;
-  console.error(
-    `[${role}] This agent was deleted by an operator (410 agent_deleted); exiting. Restore it before restarting this worker.`,
-  );
-  exit(1);
-}
-
-/**
  * Ping the server to indicate activity and update status. Resolves to whether
  * the API is draining, or undefined when it did not answer (down, or a 5xx
  * from a proxy), so a gap in service never reads as "stopped draining".
  */
-export async function pingServer(config: ApiConfig, role: string): Promise<boolean | undefined> {
+export async function pingServer(config: ApiConfig, _role: string): Promise<boolean | undefined> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
   };
@@ -817,7 +800,6 @@ export async function pingServer(config: ApiConfig, role: string): Promise<boole
       method: "POST",
       headers,
     });
-    exitIfAgentDeleted(response.status, role);
     if (response.status >= 500) return undefined;
     return isApiDrainingResponse(response);
   } catch {
@@ -4037,7 +4019,6 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
       });
 
       if (!response.ok) {
-        exitIfAgentDeleted(response.status, "runner");
         console.warn(`[runner] Poll request failed: ${response.status}`);
         opts.onPollFailure?.();
         if (opts.singlePoll) return null;
@@ -6774,7 +6755,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     try {
       await registerCurrentRuntime();
     } catch (err) {
-      if (err instanceof AgentRegistrationHttpError) exitIfAgentDeleted(err.status, role);
       console.warn(`[${role}] [config] Re-register failed (non-fatal): ${err}`);
     }
   };
