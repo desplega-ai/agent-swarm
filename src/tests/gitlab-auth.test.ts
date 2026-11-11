@@ -98,6 +98,16 @@ describe("GitLab auth", () => {
       initGitLab();
       expect(verifyGitLabWebhook("example-test-secret")).toBe(true);
     });
+
+    test("returns false, without throwing, for a same-length token with a multi-byte character", () => {
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
+      initGitLab();
+      // Same string length as the secret (19), more UTF-8 bytes.
+      const token = "example-test-secreé";
+      expect(token.length).toBe("example-test-secret".length);
+      expect(() => verifyGitLabWebhook(token)).not.toThrow();
+      expect(verifyGitLabWebhook(token)).toBe(false);
+    });
   });
 
   describe("getGitLabBotName", () => {

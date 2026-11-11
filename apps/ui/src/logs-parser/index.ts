@@ -109,7 +109,9 @@ export function itemsToParsedMessages(items: NormalizedItem[]): ParsedMessage[] 
 function itemToBlock(item: NormalizedItem): ContentBlock | null {
   switch (item.kind) {
     case "text": {
-      return { type: "text", text: item.text ?? "" };
+      return item.progress
+        ? { type: "text", text: item.text ?? "", progress: true }
+        : { type: "text", text: item.text ?? "" };
     }
     case "reasoning": {
       return { type: "thinking", thinking: item.text ?? "" };
