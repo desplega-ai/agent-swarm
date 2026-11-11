@@ -752,8 +752,7 @@ jobs:
           bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md
           cat e2e-coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
 
-      # Same upsert as the UI E2E comment. A PR with no changed API line gets no new comment,
-      # but an earlier one is updated so it never goes stale.
+      # Same upsert as the UI E2E comment. A PR with no changed API line gets a one-line comment.
       - name: Upsert changed-lines coverage comment
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
@@ -767,7 +766,7 @@ jobs:
             --jq '.[] | select(.body | startswith("<!-- e2e-coverage -->")) | .id' | head -n 1)
           if [ -n "$comment_id" ]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<e2e-coverage-comment.md)"
-          elif ! grep -q '<!-- e2e-coverage:empty -->' e2e-coverage-comment.md; then
+          else
             gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<e2e-coverage-comment.md)"
           fi
 

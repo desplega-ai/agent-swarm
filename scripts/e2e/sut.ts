@@ -170,8 +170,14 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
 async function stopSutProcess(sut: Sut): Promise<void> {
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGTERM");
-    // Under --coverage, Bun writes lcov for every loaded file after the API exits.
-    await Promise.race([sut.process.exited, Bun.sleep(sut.coverageDir ? 60_000 : 5_000)]);
+    // Under --coverage, Bun writes lcov for every loaded file after the API exits. A cleared
+    // timer, not Bun.sleep: a pending sleep keeps the runner alive after its last line.
+    let timer: Timer | undefined;
+    const grace = new Promise((done) => {
+      timer = setTimeout(done, sut.coverageDir ? 60_000 : 5_000);
+    });
+    await Promise.race([sut.process.exited, grace]);
+    clearTimeout(timer);
   }
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGKILL");

@@ -18,8 +18,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const MARKER = "<!-- e2e-coverage -->";
-/** Marks a comment worth posting only over an existing one (no changed API line). */
-export const EMPTY_MARKER = "<!-- e2e-coverage:empty -->";
 
 /** Worker-side code (CLAUDE.md "Architecture invariants") and tests: the API never runs them. */
 const NOT_API = [
@@ -200,7 +198,7 @@ export function renderComment(
     ].join("\n");
   }
   if (report.changed === 0) {
-    return `${MARKER}${EMPTY_MARKER}\nE2E coverage: this PR changes no executable API line.\n`;
+    return `${MARKER}\nE2E coverage: this PR changes no executable API line (${lcovFiles} lcov file(s) read).\n`;
   }
   const percent = ((report.covered / report.changed) * 100).toFixed(1);
   const rows = report.files.slice(0, MAX_ROWS).map((file) => {

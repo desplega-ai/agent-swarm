@@ -135,9 +135,9 @@ per API process). The **E2E Contract** job then runs `diff-coverage.ts --base HE
 the PR merge commit) and upserts one sticky comment, `<!-- e2e-coverage -->`: covered over
 changed API lines, per file, with the uncovered line ranges. It never blocks. Every coverage
 step is `continue-on-error`, and a coverage problem becomes a comment that says so. A PR that
-changes no executable API line gets no new comment (an earlier one is updated). Fork PRs have a
+changes no executable API line gets a one-line comment. Fork PRs have a
 read-only token, so the upsert step skips; the comment text is still in the job summary.
-Coverage made one local full run about 20% slower (333 s against 278 s, 124 of 124 pass both ways). Rules for scope
+Coverage made one local full run about 8% slower (299 s against 278 s, 124 of 124 pass both ways). Rules for scope
 and exemptions: [scripts/e2e/README.md § Changed lines](../scripts/e2e/README.md#changed-lines---coverage).
 
 ## Relation to unit tests

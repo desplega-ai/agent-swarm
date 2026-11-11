@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   diffCoverage,
-  EMPTY_MARKER,
   inScope,
   lineRanges,
   MARKER,
@@ -143,7 +142,9 @@ describe("e2e diff coverage", () => {
     expect(body).toContain("**1 of 4 changed API lines run in an e2e scenario (25.0%).**");
     expect(body).toContain("| `src/be/new.ts` (not loaded) | 0/2 | 2, 4 |");
     const empty = renderComment({ changed: 0, covered: 0, files: [] }, 6);
-    expect(empty.startsWith(MARKER) && empty.includes(EMPTY_MARKER)).toBe(true);
+    expect(empty).toBe(
+      `${MARKER}\nE2E coverage: this PR changes no executable API line (6 lcov file(s) read).\n`,
+    );
     expect(renderComment({ error: "no lcov" }, 0)).toContain(
       "Coverage could not be computed: no lcov",
     );
