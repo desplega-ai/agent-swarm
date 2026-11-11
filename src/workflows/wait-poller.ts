@@ -3,6 +3,8 @@ import type { ExecutorRegistry } from "./executors/registry";
 import { resumeWaitState } from "./resume";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
+/** Bumped by every stop, so a tick in flight can tell that its poller was stopped. */
+let pollerGeneration = 0;
 
 /**
  * Start the wait-state poller.
@@ -24,6 +26,7 @@ let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
  */
 export function startWaitPoller(registry: ExecutorRegistry, intervalMs = 5000): void {
   if (pollerTimeout !== null) return; // Already running
+  const generation = pollerGeneration;
 
   async function poll(): Promise<void> {
     try {
@@ -46,8 +49,8 @@ export function startWaitPoller(registry: ExecutorRegistry, intervalMs = 5000): 
       console.error("[workflows] Wait poller tick error:", err);
     }
 
-    // Schedule the next tick after this one completes.
-    pollerTimeout = setTimeout(poll, intervalMs);
+    // Schedule the next tick after this one completes, unless the poller was stopped mid-tick.
+    if (generation === pollerGeneration) pollerTimeout = setTimeout(poll, intervalMs);
   }
 
   // Start the first tick.
@@ -56,6 +59,7 @@ export function startWaitPoller(registry: ExecutorRegistry, intervalMs = 5000): 
 
 /** Stop the wait poller (clean shutdown). */
 export function stopWaitPoller(): void {
+  pollerGeneration++;
   if (pollerTimeout !== null) {
     clearTimeout(pollerTimeout);
     pollerTimeout = null;
