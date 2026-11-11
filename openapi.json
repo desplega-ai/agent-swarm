@@ -26683,7 +26683,8 @@
                               "telegram",
                               "slack",
                               "discord",
-                              "teams"
+                              "teams",
+                              "rocketchat"
                             ]
                           },
                           "configured": {

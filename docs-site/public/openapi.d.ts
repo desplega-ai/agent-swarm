@@ -9808,7 +9808,7 @@ export interface paths {
                             error?: string;
                             adapters: {
                                 /** @enum {string} */
-                                name: "telegram" | "slack" | "discord" | "teams";
+                                name: "telegram" | "slack" | "discord" | "teams" | "rocketchat";
                                 configured: boolean;
                                 enabled: boolean;
                                 /** @enum {string} */
