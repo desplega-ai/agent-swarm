@@ -720,8 +720,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "326_slack_reconcile_pages.sql");
       // 329 indexes workflow_runs and approval_requests, absent from this fixture.
       markMigrationApplied(database, "329_workflow_run_retention.sql");
-      // 331 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
-      markMigrationApplied(database, "331_audit_agent_columns.sql");
+      // 333 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
+      markMigrationApplied(database, "333_audit_agent_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
