@@ -121,9 +121,9 @@ export const knowledgeBoards: Scenario = {
         );
         const boardId = asString(asRecord(created.object).id, "board id");
         const added = asRecord(created.added);
-        const [a, b, ab] = [added.a, added.b, added["arrows[0]"]].map((v) =>
-          asString(v, "added id"),
-        );
+        const a = asString(added.a, "added a");
+        const b = asString(added.b, "added b");
+        const ab = asString(added["arrows[0]"], "added arrow");
         expect(
           created.version === 1,
           `board-create version: ${JSON.stringify(created).slice(0, 300)}`,
