@@ -63,7 +63,7 @@ function pathSegments(path: string): string[] {
       try {
         decoded = decodeURIComponent(segment);
       } catch {
-        // A lone `%` is part of the name; it is encoded below.
+        // A lone `%` is part of the name; the provider encodes it.
       }
       if (!decoded || decoded === "." || decoded === ".." || /[/\\\0]/.test(decoded)) {
         throw new FilesError(
@@ -94,7 +94,8 @@ async function callerAgentFs(agentId: string | undefined): Promise<CallerAgentFs
 export function chatFileOfPath(path: string, access: CallerAgentFs): OutboundChatFile {
   const segments = pathSegments(path);
   const name = segments.at(-1)!;
-  const key = segments.map(encodeURIComponent).join("/");
+  // A stored key is the literal drive path; AgentFsProvider encodes it for the URL.
+  const key = segments.join("/");
   // The caller's key can be shorter than the global scrubber's floor, so a
   // storage error body or transport error is scrubbed of it by exact value.
   const keyScrubber = createValueScrubber([{ value: access.apiKey, name: "AGENT_FS_API_KEY" }]);
