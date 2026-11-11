@@ -80,7 +80,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Evals Harness](https://docs.agent-swarm.dev/docs/guides/evals-harness). Reference.
 - [Personalization & Status](https://docs.agent-swarm.dev/docs/guides/personalization). Reference.
 - [Secrets Encryption](https://docs.agent-swarm.dev/docs/guides/secrets-encryption). When: Someone asks how swarm secrets are stored, encrypted or backed up.
-- [Harness Configuration](https://docs.agent-swarm.dev/docs/guides/harness-configuration). When: Someone wants agents to run on a different AI provider or coding CLI.
+- [Harness Configuration](https://docs.agent-swarm.dev/docs/guides/harness-configuration). When: Someone wants agents to run on a different harness or coding CLI.
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
