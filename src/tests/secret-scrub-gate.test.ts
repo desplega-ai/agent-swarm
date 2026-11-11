@@ -30,6 +30,7 @@ function extraStructuralTexts(): string[] {
     `signoz-ingestion-key=${tok(30)}`,
     `lin_oauth_${tok(30)}`,
     `aswt_${tok(30)}`,
+    `prod:happy-animal-123%7CeyJ2${tok(40)}`,
   ].map((secret) => `the response included ${secret} in its body`);
 }
 
