@@ -6,6 +6,7 @@ import {
   enableSlackRenderV2Only,
   findSlackTask,
   registerLead,
+  slackAbsenceWindowMs,
   waitForBotReply,
   waitForEyes,
   waitForReaction,
@@ -144,11 +145,11 @@ async function skipOneAsk(
   }
 
   if (!checkSilence) return;
-  // Calibrated like waitForOutcomeAbsence: 30s covers both an immediate
-  // legacy relay and the v2 watcher's tick, so absence is a real assertion.
+  // Calibrated like waitForOutcomeAbsence: several watcher ticks cover both an
+  // immediate legacy relay and the v2 watcher's pass, so absence is a real assertion.
   const posted = await pollUntil(
     () => threadReplies(ctx, message.ts).some((reply) => !repliesBefore.has(reply.ts)),
-    30_000,
+    slackAbsenceWindowMs(ctx),
   );
   const extra = threadReplies(ctx, message.ts).filter((reply) => !repliesBefore.has(reply.ts));
   expect(
