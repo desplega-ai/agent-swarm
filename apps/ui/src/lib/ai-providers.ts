@@ -91,6 +91,8 @@ const GATEWAY_GUIDE = {
   href: `${DOCS}/harness-configuration#nan-and-helmcode`,
 };
 
+const SECRETS_NOTE = "Saved as a global secret. Only the API server reads it.";
+
 const CLAUDE_TOKEN_TERMS =
   "The swarm runs the unmodified Claude Code CLI. Anthropic documents setup tokens for CI and automation on your own subscription. Do not share a token across people or organizations.";
 
@@ -149,6 +151,37 @@ export const AI_PROVIDERS: AiProvider[] = [
     ],
     docs: { label: "Codex OAuth guide", href: `${DOCS}/provider-auth/codex-oauth` },
     fields: [],
+  },
+  {
+    id: "opencode-go",
+    name: "OpenCode Go",
+    group: "subscription",
+    type: "Subscription",
+    logo: { src: "/harness-logos/opencode.svg" },
+    harnesses: ["pi", "opencode"],
+    noun: "key",
+    vendor: "OpenCode",
+    configuredBy: ["OPENCODE_API_KEY"],
+    liveCheck: false,
+    summary:
+      "Open coding models on a flat monthly OpenCode Go plan, for the pi and opencode harnesses.",
+    steps: [
+      {
+        text: "Subscribe in the [OpenCode Console](https://opencode.ai/auth) and copy your API key.",
+      },
+      { text: "Paste it below. Set the model with the `opencode-go/` prefix." },
+    ],
+    note: "A key stored here reaches every worker. A worker that already runs `opencode auth login` (an `auth.json` file) does not show up on this page.",
+    docs: { label: "OpenCode Go docs", href: "https://opencode.ai/docs/go/" },
+    fields: [
+      {
+        key: "OPENCODE_API_KEY",
+        label: "API key",
+        kind: "secret",
+        placeholder: "Paste the OpenCode Go key",
+        help: SECRETS_NOTE,
+      },
+    ],
   },
   {
     id: "anthropic",
@@ -542,7 +575,6 @@ const WORKFLOWS_GUIDE = {
   href: "https://docs.agent-swarm.dev/docs/concepts/workflows#systemone-decision",
 };
 const SYSTEM_ONE_FOOTER = "The swarm checks the key before a workflow's first decision.";
-const SECRETS_NOTE = "Saved as a global secret. Only the API server reads it.";
 
 /**
  * The side panels of the System One hosts (`?add=system-one-<host>`). Not in
