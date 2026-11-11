@@ -18,6 +18,23 @@ const { readStringParam, useUrlSearchInput, useUrlSearchState } = await import(
 const DELAY = 10;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Retry `check` until it stops throwing. A fixed sleep after a timer or a
+ * router transition fails when a loaded CI runner delays the render, so the
+ * tests wait for the outcome, not for a guessed duration.
+ */
+async function waitFor(check: () => void, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return check();
+    } catch (err) {
+      if (Date.now() >= deadline) throw err;
+      await sleep(5);
+    }
+  }
+}
+
 function Probe() {
   const [search, setSearch] = useUrlSearchInput("search", { delayMs: DELAY });
   const { setParam } = useUrlSearchState();
@@ -50,7 +67,7 @@ async function mount(node: React.ReactNode, initial = "/") {
   document.body.appendChild(container);
   const root = createRoot(container);
   root.render(<MemoryRouter initialEntries={[initial]}>{node}</MemoryRouter>);
-  await sleep(DELAY);
+  await waitFor(() => expect(container.querySelector("input")).not.toBeNull());
   const input = container.querySelector("input") as HTMLInputElement;
   const url = () => container.querySelector('[data-testid="url"]')?.textContent ?? "";
   /** Keys faster than renders: each one appends to what the input shows now. */
@@ -78,8 +95,7 @@ describe("useUrlSearchInput", () => {
     view.typeFast("telegram");
     expect(view.input.value).toBe("telegram");
     expect(view.url()).toBe("");
-    await sleep(DELAY * 4);
-    expect(view.url()).toBe("?search=telegram");
+    await waitFor(() => expect(view.url()).toBe("?search=telegram"));
     expect(view.input.value).toBe("telegram");
     view.root.unmount();
   });
@@ -88,9 +104,10 @@ describe("useUrlSearchInput", () => {
     const view = await mount(<Probe />, "/?search=slack");
     expect(view.input.value).toBe("slack");
     view.container.querySelector("button")?.click();
-    await sleep(DELAY * 2);
-    expect(view.url()).toBe("");
-    expect(view.input.value).toBe("");
+    await waitFor(() => {
+      expect(view.url()).toBe("");
+      expect(view.input.value).toBe("");
+    });
     view.root.unmount();
   });
 });

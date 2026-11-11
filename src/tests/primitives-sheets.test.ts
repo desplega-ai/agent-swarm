@@ -112,6 +112,7 @@ beforeEach(async () => {
 
 const doc = (path: string): SheetDoc =>
   SheetDocSchema.parse(JSON.parse(files.get(path)?.body ?? "null"));
+type CellInputGrid = Array<Array<number | string | boolean | null>>;
 const make = async (path = "t.sheet.json") => (await createSheet({ agentId, path })).object;
 
 describe("a1", () => {
@@ -170,7 +171,10 @@ describe("format", () => {
     expect(SheetDocSchema.safeParse({ ...emptySheet("id1"), tabs: [] }).success).toBe(false);
     expect(constantInput("007")).toBe("'007");
     expect(constantInput("=x")).toBe("'=x");
-    expect(constantInput("plain")).toBe("plain");
+    expect(constantInput("plain")).toBe("'plain");
+    expect(constantInput("$12")).toBe("'$12");
+    expect(constantInput(" 007")).toBe("'\u0020007");
+    expect(constantInput("")).toBe("");
     expect(constantInput(true)).toBe("TRUE");
     expect(constantInput(null)).toBe("");
   });
@@ -546,6 +550,109 @@ describe("sheet service", () => {
     await expect(getSheet({ agentId, id })).rejects.toThrow("not a valid swarm-sheet/1");
     files.delete("t.sheet.json");
     await expect(getSheet({ agentId, id })).rejects.toThrow("missing on the drive");
+  });
+
+  describe("a range and its values must have the same shape", () => {
+    const seedNeighbours = async (id: string) => {
+      await setSheetRange({ agentId, id, range: "C1:D1", values: [["keep C", "keep D"]] });
+      await setSheetRange({ agentId, id, range: "A3:A4", values: [["keep A3"], ["keep A4"]] });
+      return { body: files.get("t.sheet.json")?.body, writesBefore: writes };
+    };
+
+    test("equal-area mismatches refuse and leave the file and version alone", async () => {
+      const { id } = await make();
+      const before = await seedNeighbours(id);
+      const cases: Array<[string, CellInputGrid]> = [
+        ["A1:B2", [[1, 2, 3, 4]]], // horizontal: 1x4 into 2x2 would reach C1:D1
+        ["A1:B2", [[1], [2], [3], [4]]], // vertical: 4x1 into 2x2 would reach A3:A4
+        ["A1:D1", [[1], [2], [3], [4]]], // transposed 4x1 into 1x4
+        ["A1:A4", [[1, 2, 3, 4]]], // transposed 1x4 into 4x1
+      ];
+      for (const [range, values] of cases) {
+        await expect(setSheetRange({ agentId, id, range, values })).rejects.toThrow(
+          /values is \d+x\d+ but the range is \d+x\d+/,
+        );
+      }
+      expect(files.get("t.sheet.json")?.body).toBe(before.body);
+      expect(writes).toBe(before.writesBefore);
+      expect((await getSheetRange({ agentId, id, range: "C1:D1" })).values).toEqual([
+        ["keep C", "keep D"],
+      ]);
+    });
+
+    test("a single cell still expands to the values' shape, and an exact match still writes", async () => {
+      const { id } = await make();
+      await setSheetRange({ agentId, id, range: "A1", values: [[1, 2, 3, 4]] });
+      await setSheetRange({ agentId, id, range: "A2", values: [[5], [6]] });
+      await setSheetRange({
+        agentId,
+        id,
+        range: "C2:D3",
+        values: [
+          [7, 8],
+          [9, 10],
+        ],
+      });
+      expect((await getSheetRange({ agentId, id, range: "A1:D3" })).values).toEqual([
+        [1, 2, 3, 4],
+        [5, null, 7, 8],
+        [6, null, 9, 10],
+      ]);
+    });
+  });
+
+  describe("text stays text", () => {
+    // Strings the engine would coerce to numbers or booleans without the text prefix, plus the escape cases.
+    const texts = ["$12", " 007", "12%", "1e3", "  TRUE", "(123)", "007", "'abc", "plain"];
+    const column = texts.map((t) => [t]);
+    const read = async (id: string, range: string) =>
+      (await getSheetRange({ agentId, id, range })).values;
+
+    test("through setRange, appendRows and create, and after an unrelated recalculation", async () => {
+      const { id } = await make();
+      await setSheetRange({ agentId, id, range: "A1", values: column });
+      await appendSheetRows({ agentId, id, tab: "Sheet1", rows: column });
+      const created = await createSheet({
+        agentId,
+        path: "seeded.sheet.json",
+        tabs: [{ name: "Data", rows: column }],
+      });
+      const n = texts.length;
+      expect(await read(id, `A1:A${2 * n}`)).toEqual([...column, ...column]);
+      expect(await read(created.object.id, `Data!A1:A${n}`)).toEqual(column);
+
+      // Every later write rebuilds the model from the file: the text must survive that too.
+      await setSheetRange({ agentId, id, range: "C1", values: [[1]] });
+      await setSheetRange({ agentId, id: created.object.id, range: "C1", values: [["=1+1"]] });
+      expect(await read(id, `A1:A${2 * n}`)).toEqual([...column, ...column]);
+      expect(await read(created.object.id, `Data!A1:A${n}`)).toEqual(column);
+    });
+
+    test("hand-authored text values rebuild as text, formulas and the '= escape keep their meaning", async () => {
+      const { id } = await make();
+      const handwritten = doc("t.sheet.json");
+      handwritten.tabs[0]!.cells = {
+        A1: { v: "$12" },
+        A2: { v: " 007" },
+        A3: { v: "=not a formula" },
+        A4: { v: 5 },
+        A5: { v: "'quoted" },
+        B1: { f: "=A4*2", v: 10 },
+        B2: { f: '=A1&"!"', v: "$12!" },
+      };
+      files.set("t.sheet.json", { body: JSON.stringify(handwritten), version: 5 });
+      await setSheetRange({ agentId, id, range: "C1", values: [["'=literal"]] });
+      expect(await read(id, "A1:A5")).toEqual([
+        ["$12"],
+        [" 007"],
+        ["=not a formula"],
+        [5],
+        ["'quoted"],
+      ]);
+      expect(await read(id, "B1:B2")).toEqual([[10], ["$12!"]]);
+      expect(await read(id, "C1")).toEqual([["=literal"]]);
+      expect(doc("t.sheet.json").tabs[0]?.cells.B1).toEqual({ f: "=A4*2", v: 10 });
+    });
   });
 
   test("list returns only sheets, and reindex restores a sheet id after the table is wiped", async () => {

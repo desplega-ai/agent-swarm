@@ -115,6 +115,7 @@ function opencodeModelToCredKey(modelStr: string | undefined): string | null {
     if (provider === "anthropic") return "ANTHROPIC_API_KEY";
     if (provider === "openrouter") return "OPENROUTER_API_KEY";
     if (provider === "openai") return "OPENAI_API_KEY";
+    if (provider === "opencode-go") return "OPENCODE_API_KEY";
     // OpenAI-compatible registry providers (`nan`, `helmcode`).
     const direct = openAICompatibleProvider(provider);
     if (direct) return direct.envVar;
@@ -137,6 +138,7 @@ const OPENCODE_ANY_KEY_VARS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
+  "OPENCODE_API_KEY",
   ...openAICompatibleKeyVars(),
 ];
 
@@ -312,11 +314,12 @@ export function buildOpenAICompatibleProviderBlock(
 
 /**
  * Built-in OpenCode providers whose key OpenCode reads from `process.env`:
- * `openrouter` plus every registry provider models.dev lists
+ * `openrouter`, `opencode-go` plus every registry provider models.dev lists
  * (`catalog: "models.dev"`, e.g. `nan`), which OpenCode ships built in.
  */
 function envBoundKeyVars(providerId: string): readonly string[] | undefined {
   if (providerId === "openrouter") return ["OPENROUTER_API_KEY"];
+  if (providerId === "opencode-go") return ["OPENCODE_API_KEY"];
   const direct = openAICompatibleProvider(providerId);
   return direct?.catalog === "models.dev" ? providerKeyVars(direct) : undefined;
 }

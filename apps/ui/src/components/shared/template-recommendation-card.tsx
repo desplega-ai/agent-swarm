@@ -4,9 +4,8 @@
  * `/templates`, `/tasks`, `/workflows` and the home "First steps" section.
  *
  * The card is presentational — the parent decides when to show it. Click
- * routes to `/templates` (the prompt-templates list). A future iteration
- * may deep-link to a per-template detail view once the agent-template
- * registry is exposed in the UI; for now we keep the navigation honest.
+ * routes to the recommended template's detail page by default; pass
+ * `actionHref` to override the destination.
  */
 
 import { ArrowRight, Sparkles } from "lucide-react";
@@ -35,7 +34,7 @@ export interface TemplateRecommendationCardProps {
    * you", "Try this", "Recommended"). Defaults to "Recommended template".
    */
   eyebrow?: string;
-  /** Override the action target (defaults to `/templates`). */
+  /** Override the action target (defaults to the recommended template's detail page). */
   actionHref?: string;
   /** Override the action label (defaults to "Browse templates"). */
   actionLabel?: string;
@@ -53,7 +52,7 @@ export interface TemplateRecommendationCardProps {
  */
 export function TemplateRecommendationCard({
   eyebrow = "Recommended template",
-  actionHref = "/templates",
+  actionHref,
   actionLabel = "Browse templates",
   compact = false,
 }: TemplateRecommendationCardProps) {
@@ -82,13 +81,14 @@ function RecommendationCardInner({
 }: {
   rec: Recommendation;
   eyebrow: string;
-  actionHref: string;
+  actionHref?: string;
   actionLabel: string;
   compact: boolean;
   detectedCount: number;
 }) {
   const navigate = useNavigate();
   const label = TEMPLATE_LABELS[rec.templateId];
+  const href = actionHref ?? `/templates/${rec.templateId}`;
   return (
     <Card className="max-w-xl mx-auto w-full">
       <CardContent className="p-5 flex flex-col gap-3">
@@ -113,7 +113,7 @@ function RecommendationCardInner({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => navigate(actionHref)}
+            onClick={() => navigate(href)}
             data-template-id={rec.templateId}
           >
             {actionLabel}

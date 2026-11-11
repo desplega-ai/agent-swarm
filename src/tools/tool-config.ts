@@ -238,6 +238,13 @@ export const DEFERRED_TOOLS = new Set([
   "sheet-add-tab",
   "sheet-import-xlsx",
   "sheet-export-xlsx",
+  // Boards (6)
+  "board-create",
+  "board-get",
+  "board-list",
+  "board-add-elements",
+  "board-update-elements",
+  "board-remove-elements",
 
   // Reusable scripts and extensions (13)
   "script-upsert",

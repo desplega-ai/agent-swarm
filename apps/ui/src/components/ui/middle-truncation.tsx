@@ -47,7 +47,7 @@ function getComputedFont(el: HTMLElement) {
  * @template Return - The return type of the function (ignored in debounced version).
  * @param fn - The function to debounce.
  * @param delay - Milliseconds to wait before executing after the last call.
- * @returns A debounced version that executes on the next animation frame after the delay.
+ * @returns A debounced function with a cancel method for pending timeouts and animation frames.
  *
  * @example
  * const debouncedScroll = debounceWithRAF(handleScroll, 150)
@@ -56,24 +56,33 @@ function getComputedFont(el: HTMLElement) {
 function debounceWithRAF<Args extends unknown[], Return = void>(
   fn: (...args: Args) => Return,
   delay: number,
-): (...args: Args) => void {
+): ((...args: Args) => void) & { cancel: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let rafId: number | undefined;
 
-  return (...args: Args): void => {
+  const cancel = () => {
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
+      timeoutId = undefined;
     }
     if (rafId !== undefined) {
       cancelAnimationFrame(rafId);
+      rafId = undefined;
     }
+  };
 
+  const debounced = (...args: Args): void => {
+    cancel();
     timeoutId = setTimeout(() => {
+      timeoutId = undefined;
       rafId = requestAnimationFrame(() => {
+        rafId = undefined;
         fn(...args);
       });
     }, delay);
   };
+  debounced.cancel = cancel;
+  return debounced;
 }
 
 /**
@@ -240,7 +249,10 @@ export function MiddleTruncation({
     recalculate(el.offsetWidth);
     ro.observe(el);
 
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      debouncedRecalculate.cancel();
+    };
   }, [children, end, minEnd, ellipsis]);
 
   return (

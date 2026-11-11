@@ -51,6 +51,13 @@ export const SDK_TOOL_NAME_MAP = {
   sheets_addTab: "sheet-add-tab",
   sheets_importXlsx: "sheet-import-xlsx",
   sheets_exportXlsx: "sheet-export-xlsx",
+  // ── boards (also ctx.boards, see SDK_NAMESPACES) ──
+  boards_create: "board-create",
+  boards_get: "board-get",
+  boards_list: "board-list",
+  boards_addElements: "board-add-elements",
+  boards_updateElements: "board-update-elements",
+  boards_removeElements: "board-remove-elements",
 
   // ── repos ──
   repo_list: "get-repos",
@@ -275,6 +282,7 @@ export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
     "importXlsx",
     "exportXlsx",
   ],
+  boards: ["create", "get", "list", "addElements", "updateElements", "removeElements"],
 });
 
 /** ctx keys a namespace may never shadow. */

@@ -160,6 +160,8 @@ export async function createObject(input: {
   kind: string;
   path: string;
   title?: string;
+  /** Fill the new file (for example a board with shapes). Runs before the upload. */
+  build?: (empty: Json) => Json;
 }): Promise<PrimitiveObject> {
   const kind = kindFor(input.kind);
   const path = normalizePath(input.path);
@@ -168,13 +170,15 @@ export async function createObject(input: {
   }
   const { provider, orgId, driveId, scope } = await clientFor(input.agentId);
   const id = crypto.randomUUID();
+  const empty = kind.empty(id, input.title);
+  const content = input.build ? input.build(empty) : empty;
   let version: string | undefined;
   try {
-    ({ version } = await provider.upload(
-      scope(path),
-      JSON.stringify(kind.empty(id, input.title), null, 2),
-      { contentType: kind.contentType, ifNoneMatch: "*", message: `create ${input.kind}` },
-    ));
+    ({ version } = await provider.upload(scope(path), JSON.stringify(content, null, 2), {
+      contentType: kind.contentType,
+      ifNoneMatch: "*",
+      message: `create ${input.kind}`,
+    }));
   } catch (error) {
     if (error instanceof FilesError && error.code === "Conflict") {
       throw new ObjectsError(`a file already exists at '${path}'; run object-reindex to adopt it`);
@@ -243,6 +247,14 @@ export async function getObject(input: {
     // Not JSON (a hand-edited file): return the raw text.
   }
   return { object, missing: false, content };
+}
+
+/** Record the file version a content write produced (board and sheet services). */
+export async function recordObjectVersion(id: string, fileVersion: number | null): Promise<void> {
+  await getDbClient().run(
+    "UPDATE primitive_objects SET fileVersion = ?, updatedAt = ? WHERE id = ?",
+    [fileVersion, new Date().toISOString(), id],
+  );
 }
 
 export async function listObjects(input: {

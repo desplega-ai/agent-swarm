@@ -51,7 +51,7 @@ describe("AI provider registry", () => {
   test("ids are unique, and every provider can be set up", () => {
     const ids = AI_PROVIDERS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(16);
+    expect(ids.length).toBe(17);
     for (const p of AI_PROVIDERS) {
       expect(p.steps.length).toBeGreaterThan(0);
       // Codex signs in through the device flow; every other provider has a field.
@@ -225,6 +225,13 @@ describe("status roll-up", () => {
     });
     expect(rows.map((r) => r.provider.id)).toEqual(["bedrock"]);
     expect(rows[0]).toMatchObject({ keys: [], configOnly: true, health: "ok", reason: null });
+  });
+
+  test("a stored OPENCODE_API_KEY lists OpenCode Go, so the page is not empty", () => {
+    const base = { pools: {}, codexAccounts: [], statuses: [], usageToday: [], usage7d: [] };
+    const rows = buildProviderRows({ ...base, presence: { OPENCODE_API_KEY: true } });
+    expect(rows.map((r) => r.provider.id)).toEqual(["opencode-go"]);
+    expect(rows[0]).toMatchObject({ keys: [], configOnly: true });
   });
 
   test("a ChatGPT account that needs a new sign-in fails its provider", () => {
