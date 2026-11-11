@@ -249,6 +249,10 @@ export const knowledgeObjects: Scenario = {
       expectStatus(huge, [413], "receiver body cap");
 
       const action = (response: { json: unknown }) => asRecord(response.json).action;
+      // object-get reports the live file's version, so the stub applies each genuine change
+      // before its event is delivered, the order agent-fs uses.
+      const stored = files.get(path)?.body ?? "{}";
+      files.set(path, { body: stored, version: base + 1 });
       const edit = await deliver({ version: base + 1, operation: "edit" }, { id: "msg_edit" });
       expectStatus(edit, [200], "signed edit");
       expect(action(edit) === "updated", `edit: ${edit.text}`);
@@ -257,6 +261,7 @@ export const knowledgeObjects: Scenario = {
         action(replay) === "ignored" && asRecord(replay.json).reason === "stale event",
         `a replayed event is a no-op: ${replay.text}`,
       );
+      files.delete(path);
       const deleted = await deliver({ version: base + 2, operation: "delete" });
       expect(action(deleted) === "tombstoned", `delete: ${deleted.text}`);
       const late = await deliver({ version: base + 1, operation: "write" });
@@ -273,6 +278,7 @@ export const knowledgeObjects: Scenario = {
           "object-list hides a tombstoned object",
         );
       });
+      files.set(path, { body: stored, version: base + 3 });
       const restored = await deliver({ version: base + 3, operation: "write" });
       expect(action(restored) === "updated", `write: ${restored.text}`);
       const otherDrive = await deliver({ version: base + 4, operation: "edit", driveId: "other" });
