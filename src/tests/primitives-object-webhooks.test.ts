@@ -234,10 +234,7 @@ describe("ensureObjectWebhook", () => {
     expect(hooks[0]?.url).toBe(`${BASE}/api/objects/agent-fs-webhook/${row?.id}`);
   });
 
-  test("skips without a public https base URL, and outside the swarm's org", async () => {
-    process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
-    expect(await ensureObjectWebhook(ORG, DRIVE)).toMatchObject({ status: "skipped" });
-    process.env.PUBLIC_MCP_BASE_URL = BASE;
+  test("skips a drive outside the swarm's agent-fs org", async () => {
     expect(await ensureObjectWebhook("other-org", DRIVE)).toMatchObject({ status: "skipped" });
     expect(calls).toHaveLength(0);
   });

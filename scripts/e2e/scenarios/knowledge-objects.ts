@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -25,6 +26,40 @@ async function setAgentConfig(
   return asString(asRecord(response.json).id, `config ${key} id`);
 }
 
+async function setGlobalConfig(ctx: ScenarioContext, key: string, value: string): Promise<string> {
+  const response = await ctx.api("PUT", "/api/config", {
+    body: { scope: "global", scopeId: null, key, value, isSecret: key === "API_AGENT_FS_API_KEY" },
+  });
+  expectStatus(response, [200], `set global config ${key}`);
+  return asString(asRecord(response.json).id, `config ${key} id`);
+}
+
+const WEBHOOK_SECRET = `whsec_${Buffer.from("e2e-object-webhook-secret-32byte").toString("base64")}`;
+
+/** POST one Standard Webhooks delivery, signed like agent-fs signs it. */
+function signedDelivery(
+  ctx: ScenarioContext,
+  receiver: string,
+  secret: string,
+  id: string,
+  envelope: unknown,
+) {
+  const body = JSON.stringify(envelope);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const key = Buffer.from(secret.slice("whsec_".length), "base64");
+  const signature = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64");
+  return ctx.api("POST", receiver, {
+    apiKey: null,
+    rawBody: body,
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": id,
+      "webhook-timestamp": String(timestamp),
+      "webhook-signature": `v1,${signature}`,
+    },
+  });
+}
+
 /**
  * Flow `primitive-objects`: object-create / object-get / object-list / object-reindex and
  * `ctx.objects` in both executors, against a local agent-fs stub. Every call must carry the
@@ -38,10 +73,13 @@ export const knowledgeObjects: Scenario = {
     const ownKey = `af_own_${ctx.nonce}`;
     const org = `org-${ctx.nonce}`;
     const drive = `drive-${ctx.nonce}`;
+    const serviceKey = `af_service_${ctx.nonce}`;
     const files = new Map<string, { body: string; version: number }>();
+    const hooks: Array<{ id: string; url: string; eventTypes: string[] }> = [];
     const stub = startStub((request, body) => {
       const url = new URL(request.url);
-      if (request.headers.get("authorization") !== `Bearer ${ownKey}`) {
+      const bearer = request.headers.get("authorization");
+      if (bearer !== `Bearer ${ownKey}` && bearer !== `Bearer ${serviceKey}`) {
         return new Response("unauthorized", { status: 401 });
       }
       const raw = url.pathname.match(/^\/orgs\/[^/]+\/drives\/[^/]+\/files\/(.+)\/raw$/);
@@ -67,6 +105,18 @@ export const knowledgeObjects: Scenario = {
         return Response.json({ path, version });
       }
       if (url.pathname === `/orgs/${org}/ops`) {
+        const op = JSON.parse(body) as Record<string, unknown>;
+        if (op.op === "webhook-list") return Response.json({ webhooks: hooks });
+        if (op.op === "webhook-create") {
+          const hook = {
+            id: `hook-${ctx.nonce}`,
+            url: String(op.url),
+            eventTypes: op.eventTypes as string[],
+          };
+          hooks.push(hook);
+          return Response.json({ ...hook, secret: WEBHOOK_SECRET });
+        }
+        if (op.op !== "glob") return new Response("unsupported op", { status: 400 });
         const matches = [...files.keys()]
           .filter((path) => path.endsWith(".excalidraw"))
           .map((path) => ({ path: `/${path}`, size: 1 }));
@@ -122,7 +172,10 @@ export const knowledgeObjects: Scenario = {
 
         // A stock Excalidraw save drops the id; a second file arrives with none at all.
         files.set(path, { body: JSON.stringify({ type: "excalidraw", elements: [] }), version: 2 });
-        files.set(`loose-${ctx.nonce}.excalidraw`, { body: JSON.stringify({ type: "excalidraw" }), version: 1 });
+        files.set(`loose-${ctx.nonce}.excalidraw`, {
+          body: JSON.stringify({ type: "excalidraw" }),
+          version: 1,
+        });
         const report = structured(await callToolOk(mcp, "object-reindex", {}));
         expect(
           report.scanned === 2 && Array.isArray(report.adopted) && report.adopted.length === 2,
@@ -141,34 +194,101 @@ export const knowledgeObjects: Scenario = {
         );
       });
 
-      // The agent-fs file.changed receiver is public but signature-gated. The SUT has no
-      // https base URL or agent-fs service key, so no hook registers and every delivery is
-      // refused before it touches a row (the full flow is in primitives-object-webhooks.test.ts).
-      const event = JSON.stringify({
-        type: "file.changed",
-        data: { orgId: org, driveId: drive, path: `/${path}`, version: 99, operation: "delete" },
+      // agent-fs file.changed webhooks. With the API's service key configured, the next object
+      // call registers one drive hook; the scenario then signs deliveries with the secret the
+      // stub handed out, the way agent-fs does (Standard Webhooks).
+      for (const [key, value] of [
+        ["AGENT_FS_API_URL", stub.origin],
+        ["API_AGENT_FS_API_KEY", serviceKey],
+        ["AGENT_FS_DEFAULT_ORG_ID", org],
+      ] as const) {
+        configIds.push(await setGlobalConfig(ctx, key, value));
+      }
+      await withMcp(ctx, agentId, async (mcp) => {
+        await callToolOk(mcp, "object-reindex", {});
       });
-      const receiver = `/api/objects/agent-fs-webhook/${ctx.nonce}`;
-      const signed = await ctx.api("POST", receiver, {
+      const deadline = Date.now() + 10_000;
+      while (hooks.length === 0 && Date.now() < deadline) await Bun.sleep(100);
+      expect(hooks.length === 1, `one drive hook registered: ${JSON.stringify(hooks)}`);
+      const hook = hooks[0] as (typeof hooks)[number];
+      expect(
+        JSON.stringify(hook.eventTypes) === JSON.stringify(["file.changed"]),
+        "the hook asks for file.changed only",
+      );
+      const receiver = new URL(hook.url).pathname;
+      const deliver = (
+        data: Record<string, unknown>,
+        opts: { secret?: string; id?: string } = {},
+      ) =>
+        signedDelivery(
+          ctx,
+          receiver,
+          opts.secret ?? WEBHOOK_SECRET,
+          opts.id ?? crypto.randomUUID(),
+          {
+            type: "file.changed",
+            timestamp: new Date().toISOString(),
+            data: { orgId: org, driveId: drive, path: `/${path}`, ...data },
+          },
+        );
+      const base = files.get(path)?.version ?? 0;
+      const forgedSecret = `whsec_${Buffer.from("f".repeat(32)).toString("base64")}`;
+      const forged = await deliver(
+        { version: base + 1, operation: "delete" },
+        { secret: forgedSecret },
+      );
+      expectStatus(forged, [401], "a delivery signed with another secret");
+      const unsigned = await ctx.api("POST", receiver, { apiKey: null, rawBody: "{}" });
+      expectStatus(unsigned, [401], "a delivery without signature headers");
+      const unknown = await ctx.api("POST", `/api/objects/agent-fs-webhook/${ctx.nonce}`, {
         apiKey: null,
-        rawBody: event,
-        headers: {
-          "content-type": "application/json",
-          "webhook-id": `msg_${ctx.nonce}`,
-          "webhook-timestamp": String(Math.floor(Date.now() / 1000)),
-          "webhook-signature": "v1,AAAA",
-        },
+        rawBody: "{}",
       });
-      expectStatus(signed, [401], "unknown receiver with a forged signature");
-      const unsigned = await ctx.api("POST", receiver, { apiKey: null, rawBody: event });
-      expectStatus(unsigned, [401], "receiver without signature headers");
+      expectStatus(unknown, [401], "an unknown receiver id");
       const huge = await ctx.api("POST", receiver, { apiKey: null, rawBody: "x".repeat(70_000) });
       expectStatus(huge, [413], "receiver body cap");
-      await withMcp(ctx, agentId, async (mcp) => {
-        const after = structured(await callToolOk(mcp, "object-get", { path }));
-        expect(asRecord(after.object).deletedAt === null, "a refused delivery tombstones nothing");
-      });
 
+      const action = (response: { json: unknown }) => asRecord(response.json).action;
+      const edit = await deliver({ version: base + 1, operation: "edit" }, { id: "msg_edit" });
+      expectStatus(edit, [200], "signed edit");
+      expect(action(edit) === "updated", `edit: ${edit.text}`);
+      const replay = await deliver({ version: base + 1, operation: "edit" }, { id: "msg_edit" });
+      expect(
+        action(replay) === "ignored" && asRecord(replay.json).reason === "stale event",
+        `a replayed event is a no-op: ${replay.text}`,
+      );
+      const deleted = await deliver({ version: base + 2, operation: "delete" });
+      expect(action(deleted) === "tombstoned", `delete: ${deleted.text}`);
+      const late = await deliver({ version: base + 1, operation: "write" });
+      expect(action(late) === "ignored", `a late write below the stored version: ${late.text}`);
+      await withMcp(ctx, agentId, async (mcp) => {
+        const got = asRecord(structured(await callToolOk(mcp, "object-get", { id })).object);
+        expect(
+          got.fileVersion === base + 2 && typeof got.deletedAt === "string",
+          `the row is tombstoned at the delete's version: ${JSON.stringify(got)}`,
+        );
+        const listed = structured(await callToolOk(mcp, "object-list", { kind: "board" }));
+        expect(
+          Array.isArray(listed.objects) && !listed.objects.some((o) => asRecord(o).id === id),
+          "object-list hides a tombstoned object",
+        );
+      });
+      const restored = await deliver({ version: base + 3, operation: "write" });
+      expect(action(restored) === "updated", `write: ${restored.text}`);
+      const otherDrive = await deliver({ version: base + 4, operation: "edit", driveId: "other" });
+      expect(action(otherDrive) === "ignored", `an event for another drive: ${otherDrive.text}`);
+      const notObject = await deliver({ version: 1, operation: "write", path: "/notes/a.md" });
+      expect(
+        asRecord(notObject.json).reason === "not an object path",
+        `a non-object path: ${notObject.text}`,
+      );
+      await withMcp(ctx, agentId, async (mcp) => {
+        const got = asRecord(structured(await callToolOk(mcp, "object-get", { id })).object);
+        expect(
+          got.fileVersion === base + 3 && got.deletedAt === null,
+          `a write brings the object back: ${JSON.stringify(got)}`,
+        );
+      });
       // ctx.objects in both executors: unwrapped results, refusals throw.
       for (const executor of ["native", "quickjs"] as const) {
         const run = await runScript(
@@ -199,9 +319,14 @@ export const knowledgeObjects: Scenario = {
       }
 
       expect(stub.seen.length > 0, "the stub saw agent-fs traffic");
+      const isWebhookOp = (body: string) => body.includes('"op":"webhook-');
       expect(
-        stub.seen.every((entry) => entry.headers.authorization === `Bearer ${ownKey}`),
-        "every agent-fs call carries the agent's own key",
+        stub.seen.every(
+          (entry) =>
+            entry.headers.authorization ===
+            `Bearer ${isWebhookOp(entry.body) ? serviceKey : ownKey}`,
+        ),
+        "object calls carry the agent's own key; only webhook registration uses the service key",
       );
     } finally {
       stub.stop();

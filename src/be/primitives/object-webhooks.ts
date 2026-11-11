@@ -17,8 +17,8 @@ import { applyFileChange, type FileChangeResult } from "./objects";
  * Keeps `primitive_objects` in sync with agent-fs: one signed `file.changed`
  * webhook per drive that holds objects, registered with the API's own
  * agent-fs key (org admin; agents are only drive editors). Everything here is
- * best-effort. Without agent-fs, a public https base URL or a webhook-capable
- * agent-fs, objects still work and object-reindex is the fallback.
+ * best-effort. Without agent-fs, a base URL agent-fs accepts or a
+ * webhook-capable agent-fs, objects still work and object-reindex is the fallback.
  */
 
 /** Receiver route: `POST /api/objects/agent-fs-webhook/{id}`, id = row id. */
@@ -112,10 +112,9 @@ function skipped(driveId: string, reason: string): EnsureResult {
 }
 
 async function ensure(orgId: string, driveId: string): Promise<EnsureResult> {
+  // agent-fs decides whether it can reach this URL: public https, or a host
+  // in its AGENT_FS_WEBHOOK_ALLOWED_HOSTS. A refusal fails once and retries later.
   const base = getPublicMcpBaseUrl();
-  if (!base.startsWith("https://")) {
-    return skipped(driveId, "PUBLIC_MCP_BASE_URL / MCP_BASE_URL is not a public https URL");
-  }
   const service = await resolveAgentFsServiceCredentials();
   if (!service) {
     return skipped(driveId, "the API has no agent-fs URL, service key or org configured");

@@ -344,8 +344,9 @@ id of the row at the same path and writes it back. Durable workflow runs get
 
 The index follows agent-fs edits, deletes and moves on its own when the swarm
 can register an agent-fs `file.changed` webhook on the drive. That needs the
-API's agent-fs service key, a public https `PUBLIC_MCP_BASE_URL` (or
-`MCP_BASE_URL`) and an agent-fs with webhooks. Registration is best-effort:
+API's agent-fs service key, a `PUBLIC_MCP_BASE_URL` (or `MCP_BASE_URL`) that
+agent-fs accepts (public https, or a host in its `AGENT_FS_WEBHOOK_ALLOWED_HOSTS`)
+and an agent-fs with webhooks. Registration is best-effort:
 without it, object tools work as before and `reindex()` catches the index up.
 `reindex()` re-reads only files whose version changed, at most 50 per call; run
 it again while `truncated` is true. A deleted file hides its object from
