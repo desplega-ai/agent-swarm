@@ -13,11 +13,6 @@ export const routes: Route[] = [
   { path: "/agents", name: "agents" },
   { path: "/tasks", name: "tasks" },
   { path: "/sessions", name: "sessions" },
-  {
-    path: "/chat",
-    name: "chat",
-    skip: "not in the sidebar and calls /api/channels, which the API does not serve",
-  },
   { path: "/schedules", name: "schedules" },
   { path: "/workflows", name: "workflows" },
   { path: "/scripts", name: "scripts" },

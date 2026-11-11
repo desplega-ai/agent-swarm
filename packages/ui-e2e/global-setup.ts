@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { assertAllowedTarget, readTarget } from "./boot/policy";
+import { coverageEnabled, coverageReport } from "./fixtures/coverage";
 
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -23,6 +24,18 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const teardown = async () => {
     for (const cleanup of cleanups.reverse()) await cleanup();
   };
+  if (coverageEnabled) {
+    coverageReport().cleanCache();
+    // Pushed first, so it runs last. A coverage problem warns and never fails the run.
+    cleanups.push(async () => {
+      try {
+        const results = await coverageReport().generate();
+        console.log(`[ui-e2e] coverage: ${results?.files.length ?? 0} dashboard files measured`);
+      } catch (error) {
+        console.warn(`[ui-e2e] coverage report failed: ${String(error)}`);
+      }
+    });
+  }
   const target = readTarget(process.env);
   if (target.mode === "remote") {
     assertAllowedTarget(target.apiUrl);

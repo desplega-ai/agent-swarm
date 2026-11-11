@@ -35,7 +35,6 @@ export type AgentTaskSource =
   | "comb"
   | "chat";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
-export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 /** Mirrors `ModelSource` in `src/be/model-tier-resolution.ts` (backend). */
 export type ModelSource =
@@ -1362,27 +1361,6 @@ export interface SessionLogsResponse {
   logs: SessionLog[];
 }
 
-export interface Channel {
-  id: string;
-  name: string;
-  description?: string;
-  type: ChannelType;
-  createdBy?: string;
-  participants: string[];
-  createdAt: string;
-}
-
-export interface ChannelMessage {
-  id: string;
-  channelId: string;
-  agentId?: string | null;
-  agentName?: string;
-  content: string;
-  replyToId?: string;
-  mentions: string[];
-  createdAt: string;
-}
-
 export interface DashboardStats {
   agents: {
     total: number;
@@ -1423,14 +1401,6 @@ export interface TasksResponse {
 
 export interface LogsResponse {
   logs: AgentLog[];
-}
-
-export interface ChannelsResponse {
-  channels: Channel[];
-}
-
-export interface MessagesResponse {
-  messages: ChannelMessage[];
 }
 
 /**

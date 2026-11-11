@@ -40,6 +40,14 @@ export const SDK_TOOL_NAME_MAP = {
   objects_list: "object-list",
   objects_reindex: "object-reindex",
 
+  // ── boards (also ctx.boards, see SDK_NAMESPACES) ──
+  boards_create: "board-create",
+  boards_get: "board-get",
+  boards_list: "board-list",
+  boards_addElements: "board-add-elements",
+  boards_updateElements: "board-update-elements",
+  boards_removeElements: "board-remove-elements",
+
   // ── repos ──
   repo_list: "get-repos",
   repo_update: "update-repo",
@@ -251,6 +259,7 @@ export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
  */
 export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
   objects: ["create", "get", "list", "reindex"],
+  boards: ["create", "get", "list", "addElements", "updateElements", "removeElements"],
 });
 
 /** ctx keys a namespace may never shadow. */
