@@ -13,7 +13,7 @@ import { FilesError } from "@/fs/provider";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 // Loose, format-pin-free mirror of PrimitiveObject for MCP output validation.
-const objectOutputSchema = z.looseObject({
+export const objectOutputSchema = z.looseObject({
   id: z.string().optional(),
   kind: z.string().optional(),
   orgId: z.string().optional(),
@@ -30,7 +30,7 @@ const objectOutputSchema = z.looseObject({
 const KindSchema = z.enum(PRIMITIVE_KIND_NAMES);
 
 /** Refusals (bad input, no agent-fs identity, agent-fs errors) become toolErr; bugs still throw. */
-async function refusing<T>(
+export async function refusing<T>(
   agentId: string | undefined,
   run: () => Promise<T>,
 ): Promise<{ value: T } | { error: ReturnType<typeof toolErr> }> {
