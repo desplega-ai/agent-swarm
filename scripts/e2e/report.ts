@@ -425,7 +425,7 @@ export function markdownSummary(result: E2eResult): string {
   ];
   if (result.shard) {
     lines.splice(
-      3,
+      4,
       0,
       `Shard ${result.shard.index}/${result.shard.total}: coverage gates run on the merged result.`,
       "",
