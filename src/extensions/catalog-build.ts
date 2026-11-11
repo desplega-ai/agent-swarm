@@ -22,7 +22,7 @@ export async function buildExtensionCatalog(
   // catalog-level files next to them, like manifest.schema.json).
   const filesByDirectory = new Map<string, string[]>();
   for await (const path of new Bun.Glob("*/*").scan({ cwd: templatesDir, onlyFiles: true })) {
-    const [directory, file] = path.split("/") as [string, string];
+    const [directory, file] = path.split(/[/\\]/) as [string, string];
     filesByDirectory.set(directory, [...(filesByDirectory.get(directory) ?? []), file]);
   }
   const catalog: Record<string, ExtensionCatalogEntry> = {};

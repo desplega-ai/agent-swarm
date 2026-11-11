@@ -32,29 +32,33 @@ afterEach(async () => {
 });
 
 describe("predefined extension catalog", () => {
-  test(
-    "every bundled entry passes the manifest schema and bundle validation",
-    async () => {
-      const catalog = getExtensionCatalog();
-      expect(Object.keys(catalog).sort()).toEqual([
-        "comms-adherence-gate",
-        "deploy-awareness",
-        "github-sender-allowlist",
-        "notify-on-complete",
-        "require-ticket-ref",
-        "require-verification-note",
-        "slack-reply-gate",
-        "sql-admin-only",
-        "task-digest",
-      ]);
-      for (const [name, entry] of Object.entries(catalog)) {
-        expect(entry.manifest.name).toBe(name);
-        expect(ExtensionManifestSchema.safeParse(entry.manifest).success).toBe(true);
-        const result = await validateBundle({ manifest: entry.manifest, files: entry.files });
-        expect(result).toMatchObject({ ok: true });
-      }
-      expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
-      expect(getCatalogEntry("toString")).toBeNull();
+  const catalog = getExtensionCatalog();
+
+  test("the catalog contains every bundled extension", () => {
+    expect(Object.keys(catalog).sort()).toEqual([
+      "comms-adherence-gate",
+      "deploy-awareness",
+      "github-sender-allowlist",
+      "notify-on-complete",
+      "require-ticket-ref",
+      "require-verification-note",
+      "slack-reply-gate",
+      "sql-admin-only",
+      "task-digest",
+    ]);
+    expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
+    expect(getCatalogEntry("toString")).toBeNull();
+  });
+
+  // Each entry runs a real TypeScript check. Give each validation its own
+  // deadline rather than making all nine share 15 seconds under CI load.
+  test.each(Object.entries(catalog))(
+    "%s passes the manifest schema and bundle validation",
+    async (name, entry) => {
+      expect(entry.manifest.name).toBe(name);
+      expect(ExtensionManifestSchema.safeParse(entry.manifest).success).toBe(true);
+      const result = await validateBundle({ manifest: entry.manifest, files: entry.files });
+      expect(result).toMatchObject({ ok: true });
     },
     { timeout: 15_000 },
   );
