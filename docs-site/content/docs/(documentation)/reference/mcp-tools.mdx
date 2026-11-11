@@ -659,7 +659,7 @@ Create a new automation workflow with a DAG definition.
 
 Upstream outputs require an `inputs` mapping. Agent-task templates may interpolate declared aliases, but executable source uses a stricter security boundary: inline `script` source allows only `input`, `workflow`, `swarm`, and `run` values, while named `swarm-script` source is never workflow-interpolated. Pass trigger and upstream values through `config.args`; unresolved source tokens fail the node before execution.
 
-Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`. A `webhook` trigger accepts an optional `events` list (for example `["pull_request"]`): other deliveries are dropped after signature verification, before any run is saved. The event name is read from `eventHeader` (default `X-GitHub-Event`). See [Workflows](/docs/concepts/workflows).
+Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`. A `webhook` trigger accepts an optional `filter` with `headers` and `body` allowlists (every field must match) and a `preset` (`github`, `gitlab`, `standard-webhooks`): non-matching deliveries are dropped after signature verification, before any run is saved. The older `events` list and `eventHeader` still work as a deprecated alias of one filter clause. See [Workflows](/docs/concepts/workflows).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
