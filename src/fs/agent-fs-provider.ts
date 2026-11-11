@@ -226,6 +226,16 @@ export class AgentFsProvider implements FileStorageProvider {
     }
   }
 
+  /** Paths (leading slash) on the provider's drive that match an agent-fs glob `pattern`. */
+  async glob(pattern: string): Promise<string[]> {
+    const matches = asRecord(await this.ops({ op: "glob", pattern }))?.matches;
+    if (!Array.isArray(matches)) return [];
+    return matches.flatMap((match) => {
+      const path = asRecord(match)?.path;
+      return typeof path === "string" ? [path] : [];
+    });
+  }
+
   async url(scope: FileScope, options: SignedUrlOptions = {}): Promise<string> {
     const expiresIn = Math.min(options.expiresIn ?? 3600, this.capabilities.signedUrl.maxExpiresIn);
     const result = await this.ops(

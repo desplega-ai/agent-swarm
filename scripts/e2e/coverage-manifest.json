@@ -363,6 +363,10 @@
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
       "scenarios": ["knowledge-pages"]
     },
+    "primitive-objects": {
+      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key",
+      "scenarios": ["knowledge-objects"]
+    },
     "prompt-template-override": {
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
       "scenarios": ["knowledge-prompt-templates"]
