@@ -14,6 +14,7 @@ import {
   getDbClient,
   getResolvedConfig,
   getSwarmConfigs,
+  isAgentDeleted,
   ReservedAgentRoleError,
   resetEmptyPollCount,
   setAgentHarnessProvider,
@@ -195,6 +196,9 @@ const registerAgent = route({
       schema: RegisterAgentResponseSchema,
     },
     400: { description: "Validation error" },
+    410: {
+      description: "An operator deleted this agent id (`agent_deleted`); the worker must stop",
+    },
   },
 });
 
@@ -802,6 +806,10 @@ export async function handleAgentRegister(
         return { agent: await getAgentById(agentId), created: false };
       }
 
+      // A deleted id is not re-created by a restarted worker; restore brings it back.
+      // Checked in this transaction so an operator delete cannot commit after the check.
+      if (await isAgentDeleted(agentId)) return null;
+
       const agent = await createAgent({
         id: agentId,
         name: parsed.body.name,
@@ -835,6 +843,10 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     });
+    if (!result) {
+      jsonError(res, "agent_deleted", 410);
+      return true;
+    }
 
     if (parsed.body.harnessCliVersion !== undefined) {
       await setAgentHarnessCliVersion(agentId, parsed.body.harnessCliVersion.trim() || null);

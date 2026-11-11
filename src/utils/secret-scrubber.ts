@@ -54,8 +54,10 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * v13 = pass 2 redacts Convex deploy keys (`prod:`, `dev:`, `preview:`,
  * `project:`; `|` or `%7C`), and pass 1 also matches each known value's
  * URL-decoded and URL-encoded forms.
+ * v14 = pass 1 also matches a known value URL-encoded as stored, so a value
+ * with a literal `%` is redacted in its `%25` form.
  */
-export const SCRUBBER_RULES_VERSION = 13;
+export const SCRUBBER_RULES_VERSION = 14;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -188,20 +190,27 @@ export function normalizeKey(key: string): string {
 const MIN_VALUE_LENGTH = 12;
 
 /**
- * A known value, its URL-decoded form and that form URL-encoded. A secret
- * stored percent-encoded (`a%7Cb`) is often decoded before use
- * (`${KEY//%7C/|}`), and a raw one is encoded into URLs, so either form can
- * reach a log without equalling the stored value.
+ * A known value, the value URL-encoded, its URL-decoded form and that form
+ * URL-encoded. A secret stored percent-encoded (`a%7Cb`) is often decoded
+ * before use (`${KEY//%7C/|}`), and a raw one is encoded into URLs, so any of
+ * these can reach a log without equalling the stored value. The stored value
+ * is encoded directly too: a literal `%` in it (`abc%41x`) makes the decoded
+ * form a different string, or makes decoding throw.
  */
 export function urlForms(value: string): string[] {
   const forms = new Set([value]);
-  try {
+  const addDerived = (derive: () => string[]) => {
+    try {
+      for (const form of derive()) forms.add(form);
+    } catch {
+      // Not valid percent-encoding, or a lone surrogate: skip this form.
+    }
+  };
+  addDerived(() => [encodeURIComponent(value)]);
+  addDerived(() => {
     const decoded = decodeURIComponent(value);
-    forms.add(decoded);
-    forms.add(encodeURIComponent(decoded));
-  } catch {
-    // Not valid percent-encoding, or a lone surrogate: the raw value only.
-  }
+    return [decoded, encodeURIComponent(decoded)];
+  });
   return [...forms];
 }
 

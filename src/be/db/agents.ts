@@ -188,23 +188,45 @@ export async function updateAgentCredentialMissing(
   );
 }
 
+/** An operator deleted this id (agent_history); only restore may reinsert it. */
+export class AgentDeletedError extends Error {
+  constructor(readonly agentId: string) {
+    super(`Agent "${agentId}" was deleted by an operator. Restore it first.`);
+    this.name = "AgentDeletedError";
+  }
+}
+
+/** Whether the latest agent_history event for `agentId` is `deleted`. */
+export async function isAgentDeleted(agentId: string): Promise<boolean> {
+  const last = await getDbClient().get<{ event: string }>(
+    "SELECT event FROM agent_history WHERE agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    [agentId],
+  );
+  return last?.event === "deleted";
+}
+
 export async function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
 ): Promise<Agent> {
   const id = agent.id ?? crypto.randomUUID();
   const maxTasks = agent.maxTasks ?? 1;
-  const row = await getDbClient().get<AgentRow>(
-    "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
-    [
-      id,
-      agent.name,
-      agent.isLead ? 1 : 0,
-      agent.status,
-      maxTasks,
-      agent.provider ?? null,
-      agent.harnessProvider ?? null,
-    ],
-  );
+  // Check and insert share one write transaction (a savepoint inside the caller's), so an
+  // operator delete cannot commit between them. Every agents insert but restore comes here.
+  const row = await getDbClient().transaction(async () => {
+    if (await isAgentDeleted(id)) throw new AgentDeletedError(id);
+    return await getDbClient().get<AgentRow>(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+      [
+        id,
+        agent.name,
+        agent.isLead ? 1 : 0,
+        agent.status,
+        maxTasks,
+        agent.provider ?? null,
+        agent.harnessProvider ?? null,
+      ],
+    );
+  });
   if (!row) throw new Error("Failed to create agent");
   try {
     await dependencies.installSystemDefaultSkillsForAgent(id);

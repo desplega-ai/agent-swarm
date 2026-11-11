@@ -348,6 +348,244 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete an agent into agent_history
+         * @description Appends the agent row to `agent_history`, revokes its session tokens, and deletes the row. Refused with 409 while the agent is the lead, an extension identity, not offline, pool-bound, holds open tasks or enabled schedules, or owns skills, MCP servers or inboxes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Agent deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            event: components["schemas"]["AgentHistoryEvent"];
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Operator or user credentials required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A blocker refuses the delete */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            code: string;
+                            blockers: {
+                                code: string;
+                                message: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a deleted agent from agent_history
+         * @description Reinserts the latest deleted snapshot under the same id. Rows a cascading foreign key removed on delete do not come back.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                        newName?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Agent restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            agent: components["schemas"]["Agent"];
+                            event: components["schemas"]["AgentHistoryEvent"];
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Operator or user credentials required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No deleted agent with this id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The agent exists, or its name is taken */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            code: string;
+                            blockers: {
+                                code: string;
+                                message: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agent delete and restore events
+         * @description Newest first, at most 500. Filter by `agentId`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    agentId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Events */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            events: components["schemas"]["AgentHistoryEvent"][];
+                        };
+                    };
+                };
+                /** @description Operator or user credentials required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp-bridge": {
         parameters: {
             query?: never;
@@ -2377,6 +2615,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description An operator deleted this agent id (`agent_deleted`); the worker must stop */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -29986,6 +30233,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Env var or secret input requires config.read.secrets */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Idempotency-Key was already used for a different request */
                 409: {
                     headers: {
@@ -30199,6 +30455,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Env var or secret input requires config.read.secrets */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow not found */
                 404: {
                     headers: {
@@ -30275,6 +30540,15 @@ export interface paths {
                 };
                 /** @description Invalid patch or resulting definition */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Stored env var or secret input requires config.read.secrets */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30365,6 +30639,15 @@ export interface paths {
                 };
                 /** @description Invalid patch or resulting definition */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Stored env var or secret input requires config.read.secrets */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -31526,6 +31809,71 @@ export interface components {
             capabilities: string[];
             leadOnly?: boolean;
         };
+        AgentHistoryEvent: {
+            id: string;
+            agentId: string;
+            /** @enum {string} */
+            event: "deleted" | "restored";
+            actorRef: string;
+            reason: string;
+            snapshot: {
+                [key: string]: unknown;
+            };
+            createdAt: string;
+        };
+        Agent: {
+            id: string;
+            name: string;
+            /** @default false */
+            isLead: boolean;
+            /** @enum {string} */
+            status: "idle" | "busy" | "offline" | "waiting_for_credentials";
+            runtimePoolId?: string | null;
+            runtimeProvisionAttempts?: number;
+            runtimeProvisionRetryAt?: string | null;
+            description?: string;
+            role?: string;
+            /** @default [] */
+            capabilities: string[];
+            claudeMd?: string;
+            soulMd?: string;
+            identityMd?: string;
+            setupScript?: string;
+            toolsMd?: string;
+            heartbeatMd?: string;
+            maxTasks?: number;
+            emptyPollCount?: number;
+            /** Format: date-time */
+            lastActivityAt?: string;
+            /** @enum {string} */
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
+            /** @enum {string|null} */
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
+            credentialMissing?: string[] | null;
+            credStatus?: components["schemas"]["AgentCredStatus"] | null;
+            avatar?: {
+                /** @enum {string} */
+                type: "lucide";
+                icon: string;
+                color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
+            };
+            slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastUpdatedAt: string;
+        };
         AgentCredStatus: {
             ready: boolean;
             /** @default [] */
@@ -31650,59 +31998,6 @@ export interface components {
         } | {
             /** @enum {string} */
             type: "app";
-        };
-        Agent: {
-            id: string;
-            name: string;
-            /** @default false */
-            isLead: boolean;
-            /** @enum {string} */
-            status: "idle" | "busy" | "offline" | "waiting_for_credentials";
-            runtimePoolId?: string | null;
-            runtimeProvisionAttempts?: number;
-            runtimeProvisionRetryAt?: string | null;
-            description?: string;
-            role?: string;
-            /** @default [] */
-            capabilities: string[];
-            claudeMd?: string;
-            soulMd?: string;
-            identityMd?: string;
-            setupScript?: string;
-            toolsMd?: string;
-            heartbeatMd?: string;
-            maxTasks?: number;
-            emptyPollCount?: number;
-            /** Format: date-time */
-            lastActivityAt?: string;
-            /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
-            /** @enum {string|null} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
-            credentialMissing?: string[] | null;
-            credStatus?: components["schemas"]["AgentCredStatus"] | null;
-            avatar?: {
-                /** @enum {string} */
-                type: "lucide";
-                icon: string;
-                color?: string;
-            } | {
-                /** @enum {string} */
-                type: "url";
-                /** Format: uri */
-                url: string;
-            } | {
-                /** @enum {string} */
-                type: "agent-fs";
-                path: string;
-                orgId?: string;
-                driveId?: string;
-            };
-            slackIcon?: components["schemas"]["AgentSlackIcon"] | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            lastUpdatedAt: string;
         };
         ProfileCheckResult: {
             agentId: string;
@@ -36145,6 +36440,15 @@ export interface operations {
             };
             /** @description Agent already holds an active token */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An operator deleted this agent id (`agent_deleted`); restore it first */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };

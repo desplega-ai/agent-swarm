@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.167.0
+ARG CODEX_VERSION=0.167.1
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -564,9 +564,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794312042-g538cd5
-ARG AMP_SHA512_AMD64=1d9f9041c547e2e3cd687c0136f98b4cc6232c4c6cb2e0e87173be09f75356661a12f3b9321692319aa5560d190700b726c0d326620bb8fb3660152b7d8df475
-ARG AMP_SHA512_ARM64=171510eb9ae6617858fe8629b45e8f4c4da95b870095308dc3f3747946ed3c48aac01df88b3b6de15250ac251b6017b3fa6768b81cfaefc8f85e9b5df69c9436
+ARG AMP_VERSION=0.0.1794398443-g0895e3
+ARG AMP_SHA512_AMD64=f29c5af3769f941e2b07c076a1f17009aaae432e38a804ab6b2578dda3b0ab9091e8f8dd1b8177fe1053ab9391ec27b2b6c8b5cf2f4cac1b71a3f5034ff70672
+ARG AMP_SHA512_ARM64=4d7d3438c65789303f0a7ca7910331e76a7a4b92eb4c7b39398d144dc2827c7e212561c06c7df0f4bf99a13d4b6770138c73cbf00c83428025cfb040a1b245d2
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -601,7 +601,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.67.0
+ARG GEMINI_CLI_VERSION=0.68.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -614,7 +614,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.108
+ARG COPILOT_CLI_VERSION=1.0.109
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -624,8 +624,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.27.1), so none run as root.
-ARG QWEN_CODE_VERSION=0.27.1
+# scripts are not needed for ACP (verified on 0.27.2), so none run as root.
+ARG QWEN_CODE_VERSION=0.27.2
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -635,9 +635,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.58.1
-ARG GOOSE_SHA256_AMD64=43adae6abf10d40d5b1d5cd23bcf6481ef72fddede8fe9a8577c385e325cba68
-ARG GOOSE_SHA256_ARM64=20d9586ac7d37d2700d41d85d0051547a959ae96576aae6cbd290f77b5605a61
+ARG GOOSE_VERSION=1.59.0
+ARG GOOSE_SHA256_AMD64=a774667de6c20206a60d78d7bece2d9dda8389667e4f5c2fc8aaa758d1e81ef3
+ARG GOOSE_SHA256_ARM64=ba96b78394e3050077482bb285ff35f34613646e90b84a18b5d674b71905166e
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -655,9 +655,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.1.0
-ARG KIRO_CLI_SHA256_AMD64=006835b2f4f433f55bb02601cd3053ccb10bd3d408478719c33d320f18e46ba5
-ARG KIRO_CLI_SHA256_ARM64=acf8e80a10a079bad0c4e28b38a00aa4b3c537067c7844490384fddf94f88e7d
+ARG KIRO_CLI_VERSION=3.2.0
+ARG KIRO_CLI_SHA256_AMD64=98a5c8b1fd8d46a4b96fc20ffef7ba6a0740772e725b77a641a2dde1a9bb8638
+ARG KIRO_CLI_SHA256_ARM64=9154499bfeb77046c8e3033961110cb13be3accfc274260742e89e6d0800cd77
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
