@@ -27,6 +27,7 @@ import type { EnginePatch } from "./engine-worker";
 import {
   checkTabName,
   constantInput,
+  emptySheet,
   MAX_CELLS,
   MAX_FILE_BYTES,
   MAX_RANGE_CELLS,
@@ -80,6 +81,15 @@ async function load(target: SheetTarget) {
   return { object, version: object.fileVersion, doc: parsed.data };
 }
 
+/** The exact bytes a sheet file holds, size-checked. Save and the import preflight both use it, so they cannot disagree. */
+function sheetBody(doc: SheetDoc): string {
+  const body = JSON.stringify(doc, null, 2);
+  if (Buffer.byteLength(body) > MAX_FILE_BYTES) {
+    throw new ObjectsError(`the sheet would exceed ${MAX_FILE_BYTES} bytes (5 MiB)`);
+  }
+  return body;
+}
+
 async function save(
   agentId: string | undefined,
   object: PrimitiveObject,
@@ -87,10 +97,7 @@ async function save(
   version: number,
   op: string,
 ) {
-  const body = JSON.stringify(doc, null, 2);
-  if (Buffer.byteLength(body) > MAX_FILE_BYTES) {
-    throw new ObjectsError(`the sheet would exceed ${MAX_FILE_BYTES} bytes (5 MiB)`);
-  }
+  const body = sheetBody(doc);
   const client = agentId ? await agentFsClientFor(agentId) : undefined;
   if (!client) throw new ObjectsError(NO_AGENT_FS_IDENTITY);
   const { orgId, driveId } = client.identity;
@@ -465,11 +472,8 @@ export async function importSheetXlsx(input: {
   const { tabs, dropped } = await parseXlsx(bytes);
   const draft = { tabs };
   await recalc(input.agentId, draft, []);
-  if (Buffer.byteLength(JSON.stringify(draft.tabs)) > MAX_FILE_BYTES) {
-    throw new ObjectsError(
-      `the imported workbook would exceed ${MAX_FILE_BYTES} bytes (5 MiB) as a sheet`,
-    );
-  }
+  // Size the file createObject writes and save rewrites with these tabs, not a compact stand-in.
+  sheetBody({ ...emptySheet(crypto.randomUUID(), input.title), tabs: draft.tabs });
   const created = await createObject({
     agentId: input.agentId,
     kind: "sheet",

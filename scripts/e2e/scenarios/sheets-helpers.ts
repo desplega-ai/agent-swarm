@@ -156,6 +156,7 @@ export function zipOf(parts: Record<string, string>): Uint8Array {
   const size = central.reduce((n, entry) => n + entry.length, 0);
   const end = header(22, (v) => {
     v.setUint32(0, 0x06054b50, true);
+    v.setUint16(8, central.length, true);
     v.setUint16(10, central.length, true);
     v.setUint32(12, size, true);
     v.setUint32(16, offset, true);
@@ -163,12 +164,14 @@ export function zipOf(parts: Record<string, string>): Uint8Array {
   return Uint8Array.from([...chunks, ...central, end].flatMap((chunk) => [...chunk]));
 }
 
-/** Set the compression method of every central directory entry (0 = stored, 12 = bzip2). */
+/** Set the compression method of every part, in its central directory entry and its local header (0 = stored, 12 = bzip2). */
 export function withMethod(zip: Uint8Array, method: number): Uint8Array {
   const out = new Uint8Array(zip);
   const view = new DataView(out.buffer);
   for (let i = 0; i < out.length - 46; i++) {
-    if (view.getUint32(i, true) === 0x02014b50) view.setUint16(i + 10, method, true);
+    if (view.getUint32(i, true) !== 0x02014b50) continue;
+    view.setUint16(i + 10, method, true);
+    view.setUint16(view.getUint32(i + 42, true) + 8, method, true);
   }
   return out;
 }

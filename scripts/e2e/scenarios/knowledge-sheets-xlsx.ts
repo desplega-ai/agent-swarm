@@ -35,7 +35,7 @@ const workbook = (tabs: Array<[string, XLSX.WorkSheet]>) => {
   return new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }));
 };
 
-/** Declare a different uncompressed size for one zip part in the central directory. */
+/** Declare a different uncompressed size for one zip part, in the central directory and its local header. */
 function declareSize(bytes: Uint8Array, name: string, size: number): Uint8Array {
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -44,6 +44,7 @@ function declareSize(bytes: Uint8Array, name: string, size: number): Uint8Array 
     const nameLen = view.getUint16(i + 28, true);
     if (new TextDecoder().decode(out.subarray(i + 46, i + 46 + nameLen)) === name) {
       view.setUint32(i + 24, size, true);
+      view.setUint32(view.getUint32(i + 42, true) + 22, size, true);
     }
   }
   return out;
@@ -337,7 +338,7 @@ export const knowledgeSheetsXlsx: Scenario = {
           ],
           [
             `in/text-${ctx.nonce}.xlsx`,
-            "as a sheet",
+            "5 MiB",
             "a workbook that fits as xlsx but not as a 5 MiB sheet",
           ],
         ] as const) {

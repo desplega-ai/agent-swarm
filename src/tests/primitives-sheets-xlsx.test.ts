@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { deflateRawSync } from "node:zlib";
 import * as XLSX from "xlsx";
 import { closeDb, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { ObjectsError } from "../be/primitives/objects";
@@ -113,7 +114,7 @@ const grid = (rows: number, cols: number) =>
     Array.from({ length: rows }, () => Array.from({ length: cols }, () => 1)),
   );
 
-/** Set the declared uncompressed size of the zip part `name` in its central directory entry. */
+/** Declare the uncompressed size of the zip part `name` in its central directory entry and its local header. */
 function declareSize(bytes: Uint8Array, name: string, size: number): Uint8Array {
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -122,10 +123,116 @@ function declareSize(bytes: Uint8Array, name: string, size: number): Uint8Array 
     const nameLen = view.getUint16(i + 28, true);
     if (new TextDecoder().decode(out.subarray(i + 46, i + 46 + nameLen)) === name) {
       view.setUint32(i + 24, size, true);
+      view.setUint32(view.getUint32(i + 42, true) + 22, size, true);
     }
   }
   return out;
 }
+
+type ZipHeader = { method: number; csz: number; usz: number; name: string; extra: Uint8Array };
+type ZipPart = {
+  name: string;
+  data: Uint8Array;
+  method?: 0 | 8;
+  usz?: number;
+  /** Header fields to write differently into the central directory entry or the local header. */
+  cd?: Partial<ZipHeader>;
+  local?: Partial<ZipHeader>;
+};
+
+/** A zip with every header field under the test's control, to build archives whose headers disagree. */
+function zip(
+  parts: ZipPart[],
+  end: { disk?: number; entriesDisk?: number; entries?: number; gap?: number } = {},
+): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  const dir: Uint8Array[] = [];
+  let at = 0;
+  const push = (
+    to: Uint8Array[],
+    build: (view: DataView) => void,
+    size: number,
+    ...tail: Uint8Array[]
+  ) => {
+    const head = new Uint8Array(size);
+    build(new DataView(head.buffer));
+    to.push(head, ...tail);
+    return head.length + tail.reduce((n, t) => n + t.length, 0);
+  };
+  const text = (value: string) => new TextEncoder().encode(value);
+  for (const part of parts) {
+    const method = part.method ?? 8;
+    const body = method === 8 ? new Uint8Array(deflateRawSync(part.data)) : part.data;
+    const base: ZipHeader = {
+      method,
+      csz: body.length,
+      usz: part.usz ?? part.data.length,
+      name: part.name,
+      extra: new Uint8Array(),
+    };
+    const local = { ...base, ...part.local };
+    const cd = { ...base, ...part.cd };
+    const offset = at;
+    at += push(
+      chunks,
+      (v) => {
+        v.setUint32(0, 0x04034b50, true);
+        v.setUint16(8, local.method, true);
+        v.setUint32(18, local.csz, true);
+        v.setUint32(22, local.usz, true);
+        v.setUint16(26, text(local.name).length, true);
+        v.setUint16(28, local.extra.length, true);
+      },
+      30,
+      text(local.name),
+      local.extra,
+      body,
+    );
+    push(
+      dir,
+      (v) => {
+        v.setUint32(0, 0x02014b50, true);
+        v.setUint16(10, cd.method, true);
+        v.setUint32(20, cd.csz, true);
+        v.setUint32(24, cd.usz, true);
+        v.setUint16(28, text(cd.name).length, true);
+        v.setUint16(30, cd.extra.length, true);
+        v.setUint32(42, offset, true);
+      },
+      46,
+      text(cd.name),
+      cd.extra,
+    );
+  }
+  const dirSize = dir.reduce((n, d) => n + d.length, 0);
+  const gap = new Uint8Array(end.gap ?? 0);
+  push(
+    dir,
+    (v) => {
+      v.setUint32(0, 0x06054b50, true);
+      v.setUint16(4, end.disk ?? 0, true);
+      v.setUint16(8, end.entriesDisk ?? parts.length, true);
+      v.setUint16(10, end.entries ?? parts.length, true);
+      v.setUint32(12, dirSize, true);
+      v.setUint32(16, at, true);
+    },
+    22,
+  );
+  return new Uint8Array(
+    Buffer.concat([...chunks, ...dir.slice(0, -1), gap, dir.at(-1) as Uint8Array]),
+  );
+}
+
+/** Zip64 extra field: an 8-byte uncompressed size, then an 8-byte compressed size. */
+const zip64Extra = (usz: number, csz: number) => {
+  const extra = new Uint8Array(20);
+  const view = new DataView(extra.buffer);
+  view.setUint16(0, 0x0001, true);
+  view.setUint16(2, 16, true);
+  view.setBigUint64(4, BigInt(usz), true);
+  view.setBigUint64(12, BigInt(csz), true);
+  return extra;
+};
 
 /** Every formula cell of the xlsx with the result cached in the file. */
 function cachedFormulas(bytes: Uint8Array): Map<string, number | string | boolean> {
@@ -206,6 +313,16 @@ describe("parseXlsx", () => {
     expect(dropped).toEqual(["array formulas (kept as values)"]);
   });
 
+  test("strips the _xlfn and _xlws prefixes outside quotes only, so a string or sheet name that spells one survives", async () => {
+    const ws = XLSX.utils.aoa_to_sheet([[1]]);
+    ws.B1 = { t: "s", v: "x", f: 'IF(TRUE,"_xlfn.IFS(","_xlws.SORT(""_xlfn.")&\'_xlws.Tab\'!A1' };
+    ws["!ref"] = "A1:B1";
+    const { tabs } = await parseXlsx(workbook({ Data: ws }));
+    expect(tabs[0]?.cells.B1?.f).toBe(
+      '=IF(TRUE,"_xlfn.IFS(","_xlws.SORT(""_xlfn.")&\'_xlws.Tab\'!A1',
+    );
+  });
+
   test("an error constant becomes text and is named", async () => {
     const ws = XLSX.utils.aoa_to_sheet([[1]]);
     ws.B1 = { t: "e", v: 42, w: "#N/A" };
@@ -242,9 +359,92 @@ describe("parseXlsx", () => {
     const good = await fixture("tracker-export.xlsx");
     const declared = declareSize(good, "xl/worksheets/sheet1.xml", MAX_INFLATED_BYTES + 1);
     await expect(parseXlsx(declared)).rejects.toThrow("inflates to more than");
-    // Declares 10 bytes, the stream holds far more: the bounded inflate refuses before SheetJS runs.
+    // Declares 10 bytes in both headers, the stream holds far more: the bounded inflate refuses before SheetJS runs.
     const lying = declareSize(good, "xl/worksheets/sheet1.xml", 10);
     await expect(parseXlsx(lying)).rejects.toThrow(/corrupt zip archive|does not match/);
+  });
+
+  test("refuses a 17 MiB part hidden behind mismatched end-of-directory counts (SheetJS reads the per-disk count)", async () => {
+    // tracker-export.xlsx with xl/workbook.xml first and a 17 MiB deflated padding.bin: per-disk count 12, total 1.
+    const bomb = await fixture("eocd-count-mismatch.xlsx");
+    expect(bomb.length).toBeLessThan(MAX_XLSX_BYTES);
+    await expect(parseXlsx(bomb)).rejects.toThrow("inconsistent or ZIP64 counts");
+  });
+
+  // Every way the archive can read differently to the checker and to SheetJS, which trusts the local
+  // headers, the per-disk entry count and ZIP64 extras. Each one must be refused before SheetJS runs.
+  const workbookXml = new TextEncoder().encode("<workbook/>");
+  const padding = new Uint8Array(MAX_INFLATED_BYTES + 1024 * 1024).fill(120);
+  const small = { name: "xl/workbook.xml", data: workbookXml };
+  const bombPart = { name: "padding.bin", data: padding };
+  const disagreements: [string, Uint8Array, string][] = [
+    [
+      "per-disk count above the total",
+      zip([small, bombPart], { entries: 1 }),
+      "inconsistent or ZIP64 counts",
+    ],
+    [
+      "total count above the per-disk count",
+      zip([small, bombPart], { entriesDisk: 1 }),
+      "inconsistent or ZIP64 counts",
+    ],
+    ["a split-disk end record", zip([small], { disk: 1 }), "inconsistent or ZIP64 counts"],
+    [
+      "bytes between the directory and the end record",
+      zip([small], { gap: 8 }),
+      "does not end at the end record",
+    ],
+    [
+      "local method deflate, directory says stored",
+      zip([
+        {
+          ...small,
+          data: padding,
+          cd: { method: 0, usz: 100, csz: 100 },
+          local: { usz: 100, csz: 100 },
+        },
+      ]),
+      "local header disagrees",
+    ],
+    [
+      "local name differs from the directory name",
+      zip([{ ...small, local: { name: "xl/other.xml" } }]),
+      "local header disagrees",
+    ],
+    [
+      "local uncompressed size, the buffer SheetJS allocates, above the directory's",
+      zip([{ ...small, local: { usz: 2 ** 31 } }]),
+      "local header disagrees",
+    ],
+    [
+      "local compressed size above the directory's",
+      zip([{ ...small, local: { csz: 2 ** 31 } }]),
+      "local header disagrees",
+    ],
+    [
+      "a ZIP64 extra field in the directory",
+      zip([{ ...small, cd: { extra: zip64Extra(2 ** 33, 1) } }]),
+      "ZIP64 sizes",
+    ],
+    [
+      "a ZIP64 extra field in the local header",
+      zip([{ ...small, local: { extra: zip64Extra(2 ** 33, 1) } }]),
+      "local header disagrees",
+    ],
+  ];
+  test.each(disagreements)("refuses an archive with %s", async (_why, bytes, message) => {
+    await expect(parseXlsx(bytes)).rejects.toThrow(message);
+  });
+
+  test("the archive builder writes a zip the checker accepts when the headers agree", async () => {
+    // Control: the refusals above come from the disagreement, not from the builder's output.
+    await expect(parseXlsx(zip([small, bombPart]))).rejects.toThrow("inflates to more than");
+    const ok = zip([small, { name: "xl/media/a.png", data: padding.subarray(0, 100) }]);
+    const outcome = await parseXlsx(ok).then(
+      () => "accepted",
+      (error: Error) => error.message,
+    );
+    expect(outcome).not.toMatch(/disagrees|inconsistent|ZIP64|does not end/);
   });
 
   test("refuses over the tab and cell limits", async () => {
@@ -307,6 +507,35 @@ describe("buildXlsx", () => {
     expect(ws.E2).toMatchObject({ t: "b", v: true });
     expect(ws["!merges"]?.length).toBe(1);
     expect(ws["!cols"]?.[0]?.wpx).toBe(120);
+  });
+
+  // A function name inside a string literal or a quoted sheet name is text, not a call: only real calls get the prefix.
+  test("prefixes function calls but never text inside string literals or quoted sheet names", async () => {
+    const formulas = {
+      A1: ['=IF(TRUE,"IFS(","SORT(")', "<f>IF(TRUE,&quot;IFS(&quot;,&quot;SORT(&quot;)</f>"],
+      A2: [
+        '=IFS(TRUE,"IFS(")&SORT("a")',
+        "<f>_xlfn.IFS(TRUE,&quot;IFS(&quot;)&amp;_xlfn._xlws.SORT(&quot;a&quot;)</f>",
+      ],
+      A3: [
+        '=IF(A1="say ""IFS("" now",SEQUENCE(2),"x")',
+        "<f>IF(A1=&quot;say &quot;&quot;IFS(&quot;&quot; now&quot;,_xlfn.SEQUENCE(2),&quot;x&quot;)</f>",
+      ],
+      A4: [
+        "=SORT('SORT(''s'!A1:A3)",
+        "<f>_xlfn._xlws.SORT(&apos;SORT(&apos;&apos;s&apos;!A1:A3)</f>",
+      ],
+    };
+    const cells = Object.fromEntries(
+      Object.entries(formulas).map(([ref, [f]]) => [ref, { f: f as string, v: "IFS(" }]),
+    );
+    const { bytes } = await buildXlsx([{ name: "Data", cells }]);
+    const wb = XLSX.read(bytes, { type: "array", bookFiles: true });
+    const xml = String(
+      (wb as { files?: Record<string, { content: unknown }> }).files?.["xl/worksheets/sheet1.xml"]
+        ?.content,
+    );
+    for (const [, expected] of Object.values(formulas)) expect(xml).toContain(expected as string);
   });
 
   test("refuses a hand-edited tab name Excel forbids", async () => {
@@ -428,6 +657,45 @@ describe("importSheetXlsx and exportSheetXlsx", () => {
     await expect(exportSheetXlsx({ agentId, id: object.id, targetPath: "e.csv" })).rejects.toThrow(
       "must end in .xlsx",
     );
+  });
+
+  test("a workbook that fits as compact JSON but not as the saved file leaves no file and no row", async () => {
+    // 40,000 cells of 100 characters: ~277 KB as xlsx, under 5 MiB compact, over it as the pretty-printed file `save` writes.
+    const text = "x".repeat(100);
+    const wb = XLSX.utils.book_new();
+    const rows = Array.from({ length: 400 }, () => Array.from({ length: 100 }, () => text));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Data");
+    put(
+      "in/wide.xlsx",
+      new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true })),
+    );
+    const outcome = await importSheetXlsx({
+      agentId,
+      sourcePath: "in/wide.xlsx",
+      path: "wide.sheet.json",
+    }).then(
+      () => "accepted",
+      (error: unknown) => (error instanceof ObjectsError ? error.message : String(error)),
+    );
+    expect(outcome).toBe("the sheet would exceed 5242880 bytes (5 MiB)");
+    expect(files.has("wide.sheet.json")).toBe(false);
+    expect((await listSheets({ agentId })).total).toBe(0);
+  });
+
+  test("an export keeps a formula's string literals, so the file recalculates to the same text", async () => {
+    const created = await createSheet({
+      agentId,
+      path: "lit.sheet.json",
+      tabs: [{ name: "Data", rows: [['=IF(TRUE,"IFS(","SORT(")', '=IFS(TRUE,"SORT(")']] }],
+    });
+    await exportSheetXlsx({ agentId, id: created.object.id, targetPath: "lit.xlsx" });
+    const again = await importSheetXlsx({
+      agentId,
+      sourcePath: "lit.xlsx",
+      path: "lit2.sheet.json",
+    });
+    const range = await getSheetRange({ agentId, id: again.object.id, range: "Data!A1:B1" });
+    expect(range.values).toEqual([["IFS(", "SORT("]]);
   });
 
   test("an export of an unknown id or of a board is refused", async () => {

@@ -19,20 +19,48 @@ export const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
 
 const notXlsx = (why: string) => new ObjectsError(`not an xlsx workbook: ${why}`);
 
+const refuse = (why: string) => notXlsx(`${why}; refusing it`);
+
+/** True when a zip extra-field block holds a ZIP64 record, which SheetJS trusts for sizes. */
+function hasZip64Extra(view: DataView, from: number, length: number): boolean {
+  for (let at = from; at + 4 <= from + length; ) {
+    if (view.getUint16(at, true) === 0x0001) return true;
+    at += 4 + view.getUint16(at + 2, true);
+  }
+  return false;
+}
+
 /**
- * Names of the zip parts, after proving every part inflates to exactly its declared size
- * and that the declared sizes stay under the cap. SheetJS inflates whatever the stream holds,
- * so this runs first: a lying central directory cannot make it allocate more than the cap.
+ * Names of the zip parts, after proving that the archive reads the same to us and to SheetJS
+ * and that every part inflates to exactly its declared size under the cap. SheetJS trusts the
+ * local headers (name, method, sizes, ZIP64 extras) and the per-disk entry count, and it inflates
+ * whatever stream sits at each local header. So an archive where those disagree with the central
+ * directory is refused outright, and the rest is measured the way SheetJS walks it.
  */
 function checkedZipParts(bytes: Uint8Array): Set<string> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const names = new Set<string>();
   try {
-    let eocd = bytes.length - 22;
+    // The same last-signature scan SheetJS runs, so both pick one end record.
+    let eocd = bytes.length - 4;
     while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--;
     if (eocd < 0) throw notXlsx("not a zip archive (no end-of-directory record)");
-    const count = view.getUint16(eocd + 10, true);
-    let at = view.getUint32(eocd + 16, true);
+    const count = view.getUint16(eocd + 8, true); // SheetJS reads this one
+    const dirSize = view.getUint32(eocd + 12, true);
+    const dirStart = view.getUint32(eocd + 16, true);
+    if (
+      view.getUint16(eocd + 4, true) !== 0 ||
+      view.getUint16(eocd + 6, true) !== 0 ||
+      count !== view.getUint16(eocd + 10, true) ||
+      count === 0xffff ||
+      dirSize === 0xffffffff ||
+      dirStart === 0xffffffff
+    ) {
+      throw refuse("the zip end record has split-disk, inconsistent or ZIP64 counts");
+    }
+    if (dirStart + dirSize !== eocd)
+      throw refuse("the zip directory does not end at the end record");
+    let at = dirStart;
     let inflated = 0;
     for (let n = 0; n < count; n++) {
       if (view.getUint32(at, true) !== 0x02014b50) throw notXlsx("broken zip directory");
@@ -40,18 +68,40 @@ function checkedZipParts(bytes: Uint8Array): Set<string> {
       const size = view.getUint32(at + 20, true);
       const fullSize = view.getUint32(at + 24, true);
       const nameLen = view.getUint16(at + 28, true);
-      const next =
-        at + 46 + nameLen + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+      const extraLen = view.getUint16(at + 30, true);
+      const next = at + 46 + nameLen + extraLen + view.getUint16(at + 32, true);
       const local = view.getUint32(at + 42, true);
-      names.add(new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLen)));
+      const name = bytes.subarray(at + 46, at + 46 + nameLen);
+      names.add(new TextDecoder().decode(name));
       inflated += fullSize;
       if (inflated > MAX_INFLATED_BYTES) {
         throw new ObjectsError(
           `the workbook inflates to more than ${MAX_INFLATED_BYTES} bytes (16 MiB); refusing it`,
         );
       }
-      const start =
-        local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+      if (
+        size === 0xffffffff ||
+        fullSize === 0xffffffff ||
+        hasZip64Extra(view, at + 46 + nameLen, extraLen)
+      ) {
+        throw refuse("a zip part uses ZIP64 sizes");
+      }
+      if (view.getUint32(local, true) !== 0x04034b50) throw notXlsx("broken zip local header");
+      const localNameLen = view.getUint16(local + 26, true);
+      const localExtraLen = view.getUint16(local + 28, true);
+      // SheetJS takes the part's name and method from the local header and sizes the buffer from its sizes.
+      const sameSize = (value: number, declared: number) => value === declared || value === 0;
+      if (
+        view.getUint16(local + 8, true) !== method ||
+        !sameSize(view.getUint32(local + 18, true), size) ||
+        !sameSize(view.getUint32(local + 22, true), fullSize) ||
+        localNameLen !== nameLen ||
+        Buffer.compare(bytes.subarray(local + 30, local + 30 + localNameLen), name) !== 0 ||
+        hasZip64Extra(view, local + 30 + localNameLen, localExtraLen)
+      ) {
+        throw refuse("a zip part's local header disagrees with the directory");
+      }
+      const start = local + 30 + localNameLen + localExtraLen;
       const data = bytes.subarray(start, start + size);
       let actual: number;
       if (method === 0) actual = data.length;
@@ -61,6 +111,7 @@ function checkedZipParts(bytes: Uint8Array): Set<string> {
       if (actual !== fullSize) throw notXlsx("a zip part does not match its declared size");
       at = next;
     }
+    if (at !== eocd) throw refuse("the zip directory has bytes the entry count does not cover");
   } catch (error) {
     if (error instanceof ObjectsError) throw error;
     // RangeError (read past the end), zlib errors (bad stream, output past the declared size).
@@ -69,8 +120,15 @@ function checkedZipParts(bytes: Uint8Array): Set<string> {
   return names;
 }
 
-// SheetJS already drops `_xlfn.` when it reads a formula; it leaves `_xlws.` (the sort/filter family) in place.
-const XLWS = /_xlws\./g;
+/** Run `fn` on the parts of a formula outside string literals and quoted sheet names. `""` and `''` escape a quote. */
+const outsideQuotes = (formula: string, fn: (code: string) => string) =>
+  formula
+    .split(/("(?:[^"]|"")*"|'(?:[^']|'')*')/)
+    .map((part, i) => (i % 2 ? part : fn(part)))
+    .join("");
+
+// Read with `xlfn: true`: SheetJS would strip `_xlfn.` inside string literals too. We strip both prefixes, outside quotes only.
+const XLPREFIX = /_xl(?:fn|ws)\./g;
 
 /** Functions Excel stores with an `_xlfn.` prefix (`_xlfn._xlws.` for the two that sort or filter). Without it Excel shows #NAME?. */
 const XLFN_FUNCTIONS = [
@@ -100,10 +158,12 @@ const prefixFunctions = (formula: string, names: string[], prefix: string) =>
 
 // shortcut: a fixed list of post-2007 functions; add a name here when Excel shows #NAME? for one we export.
 const toXlsxFormula = (formula: string) =>
-  prefixFunctions(
-    prefixFunctions(formula.slice(1), XLFN_FUNCTIONS, "_xlfn."),
-    XLWS_FUNCTIONS,
-    "_xlfn._xlws.",
+  outsideQuotes(formula.slice(1), (code) =>
+    prefixFunctions(
+      prefixFunctions(code, XLFN_FUNCTIONS, "_xlfn."),
+      XLWS_FUNCTIONS,
+      "_xlfn._xlws.",
+    ),
   );
 
 const ERROR_CODES: Record<string, number> = {
@@ -170,6 +230,7 @@ export async function parseXlsx(
       cellFormula: true,
       cellNF: true,
       cellStyles: true,
+      xlfn: true,
       sheetStubs: true,
       bookFiles: true,
     });
@@ -193,7 +254,7 @@ export async function parseXlsx(
       if (typeof cell.f === "string" && cell.f !== "") {
         // A multi-cell array formula would spill over its own cached cells: keep the values.
         if (cell.F?.includes(":")) dropped.add("array formulas (kept as values)");
-        else out.f = `=${cell.f.replace(XLWS, "")}`;
+        else out.f = `=${outsideQuotes(cell.f, (code) => code.replace(XLPREFIX, ""))}`;
       }
       if (out.f === undefined) {
         if (cell.t === "n" || cell.t === "s") out.v = cell.v as number | string;
