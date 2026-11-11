@@ -1,7 +1,15 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
-import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
+import {
+  assertNamespaces,
+  isSdkToolAllowed,
+  mcpToolNameForSdkMethod,
+  SDK_NAMESPACES,
+  type SdkNamespaceRegistry,
+  sdkMethodForNamespace,
+  unwrapToolPayload,
+} from "./sdk-allowlist";
 import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
 
@@ -765,4 +773,43 @@ export function createSwarmSdk(
       return (args?: unknown) => callTool(prop, args, config, signal);
     },
   }) as RuntimeSwarmSdk;
+}
+
+export type SdkNamespaceClient = Readonly<Record<string, (args?: unknown) => Promise<unknown>>>;
+
+/**
+ * One frozen client per registered namespace. `ctx.<ns>.<m>(args)` calls SDK
+ * method `<ns>_<m>`, throws on a non-2xx or a tool refusal, and returns the
+ * tool payload without `success` (flat `ctx.swarm.<ns>_<m>` keeps the envelope).
+ */
+export function createNamespaceClients(
+  config: SwarmConfig,
+  options: { signal?: AbortSignal; registry?: SdkNamespaceRegistry } = {},
+): Readonly<Record<string, SdkNamespaceClient>> {
+  const { signal, registry = SDK_NAMESPACES } = options;
+  assertNamespaces(registry);
+  const call = (ns: string, method: string) => async (args?: unknown) => {
+    const label = `ctx.${ns}.${method}`;
+    const result = (await callTool(sdkMethodForNamespace(ns, method), args, config, signal)) as {
+      success: boolean;
+      status: number;
+      data: unknown;
+    };
+    const data = result.data as { success?: unknown; error?: unknown } | null;
+    // A tool refusal is a 200 with `data.success === false`: unwrapToolPayload throws its message.
+    if (!result.success && data?.success !== false) {
+      const reason =
+        data && typeof data === "object" && "error" in data ? String(data.error) : "api failed";
+      throw new Error(`${label} failed with ${result.status}: ${reason}`);
+    }
+    return unwrapToolPayload(label, result.data);
+  };
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(registry).map(([ns, methods]) => [
+        ns,
+        Object.freeze(Object.fromEntries(methods.map((method) => [method, call(ns, method)]))),
+      ]),
+    ),
+  );
 }
