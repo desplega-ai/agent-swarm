@@ -6,6 +6,7 @@
     "customer-renewal-review",
     "customer-commitment-tracking",
     "ai-invoice-discrepancy-review",
+    "supplier-security-evidence-review",
     "deployment",
     "one-click-deploy",
     "kubernetes",
