@@ -578,8 +578,8 @@
       "scenarios": ["workflow-approvals"]
     },
     "workflow-definitions": {
-      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types over HTTP and MCP",
-      "scenarios": ["workflow-definitions"]
+      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
+      "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
       "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
