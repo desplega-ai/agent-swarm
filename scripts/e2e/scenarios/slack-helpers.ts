@@ -244,18 +244,27 @@ export async function waitForBotReply(
 }
 
 /**
+ * How long an absence assertion watches a Slack thread: 3 watcher ticks, at least 10 s.
+ * 30 s at the API's 10 s default tick, 10 s (10 passes) at the runner's 1 s tick, so a
+ * `--sut-env SLACK_TASK_WATCHER_INTERVAL_MS=...` override keeps the window honest.
+ */
+export function slackAbsenceWindowMs(ctx: ScenarioContext): number {
+  const tick = Number(ctx.sutEnv.SLACK_TASK_WATCHER_INTERVAL_MS);
+  return Math.max(10_000, 3 * (Number.isInteger(tick) && tick > 0 ? tick : 10_000));
+}
+
+/**
  * Asserts a message matching `needle` never lands in the thread within
- * `timeoutMs`. Calibrated against slack-delegation-child-result.ts's
- * `waitForOutcome(ctx, message.ts, childOutput)` call, which uses this same
- * default (30s) to see the flag-on child card land — using it here too means
- * absence is a real assertion bounded by the watcher's own tick cadence, not
- * a race that just happens to return before the card would have appeared.
+ * `timeoutMs`. The default window spans several watcher ticks
+ * (`slackAbsenceWindowMs`), so absence is a real assertion bounded by the
+ * watcher's own cadence, not a race that just happens to return before the
+ * card would have appeared.
  */
 export async function waitForOutcomeAbsence(
   ctx: ScenarioContext,
   threadTs: string,
   needle: string,
-  timeoutMs = 30_000,
+  timeoutMs = slackAbsenceWindowMs(ctx),
 ): Promise<void> {
   const appeared = await pollUntil(
     () =>

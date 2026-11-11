@@ -206,7 +206,7 @@ export function nightlyMarkdown(
     const { scenarios, coverage, gates } = report.contract;
     const count = (status: string) => scenarios.filter((s) => s.status === status).length;
     lines.push(
-      `${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped · ` +
+      `${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped, ${count("flaky")} flaky · ` +
         `routes ${coverage.routes.covered}/${coverage.routes.total} (${coverage.routes.percent.toFixed(1)}%) · ` +
         `MCP tools ${coverage.mcpTools.covered}/${coverage.mcpTools.total} (${coverage.mcpTools.percent.toFixed(1)}%) · ` +
         `gates ${gates.passed ? "PASS" : "FAIL"}`,

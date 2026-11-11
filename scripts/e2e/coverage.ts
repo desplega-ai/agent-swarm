@@ -301,7 +301,11 @@ export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): P
       if (!inputs.knownScenarios.has(scenario)) unknownFlowScenarios.add(scenario);
     }
     const missing = flow.scenarios.filter((scenario) => !byName.has(scenario));
-    const failed = flow.scenarios.filter((scenario) => byName.get(scenario)?.status !== "pass");
+    // A flaky pass passes its flow; a quarantined failure is reported, never gating.
+    const failed = flow.scenarios.filter((scenario) => {
+      const result = byName.get(scenario);
+      return !(result?.status === "pass" || result?.status === "flaky" || result?.quarantine);
+    });
     let detail: string | undefined;
     if (missing.length > 0) detail = `not run: ${missing.join(", ")}`;
     else if (failed.length > 0) detail = `not passing: ${failed.join(", ")}`;

@@ -1,14 +1,33 @@
 import type { Coverage } from "./coverage";
+import type { QuarantineEntry } from "./quarantine";
 
 export class SkipError extends Error {}
 
-export type RunStatus = "pass" | "fail" | "skip";
+/** `flaky`: failed, then passed its rerun on a fresh API. It does not fail the run. */
+export type RunStatus = "pass" | "fail" | "skip" | "flaky";
+export type ScenarioAttempt = { status: RunStatus; durationMs: number; error?: string };
 export type ScenarioResult = {
   name: string;
   status: RunStatus;
+  /** Wall-clock over every attempt. */
   durationMs: number;
   error?: string;
+  /** Present when the scenario reran: the first attempt, then the rerun. */
+  attempts?: ScenarioAttempt[];
+  /** Present when quarantine.json lists the scenario: a failure here cannot fail the run. */
+  quarantine?: Omit<QuarantineEntry, "scenario">;
 };
+
+/** A failure that fails the run: not quarantined. */
+export function failsRun(result: ScenarioResult): boolean {
+  return result.status === "fail" && !result.quarantine;
+}
+
+/** Status label for consoles and tables: FLAKY, FAIL (quarantined), PASS. */
+export function statusLabel(result: ScenarioResult): string {
+  const label = result.status.toUpperCase();
+  return result.quarantine && result.status !== "pass" ? `${label} (quarantined)` : label;
+}
 /** Session-cost rows the API stored for one harness attempt, summed. */
 export type HarnessCost = {
   records: number;
@@ -59,6 +78,8 @@ export type E2eResult = {
   scenarios: ScenarioResult[];
   harness: HarnessResult[];
   coverage: Coverage;
+  /** quarantine.json as loaded, plus the reasons it fails the run (expired, unknown, duplicate). */
+  quarantine?: { entries: QuarantineEntry[]; problems: string[] };
   gates: {
     minRouteCoverage: number;
     minToolCoverage: number;
@@ -208,17 +229,20 @@ export function parseOptions(
 }
 
 const colors = process.stdout.isTTY
-  ? { pass: "\x1b[32m", fail: "\x1b[31m", skip: "\x1b[33m", reset: "\x1b[0m" }
-  : { pass: "", fail: "", skip: "", reset: "" };
+  ? { pass: "\x1b[32m", fail: "\x1b[31m", skip: "\x1b[33m", flaky: "\x1b[35m", reset: "\x1b[0m" }
+  : { pass: "", fail: "", skip: "", flaky: "", reset: "" };
 
 export function seconds(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
 export function printScenario(result: ScenarioResult): void {
-  const label = result.status.toUpperCase();
-  const detail = result.error ? `: ${result.error}` : "";
-  const duration = result.status === "skip" ? "" : ` (${seconds(result.durationMs)})`;
+  const label = statusLabel(result);
+  const detail = result.error
+    ? `: ${result.status === "flaky" ? "passed on rerun; first attempt: " : ""}${result.error}`
+    : "";
+  const attempts = result.attempts ? `, ${result.attempts.length} attempts` : "";
+  const duration = result.status === "skip" ? "" : ` (${seconds(result.durationMs)}${attempts})`;
   console.log(`${colors[result.status]}${label}${colors.reset} ${result.name}${duration}${detail}`);
 }
 
@@ -297,13 +321,26 @@ export function markdownSummary(result: E2eResult): string {
     "",
     "### Scenarios",
     "",
-    "| Scenario | Status | Duration | Error |",
-    "| --- | --- | ---: | --- |",
+    "| Scenario | Status | Attempts | Duration | Error |",
+    "| --- | --- | ---: | ---: | --- |",
     ...result.scenarios.map(
       (scenario) =>
-        `| ${scenario.name} | ${scenario.status.toUpperCase()} | ${seconds(scenario.durationMs)} | ${markdownCell(scenario.error ?? "")} |`,
+        `| ${scenario.name} | ${statusLabel(scenario)} | ${scenario.attempts?.length ?? 1} | ${seconds(scenario.durationMs)} | ${markdownCell(scenario.error ?? "")} |`,
     ),
   ];
+  const flaky = result.scenarios.filter((scenario) => scenario.status === "flaky");
+  if (flaky.length > 0) {
+    lines.push("", `Flaky (passed on rerun): ${flaky.map((scenario) => scenario.name).join(", ")}`);
+  }
+  const quarantineProblems = result.quarantine?.problems ?? [];
+  if (quarantineProblems.length > 0) {
+    lines.push(
+      "",
+      "Quarantine file fails the run:",
+      "",
+      ...quarantineProblems.map((p) => `- ${p}`),
+    );
+  }
   if (result.harness.length > 0) {
     lines.push(
       "",

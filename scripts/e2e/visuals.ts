@@ -4,7 +4,7 @@ import { frames, SlackMock, screenshot } from "@desplega.ai/slack-mock";
 type ManifestThread = { label: string; channel: string; ts: string };
 type ManifestScenario = {
   name: string;
-  status: "pass" | "fail" | "skip";
+  status: "pass" | "fail" | "skip" | "flaky";
   durationMs: number;
   error: string | null;
   threads: ManifestThread[];
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
   const renderedScenarios: Array<{
     name: string;
-    status: "pass" | "fail" | "skip";
+    status: "pass" | "fail" | "skip" | "flaky";
     error: string | null;
     threads: RenderedThread[];
   }> = [];
