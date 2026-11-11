@@ -152,8 +152,11 @@ function inputFor(value: CellInput): string {
 }
 
 /** Recalculate `doc` with `patches` and report which cells moved. */
-async function recalc(doc: SheetDoc, patches: EnginePatch[]) {
-  const { cells, changed } = await sheetEngine().recalc(doc.tabs, patches, { maxCells: MAX_CELLS });
+async function recalc(agentId: string | undefined, doc: SheetDoc, patches: EnginePatch[]) {
+  const { cells, changed } = await sheetEngine().recalc(doc.tabs, patches, {
+    maxCells: MAX_CELLS,
+    caller: agentId,
+  });
   doc.tabs.forEach((tab, i) => {
     tab.cells = cells[i] ?? {};
   });
@@ -222,7 +225,7 @@ export async function createSheet(input: {
             })),
           ),
         );
-        await recalc(doc, patches);
+        await recalc(input.agentId, doc, patches);
         return { doc, result: null };
       },
     );
@@ -316,7 +319,7 @@ export async function setSheetRange(
         input: inputFor(value),
       })),
     );
-    const changed = await recalc(doc, patches);
+    const changed = await recalc(target.agentId, doc, patches);
     const inRange = (ref: string) => {
       const [name, a1] = [ref.slice(0, ref.lastIndexOf("!")), ref.slice(ref.lastIndexOf("!") + 1)];
       const { row, col } = parseCell(a1);
@@ -359,7 +362,7 @@ export async function appendSheetRows(target: SheetTarget & { tab: string; rows:
           : [{ tab: tab.name, row: first + i, col: j + 1, input: inputFor(value) }],
       ),
     );
-    const changed = await recalc(doc, patches);
+    const changed = await recalc(target.agentId, doc, patches);
     return {
       doc: changed.length ? doc : undefined,
       result: { range: formatRange(tab.name, range) },
@@ -386,7 +389,7 @@ export async function clearSheetRange(target: SheetTarget & { range: string }) {
     });
     if (patches.length === 0)
       return { result: { range: formatRange(tab.name, range), cleared: 0 } };
-    await recalc(doc, patches);
+    await recalc(target.agentId, doc, patches);
     return { doc, result: { range: formatRange(tab.name, range), cleared: patches.length } };
   });
   return { ...result, version };

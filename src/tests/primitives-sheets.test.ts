@@ -10,7 +10,7 @@ import {
   parseCell,
   parseRange,
 } from "../be/primitives/sheets/a1";
-import { SheetEngine } from "../be/primitives/sheets/engine";
+import { MAX_ENGINE_CALLS, SheetEngine } from "../be/primitives/sheets/engine";
 import {
   constantInput,
   emptySheet,
@@ -218,6 +218,26 @@ describe("sheet engine", () => {
         },
       );
       expect(out.cells[0]?.B1?.v).toBe(4_501_500);
+    } finally {
+      engine.stop();
+    }
+  }, 20_000);
+
+  test("the queue is bounded per caller and in total, and oversized input is refused before queueing", async () => {
+    const engine = new SheetEngine();
+    try {
+      const tabs = [{ name: "S", cells: {} }];
+      const call = (caller: string) => engine.recalc(tabs, [], { maxCells: MAX_CELLS, caller });
+      const first = [call("a"), call("a")];
+      await expect(call("a")).rejects.toThrow("busy");
+      const others = Array.from({ length: MAX_ENGINE_CALLS - 2 }, (_, i) => call(`b${i}`));
+      await expect(call("c")).rejects.toThrow("busy");
+      await Promise.all([...first, ...others]);
+      // Slots free up once the calls settle.
+      await call("a");
+      await expect(
+        engine.recalc([{ name: "S", cells: { A1: { v: 1 }, A2: { v: 2 } } }], [], { maxCells: 1 }),
+      ).rejects.toThrow("the limit is 1");
     } finally {
       engine.stop();
     }

@@ -9,6 +9,10 @@ import type { SheetCell, SheetTab } from "./format";
  */
 
 export const ENGINE_TIMEOUT_MS = 10_000;
+/** Calls waiting or running at once. Bounds the queue wait to about this many timeouts. */
+export const MAX_ENGINE_CALLS = 8;
+/** Calls one caller may have waiting or running, so one agent cannot fill the queue. */
+export const MAX_ENGINE_CALLS_PER_CALLER = 2;
 
 /** In the compiled API binary every `import.meta.url` is the binary; see the Dockerfile compile step. */
 function workerSpecifier(): string {
@@ -22,6 +26,8 @@ export class SheetEngine {
   private worker: Promise<Worker> | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private nextId = 1;
+  private pending = new Map<string, number>();
+  private total = 0;
 
   private spawn(): Promise<Worker> {
     const worker = new Worker(workerSpecifier());
@@ -59,8 +65,30 @@ export class SheetEngine {
   recalc(
     tabs: SheetTab[],
     patches: EnginePatch[],
-    options: { maxCells: number; timeoutMs?: number },
+    options: { maxCells: number; timeoutMs?: number; caller?: string },
   ): Promise<RecalcResult> {
+    // Refuse before queueing: a call that cannot fit never holds a workbook in memory or a queue slot.
+    const caller = options.caller ?? "";
+    const mine = this.pending.get(caller) ?? 0;
+    if (this.total >= MAX_ENGINE_CALLS || mine >= MAX_ENGINE_CALLS_PER_CALLER) {
+      return Promise.reject(
+        new ObjectsError("sheet engine is busy with other recalculations; retry in a few seconds"),
+      );
+    }
+    const cells = tabs.reduce((n, tab) => n + Object.keys(tab.cells).length, 0);
+    if (cells > options.maxCells) {
+      return Promise.reject(
+        new ObjectsError(`the workbook has ${cells} cells; the limit is ${options.maxCells}`),
+      );
+    }
+    this.pending.set(caller, mine + 1);
+    this.total++;
+    const release = () => {
+      this.total--;
+      const left = (this.pending.get(caller) ?? 1) - 1;
+      if (left > 0) this.pending.set(caller, left);
+      else this.pending.delete(caller);
+    };
     const run = async (): Promise<RecalcResult> => {
       this.worker ??= this.spawn();
       let worker: Worker;
@@ -110,7 +138,7 @@ export class SheetEngine {
       });
     };
     // One call at a time: the timeout clock starts when the worker is free, not when the call queues.
-    const result = this.queue.then(run, run);
+    const result = this.queue.then(run, run).finally(release);
     this.queue = result.catch(() => {});
     return result;
   }
