@@ -576,10 +576,11 @@ export async function applyFileChange(
     if (!atPath) return { action: "ignored", path, reason: "no object at this path" };
     if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     // agent-fs delivers a batch concurrently, so the version check lives in the UPDATE.
+    // Versions count per path: a row that moved meanwhile is not this event's.
     const { changes } = await db.run(
       `UPDATE primitive_objects SET deletedAt = ?, fileVersion = ?, updatedAt = ?
-       WHERE id = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
-      [now, version, now, atPath.id, version],
+       WHERE id = ? AND path = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
+      [now, version, now, atPath.id, path, version],
     );
     if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     return { action: "tombstoned", path, id: atPath.id };
@@ -598,8 +599,8 @@ export async function applyFileChange(
     const { changes } = await db.run(
       `UPDATE primitive_objects
          SET deletedAt = NULL, updatedAt = ?, fileVersion = CASE WHEN ? THEN ? ELSE fileVersion END
-       WHERE id = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
-      [now, owned ? 1 : 0, read, atPath.id, version],
+       WHERE id = ? AND path = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
+      [now, owned ? 1 : 0, read, atPath.id, path, version],
     );
     if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     if (owned) return { action: "updated", path, id: atPath.id };
@@ -634,7 +635,8 @@ export async function applyFileChange(
     };
   }
   const title = swarmBlock(json).title;
-  await saveRow(
+  const savedVersion = fileVersion ?? version;
+  const saved = await saveRow(
     {
       id,
       kind: kindName,
@@ -642,10 +644,30 @@ export async function applyFileChange(
       driveId,
       path,
       title: typeof title === "string" ? title : (byId?.title ?? null),
-      fileVersion: fileVersion ?? version,
+      fileVersion: savedVersion,
       ownerAgentId: byId?.ownerAgentId ?? null,
     },
     { onlyNewer: true },
   );
-  return { action: byId ? "moved" : "restored", path, id };
+  const action = byId ? "moved" : "restored";
+  if (saved.path !== path || saved.fileVersion !== savedVersion || saved.deletedAt) {
+    return { action, path, id };
+  }
+  // A delete event for this path that ran before the save found no row and was dropped.
+  // agent-fs sends events after the change, so a file gone now was deleted in that window.
+  let present = true;
+  try {
+    present = await reader.exists(path);
+  } catch {
+    // shortcut: a failed check keeps the row live (a retry would see a stale event);
+    // add a per-path delete marker if agent-fs read failures show up here.
+  }
+  if (present) return { action, path, id };
+  const { changes } = await db.run(
+    `UPDATE primitive_objects SET deletedAt = ?, updatedAt = ?
+     WHERE id = ? AND path = ? AND fileVersion = ? AND deletedAt IS NULL`,
+    [now, now, id, path, savedVersion],
+  );
+  if (changes === 0) return { action, path, id };
+  return { action: "tombstoned", path, id, reason: "the file was deleted while it was saved" };
 }

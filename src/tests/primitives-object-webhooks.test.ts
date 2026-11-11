@@ -354,7 +354,8 @@ describe("file.changed receiver", () => {
         new Response(JSON.stringify({ type: "excalidraw", elements: [], swarm: { id } }), {
           headers: { "x-agent-fs-version": String(version) },
         }),
-      exists: async () => false,
+      // No row holds the id elsewhere; the restored file itself is on the drive.
+      exists: async (path: string) => path.startsWith("boards/restore-race-"),
     });
     const wrong: string[] = [];
     for (let i = 0; i < 20; i++) {
@@ -376,6 +377,87 @@ describe("file.changed receiver", () => {
       if (row?.fileVersion !== 5) wrong.push(id);
     }
     expect(wrong).toEqual([]);
+  });
+
+  test("an edit on the old path racing a move does not stamp its version on the moved row", async () => {
+    const id = "move-race";
+    const oldPath = "boards/move-old.excalidraw";
+    const newPath = "boards/move-new.excalidraw";
+    const now = new Date().toISOString();
+    await getDbClient().run(
+      `INSERT INTO primitive_objects
+         (id, kind, orgId, driveId, path, title, fileVersion, ownerAgentId, createdAt, updatedAt)
+       VALUES (?, 'board', 'org-race', 'drive-race', ?, NULL, 3, NULL, ?, ?)`,
+      [id, oldPath, now, now],
+    );
+    // The edit read the row at the old path; its write lands after the move repointed the row.
+    let moveDone = () => {};
+    const afterMove = new Promise<void>((resolve) => {
+      moveDone = resolve;
+    });
+    const reader = (version: number, gate?: Promise<void>) => ({
+      download: async () => {
+        await gate;
+        return new Response(JSON.stringify({ type: "excalidraw", elements: [], swarm: { id } }), {
+          headers: { "x-agent-fs-version": String(version) },
+        });
+      },
+      exists: async (path: string) => path === newPath,
+    });
+    const change = { orgId: "org-race", driveId: "drive-race" };
+    await Promise.all([
+      applyFileChange(
+        { ...change, path: oldPath, version: 4, operation: "edit" },
+        reader(4, afterMove),
+      ),
+      applyFileChange({ ...change, path: newPath, version: 1, operation: "write" }, reader(1)).then(
+        moveDone,
+      ),
+    ]);
+    // Versions count per path: the new path's delete at v2 must land.
+    const deleted = await applyFileChange(
+      { ...change, path: newPath, version: 2, operation: "delete" },
+      reader(2),
+    );
+    expect(deleted).toMatchObject({ action: "tombstoned", id });
+    const row = await getDbClient().get<{ path: string; fileVersion: number }>(
+      "SELECT path, fileVersion FROM primitive_objects WHERE id = ?",
+      [id],
+    );
+    expect(row).toEqual({ path: newPath, fileVersion: 2 });
+  });
+
+  test("a delete that races the first restore of a path leaves no live row", async () => {
+    const id = "first-restore";
+    // The restore read the file just before agent-fs deleted it; the delete then finds no row.
+    let deleteDone = () => {};
+    const afterDelete = new Promise<void>((resolve) => {
+      deleteDone = resolve;
+    });
+    const reader = {
+      download: async () => {
+        await afterDelete;
+        return new Response(JSON.stringify({ type: "excalidraw", elements: [], swarm: { id } }), {
+          headers: { "x-agent-fs-version": "4" },
+        });
+      },
+      exists: async () => false,
+    };
+    const change = {
+      orgId: "org-race",
+      driveId: "drive-race",
+      path: "/boards/first-restore.excalidraw",
+    };
+    const [restored] = await Promise.all([
+      applyFileChange({ ...change, version: 4, operation: "write" }, reader),
+      applyFileChange({ ...change, version: 5, operation: "delete" }, reader).then(deleteDone),
+    ]);
+    expect(restored).toMatchObject({ action: "tombstoned", id });
+    const row = await getDbClient().get<{ deletedAt: string | null }>(
+      "SELECT deletedAt FROM primitive_objects WHERE id = ?",
+      [id],
+    );
+    expect(row?.deletedAt).not.toBeNull();
   });
 
   test("an edit that drops the embedded id leaves the file for object-reindex to adopt", async () => {
