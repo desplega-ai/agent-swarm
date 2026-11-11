@@ -1,12 +1,13 @@
-import { MessageSquarePlus } from "lucide-react";
+import { ChevronUp, MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { TaskCard } from "@/components/sessions/task-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { EmptyState } from "@/components/shared/empty-state";
 import { UserAvatar } from "@/components/shared/user-avatar";
+import { Button } from "@/components/ui/button";
 import { agentName } from "@/lib/agent-name";
 import { CHAT_COLUMN } from "@/lib/chat-width";
 import type { SessionViewer } from "@/lib/session-presence";
@@ -47,6 +48,101 @@ function useClock(ticking: boolean): number {
 
 /** A step block opens and closes in 150/120 ms (`AnimatedReveal` fast). */
 const REVEAL_MS = 200;
+
+/**
+ * Tasks rendered at first, and added per "Show earlier" click. A long-running
+ * case holds hundreds of tasks; the newest turns are what a person opens it
+ * for. A turn always renders whole, and at least `MIN_TURNS` show.
+ */
+export const TASK_BUDGET = 60;
+export const MIN_TURNS = 3;
+
+/** The nearest ancestor that scrolls vertically. */
+function scrollParent(el: Element): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node;
+  }
+  return null;
+}
+
+/** The first turn to render: the newest turns that fit `budget` tasks. */
+export function windowStart<T>(turns: T[], weight: (turn: T) => number, budget: number): number {
+  let used = 0;
+  let start = turns.length;
+  while (start > 0) {
+    const next = used + weight(turns[start - 1]);
+    if (next > budget && turns.length - start >= MIN_TURNS) break;
+    used = next;
+    start -= 1;
+  }
+  return start;
+}
+
+/**
+ * The first turn to render. A session opens on the newest turns that fit the
+ * task budget. After that the start only moves up, never down: a poll that
+ * adds turns at the tail never unmounts a turn the person can see. A turn
+ * with open work or a pending approval always renders, however old.
+ */
+export function turnWindowStart<T extends { id: string }>(
+  turns: T[],
+  weight: (turn: T) => number,
+  isOpen: (turn: T) => boolean,
+  pinnedId: string | null,
+): number {
+  const pinned = pinnedId ? turns.findIndex((turn) => turn.id === pinnedId) : -1;
+  const start = pinned >= 0 ? pinned : windowStart(turns, weight, TASK_BUDGET);
+  const firstOpen = turns.findIndex(isOpen);
+  return firstOpen >= 0 && firstOpen < start ? firstOpen : start;
+}
+
+/**
+ * The visible turns, plus a `showEarlier` that adds a budget above and keeps
+ * the turn the person was looking at in place. Resets per session.
+ */
+function useTurnWindow<T extends { id: string }>(
+  rootTaskId: string,
+  turns: T[],
+  weight: (turn: T) => number,
+  isOpen: (turn: T) => boolean,
+) {
+  const pin = useRef<{ rootTaskId: string; firstId: string | null }>({
+    rootTaskId,
+    firstId: null,
+  });
+  const [reveals, setReveals] = useState(0);
+  const pinnedId = pin.current.rootTaskId === rootTaskId ? pin.current.firstId : null;
+  const hidden = turnWindowStart(turns, weight, isOpen, pinnedId);
+  // Idempotent: the same turns and pin give the same start on a second render.
+  if (turns.length > 0) pin.current = { rootTaskId, firstId: turns[hidden]?.id ?? null };
+  const anchor = useRef<{ el: Element; top: number } | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs after the earlier turns render.
+  useLayoutEffect(() => {
+    const kept = anchor.current;
+    if (!kept) return;
+    anchor.current = null;
+    const scroller = scrollParent(kept.el);
+    if (scroller) scroller.scrollTop += kept.el.getBoundingClientRect().top - kept.top;
+  }, [reveals]);
+
+  const showEarlier = (firstShown: Element | null) => {
+    if (firstShown)
+      anchor.current = { el: firstShown, top: firstShown.getBoundingClientRect().top };
+    const next = windowStart(turns.slice(0, hidden), weight, TASK_BUDGET);
+    pin.current = { rootTaskId, firstId: turns[next]?.id ?? null };
+    setReveals((count) => count + 1);
+  };
+  return { visible: hidden > 0 ? turns.slice(hidden) : turns, hidden, showEarlier };
+}
+
+/** Tasks a turn renders: its person message, and each part's reply and steps. */
+function turnWeight(turn: { person?: unknown; parts: TurnPart[] }): number {
+  return (
+    (turn.person ? 1 : 0) +
+    turn.parts.reduce((sum, part) => sum + 1 + partSteps(part).length + part.internal.length, 0)
+  );
+}
 
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
@@ -99,6 +195,23 @@ export function TurnTimeline({
     return approvalsByPart(turns, shown);
   }, [rootTaskId, turns, approvals]);
   const pendingIds = useMemo(() => new Set(approvals.map((approval) => approval.id)), [approvals]);
+  // A turn with work still running stays on screen, however old.
+  const turnIsOpen = (turn: (typeof turns)[number]) =>
+    turn.parts.some(
+      (part) =>
+        !!part.live ||
+        !TERMINAL_STATUSES.has(part.reply.status) ||
+        partSteps(part).some(
+          (step) => !TERMINAL_STATUSES.has(step.tries[step.tries.length - 1].status),
+        ),
+    );
+  const { visible, hidden, showEarlier } = useTurnWindow(rootTaskId, turns, turnWeight, turnIsOpen);
+  // Pending approvals of hidden turns still wait on someone: they show above the window.
+  const hiddenApprovals = turns
+    .slice(0, hidden)
+    .flatMap((turn) => turn.parts.flatMap((part) => placed.get(part.id) ?? []))
+    .filter((approval) => pendingIds.has(approval.id));
+  const earlierRef = useRef<HTMLDivElement>(null);
   const { data: agents } = useAgents();
   const nameOf = (agentId: string | null) => agentName(agents, agentId);
   const blocks = useStepBlocks(rootTaskId, showHandoffs);
@@ -133,7 +246,24 @@ export function TurnTimeline({
 
   return (
     <div className={cn("@container/turns flex min-w-0 flex-col gap-6", CHAT_COLUMN)}>
-      {turns.map((turn) => (
+      {hiddenApprovals.map((approval) => (
+        <ApprovalLine key={approval.id} approval={approval} pending />
+      ))}
+      {hidden > 0 ? (
+        <div ref={earlierRef} className="flex justify-center">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-xs text-muted-foreground"
+            onClick={() => showEarlier(earlierRef.current?.nextElementSibling ?? null)}
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Show earlier messages ({hidden})
+          </Button>
+        </div>
+      ) : null}
+      {visible.map((turn) => (
         <Fragment key={turn.id}>
           {turn.person ? (
             <PersonBubble

@@ -165,6 +165,28 @@ export function SessionConversation({
     scrollEl.scrollTop = scrollEl.scrollHeight;
   }, [turns, scrollEl, detail, rootTaskId]);
 
+  // Markdown, attachments, and logs keep growing the timeline after that
+  // first jump, which left it short of the end. Hold the bottom while the
+  // content settles, until the person scrolls, clicks, or types in it.
+  const pinFor = turns && detail ? rootTaskId : null;
+  useEffect(() => {
+    if (!pinFor || !scrollEl?.firstElementChild) return;
+    let pinned = true;
+    const release = () => {
+      pinned = false;
+    };
+    const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    for (const name of events) scrollEl.addEventListener(name, release, { passive: true });
+    const observer = new ResizeObserver(() => {
+      if (pinned) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+    observer.observe(scrollEl.firstElementChild);
+    return () => {
+      observer.disconnect();
+      for (const name of events) scrollEl.removeEventListener(name, release);
+    };
+  }, [pinFor, scrollEl]);
+
   return (
     <>
       {/* Timeline (scrollable), wrapped in a relative container so the
