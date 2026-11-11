@@ -720,6 +720,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "326_slack_reconcile_pages.sql");
       // 329 indexes workflow_runs and approval_requests, absent from this fixture.
       markMigrationApplied(database, "329_workflow_run_retention.sql");
+      // 334 alters agents, absent from this fixture.
+      markMigrationApplied(database, "334_agent_soft_delete.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
