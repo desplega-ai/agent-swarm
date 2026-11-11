@@ -1,6 +1,6 @@
 // Connect › Channels: the channel cards and their state.
 //
-// Telegram, Discord and Teams are adapters of the `chat-sdk` integration;
+// Telegram, Discord, Teams and Rocket.Chat are adapters of the `chat-sdk` integration;
 // their state is the adapter's `connected` flag from
 // `GET /api/integrations/chat/status`. Slack exists twice: the socket-mode
 // `slack` integration and the Chat SDK `slack` adapter. One card covers both.
@@ -10,7 +10,7 @@ import type { ChatSdkAdapterName } from "./chat-sdk-fields";
 import { INTEGRATIONS } from "./integrations-catalog";
 import { deriveIntegrationStatus, type EnvPresence } from "./integrations-status";
 
-export type ChannelId = "slack" | "telegram" | "discord" | "teams" | "kapso";
+export type ChannelId = "slack" | "telegram" | "discord" | "teams" | "rocketchat" | "kapso";
 
 /** `configured`: saved, but not running (the detail says why). */
 export type ChannelChip = "connected" | "configured" | "none";
@@ -87,6 +87,17 @@ export const CHANNEL_DEFS: ChannelDef[] = [
     more: true,
     beta: BETA_NOTE,
     adapter: "teams",
+  },
+  {
+    id: "rocketchat",
+    name: "Rocket.Chat",
+    description: "Mention the bot in a self-hosted Rocket.Chat room.",
+    needs: "Instance URL, access token and webhook token",
+    href: chatSdkAdapterHref("rocketchat"),
+    keywords: ["chat sdk", "rocket.chat", "self-hosted", "on-prem"],
+    more: true,
+    beta: "Tested only against fixtures so far, not a real server. The adapter is a community package.",
+    adapter: "rocketchat",
   },
   {
     id: "kapso",
@@ -173,6 +184,7 @@ export function deriveChannelStates(input: {
     telegram: adapterChannelState(chatSdk, "telegram"),
     discord: adapterChannelState(chatSdk, "discord"),
     teams: adapterChannelState(chatSdk, "teams"),
+    rocketchat: adapterChannelState(chatSdk, "rocketchat"),
     kapso: integrationChannelState(catalogStatus("kapso")),
   };
 }

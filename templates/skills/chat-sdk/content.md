@@ -1,6 +1,6 @@
 # Chat SDK
 
-The swarm receives messages from Telegram, Slack, Discord, and Microsoft Teams through the Chat SDK channel. A person mentions the bot or sends it a direct message, and the swarm creates a task for it. This skill tells you how to work on such a task.
+The swarm receives messages from Telegram, Slack, Discord, Microsoft Teams, and Rocket.Chat through the Chat SDK channel. A person mentions the bot or sends it a direct message, and the swarm creates a task for it. This skill tells you how to work on such a task.
 
 ## How you know you are on a chat task
 
@@ -62,7 +62,7 @@ The upload limit is 50 MB per file on Telegram and 10 MB on Discord. A larger fi
 
 ## `chat-read-thread` limits per platform
 
-`chat-read-thread { threadId, limit? }` returns the most recent messages of a thread, oldest first. The thread id is the adapter name plus the URI-decoded remainder of the contextKey. Telegram ids have no escaping, so `telegram:555001` stays as it is. Slack, Discord, and Teams ids contain `%3A` in the contextKey, so do not build the id by hand. `chat-reply` resolves the thread itself. For `chat-read-thread`, use the thread id returned by `chat-reply`, `chat-post`, or `chat-open-dm`. You can read the thread of your current task. Any other thread needs lead privileges.
+`chat-read-thread { threadId, limit? }` returns the most recent messages of a thread, oldest first. The thread id is the adapter name plus the URI-decoded remainder of the contextKey. Telegram ids have no escaping, so `telegram:555001` stays as it is. Slack, Discord, Teams, and Rocket.Chat ids contain `%3A` in the contextKey, so do not build the id by hand. `chat-reply` resolves the thread itself. For `chat-read-thread`, use the thread id returned by `chat-reply`, `chat-post`, or `chat-open-dm`. You can read the thread of your current task. Any other thread needs lead privileges.
 
 - Telegram has no history API. The SDK keeps the Telegram thread history it saw in the swarm database, capped at 100 messages and 7 days.
 - Teams needs the `Chat.Read.*` Graph permission on the bot. Without it, the call fails.
