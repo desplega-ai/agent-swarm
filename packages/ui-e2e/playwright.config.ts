@@ -6,7 +6,9 @@ export default defineConfig({
   // overflow.spec.ts (206 s) on one worker. Each worker still has its own API and DB, and
   // `mode: "serial"` describes stay together.
   fullyParallel: true,
-  workers: process.env.CI ? 2 : 3,
+  // 3 in CI: shards split by test count, not duration, so the slow-test shard (entity-refresh:
+  // 7 tests, 150 s) sets the wall time. Those tests wait on refresh intervals, not CPU.
+  workers: 3,
   // One rerun. A pass on it reports as flaky (comment and tracker) and exits 0.
   retries: 1,
   timeout: 60_000,

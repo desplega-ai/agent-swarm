@@ -56,11 +56,12 @@ jobs:
         working-directory: packages/ui-e2e
 
       # Best effort: the runner image already has Chromium's libraries, and this adds only
-      # fonts. A hung apt mirror (all shards, Nov 11) must not turn the required gate red. A
-      # library that is really missing still fails the shard in the next step.
+      # fonts. A hung apt mirror (all shards, Nov 11: 190 s each, then every shard passed
+      # without the fonts) must not turn the required gate red or slow it for long. A library
+      # that is really missing still fails the shard in the next step.
       - name: Install Chromium system dependencies
         continue-on-error: true
-        timeout-minutes: 3
+        timeout-minutes: 1
         run: npx playwright install-deps chromium
         working-directory: packages/ui-e2e
 

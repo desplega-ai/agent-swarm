@@ -60,7 +60,8 @@ export async function startCoverage(page: Page): Promise<void> {
 export async function stopCoverage(page: Page): Promise<void> {
   try {
     const entries = await page.coverage.stopJSCoverage();
-    await coverageReport().add(entries);
+    // A test that never loaded the dashboard has nothing to add.
+    if (entries.length > 0) await coverageReport().add(entries);
   } catch (error) {
     console.warn(`[ui-e2e] coverage not recorded: ${String(error)}`);
   }
