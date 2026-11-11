@@ -57,7 +57,8 @@ const COMMON_SHAPE = {
 };
 
 function adapterSchema<S extends AdapterShape>(shape: S) {
-  return z.looseObject({ ...shape, ...COMMON_SHAPE }).superRefine(forbiddenKeyIssues);
+  // The adapter's own shape wins: Rocket.Chat needs `userName` required.
+  return z.looseObject({ ...COMMON_SHAPE, ...shape }).superRefine(forbiddenKeyIssues);
 }
 
 /**
@@ -159,10 +160,15 @@ export const TeamsAdapterSchema = adapterSchema(TEAMS_SHAPE).superRefine((value,
  * `botUserId` pairs with `token` on every REST call and identifies the bot's
  * own messages; `webhookToken` is the Outgoing Webhook shared secret.
  */
+// `userName` is required here, unlike the other adapters. Rocket.Chat detects
+// a mention by matching `@<userName>` in the message text, and the REST API
+// has no "who am I" call the adapter could use, so a wrong or defaulted name
+// means the bot silently never sees a mention.
 const ROCKETCHAT_SHAPE = {
   token: Str,
   botUserId: Str,
   webhookToken: Str,
+  userName: Str,
 };
 
 export const RocketchatAdapterSchema = adapterSchema(ROCKETCHAT_SHAPE);

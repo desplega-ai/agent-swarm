@@ -20,6 +20,7 @@ import { getFreePort } from "./test-net";
 const TEST_DB_PATH = "./test-chat-sdk-rocketchat.sqlite";
 const WEBHOOK_TOKEN = "rc-outgoing-webhook-token";
 const BOT_USER_ID = "rc-bot-user-id";
+const BOT_USER_NAME = "swarm";
 const TOKEN = "rc-personal-access-token";
 
 const restoreEnv = snapshotChatSdkEnv();
@@ -33,7 +34,12 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-const VALID_ENTRY = { token: TOKEN, botUserId: BOT_USER_ID, webhookToken: WEBHOOK_TOKEN };
+const VALID_ENTRY = {
+  token: TOKEN,
+  botUserId: BOT_USER_ID,
+  webhookToken: WEBHOOK_TOKEN,
+  userName: BOT_USER_NAME,
+};
 
 async function startRocketchat(entry: Record<string, unknown> = VALID_ENTRY): Promise<void> {
   process.env.CHAT_SDK_ENABLED = "true";
@@ -102,9 +108,9 @@ afterAll(async () => {
 });
 
 describe("Rocket.Chat adapter config", () => {
-  test("requires the token, bot user id and webhook token", async () => {
+  test("requires the token, bot user id, webhook token and bot user name", async () => {
     expect(ChatSdkAdaptersSchema.safeParse({ rocketchat: VALID_ENTRY }).success).toBe(true);
-    for (const missing of ["token", "botUserId", "webhookToken"] as const) {
+    for (const missing of ["token", "botUserId", "webhookToken", "userName"] as const) {
       const { [missing]: _dropped, ...rest } = VALID_ENTRY;
       process.env.CHAT_SDK_ENABLED = "true";
       process.env.CHAT_SDK_ADAPTERS = JSON.stringify({ rocketchat: rest });

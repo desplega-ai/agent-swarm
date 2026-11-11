@@ -148,7 +148,9 @@ export async function loadAdapter(
         token: typeof config.token === "string" ? config.token : "",
         botUserId: typeof config.botUserId === "string" ? config.botUserId : "",
         webhookToken: typeof config.webhookToken === "string" ? config.webhookToken : "",
-        userName: typeof config.userName === "string" ? config.userName : DEFAULT_BOT_USER_NAME,
+        // Required by the schema: mention detection matches `@<userName>` in
+        // the text, and the REST API offers no way to look the name up.
+        userName: typeof config.userName === "string" ? config.userName : "",
       } as Parameters<typeof createRocketChatAdapter>[0]);
     }
   }

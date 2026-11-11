@@ -272,7 +272,7 @@ CHAT_SDK_API_URL_OVERRIDES='{"rocketchat":"https://chat.example.com"}'
 
 Until it is set, the adapter card shows the missing variable instead of starting.
 
-1. Create a user for the bot, or use an existing one.
+1. Create a user for the bot, or use an existing one, and note its username.
 2. As that user, open **My Account → Personal Access Tokens**, generate a token, and copy both the token and the user id shown with it.
 3. In **Administration → Workspace → Integrations**, create an **Outgoing WebHook** with event type **Message Sent**.
 4. Point its **URLs** at the Rocket.Chat webhook URL, and leave **Trigger Words** empty to receive every message in the selected channels.
@@ -283,9 +283,9 @@ Until it is set, the adapter card shows the missing variable instead of starting
 | `token` | yes | The bot account's personal access token. Sent on every REST call. |
 | `botUserId` | yes | The user id shown with the token. Also identifies the bot's own messages. |
 | `webhookToken` | yes | The Outgoing WebHook **Token**. Checked on every webhook call. |
-| `userName` | no | The bot name. Default `swarm`. |
+| `userName` | yes | The bot account's username, without the `@`. |
 
-The adapter verifies the `token` field of each webhook payload against `webhookToken` with a timing-safe comparison, and answers `401` when it does not match. The REST API has no typing endpoint, so the bot shows no typing indicator on Rocket.Chat.
+The adapter verifies the `token` field of each webhook payload against `webhookToken` with a timing-safe comparison, and answers `401` when it does not match. A mention is matched by looking for `@<userName>` in the message text, and the REST API has no call that reports the bot's own name, so `userName` is required here while it is optional for the other adapters: a wrong one means the bot never answers. The REST API has no typing endpoint either, so the bot shows no typing indicator on Rocket.Chat.
 
 ## How it works
 
