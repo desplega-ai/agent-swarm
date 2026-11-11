@@ -2,12 +2,17 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getTaskById } from "../be/db";
 import {
+  clampTokenRatio,
   createRequestComposition,
+  getLatestWorkerComposition,
   getRequestCompositionsByTask,
+  getTokenRatio,
   MAX_REQUEST_COMPOSITIONS_PER_TASK,
+  recordTokenRatio,
 } from "../be/db/request-composition";
 import { estimateTokens } from "../be/memory/key-browser";
 import {
+  type RequestComposition,
   type RequestCompositionPart,
   RequestCompositionPartInputSchema,
   RequestCompositionSchema,
@@ -43,7 +48,7 @@ const postRequestComposition = route({
   },
   summary: "Record the request composition manifest of a task session",
   description:
-    "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.",
+    "The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. A `harness-hook` post (pi, opencode) carries exact sizes measured from the request payload plus the call's prompt tokens: the server merges it with the session's worker manifest and folds the observed chars-to-tokens ratio into the provider's average. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
@@ -52,6 +57,16 @@ const postRequestComposition = route({
     model: z.string().optional(),
     toolLoading: RequestCompositionToolLoadingSchema,
     parts: z.array(RequestCompositionPartInputSchema).max(200),
+    source: z.enum(["worker", "harness-hook"]).default("worker"),
+    /** Required for `harness-hook`: totals measured from the request payload. */
+    harness: z
+      .object({
+        systemChars: z.number().int().min(0),
+        payloadChars: z.number().int().min(0),
+        promptTokens: z.number().int().min(0),
+        firstMessageChars: z.number().int().min(0).optional(),
+      })
+      .optional(),
   }),
   responses: {
     200: { description: "Manifest recorded", schema: PostRequestCompositionResponseSchema },
@@ -125,6 +140,79 @@ async function toolSchemaPart(
   }
 }
 
+// ─── Harness-hook manifests ──────────────────────────────────────────────────
+
+/** Worker parts that are text inside the system prompt the harness sends. */
+const SYSTEM_PROMPT_KINDS = new Set<RequestCompositionPart["kind"]>([
+  "system_section",
+  "persona",
+  "claude_md",
+  "operator_prompt",
+]);
+
+/**
+ * Build a hook manifest's parts. The hook measured the whole system prompt,
+ * the tool declarations and the skills listing exactly. The worker manifest
+ * still names our sections, the task prompt and the memories, so they carry
+ * over; the system prompt chars they do not cover are the harness's own base
+ * prompt, now exact instead of a residual. On the session's first call the
+ * message text beyond our task prompt and memories is context the harness
+ * added (OpenCode's environment block, for one). Estimated tool schemas give
+ * way to the measured ones. Without a worker manifest the system prompt stays
+ * whole.
+ */
+export function mergeHookParts(
+  hookParts: readonly RequestCompositionPart[],
+  harness: { systemChars: number; firstMessageChars?: number },
+  worker: RequestComposition | null,
+): RequestCompositionPart[] {
+  const exactPart = (id: string, label: string, chars: number): RequestCompositionPart => ({
+    kind: "system_section",
+    id,
+    label,
+    chars,
+    estTokens: estimateTokens(chars),
+    fidelity: "exact",
+  });
+  const hookSkillsChars = hookParts
+    .filter((part) => part.kind === "skills_listing")
+    .reduce((sum, part) => sum + part.chars, 0);
+  const harnessSystemChars = Math.max(0, harness.systemChars - hookSkillsChars);
+
+  if (!worker) {
+    return [exactPart("harness:system", "system prompt as sent", harnessSystemChars), ...hookParts];
+  }
+  const carried = worker.parts.filter(
+    (part) =>
+      part.kind !== "tool_schemas" && !(part.kind === "skills_listing" && hookSkillsChars > 0),
+  );
+  const ours = carried
+    .filter((part) => SYSTEM_PROMPT_KINDS.has(part.kind))
+    .reduce((sum, part) => sum + part.chars, 0);
+  const baseChars = harnessSystemChars - ours;
+  const messageExtraChars =
+    harness.firstMessageChars === undefined
+      ? 0
+      : harness.firstMessageChars -
+        carried
+          .filter((part) => part.kind === "task_prompt" || part.kind === "memories")
+          .reduce((sum, part) => sum + part.chars, 0);
+  return [
+    ...carried,
+    ...(baseChars > 0 ? [exactPart("harness:base", "harness base prompt", baseChars)] : []),
+    ...(messageExtraChars > 0
+      ? [exactPart("harness:messages", "harness context in the first message", messageExtraChars)]
+      : []),
+    ...hookParts,
+  ];
+}
+
+/** Observed tokens per `chars / 4`, or null when the call gives nothing to learn from. */
+export function observedTokenRatio(promptTokens: number, payloadChars: number): number | null {
+  if (!(promptTokens > 0) || !(payloadChars > 0)) return null;
+  return promptTokens / (payloadChars / 4);
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleRequestComposition(
@@ -153,21 +241,42 @@ export async function handleRequestComposition(
       return true;
     }
 
-    const parts: RequestCompositionPart[] = parsed.body.parts.map((part) => ({
+    const { body } = parsed;
+    let parts: RequestCompositionPart[] = body.parts.map((part) => ({
       ...part,
       estTokens: estimateTokens(part.chars),
     }));
-    const toolPart = await toolSchemaPart(myAgentId, task, parsed.body.toolLoading);
-    if (toolPart) parts.push(toolPart);
+    let tokenRatio: number;
+    if (body.source === "harness-hook") {
+      if (!body.harness) {
+        jsonError(res, "harness-hook manifests require `harness` totals", 400);
+        return true;
+      }
+      parts = mergeHookParts(parts, body.harness, await getLatestWorkerComposition(body.sessionId));
+      // This manifest keeps its own call's ratio, so its residual is ~0. The
+      // provider average serves the sessions that follow.
+      const observed = observedTokenRatio(body.harness.promptTokens, body.harness.payloadChars);
+      if (observed === null) {
+        tokenRatio = await getTokenRatio(body.provider);
+      } else {
+        tokenRatio = clampTokenRatio(observed);
+        await recordTokenRatio(body.provider, observed);
+      }
+    } else {
+      const toolPart = await toolSchemaPart(myAgentId, task, body.toolLoading);
+      if (toolPart) parts.push(toolPart);
+      tokenRatio = await getTokenRatio(body.provider);
+    }
 
     const manifest = await createRequestComposition({
       taskId: task.id,
       agentId: myAgentId,
-      sessionId: parsed.body.sessionId,
-      provider: parsed.body.provider,
-      model: parsed.body.model,
-      source: "worker",
+      sessionId: body.sessionId,
+      provider: body.provider,
+      model: body.model,
+      source: body.source,
       parts,
+      tokenRatio,
     });
     if (!manifest) {
       jsonError(
