@@ -67,8 +67,11 @@ export const PROFILE_UPLOADS_HELD_ENV = "AGENT_SWARM_PROFILE_UPLOADS_HELD";
 export type IdentityBaselines = Partial<Record<VersionableField, string>> & {
   /** DB lineage, separate from the local hashes used to skip untouched files. */
   expected?: ProfileExpectedHashes;
+  /** Responses settled per field since boot: a token can repeat, this count cannot. */
+  settled?: ProfileSettledCounts;
 };
 const CAS_FIELDS = ["soulMd", "identityMd", "toolsMd", "heartbeatMd", "setupScript"] as const;
+type ProfileSettledCounts = Partial<Record<(typeof CAS_FIELDS)[number], number>>;
 const PROFILE_PATHS = {
   soulMd: SOUL_MD_PATH,
   identityMd: IDENTITY_MD_PATH,
@@ -730,6 +733,8 @@ export interface ProfilePayload {
   label: string;
   /** Field values are strings; `expectedHashes` (compare-and-set) is an object. */
   body: Record<string, string | ProfileExpectedHashes>;
+  /** Settled count of the CAS field when the payload was built; never sent. */
+  settled?: number;
 }
 
 /**
@@ -979,6 +984,7 @@ export async function collectProfilePayloads(
       const token = field && baselines?.expected?.[field];
       if (field && token) {
         payload.body.expectedHashes = { [field]: token };
+        payload.settled = baselines?.settled?.[field] ?? 0;
         payloads.push(payload);
       }
     }
@@ -1020,6 +1026,7 @@ export async function collectProfilePayloads(
             changeSource,
             expectedHashes: { setupScript: baselines.expected.setupScript },
           },
+          settled: baselines.settled?.setupScript ?? 0,
         });
       }
     }
@@ -1096,11 +1103,13 @@ async function settleProfileUpdate(
     async () => {
       const baselines = await readIdentityBaselines(io.readFile);
       if (!baselines?.expected?.[field]) return;
-      // A response to a request built on an older token is superseded: a newer
-      // sync already settled this field, so applying it would roll back the
-      // local copy and its tokens. The next sync re-reads the current state.
+      // A response to a request built before a newer sync settled this field is
+      // superseded: applying it would roll back the local copy and its tokens.
+      // The token alone can repeat (the DB may return to an earlier value), so
+      // the settled count decides too. The next sync re-reads the current state.
       const sentToken = (payload.body.expectedHashes as ProfileExpectedHashes | undefined)?.[field];
-      if (sentToken !== baselines.expected[field]) return;
+      const settled = baselines.settled?.[field] ?? 0;
+      if (sentToken !== baselines.expected[field] || (payload.settled ?? 0) !== settled) return;
       let localValue = dbValue;
       if (dbValue !== sent) {
         const path = PROFILE_PATHS[field];
@@ -1125,6 +1134,7 @@ async function settleProfileUpdate(
           : localValue,
       );
       baselines.expected[field] = contentSha256(dbValue);
+      baselines.settled = { ...baselines.settled, [field]: settled + 1 };
       await io.writeFile(IDENTITY_BASELINES_PATH, JSON.stringify(baselines));
     },
     { waitMs: BASELINES_LOCK_WAIT_MS },

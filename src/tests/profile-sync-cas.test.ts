@@ -5,14 +5,17 @@ import { join } from "node:path";
 import { closeDb, createAgent, getAgentById, initDb, updateAgentProfile } from "../be/db";
 import {
   bootIdentityBaselines,
+  contentSha256,
   IDENTITY_BASELINES_PATH,
   type ProfileFileIO,
   SETUP_SCRIPT_PATH,
   SOUL_MD_PATH,
   syncProfileFilesToServer,
   TOOLS_MD_PATH,
+  writeIdentityBaselines,
   writeProfileFileFromDb,
 } from "../commands/profile-sync";
+import { withFileLock } from "../utils/file-lock";
 
 import { expectChildOk, runChild } from "./test-proc";
 
@@ -453,4 +456,59 @@ test("an unreadable field is held while an independent field edit is still accep
   const stored = await getAgentById(id);
   expect(stored?.toolsMd).toBe("readable independent edit");
   expect(stored?.soulMd).toBe(soul);
+});
+
+test("boot baselines wait for the baselines lock and are not written once its wait runs out", async () => {
+  const box = workspace({ toolsMd: "lock boot" });
+  const lockPath = box.io.baselinesLockPath as string;
+  let pending!: Promise<void>;
+  await withFileLock(lockPath, async () => {
+    pending = writeIdentityBaselines({ toolsMd: contentSha256("lock new boot") }, box.io);
+    await Bun.sleep(70);
+    expect(JSON.parse(box.files[IDENTITY_BASELINES_PATH] ?? "{}").toolsMd).toBe(
+      contentSha256("lock boot"),
+    );
+  });
+  await pending;
+  const written = box.files[IDENTITY_BASELINES_PATH];
+  expect(JSON.parse(written ?? "{}").toolsMd).toBe(contentSha256("lock new boot"));
+  await withFileLock(lockPath, async () => {
+    await expect(writeIdentityBaselines({ toolsMd: "not recorded" }, box.io)).rejects.toThrow(
+      "Boot baselines not recorded",
+    );
+  });
+  expect(box.files[IDENTITY_BASELINES_PATH]).toBe(written);
+}, 10_000);
+
+test("a late response is superseded even when the DB value has returned to its token", async () => {
+  await updateAgentProfile(id, { toolsMd: "aba A" });
+  const box = workspace({ toolsMd: "aba A" });
+  await updateAgentProfile(id, { toolsMd: "aba B" });
+  box.files[TOOLS_MD_PATH] = "aba stale edit";
+  const held = heldResponse();
+  const old = box.sync(held.fetchImpl); // sent on token A, answered with B
+  await held.sent;
+  await box.sync(); // recovers B
+  await updateAgentProfile(id, { toolsMd: "aba A" }); // the DB returns to A
+  box.files[TOOLS_MD_PATH] = "aba edit over B";
+  await box.sync(); // conflict: recovers A, so the token is A again
+  expect(box.files[TOOLS_MD_PATH]).toBe("aba A");
+  held.release();
+  await old;
+  expect(box.files[TOOLS_MD_PATH]).toBe("aba A");
+});
+
+test("an unreadable setup script is held while an identity edit is still accepted", async () => {
+  await updateAgentProfile(id, { toolsMd: "setup read base", setupScript: "export READ=1" });
+  const box = workspace({ toolsMd: "setup read base", setupScript: "export READ=1" });
+  box.files[TOOLS_MD_PATH] = "edit beside unreadable setup";
+  const read = box.io.readFile;
+  box.io.readFile = async (path) => {
+    if (path === SETUP_SCRIPT_PATH) throw Object.assign(new Error("EIO setup"), { code: "EIO" });
+    return read(path);
+  };
+  await box.sync();
+  const stored = await getAgentById(id);
+  expect(stored?.toolsMd).toBe("edit beside unreadable setup");
+  expect(stored?.setupScript).toBe("export READ=1");
 });
