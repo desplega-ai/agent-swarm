@@ -132,11 +132,12 @@ harness legs.
 
 On a PR, each shard also runs with `--coverage` and uploads `e2e-coverage-shard-<i>` (one lcov
 per API process). The **E2E Contract** job then runs `diff-coverage.ts --base HEAD^1` (HEAD is
-the PR merge commit) and upserts one sticky comment, `<!-- e2e-coverage -->`: covered over
-changed API lines, per file, with the uncovered line ranges. It never blocks. Every coverage
-step is `continue-on-error`, and a coverage problem becomes a comment that says so. A PR that
-changes no executable API line gets a one-line comment. Fork PRs have a
-read-only token, so the upsert step skips; the comment text is still in the job summary.
+the PR merge commit) and builds one sticky comment, `<!-- e2e-coverage -->`: covered over
+changed API lines, per file, with the uncovered line ranges. The **E2E Coverage Comment** job
+posts it. It is the only job with `pull-requests: write`, and it checks out no PR code. It
+never blocks. Every coverage step is `continue-on-error`, and a coverage problem becomes a
+comment that says so. A PR that changes no executable API line gets a one-line comment. Fork
+PRs skip the post; the comment text is still in the E2E Contract job summary.
 Coverage made one local full run about 8% slower (299 s against 278 s, 124 of 124 pass both ways). Rules for scope
 and exemptions: [scripts/e2e/README.md § Changed lines](../scripts/e2e/README.md#changed-lines---coverage).
 

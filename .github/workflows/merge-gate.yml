@@ -694,8 +694,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # The sticky changed-lines coverage comment. Fork PRs get a read-only token and skip it.
-      pull-requests: write
     timeout-minutes: 10
 
     steps:
@@ -752,16 +750,41 @@ jobs:
           bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md
           cat e2e-coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
 
-      # Same upsert as the UI E2E comment. A PR with no changed API line gets a one-line comment.
-      - name: Upsert changed-lines coverage comment
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      - name: Upload changed-lines coverage comment
+        if: always() && github.event_name == 'pull_request'
         continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-coverage-comment
+          path: e2e-coverage-comment.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Posts the comment e2e-contract built. Its own job: the only one with pull-requests: write,
+  # and it runs no PR code (no checkout), so a queued fork PR never sees a write token.
+  # Same upsert as the UI E2E comment. Not in Merge Gate's needs: it never blocks.
+  e2e-coverage-comment:
+    name: E2E Coverage Comment
+    needs: e2e-contract
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.e2e-contract.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Download changed-lines coverage comment
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-coverage-comment
+
+      - name: Upsert changed-lines coverage comment
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          test -f e2e-coverage-comment.md || exit 0
           comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
             --jq '.[] | select(.body | startswith("<!-- e2e-coverage -->")) | .id' | head -n 1)
           if [ -n "$comment_id" ]; then
