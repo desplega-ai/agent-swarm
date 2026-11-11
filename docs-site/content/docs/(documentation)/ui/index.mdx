@@ -19,6 +19,18 @@ The Usage page can filter costs by canonical requester and shows **Cost by User*
 
 When a dashboard tab authenticates with a user-bound `aswt_` token, the dashboard resolves the principal from `GET /api/whoami` and locks the tab to that user. Identity switching and local identity overrides stay hidden so requester and audit attribution cannot diverge from the bearer token. Operator-key sessions keep the existing user picker.
 
+## AI providers
+
+Connect → AI providers manages provider credentials, not harness connections.
+A provider is the account, key or gateway that authorizes model calls: Anthropic, OpenAI, DeepSeek, OpenRouter, a Claude or ChatGPT subscription.
+The page lists each provider with its key pool, status and spend.
+A harness is the runtime that drives the model: Claude Code, Codex, opencode, pi.
+See [Harness configuration](/docs/guides/harness-configuration) to pick one.
+
+A harness can authenticate with a credential the API does not manage, such as an opencode `auth.json` mounted into the worker.
+Its agents run tasks while this page shows **No AI providers yet**.
+Check the harness credential on the Agents page (each agent's **Credentials** tab) or with [`GET /api/agents/credential-status`](/docs/api-reference/agents).
+
 ## Subscriptions vs API
 
 The Usage page compares each subscription credential (Claude OAuth, Codex OAuth) with what its sessions would cost at API prices. The plan cost is the monthly list price, prorated per day from the credential's first session in the window. **Saved** is the API value minus that plan cost.

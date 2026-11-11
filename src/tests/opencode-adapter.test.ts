@@ -1136,6 +1136,17 @@ describe("provider key splice (one picked key per task)", () => {
     expect(config).toEqual({ provider: { nan: { env: [], options: { apiKey: PICKED } } } });
   });
 
+  test("opencode-go: OPENCODE_API_KEY is spliced as the provider key", () => {
+    const config = {};
+    const picked = applyProviderKeySplice(config, "opencode-go/glm-5.2", {
+      OPENCODE_API_KEY: PICKED,
+    });
+    expect(picked).toEqual({ key: PICKED, name: "OPENCODE_API_KEY" });
+    expect(config).toEqual({
+      provider: { "opencode-go": { env: [], options: { apiKey: PICKED } } },
+    });
+  });
+
   test("a pool that reaches the splice unpicked yields its first member", () => {
     const config = {};
     applyProviderKeySplice(config, "nan/qwen3.6", {
