@@ -305,9 +305,9 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
     } catch {}
   }
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
+  // Notify lifecycle subscribers only after the claim commits (e.g. GitHub eyes reaction).
   if (result && oldTask.status !== "in_progress") {
-    emitTaskStarted(result);
+    getDbClient().afterCommit(() => emitTaskStarted(result));
   }
   return result;
 }

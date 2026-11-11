@@ -166,6 +166,40 @@ export default extension;
     ]);
   });
 
+  test("a workflow-step supersede-resume with no resume stays superseded and says so", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    bundle.manifest = { ...bundle.manifest, name: "resume-workflow-steps" };
+    bundle.files["hooks.ts"] = `
+import { modify, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.heartbeat.remediate", (event) => {
+    if (event.proposedAction === "fail") return modify({ proposedAction: "supersede-resume" });
+  });
+};
+export default extension;
+`;
+    await enableBundle(bundle);
+    const { task } = await createStalledTask({ minutes: 10, workflowStep: true });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const findings = await codeLevelTriage();
+      const logged = warn.mock.calls
+        .map((call) => String(call[0]))
+        .find((line) => line.includes(task.id.slice(0, 8)) && line.includes("no resume"));
+
+      // `supersedeTask` made the task terminal, so the fallback cannot fail it.
+      expect((await getTaskById(task.id))?.status).toBe("superseded");
+      expect(await getChildTasks(task.id)).toEqual([]);
+      expect(findings.autoFailedTasks).toEqual([]);
+      // The log must not claim a failure that did not happen.
+      expect(logged).toContain("left superseded");
+      expect(logged).not.toMatch(/failed because/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("blocks remediation for a configured task tag", async () => {
     const bundle = await loadBundleFixture("record-only-on-tag");
     const extension = await enableBundle({ ...bundle, config: { tag: "manual" } });

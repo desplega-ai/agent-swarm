@@ -1,0 +1,88 @@
+---
+title: 'Reviewing a supplier''s security evidence before onboarding with AI agents'
+description: "Agent Swarm collects a prospective supplier's authorized security evidence and prepares a source-linked matrix for a named owner. People decide access."
+agent:
+  when: "Someone wants security and operations to review a prospective supplier's security evidence before granting it access"
+---
+
+Agent Swarm can collect already-authorized supplier security evidence and prepare a source-linked evidence matrix for a named security owner, while the decision to approve or reject supplier access stays with people. What it takes off the team is the assembly: finding the reports and policy statements across the places the supplier shared them and naming what is missing or does not match.
+
+The scope is one decision: a buyer assessing a prospective supplier before that supplier gets access. Answering a customer's security questionnaire about our own controls is a different job, documented in [the security questionnaire workflow](https://www.agent-swarm.dev/blog/omnia/ai-security-questionnaire-workflow). A commercial renewal and a request for employee access are separate handoffs with their own owners and their own evidence.
+
+## When another tool fits better
+
+Two established options already cover most of this ground.
+
+**A specialist third-party risk management platform.** If the company reviews many suppliers, needs continuous monitoring between reviews, exchanges questionnaires through a portal and scores the answers against a fixed model, a product built for that job fits better.
+
+**A manual checklist.** If the supplier count is small and one person can read the evidence in a sitting, a checklist in a document is the cheaper control.
+
+Agent Swarm fits a different shape: a review where the evidence sits in several places and several people hold a piece of it. The penetration test report sits in one folder, the questionnaire in another, the contract terms in a third, and the person who knows which service the supplier will touch is somewhere else. That review means gathering what was already shared, reading it against written criteria and putting one document in front of the owner who decides. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in vendor-assessment feature or a customer result. It needs permissions, configuration and possibly custom integrations your team sets up and tests.
+
+<Mermaid title="Illustrative supplier security evidence review, from written criteria to a human decision on access." chart={`flowchart LR
+  A["Review criteria<br/>defined by owner"] --> B["Collect authorized<br/>evidence"]
+  B --> C["Agent builds source-linked<br/>evidence matrix"]
+  C --> G{{"human-in-the-loop<br/>security owner"}}
+  G -- "approve" --> R["Grant access via<br/>the normal process"]
+  G -- "reject" --> S["Return, request<br/>more evidence<br/>or escalate"]
+`} />
+
+**1. The security owner writes the review criteria.** Before anything is collected, the owner states what the review must answer: which data and systems the supplier will touch, which reports are required, the oldest report date that still counts, and the scope each must cover. The criteria belong in the workflow's [governance](/docs/guides/ai-operations-governance) record.
+
+**2. The swarm collects only evidence already shared.** Reports, policies, questionnaire answers and the contract's security terms are pulled from where the supplier or team already put them, under the terms agreed for that review. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so the raw secret stays out of script source and arguments.
+
+**3. Collection runs as deterministic steps.** `swarm-script` nodes fetch the documents and emit JSON, so the same review pulls the same records every time and no model chooses which files to open. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
+
+**4. An agent prepares the matrix.** The agent reads the collected material against the owner's criteria and writes one row per criterion: the source link, the document date, the scope the document covers, the gap, and any statement that conflicts with another document. Each row points at the record it came from.
+
+**5. The matrix is stored as a file for review.** It lives on [agent-fs](https://github.com/desplega-ai/agent-fs) with the source documents, and the gate message links to it. The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends exactly that: a summary plus a link to the full artifact.
+
+**6. A person decides at a gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only on a human response. Approve leads to the normal access process. Reject has its own branch: return the review, request more evidence through the owner, or escalate. The gate carries a timeout and a fallback, and the workflow never proceeds on silence. [Lead prospecting](/docs/playbooks/lead-prospecting) is the documented example of the same shape: research and drafting by agents, a human gate before anything irreversible.
+
+## What the matrix flags
+
+Each row states what was checked and what was found. The cases below are the ones worth writing into the criteria.
+
+- **A required report is missing.** No document was collected for the criterion, and the row names what the owner expected.
+- **The report is older than the window.** A penetration test dated outside the acceptable age, reported with its date so the owner can judge whether it still counts.
+- **The scope does not cover what is being bought.** A report about a different product, environment or hosting arrangement, with the scope quoted and the gap named.
+- **A claim has no evidence behind it.** A policy statement with no document, certificate or audit reference attached, marked as an assertion, not a finding.
+- **Two documents conflict.** A questionnaire answer that contradicts the contract terms or the report, shown with both sources and the owners who can settle it, not one chosen silently.
+
+## Data sensitivity, confidentiality and escalation
+
+**Keep supplier evidence access-controlled.** Suppliers often share reports under an NDA. Keep the documents in access-controlled storage, keep the matrix alongside them, and do not paste report contents into chats or task text. The gate message carries a summary and a link.
+
+**Restrict who can read the evidence.** Decide who may read supplier reports and who may approve access, and write it down. The [governance guide](/docs/guides/ai-operations-governance) covers RBAC roles, one named owner per workflow and approval thresholds, plus its limits: RBAC gates user-token requests, not operator-key or agent calls.
+
+**Name missing access, never work around it.** When a document sits in a system the swarm is not connected to, the matrix names the record and the owner who can grant access. It does not ask someone to paste the report into a chat and does not infer the contents.
+
+**Escalate when the owner does not answer.** The gate needs a reminder before its timeout, then a named backup owner, then an explicit hold so the review appears on an open list. The reject branch needs a definition too: return to the requester, request more evidence, or escalate. Proceeding on silence is the failure mode to design out.
+
+## What stays human-owned
+
+Five decisions stay with people in every version of this workflow.
+
+- **Whether the evidence is sufficient.** Judging that a slightly old report is acceptable for a low-risk service, or that a gap is material, is a person's call.
+- **Risk acceptance.** Accepting a known gap and recording why is a decision with a name attached, not something the workflow can conclude.
+- **Approving or rejecting access.** Access is granted by the team's normal process, after a person decides. The agent has no path to create an account, a role or a key.
+- **Contacting the supplier.** Requesting more evidence or asking about a conflicting statement goes through the owner of the relationship, not the agent.
+- **Any contract decision.** Security terms, liability and the commercial consequence of a failed review belong to the people who own the agreement.
+
+The pattern is the one the HITL guide states: gate the irreversible step, let the reversible ones run. Collecting documents and writing the matrix are reversible. Granting a supplier access to production data is not.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a supplier review is the illustrative part.
+
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Lead prospecting](/docs/playbooks/lead-prospecting): the documented example of agent research and drafting followed by a human gate before anything irreversible.
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [AI operations governance](/docs/guides/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and source-of-truth rules.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): how to choose between a specialist risk platform, a manual checklist and a shared agent platform.

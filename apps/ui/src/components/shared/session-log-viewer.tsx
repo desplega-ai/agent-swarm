@@ -9,6 +9,7 @@ import {
   Copy,
   Gauge,
   Image as ImageIcon,
+  MessageSquareText,
   Scissors,
   Search,
   Sparkles,
@@ -565,6 +566,7 @@ function appendThinkingTokenEvent(
 
 function markLiveThinkingGroup(rows: StreamRow[], isRunning?: boolean) {
   const last = rows[rows.length - 1];
+  if (last?.type === "thinking") last.live = isRunning === true;
   if (
     last?.type === "meta" &&
     last.block.kind === "helper" &&
@@ -838,6 +840,7 @@ function buildStream(
           iso: m.timestamp,
           md: b.text,
           isNew,
+          ...(b.progress ? { progress: true } : {}),
         };
         if (m.role === "assistant") takeUsage(lane, row);
         rows.push(row);
@@ -980,7 +983,7 @@ type TickTone = "agent" | "tool" | "user" | "muted";
 function rowTone(row: StreamRow): TickTone {
   if (row.type === "subagent") return "agent";
   if (row.type === "toolgroup") return "tool";
-  if (row.type === "agent") return row.role === "user" ? "user" : "agent";
+  if (row.type === "agent") return row.role === "user" ? "user" : row.progress ? "muted" : "agent";
   if (row.type === "steering") return "user";
   if (row.type === "thinking") return "agent";
   return "muted";
@@ -2620,7 +2623,7 @@ export function SessionLogViewer({
       const r = visibleRows[index];
       switch (r?.type) {
         case "agent":
-          return 96;
+          return r.progress ? 32 : 96;
         case "thinking":
           return 52;
         case "meta":
@@ -2697,6 +2700,20 @@ export function SessionLogViewer({
       const flash = flashId === row.id;
       if (row.type === "compaction") return <CompactionDivider snapshot={row.snapshot} />;
       const streamDelayMs = staggerById.get(row.id) ?? 0;
+      if (row.type === "agent" && row.progress) {
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <ProgressRow text={row.md} usage={row.usage} />
+          </RowShell>
+        );
+      }
       if (row.type === "agent") {
         const isUser = row.role === "user";
         const isSystem = row.role === "system";
@@ -2759,7 +2776,7 @@ export function SessionLogViewer({
             highlight={row.isNew && atBottomRef.current}
             streamDelayMs={streamDelayMs}
           >
-            <ThinkingRow text={row.text} usage={row.usage} />
+            <ThinkingRow text={row.text} usage={row.usage} live={row.live === true} />
           </RowShell>
         );
       }
@@ -3162,7 +3179,7 @@ export function SessionLogViewer({
 // inline one-line preview, body behind a border-t) so thinking reads as part of
 // the same visual family, just recessed (muted surface, no accent color) to
 // signal it's internal reasoning rather than output.
-function ThinkingRow({ text, usage }: { text: string; usage?: CallUsage }) {
+function ThinkingRow({ text, usage, live }: { text: string; usage?: CallUsage; live: boolean }) {
   const [open, setOpen] = useState(false);
   const preview = truncate(text.replace(/\s+/g, " ").trim(), 90);
   return (
@@ -3179,7 +3196,9 @@ function ThinkingRow({ text, usage }: { text: string; usage?: CallUsage }) {
           )}
         />
         <Brain className="size-3 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-xs font-medium italic text-muted-foreground">Thinking</span>
+        <span className="shrink-0 text-xs font-medium italic text-muted-foreground">
+          {live ? "Thinking" : "Thought"}
+        </span>
         {!open && (
           <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">{preview}</span>
         )}
@@ -3192,6 +3211,23 @@ function ThinkingRow({ text, usage }: { text: string; usage?: CallUsage }) {
           </div>
         </div>
       </AnimatedReveal>
+    </div>
+  );
+}
+
+// A pre-tool progress note (a Claude update block): one muted line, the full
+// text on hover. Not reasoning, and not the agent's prose.
+function ProgressRow({ text, usage }: { text: string; usage?: CallUsage }) {
+  const line = text.replace(/\s+/g, " ").trim();
+  return (
+    <div
+      data-slot="session-log-progress"
+      title={text}
+      className="flex min-w-0 items-center gap-2 py-0.5 text-meta text-muted-foreground"
+    >
+      <MessageSquareText className="size-3 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{line}</span>
+      {usage && <CallUsageChip usage={usage} className="ml-auto max-sm:hidden" />}
     </div>
   );
 }

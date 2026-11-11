@@ -126,6 +126,22 @@ describe("buildTranscriptRows", () => {
     });
     expect(rows.map((r) => r.kind)).toEqual(["work", "steer"]);
   });
+
+  test("a progress note is a work step, not the agent's prose, with or without messages", () => {
+    const messages = [
+      msg("assistant", [{ type: "thinking", thinking: "plan the read" }]),
+      msg("assistant", [{ type: "text", text: " Reading the config. ", progress: true }]),
+      msg("assistant", [{ type: "text", text: "", progress: true }]),
+      msg("assistant", [{ type: "tool_use", id: "p1", name: "Read", input: {} }]),
+    ];
+    for (const withMessages of [true, false]) {
+      const rows = buildTranscriptRows({ messages, withMessages });
+      expect(rows.map((r) => r.kind)).toEqual(["work"]);
+      const entries = rows[0]?.kind === "work" ? rows[0].entries : [];
+      expect(entries.map((e) => e.kind)).toEqual(["thinking", "progress", "tool"]);
+      expect(entries[1]).toMatchObject({ kind: "progress", text: "Reading the config." });
+    }
+  });
 });
 
 describe("steering order", () => {
@@ -290,6 +306,13 @@ describe("summarizeWork", () => {
     const thinking: WorkEntry = { kind: "thinking", id: "t", at: "", text: "x" };
     expect(summarizeWork([thinking])).toBe("Thought");
     expect(summarizeWork([thinking, { ...thinking, id: "u" }])).toBe("Thought (×2)");
+  });
+
+  test("a progress note is no action and does not count as a thought", () => {
+    const thinking: WorkEntry = { kind: "thinking", id: "t", at: "", text: "x" };
+    const progress: WorkEntry = { kind: "progress", id: "p", at: "", text: "Reading." };
+    expect(summarizeWork([thinking, progress])).toBe("Thought");
+    expect(summarizeWork([thinking, progress, tool("Read", "a")])).toBe("Read 1 file");
   });
 });
 

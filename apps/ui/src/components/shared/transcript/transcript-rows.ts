@@ -44,6 +44,8 @@ export type WorkEntry =
       durationMs?: number;
     }
   | { kind: "thinking"; id: string; at: string; text: string }
+  /** A pre-tool progress note (a Claude update block). */
+  | { kind: "progress"; id: string; at: string; text: string }
   | { kind: "event"; id: string; at: string; text: string };
 
 export type TranscriptRow =
@@ -164,6 +166,10 @@ function messageItems(parsed: ParsedMessage[], withMessages: boolean): Item[] {
         });
       } else if (block.type === "thinking" && block.thinking.trim()) {
         out.push({ t, entry: { kind: "thinking", id, at, text: block.thinking.trim() } });
+      } else if (block.type === "text" && block.progress) {
+        if (block.text.trim()) {
+          out.push({ t, entry: { kind: "progress", id, at, text: block.text.trim() } });
+        }
       } else if (
         withMessages &&
         m.role === "assistant" &&
@@ -340,7 +346,7 @@ const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const CODE_SEARCH_TOOLS = new Set(["Glob", "Grep"]);
 
 function actionOf(entry: WorkEntry): Action | null {
-  if (entry.kind === "thinking") return null;
+  if (entry.kind === "thinking" || entry.kind === "progress") return null;
   if (entry.kind === "event") return "update";
   if (entry.toolKind === "bash") return "command";
   if (entry.toolKind === "web") return "search";
@@ -400,8 +406,9 @@ function sentence(parts: string[]): string {
 }
 
 /**
- * A work row's one-line summary: reasoning only reads "Thought (×N)",
- * anything else names its two leading kinds of action and counts the rest.
+ * A work row's one-line summary: reasoning and progress notes only read
+ * "Thought (×N)", counting the reasoning blocks; anything else names its two
+ * leading kinds of action and counts the rest.
  */
 export function summarizeWork(entries: WorkEntry[]): string {
   const buckets = new Map<Action, WorkEntry[]>();
@@ -413,7 +420,8 @@ export function summarizeWork(entries: WorkEntry[]): string {
     else buckets.set(action, [entry]);
   }
   if (buckets.size === 0) {
-    return entries.length > 1 ? `Thought (×${entries.length})` : "Thought";
+    const thoughts = entries.filter((entry) => entry.kind === "thinking").length;
+    return thoughts > 1 ? `Thought (×${thoughts})` : "Thought";
   }
   // Map order is first appearance, and the sort is stable: ties keep it.
   const ranked = [...buckets.entries()].sort(
@@ -429,6 +437,7 @@ export function summarizeWork(entries: WorkEntry[]): string {
 export function entrySummary(entry: WorkEntry): string {
   switch (entry.kind) {
     case "event":
+    case "progress":
       return entry.text;
     case "tool":
       return entry.detail ? `${entry.title} ${entry.detail}` : entry.title;

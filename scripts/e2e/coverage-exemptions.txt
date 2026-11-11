@@ -1,0 +1,6 @@
+# Paths the e2e changed-lines comment skips (scripts/e2e/diff-coverage.ts).
+# One per line: a file, or a directory ending in `/`, then the reason. A line with no reason
+# makes the comment report an error instead of a number.
+src/scripts-runtime/eval-harness.ts  Runs in the script sandbox subprocess; only the API process is instrumented.
+src/scripts-runtime/extract-args-schema.ts  Runs as its own `bun run` subprocess at script upsert; not instrumented.
+src/http/all-routes.ts  Imported by the OpenAPI and RBAC scripts only; the API never loads it.
