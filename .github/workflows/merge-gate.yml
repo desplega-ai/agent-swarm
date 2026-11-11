@@ -619,8 +619,10 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  e2e-contract:
-    name: E2E Contract
+  # Three shards, one runner each: its own API process, DB file, ports and mocks. Bands
+  # are fixed by scenario order (SHARD_CUTS in scripts/e2e/shard.ts), not timing.
+  e2e-contract-shard:
+    name: E2E Contract (shard ${{ matrix.shard }}/3)
     needs: detect-changes
     # PRs skip the suite when they touch nothing it loads. merge_group (and any
     # other event) always runs it.
@@ -629,6 +631,10 @@ jobs:
     permissions:
       contents: read
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout repository
@@ -642,14 +648,78 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Static checks run once, on the first shard.
       - name: Check E2E boundary
+        if: matrix.shard == 1
         run: bash scripts/check-e2e-boundary.sh
 
       - name: Type check E2E runner
+        if: matrix.shard == 1
         run: bun run e2e:tsc
 
-      - name: Run E2E contract suite (strict coverage gate)
-        run: bun run e2e --strict --json e2e-results.json --summary-md e2e-summary.md
+      # No --strict here: a band alone covers part of the surface. The merge job gates the union.
+      # On PRs, --coverage writes one lcov per API process; a coverage problem never fails it.
+      - name: Run E2E contract shard
+        run: bun run e2e --shard ${{ matrix.shard }}/3 ${{ github.event_name == 'pull_request' && '--coverage' || '' }} --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+
+      - name: Add E2E job summary
+        if: always()
+        run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload shard result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-contract-shard-${{ matrix.shard }}
+          path: e2e-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload shard coverage
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-coverage-shard-${{ matrix.shard }}
+          path: e2e-coverage/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Keeps the E2E Contract name: unions the shards' coverage, then applies --strict once.
+  e2e-contract:
+    name: E2E Contract
+    needs: [detect-changes, e2e-contract-shard]
+    # Runs after a failed shard too, so the summary names what failed.
+    if: always() && needs.detect-changes.result == 'success' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+
+    steps:
+      # Depth 2: on a PR, HEAD is the merge commit and HEAD^1 its base, for the changed lines.
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # A shard that wrote nothing shows up as a missing file in the merge step below.
+      - name: Download shard results
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: e2e-contract-shard-*
+          path: e2e-shards
+          merge-multiple: true
+
+      # merge.ts imports no package, so no install. A missing shard file fails the merge.
+      - name: Merge shards (strict coverage gate)
+        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json
 
       - name: Add E2E job summary
         if: always()
@@ -662,6 +732,66 @@ jobs:
           name: e2e-contract-results
           path: e2e-results.json
           if-no-files-found: warn
+
+      # Rule 3, comment only: changed API lines no scenario runs. Nothing here fails the job.
+      - name: Download shard coverage
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: e2e-coverage-shard-*
+          path: e2e-coverage
+          merge-multiple: true
+
+      - name: Build changed-lines coverage comment
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md
+          cat e2e-coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload changed-lines coverage comment
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-coverage-comment
+          path: e2e-coverage-comment.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Posts the comment e2e-contract built. Its own job: the only one with pull-requests: write,
+  # and it runs no PR code (no checkout), so a queued fork PR never sees a write token.
+  # Same upsert as the UI E2E comment. Not in Merge Gate's needs: it never blocks.
+  e2e-coverage-comment:
+    name: E2E Coverage Comment
+    needs: e2e-contract
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.e2e-contract.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Download changed-lines coverage comment
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-coverage-comment
+
+      - name: Upsert changed-lines coverage comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.body | startswith("<!-- e2e-coverage -->")) | .id' | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<e2e-coverage-comment.md)"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<e2e-coverage-comment.md)"
+          fi
 
   test:
     name: Run Tests (${{ matrix.shard }}/4)
@@ -1430,7 +1560,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout. checks: read lets the last step read the PR Body check.

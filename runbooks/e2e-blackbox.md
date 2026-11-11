@@ -53,11 +53,15 @@ model" is a failure, not a pass.
 ## Running
 
 ```bash
-bun run e2e --strict                               # the CI contract (merge-gate "E2E Contract")
+bun run e2e --strict                               # the whole contract in one process
+bun run e2e --shard 1/3 --json shard-1.json        # one CI shard (bands fixed by order)
+bun scripts/e2e/merge.ts --strict shard-*.json     # what the "E2E Contract" job runs on the shards
 bun run e2e                                        # same scenarios, report only, no gate
 bun run e2e --only <name>,<name>                   # a subset while debugging
 bun run e2e --strict --json out.json --summary-md out.md
 bun run e2e --keep                                 # keep db, logs, temp dirs (paths printed as KEEP ...)
+bun run e2e --coverage                             # plus lcov per API process in ./e2e-coverage/
+bun scripts/e2e/diff-coverage.ts                   # the PR comment: changed API lines no scenario runs
 ```
 
 Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios dominate.
@@ -103,16 +107,39 @@ same machine, back to back.
 
 ### In CI
 
-The **E2E Contract** job uploads `e2e-results.json` in the `e2e-contract-results` artifact.
+The **E2E Contract** job uploads the merged `e2e-results.json` in the `e2e-contract-results`
+artifact. Each shard's own result is in `e2e-contract-shard-<i>`.
 Download two reports and compare them locally with `bun run e2e:bench`.
 Use runs from the same environment because timing depends on runner load.
 The job uses only `contents: read` permission.
 
 ## CI
 
-`.github/workflows/merge-gate.yml` job **E2E Contract** runs `check-e2e-boundary.sh`,
-`e2e:tsc`, then `bun run e2e --strict` and uploads `e2e-results.json`. The job is required by
-the merge gate. The nightly workflow runs the same scenarios plus real harness legs.
+`.github/workflows/merge-gate.yml` runs the suite as three **E2E Contract (shard i/3)** jobs,
+each on its own runner with its own API process, database, ports and mocks. Shard 1 also runs
+`check-e2e-boundary.sh` and `e2e:tsc`. A shard fails only on its own scenarios and the
+quarantine file. It does not gate coverage: alone it covers part of the surface.
+
+The **E2E Contract** job then runs `bun scripts/e2e/merge.ts --strict` on the three shard
+results. It unions their calls, tools, node types and state values and computes coverage
+once, so a surface covered in any shard counts. It applies `--strict` and the minimums,
+carries `flaky` and quarantined rows into its summary, and fails when a shard result is
+missing, duplicated or red. It needs no `bun install`. The Merge Gate needs both jobs.
+
+To reproduce a red merge locally, download the three `e2e-contract-shard-<i>` artifacts and
+run the same `merge.ts` command on them. The nightly workflow runs unsharded, plus real
+harness legs.
+
+On a PR, each shard also runs with `--coverage` and uploads `e2e-coverage-shard-<i>` (one lcov
+per API process). The **E2E Contract** job then runs `diff-coverage.ts --base HEAD^1` (HEAD is
+the PR merge commit) and builds one sticky comment, `<!-- e2e-coverage -->`: covered over
+changed API lines, per file, with the uncovered line ranges. The **E2E Coverage Comment** job
+posts it. It is the only job with `pull-requests: write`, and it checks out no PR code. It
+never blocks. Every coverage step is `continue-on-error`, and a coverage problem becomes a
+comment that says so. A PR that changes no executable API line gets a one-line comment. Fork
+PRs skip the post; the comment text is still in the E2E Contract job summary.
+Coverage made one local full run about 8% slower (299 s against 278 s, 124 of 124 pass both ways). Rules for scope
+and exemptions: [scripts/e2e/README.md § Changed lines](../scripts/e2e/README.md#changed-lines---coverage).
 
 ## Relation to unit tests
 

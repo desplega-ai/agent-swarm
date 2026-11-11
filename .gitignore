@@ -92,6 +92,8 @@ docker-compose.desplega.yaml
 # Standalone black-box E2E reports
 e2e-results.json
 e2e-summary.md
+e2e-coverage/
+e2e-coverage-comment.md
 packages/ui-e2e/test-results/
 packages/ui-e2e/playwright-report/
 packages/ui-e2e/blob-report/
