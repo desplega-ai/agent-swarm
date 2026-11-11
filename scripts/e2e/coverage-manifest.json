@@ -363,6 +363,10 @@
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
       "scenarios": ["knowledge-pages"]
     },
+    "primitive-boards": {
+      "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
+      "scenarios": ["knowledge-boards"]
+    },
     "primitive-objects": {
       "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key",
       "scenarios": ["knowledge-objects"]

@@ -49,6 +49,13 @@ export const SDK_TOOL_NAME_MAP = {
   sheets_appendRows: "sheet-append-rows",
   sheets_clearRange: "sheet-clear-range",
   sheets_addTab: "sheet-add-tab",
+  // ── boards (also ctx.boards, see SDK_NAMESPACES) ──
+  boards_create: "board-create",
+  boards_get: "board-get",
+  boards_list: "board-list",
+  boards_addElements: "board-add-elements",
+  boards_updateElements: "board-update-elements",
+  boards_removeElements: "board-remove-elements",
 
   // ── repos ──
   repo_list: "get-repos",
@@ -262,6 +269,7 @@ export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
 export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
   objects: ["create", "get", "list", "reindex"],
   sheets: ["create", "get", "list", "getRange", "setRange", "appendRows", "clearRange", "addTab"],
+  boards: ["create", "get", "list", "addElements", "updateElements", "removeElements"],
 });
 
 /** ctx keys a namespace may never shadow. */

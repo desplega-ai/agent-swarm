@@ -250,6 +250,7 @@
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",
     "e2b": "2.26.0",
+    "fractional-indexing": "4.0.0",
     "ink": "^6.5.1",
     "just-bash": "3.6.0",
     "oauth4webapi": "^3.8.5",

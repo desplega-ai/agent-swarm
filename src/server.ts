@@ -24,6 +24,14 @@ import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppRowTools } from "./tools/app-rows";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
+import {
+  registerBoardAddElementsTool,
+  registerBoardCreateTool,
+  registerBoardGetTool,
+  registerBoardListTool,
+  registerBoardRemoveElementsTool,
+  registerBoardUpdateElementsTool,
+} from "./tools/boards";
 import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerChatOpenDmTool } from "./tools/chat-open-dm";
@@ -703,7 +711,7 @@ export async function createServer(
     registerRoomDecodeTool(server);
   }
 
-  // Primitives capability: object-* and sheet-* tools over agent-fs files (src/be/primitives/).
+  // Primitives capability: object-*, sheet-* and board-* tools over agent-fs files (src/be/primitives/).
   if (hasCapability("primitives")) {
     registerObjectCreateTool(server);
     registerObjectGetTool(server);
@@ -717,6 +725,12 @@ export async function createServer(
     registerSheetAppendRowsTool(server);
     registerSheetClearRangeTool(server);
     registerSheetAddTabTool(server);
+    registerBoardCreateTool(server);
+    registerBoardGetTool(server);
+    registerBoardListTool(server);
+    registerBoardAddElementsTool(server);
+    registerBoardUpdateElementsTool(server);
+    registerBoardRemoveElementsTool(server);
   }
 
   // Slack capability - Slack integration tools (no-op if Slack is not configured)

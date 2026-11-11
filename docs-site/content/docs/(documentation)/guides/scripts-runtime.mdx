@@ -368,6 +368,33 @@ single-cell `range` is the top-left corner of the `values`; a larger one must
 match their size. Limits: 20 tabs, 50,000 cells, 5 MiB, 10,000 cells per range
 call. Durable workflow runs get `ctx.sheets` too.
 
+### Boards
+
+`ctx.boards` edits boards as Excalidraw element JSON through the `board-*` tools.
+Arrows name a shape `key` from the same call or an existing element id, and bind
+on both ends. Shapes without `x`/`y` are laid out below the existing content.
+
+```ts
+export default async function (_args, ctx) {
+  const { object, added } = await ctx.boards.create({
+    path: "/boards/flow.excalidraw",
+    shapes: [
+      { key: "req", type: "rectangle", label: "Request", color: "blue" },
+      { key: "lead", type: "diamond", label: "Lead" },
+    ],
+    arrows: [{ from: "req", to: "lead", label: "send-task" }],
+  });
+  await ctx.boards.updateElements({ id: object.id, patches: [{ elementId: added.lead, label: "Lead routes" }] });
+  const { elements } = await ctx.boards.get({ id: object.id });
+  return { link: object.link, elements: elements.length };
+}
+```
+
+Every write sends the file version as `If-Match`. On a concurrent change it
+re-reads and re-applies, up to three times, and each touched element gets a new
+`version` so an open editor repaints it. Label sizes are Excalifont estimates;
+the editor re-measures them on open.
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:
