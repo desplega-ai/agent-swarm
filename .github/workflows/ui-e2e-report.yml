@@ -1,0 +1,284 @@
+name: UI E2E Report
+
+# Reads the shard artifacts of the calling run (ui-e2e-shards.yml): merges the HTML report and
+# the dashboard coverage, publishes artifacts to agent-fs, upserts the sticky PR comment and
+# posts to the results tracker. Every external step is continue-on-error, and Merge Gate does
+# not need this job, so an agent-fs or tracker outage never fails the gate.
+on:
+  workflow_call:
+    inputs:
+      shards-result:
+        description: Result of the calling run's shard job (success, failure, cancelled).
+        required: true
+        type: string
+
+jobs:
+  report:
+    name: Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # This job holds the agent-fs and tracker secrets. A merge group can carry a fork PR,
+      # so on merge_group it runs the reporter from the group's base (main), never the code
+      # under test. Shard artifacts are read as data only.
+      - name: Checkout trusted code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || '' }}
+          persist-credentials: false
+
+      - name: Resolve run context
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: |
+          set -euo pipefail
+          same_repo="true"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            same_repo="false"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            trigger="pr"
+            sha="$PR_HEAD_SHA"
+            ref="$PR_HEAD_REF"
+            pr="$PR_NUMBER"
+          elif [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            # The queue fast-forwards main to the group's head commit, so this is main's run.
+            trigger="main"
+            sha="$MERGE_GROUP_HEAD_SHA"
+            ref="${MERGE_GROUP_BASE_REF#refs/heads/}"
+            pr=""
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            trigger="nightly"
+            sha="$GITHUB_SHA"
+            ref="$GITHUB_REF_NAME"
+            pr=""
+          else
+            trigger="manual"
+            sha="$GITHUB_SHA"
+            ref="$GITHUB_REF_NAME"
+            pr=""
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              pr=$(gh pr list --head "$GITHUB_REF_NAME" --state open --json number --jq '.[0].number // empty' || true)
+            fi
+          fi
+          target="main"
+          if [ -n "$pr" ]; then
+            target="pr-$pr"
+          fi
+          {
+            echo "same_repo=$same_repo"
+            echo "trigger=$trigger"
+            echo "sha=$sha"
+            echo "ref=$ref"
+            echo "pr=$pr"
+            echo "target=$target"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download blob reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-e2e-blob-*
+          path: packages/ui-e2e/all-blob-reports
+          merge-multiple: true
+
+      - name: Download test results
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-e2e-results-*
+          path: packages/ui-e2e/all-results
+          merge-multiple: false
+
+      - name: Download shard coverage
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-e2e-coverage-*
+          path: packages/ui-e2e/all-coverage
+          merge-multiple: false
+
+      # A line counts as covered when any shard hit it. The base of the first merge group
+      # after this lands has no coverage.ts yet: skip.
+      - name: Merge dashboard coverage
+        continue-on-error: true
+        run: |
+          if [ ! -f reporter/coverage.ts ]; then
+            echo "coverage merge skipped: reporter/coverage.ts is not on the checked-out code"
+            exit 0
+          fi
+          node --experimental-strip-types reporter/coverage.ts \
+            --lcov-dir all-coverage \
+            --out coverage.json \
+            --lcov-out lcov.info \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        working-directory: packages/ui-e2e
+
+      - name: Upload merged coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-coverage
+          path: |
+            packages/ui-e2e/coverage.json
+            packages/ui-e2e/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Merge Playwright reports
+        continue-on-error: true
+        run: npx playwright merge-reports --reporter html all-blob-reports
+        working-directory: packages/ui-e2e
+
+      - name: Upload HTML report
+        id: html-report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-html-report
+          path: packages/ui-e2e/playwright-report
+          if-no-files-found: warn
+
+      - name: Check agent-fs secrets
+        id: image-secrets
+        if: steps.context.outputs.same_repo == 'true'
+        env:
+          AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
+          AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
+          AGENT_FS_DEFAULT_ORG_ID: ${{ secrets.E2E_AGENT_FS_ORG_ID }}
+          AGENT_FS_DEFAULT_DRIVE_ID: ${{ secrets.E2E_AGENT_FS_DRIVE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_FS_API_KEY" ] && [ -n "$AGENT_FS_DEFAULT_ORG_ID" ] && [ -n "$AGENT_FS_DEFAULT_DRIVE_ID" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "agent-fs secrets are incomplete. The comment will omit images."
+          fi
+
+      - name: Publish artifacts to agent-fs
+        continue-on-error: true
+        if: steps.context.outputs.same_repo == 'true' && steps.image-secrets.outputs.available == 'true'
+        env:
+          AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
+          AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
+          AGENT_FS_DEFAULT_ORG_ID: ${{ secrets.E2E_AGENT_FS_ORG_ID }}
+          AGENT_FS_DEFAULT_DRIVE_ID: ${{ secrets.E2E_AGENT_FS_DRIVE_ID }}
+          RUN_TARGET: ${{ steps.context.outputs.target }}
+          RUN_SHA: ${{ steps.context.outputs.sha }}
+        run: |
+          set -euo pipefail
+          npm i -g @desplega.ai/agent-fs@0.18.24
+          node --experimental-strip-types reporter/publish-artifacts.ts \
+            --results all-results \
+            --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \
+            --artifacts-out artifacts.json \
+            --images-out images.json
+        working-directory: packages/ui-e2e
+
+      - name: Build UI E2E summary
+        continue-on-error: true
+        env:
+          TRACKER_URL: ${{ vars.UI_E2E_TRACKER_URL }}
+        run: |
+          set -euo pipefail
+          coverage=()
+          if [ -f packages/ui-e2e/reporter/coverage.ts ] && [ -f packages/ui-e2e/coverage.json ]; then
+            coverage=(--coverage packages/ui-e2e/coverage.json)
+          fi
+          node --experimental-strip-types packages/ui-e2e/reporter/comment.ts \
+            --summaries packages/ui-e2e/all-results \
+            --images packages/ui-e2e/images.json \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --report-artifact ui-e2e-html-report \
+            --tracker-url "$TRACKER_URL" \
+            "${coverage[@]}" \
+            --out packages/ui-e2e/comment.md
+          cat packages/ui-e2e/comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert sticky PR comment
+        continue-on-error: true
+        if: github.event_name == 'pull_request' && steps.context.outputs.same_repo == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.body | startswith("<!-- ui-e2e -->")) | .id' | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<packages/ui-e2e/comment.md)"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<packages/ui-e2e/comment.md)"
+          fi
+
+      - name: Ingest into the UI E2E tracker
+        continue-on-error: true
+        if: steps.context.outputs.same_repo == 'true'
+        env:
+          UI_E2E_INGEST_URL: ${{ secrets.UI_E2E_INGEST_URL }}
+          UI_E2E_INGEST_BEARER: ${{ secrets.UI_E2E_INGEST_BEARER }}
+          UI_E2E_TRIGGER: ${{ steps.context.outputs.trigger }}
+          UI_E2E_SHA: ${{ steps.context.outputs.sha }}
+          UI_E2E_REF: ${{ steps.context.outputs.ref }}
+          UI_E2E_PR_NUMBER: ${{ steps.context.outputs.pr }}
+          REPORT_URL: ${{ steps.html-report.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          coverage=()
+          if [ -f reporter/coverage.ts ] && [ -f coverage.json ]; then
+            coverage=(--coverage coverage.json)
+          fi
+          node --experimental-strip-types reporter/ingest.ts \
+            --summaries all-results \
+            --artifacts artifacts.json \
+            --out ingest-payloads \
+            --report-url "$REPORT_URL" \
+            "${coverage[@]}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        working-directory: packages/ui-e2e
+
+      - name: Upload ingest payloads
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-e2e-ingest-payloads
+          path: |
+            packages/ui-e2e/ingest-payloads
+            packages/ui-e2e/artifacts.json
+          if-no-files-found: ignore
+
+      - name: Fail when a UI E2E shard failed
+        if: always()
+        env:
+          SHARDS_RESULT: ${{ inputs.shards-result }}
+        run: |
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "At least one UI E2E shard failed. See the uploaded artifacts." >&2
+            exit 1
+          fi

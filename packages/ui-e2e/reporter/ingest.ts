@@ -4,8 +4,10 @@ import { parseFlags } from "./cli.ts";
 import {
   type ArtifactRecord,
   buildShardPayload,
+  type CoverageSummary,
   type RunContext,
   type Summary,
+  withCoverage,
 } from "./ingest-payload.ts";
 import { postPayloads } from "./ingest-post.ts";
 
@@ -14,13 +16,14 @@ interface Options {
   artifacts: string;
   out: string;
   reportUrl: string | undefined;
+  coverage: string | undefined;
   dryRun: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
   const values = parseFlags(argv, {
     required: ["summaries", "artifacts", "out"],
-    optional: ["report-url"],
+    optional: ["report-url", "coverage"],
     booleans: ["dry-run"],
   });
   const required = (key: string): string => {
@@ -33,6 +36,7 @@ function parseArgs(argv: string[]): Options {
     artifacts: required("artifacts"),
     out: required("out"),
     reportUrl: values.get("report-url") as string | undefined,
+    coverage: values.get("coverage") as string | undefined,
     dryRun: values.get("dry-run") === true,
   };
 }
@@ -61,6 +65,19 @@ function readArtifacts(path: string): ArtifactRecord[] {
   return [];
 }
 
+// Coverage is optional: a missing or unreadable file sends the v1 payloads unchanged.
+function readCoverage(path: string | undefined): CoverageSummary | undefined {
+  if (!path || !existsSync(path)) return undefined;
+  try {
+    const coverage = JSON.parse(readFileSync(path, "utf8")) as CoverageSummary;
+    if (coverage.total?.total > 0 && Array.isArray(coverage.files)) return coverage;
+    console.warn(`Ignoring ${path}: no coverage totals`);
+  } catch (error) {
+    console.warn(`Ignoring unreadable ${path}: ${String(error)}`);
+  }
+  return undefined;
+}
+
 function runContext(): RunContext {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const prNumber = process.env.UI_E2E_PR_NUMBER;
@@ -84,7 +101,7 @@ async function main(): Promise<void> {
   }
   const artifacts = readArtifacts(options.artifacts);
   const run = runContext();
-  const payloads = findSummaryFiles(options.summaries).map((path) =>
+  const shardPayloads = findSummaryFiles(options.summaries).map((path) =>
     buildShardPayload(
       JSON.parse(readFileSync(path, "utf8")) as Summary,
       artifacts,
@@ -92,6 +109,8 @@ async function main(): Promise<void> {
       options.reportUrl,
     ),
   );
+  const coverage = readCoverage(options.coverage);
+  const payloads = coverage ? withCoverage(shardPayloads, coverage) : shardPayloads;
 
   mkdirSync(options.out, { recursive: true });
   for (const payload of payloads) {

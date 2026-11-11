@@ -31,6 +31,8 @@ The full recipe, the env table, and the CI notes live in [LOCAL_TESTING.md](../.
 | `reporter/publish-plan.ts` | Node | Turns summaries into the agent-fs upload plan and the comment image pick. |
 | `reporter/publish-artifacts.ts` | Node | Uploads screenshots, traces, and summaries to agent-fs, writes `artifacts.json` and `images.json`. |
 | `reporter/ingest-payload.ts` | Node | Builds the tracker v1 payload from a shard summary plus `artifacts.json`. |
+| `reporter/coverage.ts` | Node | Merges the shards' lcov files into `coverage.json` (the tracker's `coverage` block) and one lcov. |
+| `fixtures/coverage.ts` | Node | V8 JS coverage options and the per-test start and stop (`UI_E2E_COVERAGE=1`). |
 | `reporter/ingest.ts` | Node | Posts one payload per shard to the tracker endpoint. |
 | `reporter/cli.ts` | Node | Shared flag parser. |
 | `reporter/ui-e2e-ingest.v1.schema.json` | n/a | Vendored copy of the tracker's frozen v1 schema. The oracle for the payload unit tests. |
@@ -100,11 +102,13 @@ The target API must be 2.5.1 or later, or run with `SWARM_DEV_MODE=true`, for `s
 
 ## CI
 
-`.github/workflows/ui-e2e.yml` runs two shards on pull requests that touch the UI, the API, or this package, and on pushes to `main`. It also runs on manual dispatch. An external scheduler dispatches it on `main` nightly at 03:00 UTC, and a dispatch on `main` reports to the tracker as a nightly run.
+`.github/workflows/ui-e2e-shards.yml` runs four shards, one runner each. Merge Gate calls it on pull requests and merge groups that touch the UI, the API, or this package, and needs it. `.github/workflows/ui-e2e.yml` calls it on manual dispatch. An external scheduler dispatches that on `main` nightly at 03:00 UTC, and a dispatch on `main` reports to the tracker as a nightly run. A merge group reports as `main`.
 
-The `report` job resolves the run context once: trigger, target, sha, ref, and PR number. Every later step reads that context. It merges the blob reports into the `ui-e2e-html-report` artifact. For every same-repo event, it uploads screenshots, traces, and each shard's `summary.json` to agent-fs. It builds the sticky PR comment from every `summary.json`. It ingests one payload per shard into the UI E2E tracker. It uploads the ingest payloads and `artifacts.json` as the `ui-e2e-ingest-payloads` artifact for review.
+`playwright.config.ts` sets `fullyParallel: true` (shards split by test, not file) and `retries: 1`. A pass on the rerun is `flaky` and exits 0. With `UI_E2E_COVERAGE=1`, `boot/run.ts` builds with `--sourcemap`, the `page` fixture records V8 JS coverage per test (`fixtures/coverage.ts`), and global teardown writes `coverage/lcov.info`. Only the test's own `page` is measured, and only files the browser loads count.
 
-The workflow is informational and not a required check. Screenshot links need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only. Tracker ingest needs `UI_E2E_INGEST_URL` and `UI_E2E_INGEST_BEARER`. Without them ingest is skipped. `merge-gate.yml`'s `ui-lint` job typechecks and lints this package.
+The report job in `.github/workflows/ui-e2e-report.yml` resolves the run context once: trigger, target, sha, ref, and PR number. Every later step reads that context. It merges the blob reports into the `ui-e2e-html-report` artifact. For every same-repo event, it uploads screenshots, traces, and each shard's `summary.json` to agent-fs. It merges the shards' lcov with `reporter/coverage.ts` into `coverage.json`. It builds the sticky PR comment from every `summary.json` and the coverage. It ingests one payload per shard into the UI E2E tracker (v2 with `suite: "ui"` when coverage exists; the first payload carries it). On `merge_group` it runs the reporter from the group's base commit, because it holds the secrets. It uploads the ingest payloads and `artifacts.json` as the `ui-e2e-ingest-payloads` artifact for review.
+
+The report job is informational: Merge Gate does not need it, and every external step is `continue-on-error`. Screenshot links need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only. Tracker ingest needs `UI_E2E_INGEST_URL` and `UI_E2E_INGEST_BEARER`. Without them ingest is skipped. `merge-gate.yml`'s `ui-lint` job typechecks and lints this package.
 
 ## Hooks for the next phases
 
