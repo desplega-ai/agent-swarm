@@ -216,11 +216,14 @@ export const knowledgeObjects: Scenario = {
         "the hook asks for file.changed only",
       );
       const receiver = new URL(hook.url).pathname;
-      const deliver = (
+      // The receiver reads the changed file with the service key: no agent is calling.
+      const receiverCalls = new Set<number>();
+      const deliver = async (
         data: Record<string, unknown>,
         opts: { secret?: string; id?: string } = {},
-      ) =>
-        signedDelivery(
+      ) => {
+        const from = stub.seen.length;
+        const response = await signedDelivery(
           ctx,
           receiver,
           opts.secret ?? WEBHOOK_SECRET,
@@ -231,6 +234,9 @@ export const knowledgeObjects: Scenario = {
             data: { orgId: org, driveId: drive, path: `/${path}`, ...data },
           },
         );
+        for (let i = from; i < stub.seen.length; i++) receiverCalls.add(i);
+        return response;
+      };
       const base = files.get(path)?.version ?? 0;
       const forgedSecret = `whsec_${Buffer.from("f".repeat(32)).toString("base64")}`;
       const forged = await deliver(
@@ -326,13 +332,15 @@ export const knowledgeObjects: Scenario = {
 
       expect(stub.seen.length > 0, "the stub saw agent-fs traffic");
       const isWebhookOp = (body: string) => body.includes('"op":"webhook-');
+      expect(receiverCalls.size > 0, "the receiver read the changed file");
+      const wrongKey = stub.seen.filter(
+        (entry, i) =>
+          entry.headers.authorization !==
+          `Bearer ${isWebhookOp(entry.body) || receiverCalls.has(i) ? serviceKey : ownKey}`,
+      );
       expect(
-        stub.seen.every(
-          (entry) =>
-            entry.headers.authorization ===
-            `Bearer ${isWebhookOp(entry.body) ? serviceKey : ownKey}`,
-        ),
-        "object calls carry the agent's own key; only webhook registration uses the service key",
+        wrongKey.length === 0,
+        `object calls carry the agent's own key; only webhook registration and the receiver use the service key: ${JSON.stringify(wrongKey.map((e) => `${e.method} ${e.path}`))}`,
       );
     } finally {
       stub.stop();
