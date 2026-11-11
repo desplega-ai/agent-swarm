@@ -79,6 +79,18 @@ const MAX_REINDEX_FILES = 500;
 // Full downloads per reindex call. Unchanged files cost one `stat` and no read,
 // so repeated calls converge: each one reads at most this many changed files.
 const MAX_REINDEX_READS = 50;
+// Wall-clock and downloaded-byte budget per reindex call, so one call stays bounded
+// even when every file is large or agent-fs is slow. The byte check runs before each
+// read, so a call can overshoot by at most one file.
+const MAX_REINDEX_MS = 20_000;
+const MAX_REINDEX_BYTES = 16 * 1024 * 1024;
+
+export type ReindexLimits = { reads: number; ms: number; bytes: number };
+const REINDEX_LIMITS: ReindexLimits = {
+  reads: MAX_REINDEX_READS,
+  ms: MAX_REINDEX_MS,
+  bytes: MAX_REINDEX_BYTES,
+};
 // shortcut: in-process only; two API replicas can still reindex one drive at once (each pass is safe, just duplicated work).
 const reindexing = new Set<string>();
 
@@ -298,13 +310,17 @@ export type ReindexReport = {
   missing: string[];
   /** Files skipped: changed during write-back, or not valid JSON. */
   conflicts: Array<{ path: string; reason: string }>;
-  /** More files remain: over the file cap or the read cap. Run again to continue. */
+  /** More files remain: a cap or budget cut this call short. Run again to continue. */
   truncated: boolean;
+  /** Which limit cut this call short; null when the pass finished. */
+  cutBy: "files" | "reads" | "time" | "bytes" | null;
 };
 
 export async function reindexObjects(input: {
   agentId: string | undefined;
   kind?: string;
+  /** Override the per-call budget (tests). */
+  limits?: Partial<ReindexLimits>;
 }): Promise<ReindexReport> {
   const kinds = input.kind ? [input.kind] : PRIMITIVE_KIND_NAMES;
   for (const kind of kinds) kindFor(kind);
@@ -317,7 +333,10 @@ export async function reindexObjects(input: {
   }
   reindexing.add(lock);
   try {
-    const report = await reindexDrive(client, kinds, input.agentId);
+    const report = await reindexDrive(client, kinds, input.agentId, {
+      ...REINDEX_LIMITS,
+      ...input.limits,
+    });
     watchDrive(client.orgId, client.driveId);
     return report;
   } finally {
@@ -329,6 +348,7 @@ async function reindexDrive(
   { provider, orgId, driveId, scope }: Awaited<ReturnType<typeof clientFor>>,
   kinds: string[],
   agentId: string | undefined,
+  limits: ReindexLimits,
 ): Promise<ReindexReport> {
   const db = getDbClient();
   const report: ReindexReport = {
@@ -339,20 +359,31 @@ async function reindexDrive(
     missing: [],
     conflicts: [],
     truncated: false,
+    cutBy: null,
   };
+  const startedAt = Date.now();
   let reads = 0;
+  let bytes = 0;
+  const cut = (by: NonNullable<ReindexReport["cutBy"]>) => {
+    report.truncated = true;
+    report.cutBy = by;
+  };
 
   for (const kindName of kinds) {
     if (report.truncated) break;
     const kind = kindFor(kindName);
     const all = (await provider.glob(kind.glob)).map((p) => p.replace(/^\/+/, ""));
     const paths = all.slice(0, MAX_REINDEX_FILES - report.scanned);
-    if (paths.length < all.length) report.truncated = true;
+    if (paths.length < all.length) cut("files");
     const onDrive = new Set(all);
     // Ids already given to a file in this pass: a copied file must not steal one.
     const claimed = new Map<string, string>();
 
     for (const path of paths) {
+      if (Date.now() - startedAt >= limits.ms) {
+        cut("time");
+        break;
+      }
       const atPath = await db.get<ObjectRow>(
         "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
         [orgId, driveId, path],
@@ -372,8 +403,8 @@ async function reindexDrive(
           continue;
         }
       }
-      if (reads >= MAX_REINDEX_READS) {
-        report.truncated = true;
+      if (reads >= limits.reads || bytes >= limits.bytes) {
+        cut(reads >= limits.reads ? "reads" : "bytes");
         break;
       }
       reads += 1;
@@ -384,7 +415,9 @@ async function reindexDrive(
       try {
         const response = await provider.download(scope(path));
         version = response.headers.get("x-agent-fs-version");
-        const parsed = JSON.parse(await response.text()) as unknown;
+        const text = await response.text();
+        bytes += Buffer.byteLength(text);
+        const parsed = JSON.parse(text) as unknown;
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
           throw new Error("not an object");
         json = parsed as Json;

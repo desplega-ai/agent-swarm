@@ -75,7 +75,7 @@ The `primitives` capability (off by default; scripts always reach it through the
 | `object-create` | Create a file create-only and give it a stable id. Kind `board` writes an empty `.excalidraw` scene. |
 | `object-get` | Read one object by `id` or `path`, optionally with its content. |
 | `object-list` | List objects by `kind` and path `prefix`. Hides objects whose file agent-fs reported deleted. |
-| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files. |
+| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, and `cutBy` names the limit that stopped it. |
 
 Scripts use `ctx.objects.create/get/list/reindex`.
 

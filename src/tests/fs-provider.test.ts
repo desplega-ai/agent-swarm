@@ -431,6 +431,31 @@ describe("AgentFsProvider", () => {
     );
   });
 
+  test("stored key segments are encoded so `#`, `?` and spaces stay in the path", async () => {
+    const calls: string[] = [];
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "org",
+      driveId: "drive",
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        return new Response("bytes", { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const key = "x/raw#y?v=1/my board.excalidraw";
+    await provider.download({ taskId: "t", name: "n", key });
+
+    const url = new URL(calls[0] ?? "");
+    expect(calls[0]).toBe(
+      "http://agent-fs.test/orgs/org/drives/drive/files/x/raw%23y%3Fv%3D1/my%20board.excalidraw/raw",
+    );
+    expect(url.hash).toBe("");
+    expect(url.search).toBe("");
+    expect(decodeURIComponent(url.pathname)).toBe(`/orgs/org/drives/drive/files/${key}/raw`);
+  });
+
   test("missing configuration throws a provider error", () => {
     expect(
       () =>

@@ -244,8 +244,10 @@ declare module "swarm-sdk" {
     restored: string[];
     missing: string[];
     conflicts: Array<{ path: string; reason: string }>;
-    /** More files remain (at most 50 reads per call): run again. */
+    /** More files remain (at most 50 reads, 16 MiB or 20 s per call): run again. */
     truncated: boolean;
+    /** Which limit cut this call short; null when the pass finished. */
+    cutBy: "files" | "reads" | "time" | "bytes" | null;
   }
 
   /**

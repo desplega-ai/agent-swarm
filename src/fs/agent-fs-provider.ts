@@ -81,6 +81,14 @@ export type AgentFsCommentThread = {
 // A failed identity lookup is not asked again for this long.
 const SERVICE_USER_RETRY_MS = 60_000;
 
+// A stored key is a literal drive path: encode each segment so a `#`, `?` or `%`
+// in a name stays in the URL path. A task-scoped path is already encoded by normalizeName.
+function rawPath(scope: FileScope): string {
+  const path = providerPath(scope);
+  if (scope.key === undefined || scope.key === null || scope.key === "") return path;
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 export class AgentFsProvider implements FileStorageProvider {
   readonly id = "agent-fs";
   readonly capabilities = {
@@ -450,7 +458,7 @@ export class AgentFsProvider implements FileStorageProvider {
 
   private rawUrl(scope: FileScope): string {
     const { orgId, driveId } = this.scopeFor(scope);
-    return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${providerPath(scope)}/raw`;
+    return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${rawPath(scope)}/raw`;
   }
 
   private scopeFor(scope?: Pick<FileScope, "orgId" | "driveId">): {

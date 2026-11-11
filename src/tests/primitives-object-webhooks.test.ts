@@ -393,7 +393,7 @@ describe("object-reindex bounds", () => {
     await createObject({ agentId, kind: "board", path: "boards/b.excalidraw" });
     downloads = 0;
     const report = await reindexObjects({ agentId });
-    expect(report).toMatchObject({ scanned: 2, unchanged: 2, truncated: false });
+    expect(report).toMatchObject({ scanned: 2, unchanged: 2, truncated: false, cutBy: null });
     expect(downloads).toBe(0);
     expect(opCount("stat")).toBe(2);
   });
@@ -406,13 +406,35 @@ describe("object-reindex bounds", () => {
       });
     }
     const first = await reindexObjects({ agentId });
-    expect(first).toMatchObject({ truncated: true });
+    expect(first).toMatchObject({ truncated: true, cutBy: "reads" });
     expect(first.adopted).toHaveLength(50);
     expect(downloads).toBe(50);
     const second = await reindexObjects({ agentId });
     expect(second).toMatchObject({ truncated: false, unchanged: 50 });
     expect(second.adopted).toHaveLength(10);
     expect((await listObjects({ agentId, limit: 200 })).total).toBe(60);
+  });
+
+  test("a byte budget stops reading once spent; the next call continues", async () => {
+    const body = JSON.stringify({ type: "excalidraw", elements: [], pad: "x".repeat(100) });
+    for (let i = 0; i < 3; i++) files.set(`big/${i}.excalidraw`, { body, version: 1 });
+    const first = await reindexObjects({ agentId, limits: { bytes: body.length + 1 } });
+    expect(first).toMatchObject({ truncated: true, cutBy: "bytes", missing: [] });
+    expect(first.adopted).toHaveLength(2);
+    expect(downloads).toBe(2);
+    const second = await reindexObjects({ agentId });
+    expect(second).toMatchObject({ truncated: false, cutBy: null, unchanged: 2 });
+    expect(second.adopted).toHaveLength(1);
+  });
+
+  test("a spent time budget stops the pass before the next file", async () => {
+    await createObject({ agentId, kind: "board", path: "boards/a.excalidraw" });
+    calls.length = 0;
+    downloads = 0;
+    const report = await reindexObjects({ agentId, limits: { ms: 0 } });
+    expect(report).toMatchObject({ scanned: 0, truncated: true, cutBy: "time", missing: [] });
+    expect(opCount("stat")).toBe(0);
+    expect(downloads).toBe(0);
   });
 
   test("a second reindex on the same drive is refused while one runs", async () => {
