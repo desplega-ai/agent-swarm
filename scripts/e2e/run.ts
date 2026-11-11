@@ -195,7 +195,12 @@ async function bootStack(
     stack.slack = slack;
     const llm = await startMockLlm();
     stack.llm = llm;
-    const sut = await startSut(options.keep, { ...slack.mock.env, ...llm.env }, options.sutEnv);
+    const sut = await startSut(
+      options.keep,
+      { ...slack.mock.env, ...llm.env },
+      options.sutEnv,
+      options.coverageDir,
+    );
     stack.sut = sut;
     try {
       await slack.mock.waitForConnection(60_000);
@@ -393,6 +398,8 @@ async function main(): Promise<number> {
       .delete()
       .catch(() => {});
   }
+  // A fresh directory: the report unions every lcov in it, and stale ones would count.
+  if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
   const { sut, db, ctx } = await bootStack(options, journalPath);
   const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
@@ -532,6 +539,13 @@ async function main(): Promise<number> {
   }
   printTotals(result);
   await cleanup(options.keep);
+  // lcov lands when each API process stops, so count it after cleanup. Never fails the run.
+  if (options.coverageDir) {
+    const lcov = await Array.fromAsync(
+      new Bun.Glob("*/lcov.info").scan({ cwd: options.coverageDir, onlyFiles: true }),
+    ).catch(() => []);
+    console.log(`Coverage: ${lcov.length} lcov file(s) in ${options.coverageDir}`);
+  }
   return ok ? 0 : 1;
 }
 
