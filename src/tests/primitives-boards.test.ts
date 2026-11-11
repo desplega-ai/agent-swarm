@@ -336,6 +336,145 @@ describe("boards", () => {
     expect(s.elements.find((e) => e.containerId === arrowId)?.text).toBe("assign");
   });
 
+  // Regression: a label created by one patch was invisible to later patches in
+  // the same call, so a second set duplicated it and arrow re-routing left it behind.
+  describe("updateElements: a label set earlier in the call is visible to later patches", () => {
+    async function board(path: string) {
+      const { added } = await createBoard({
+        agentId,
+        path,
+        shapes: [
+          { key: "a", type: "rectangle", x: 0, y: 0 },
+          { key: "b", type: "rectangle", x: 400, y: 0 },
+        ],
+        arrows: [{ from: "a", to: "b" }],
+      });
+      return { a: added.a ?? "", b: added.b ?? "", arrow: added["arrows[0]"] ?? "" };
+    }
+
+    // Exactly one live bound text with `text` (or none), with matching two-way refs.
+    function expectLabel(s: Scene, containerId: string, text: string | null) {
+      const texts = s.elements.filter((e) => e.type === "text" && e.containerId === containerId);
+      const live = texts.filter((e) => !e.isDeleted);
+      const refs = (byId(s, containerId).boundElements ?? []).filter((r) => r.type === "text");
+      if (text === null) {
+        expect(live).toHaveLength(0);
+        expect(refs).toHaveLength(0);
+        return undefined;
+      }
+      expect(live.map((e) => e.text)).toEqual([text]);
+      expect(refs).toEqual([{ type: "text", id: live[0]?.id ?? "" }]);
+      return live[0] as BoardElement;
+    }
+
+    function expectArrowLabelCentered(s: Scene, arrowId: string, label: BoardElement) {
+      const arrow = byId(s, arrowId);
+      const end = arrow.points?.[1] ?? [0, 0];
+      expect(label.x + label.width / 2).toBeCloseTo(arrow.x + (end[0] ?? 0) / 2);
+      expect(label.y + label.height / 2).toBeCloseTo(arrow.y + (end[1] ?? 0) / 2);
+    }
+
+    for (const order of ["label then move", "move then label"] as const) {
+      test(`arrow label follows a moved end (${order})`, async () => {
+        const ids = await board("reroute.excalidraw");
+        const label = { elementId: ids.arrow, label: "go" };
+        const move = { elementId: ids.b, y: 600 };
+        await updateBoardElements({
+          agentId,
+          path: "reroute.excalidraw",
+          patches: order === "label then move" ? [label, move] : [move, label],
+        });
+        const s = scene("reroute.excalidraw");
+        expectValidScene(s);
+        const text = expectLabel(s, ids.arrow, "go") as BoardElement;
+        expectArrowLabelCentered(s, ids.arrow, text);
+        expect(text.y + text.height / 2).toBeGreaterThan(300);
+      });
+    }
+
+    test("a shape label set, then moved and resized, stays centered", async () => {
+      const ids = await board("shape-move.excalidraw");
+      await updateBoardElements({
+        agentId,
+        path: "shape-move.excalidraw",
+        patches: [
+          { elementId: ids.a, label: "new" },
+          { elementId: ids.a, x: 50, y: 500, width: 300 },
+        ],
+      });
+      const s = scene("shape-move.excalidraw");
+      expectValidScene(s);
+      const a = byId(s, ids.a);
+      const text = expectLabel(s, ids.a, "new") as BoardElement;
+      expect(text.x + text.width / 2).toBeCloseTo(a.x + a.width / 2);
+      expect(text.y + text.height / 2).toBeCloseTo(a.y + a.height / 2);
+    });
+
+    for (const target of ["a", "arrow"] as const) {
+      const kind = target === "a" ? "shape" : "arrow";
+      test(`setting a ${kind} label twice keeps one live text`, async () => {
+        const ids = await board(`twice-${target}.excalidraw`);
+        const result = await updateBoardElements({
+          agentId,
+          path: `twice-${target}.excalidraw`,
+          patches: [
+            { elementId: ids[target], label: "first" },
+            { elementId: ids[target], label: "second" },
+          ],
+        });
+        expect(result.version).toBe(2);
+        const s = scene(`twice-${target}.excalidraw`);
+        expectValidScene(s);
+        const text = expectLabel(s, ids[target], "second") as BoardElement;
+        expect(text.version).toBe(1);
+        if (target === "arrow") expectArrowLabelCentered(s, ids.arrow, text);
+        expect((await getBoard({ agentId, path: `twice-${target}.excalidraw` })).elements).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: ids[target], text: "second" })]),
+        );
+      });
+
+      test(`setting then clearing a new ${kind} label leaves no text, not even a tombstone`, async () => {
+        const ids = await board(`clear-${target}.excalidraw`);
+        await updateBoardElements({
+          agentId,
+          path: `clear-${target}.excalidraw`,
+          patches: [
+            { elementId: ids[target], label: "temp" },
+            { elementId: ids[target], label: "" },
+          ],
+        });
+        const s = scene(`clear-${target}.excalidraw`);
+        expectValidScene(s);
+        expectLabel(s, ids[target], null);
+        expect(s.elements.filter((e) => e.containerId === ids[target])).toHaveLength(0);
+      });
+
+      test(`clearing a stored ${kind} label then setting a new one keeps one live text`, async () => {
+        const ids = await board(`reset-${target}.excalidraw`);
+        await updateBoardElements({
+          agentId,
+          path: `reset-${target}.excalidraw`,
+          patches: [{ elementId: ids[target], label: "old" }],
+        });
+        const oldId = expectLabel(scene(`reset-${target}.excalidraw`), ids[target], "old")?.id;
+        await updateBoardElements({
+          agentId,
+          path: `reset-${target}.excalidraw`,
+          patches: [
+            { elementId: ids[target], label: "" },
+            { elementId: ids[target], label: "new" },
+            { elementId: ids[target], label: "newer" },
+          ],
+        });
+        const s = scene(`reset-${target}.excalidraw`);
+        expectValidScene(s);
+        const text = expectLabel(s, ids[target], "newer") as BoardElement;
+        expect(text.id).not.toBe(oldId);
+        expect(byId(s, oldId ?? "").isDeleted).toBe(true);
+      });
+    }
+  });
+
   test("updateElements refuses bad patches and writes nothing", async () => {
     const { object, added } = await createBoard({
       agentId,

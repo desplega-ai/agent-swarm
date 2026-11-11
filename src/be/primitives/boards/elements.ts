@@ -535,47 +535,57 @@ function rerouteArrows(scene: Scene, element: BoardElement, touched: BoardElemen
   }
 }
 
+/**
+ * Set or clear `element`'s label. A new label joins `scene.elements` at once,
+ * so later patches in the same call (and arrow re-routing) see it; it is also
+ * recorded in `appended` so the caller indexes it once at the end.
+ */
 function setLabel(
   scene: Scene,
   element: BoardElement,
   label: string,
   now: number,
   touched: BoardElement[],
-): BoardElement[] {
-  const appended: BoardElement[] = [];
+  appended: BoardElement[],
+): void {
   if (element.type === "text") {
     if (label.trim() === "")
       throw new ObjectsError(`${element.id}: a text element needs a non-empty label`);
     const size = measureText(label, element.fontSize ?? SHAPE_FONT_SIZE);
     Object.assign(element, { text: label, originalText: label, ...size });
-    return appended;
+    return;
   }
   const existing = labelOf(scene, element);
   if (label === "") {
     if (existing) {
-      existing.isDeleted = true;
       dropRef(element, existing.id);
-      touched.push(existing);
+      if (appended.includes(existing)) {
+        // Created earlier in this call and never persisted: drop it, no tombstone.
+        scene.elements.splice(scene.elements.indexOf(existing), 1);
+        appended.splice(appended.indexOf(existing), 1);
+      } else {
+        existing.isDeleted = true;
+        touched.push(existing);
+      }
     }
-    return appended;
+    return;
   }
   const fontSize = element.type === "arrow" ? ARROW_FONT_SIZE : SHAPE_FONT_SIZE;
-  let text = existing;
-  if (text) {
-    Object.assign(text, {
+  if (existing) {
+    Object.assign(existing, {
       text: label,
       originalText: label,
-      ...measureText(label, text.fontSize ?? fontSize),
+      ...measureText(label, existing.fontSize ?? fontSize),
     });
-    touched.push(text);
-  } else {
-    text = textElement(label, fontSize, { x: element.x, y: element.y }, element.id, now);
-    text.textAlign = "center";
-    text.verticalAlign = "middle";
-    addRef(element, { type: "text", id: text.id });
-    appended.push(text);
+    touched.push(existing);
+    return;
   }
-  return appended;
+  const text = textElement(label, fontSize, { x: element.x, y: element.y }, element.id, now);
+  text.textAlign = "center";
+  text.verticalAlign = "middle";
+  addRef(element, { type: "text", id: text.id });
+  scene.elements.push(text);
+  appended.push(text);
 }
 
 /** Apply patches in place. Returns the patched ids. */
@@ -608,12 +618,8 @@ export function updateElements(scene: Scene, patches: ElementPatch[], now = Date
     if (patch.y !== undefined) element.y = patch.y;
     if (patch.width !== undefined) element.width = patch.width;
     if (patch.height !== undefined) element.height = patch.height;
-    if (patch.label !== undefined)
-      appended.push(...setLabel(scene, element, patch.label, now, touched));
-    const label =
-      element.type === "text"
-        ? undefined
-        : (appended.find((e) => e.containerId === element.id) ?? labelOf(scene, element));
+    if (patch.label !== undefined) setLabel(scene, element, patch.label, now, touched, appended);
+    const label = element.type === "text" ? undefined : labelOf(scene, element);
     if (label) {
       // A smaller explicit size still has to fit the label.
       if (element.type !== "arrow") {
@@ -625,7 +631,6 @@ export function updateElements(scene: Scene, patches: ElementPatch[], now = Date
     if (element.type !== "arrow" && (moves || patch.label !== undefined))
       rerouteArrows(scene, element, touched);
   }
-  scene.elements.push(...appended);
   assignIndexes(scene, appended);
   bump(
     touched.filter((e) => !appended.includes(e)),
