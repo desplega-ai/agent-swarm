@@ -14,6 +14,7 @@ import {
   returnToOutbox,
   writeOutbox,
 } from "@/lib/comb/drafts";
+import { randomUUID } from "../../lib/uuid";
 
 export interface CommentOutbox {
   /** The connected user's unsent comments, oldest first, the ones being sent included. */
@@ -111,7 +112,7 @@ export function useCommentOutbox(
   const add = useCallback(
     (params: CommentAddParams, error: string) => {
       const storage = browserStorage();
-      const entry = { id: crypto.randomUUID(), userId, params, error, now: new Date() };
+      const entry = { id: randomUUID(), userId, params, error, now: new Date() };
       writeOutbox(storage, key, addToOutbox(readOutbox(storage, key), entry));
       notify();
     },
