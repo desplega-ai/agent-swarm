@@ -10,7 +10,8 @@ import {
 import type { EgressSecretEntry, ScriptAgentFsDescriptor } from "@/scripts-runtime/executors/types";
 import { AGENT_FS_API_KEY_CONFIG } from "@/scripts-runtime/script-fs";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
-import { getResolvedConfig, getSwarmConfigs } from "./db";
+import { resolveAgentFsIdentity } from "./agent-fs-identity";
+import { getResolvedConfig } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
 import { isApiOnlyConfigKey, isInternalConfigKey } from "./swarm-config-guard";
@@ -54,48 +55,28 @@ function toScriptUserConfig(configs: Awaited<ReturnType<typeof getResolvedConfig
 /**
  * The agent's default agent-fs drive for `ctx.fs` / `ctx.sh`, and the egress
  * entry that lets the patched fetch put the agent's key on agent-fs requests.
- *
- * The key comes only from the invoking agent's own agent-scoped row. A global
- * or repo row, the API env and `API_AGENT_FS_API_KEY` would all run the script
- * as some other agent-fs identity, so without an own key there is no mount.
- * The non-secret coordinates keep the store-progress lookup: config, then env.
+ * Identity rules (own agent-scoped key only): `resolveAgentFsIdentity`.
  */
 async function agentFsMount(
   agentId: string | undefined,
   configMap: Map<string, string>,
 ): Promise<{ descriptor: ScriptAgentFsDescriptor; entry: EgressSecretEntry } | undefined> {
-  if (!agentId) return undefined;
-  const [own] = await getSwarmConfigs({
-    scope: "agent",
-    scopeId: agentId,
-    key: AGENT_FS_API_KEY_CONFIG,
-  });
-  const key = own?.value?.trim();
-  if (!key) return undefined;
-  const value = (name: string) => configMap.get(name)?.trim() || process.env[name]?.trim();
-  const apiUrl = value("AGENT_FS_API_URL")?.replace(/\/+$/, "");
-  const orgId = value("AGENT_FS_DEFAULT_ORG_ID");
-  const driveId = value("AGENT_FS_DEFAULT_DRIVE_ID");
-  if (!apiUrl || !orgId || !driveId) return undefined;
-  let host: string;
-  try {
-    host = new URL(apiUrl).hostname;
-  } catch {
-    return undefined;
-  }
+  const identity = await resolveAgentFsIdentity(agentId, configMap);
+  if (!agentId || !identity) return undefined;
+  const { apiUrl, apiKey, orgId, driveId } = identity;
   const placeholder = placeholderForConfigKey(AGENT_FS_API_KEY_CONFIG);
   return {
     descriptor: { apiUrl, orgId, driveId },
     entry: {
       configKey: AGENT_FS_API_KEY_CONFIG,
-      allowedHosts: [host],
+      allowedHosts: [new URL(apiUrl).hostname],
       headerTemplate: `Authorization: Bearer ${placeholder}`,
       scope: "agent",
       scopeId: agentId,
       active: true,
       authKind: "config",
       placeholder,
-      value: key,
+      value: apiKey,
     },
   };
 }

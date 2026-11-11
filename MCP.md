@@ -17,7 +17,7 @@ bridge always builds a full-surface server (its surface is governed by the
 SDK allowlist instead), and HTTP REST routes are generally not gated.
 
 - Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`
+- Disabled by default: `primitives`, `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`
 
 ## Table of Contents
 
@@ -173,6 +173,11 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [room-change](#room-change)
   - [room-reset](#room-reset)
   - [room-decode](#room-decode)
+- [Primitives Tools](#primitives-tools)
+  - [object-create](#object-create)
+  - [object-get](#object-get)
+  - [object-list](#object-list)
+  - [object-reindex](#object-reindex)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -2146,6 +2151,59 @@ Decode a room snapshot value that the caller already holds.
 |-----------|------|----------|---------|-------------|
 | `value` | `unknown` | Yes | - | - |
 
+## Primitives Tools
+
+*Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).*
+
+Capability: `primitives` — **disabled by default**; add `primitives` to `CAPABILITIES` to enable.
+
+### object-create
+
+**Create primitive object**
+
+Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). |
+| `path` | `string` | Yes | - | Drive path, e.g. /boards/roadmap.excalidraw. |
+| `title` | `string` | No | - | - |
+
+### object-get
+
+**Get primitive object**
+
+Get a primitive object on your default agent-fs drive by `id` or `path`. `missing: true` means the row exists but the file is gone. `includeContent` returns the parsed file.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | - |
+| `path` | `string` | No | - | - |
+| `includeContent` | `boolean` | No | - | - |
+
+### object-list
+
+**List primitive objects**
+
+List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | No | - | - |
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### object-reindex
+
+**Reindex primitive objects**
+
+Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | No | - | - |
+
 ## Slack Tools
 
 *Slack capability - Slack integration tools (no-op if Slack is not configured)*
@@ -2179,7 +2237,7 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 | `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). A user ID (U…/W…) reads the bot's DM with that user. |
 | `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
 | `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
-| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task. |
+| `includeFiles` | `boolean` | No | - | Include and download file attachments. Defaults to false for direct channelId reads, and true for taskId or inboxMessageId reads. From a task, files are also stored as attachments of that task. |
 
 ### slack-post
 

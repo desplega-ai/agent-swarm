@@ -14,7 +14,7 @@
  * `SANDBOX_WEB_SHIMS` (quickjs-web-shims.ts) runs first and adds URL,
  * URLSearchParams, TextEncoder and TextDecoder.
  * `__swarm_shape` (injected before this file) lists the configured api/mcp
- * connections and the `ctx.fs` methods, so `ctx` matches the native executor exactly.
+ * connections, the `ctx.fs` methods and the SDK namespaces, so `ctx` matches the native executor exactly.
  */
 export const SANDBOX_PRELUDE = String.raw`(() => {
 "use strict";
@@ -445,7 +445,14 @@ const registry = (kind) => {
 // ctx.fs / ctx.sh run on the host (script-fs.ts): agent-fs at /afs, scratch memory elsewhere.
 const fs = Object.freeze(Object.fromEntries(shape.fs.map((name) => [name, method("fs." + name)])));
 const sh = (command, options) => hostCall("sh", options === undefined ? [command] : [command, options]);
-const ctx = Object.freeze({ swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console });
+// ctx.<ns>.<m> for each SDK_NAMESPACES entry; the host calls SDK method <ns>_<m> and unwraps it.
+const namespaces = Object.fromEntries(
+  Object.entries(shape.namespaces).map(([ns, names]) => [
+    ns,
+    Object.freeze(Object.fromEntries(names.map((name) => [name, method(ns + "." + name)]))),
+  ]),
+);
+const ctx = Object.freeze({ ...namespaces, swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console });
 
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });

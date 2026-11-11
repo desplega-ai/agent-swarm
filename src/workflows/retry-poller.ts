@@ -27,7 +27,7 @@ import { FOREACH_ITEMS_WAIT_FOR, parkAndDriveForeach, runForeachDrive } from "./
 import { resolveForeachParent } from "./foreach-join";
 import { rebuildNodeExecutionInput } from "./step-input";
 import { hasOwedSuccessors } from "./successor-routing";
-import { runStepValidation } from "./validation";
+import { runStepValidation, validateOutputSchema } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
 /** Bumped by every stop, so a tick in flight can tell that its poller was stopped. */
@@ -191,7 +191,20 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 await resumeFromChildRun(step.id, registry);
               }
             } else {
-              // Success! Re-run validation if configured before checkpointing.
+              const outputSchemaError = validateOutputSchema(node, result);
+              if (outputSchemaError) {
+                await checkpointStepFailure(
+                  run.id,
+                  step.id,
+                  outputSchemaError,
+                  step.retryCount,
+                  undefined,
+                  { fence },
+                );
+                continue;
+              }
+
+              // Re-run validation if configured before checkpointing.
               let validationPassed: boolean | undefined;
               if (node.validation) {
                 const validationResult = await runStepValidation(

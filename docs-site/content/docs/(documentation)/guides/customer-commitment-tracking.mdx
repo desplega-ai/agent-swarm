@@ -1,0 +1,82 @@
+---
+title: Customer commitment tracking
+description: "How a team keeps post-signature delivery commitments visible, source-linked and owned by a named person."
+---
+
+Agent Swarm fits a team where sales, delivery and operations share customer agreements and project updates in sources the swarm can read, and where the team wants a source-linked register of delivery commitments that a person verifies and owns. It does not fit a team that wants automated legal interpretation of contract terms, or one whose contract-management system already tracks obligations and owners, because that system is already the record and a second one only splits it.
+
+## Limits
+
+This page describes an illustrative configured design. It is not a customer story, not a measured result, and not a built-in legal or compliance feature. No customer is named here. Permissions, integrations and approval steps depend on your deployment, and your team configures and tests each one. Some of them need custom integrations.
+
+Four boundaries hold in every version of this design. The agent never interprets terms as a final answer. It never makes or changes a commitment to a customer. It never edits the approved register. It never sends external communication without human review. The register and the commitments in it stay a person's responsibility.
+
+## What the agent drafts
+
+The customer owner supplies the approved agreement and the current amendments into the account folder at `customers/<account>/` in agent-fs. That folder is the account's long-lived record, so the agreement sits next to the project updates and notes it will be read against.
+
+From those files the agent drafts a list of potential delivery commitments. Each item carries three things: what the team may have promised, a due date when the source states one, and the open questions the reading leaves. Every item links the clause or the file it came from, so a reader who doubts a line follows its link to the sentence that produced it.
+
+The draft stays separate from the approved record. The agent appends a new draft file rather than overwriting the register, because a draft that replaces an approved line erases the difference between the two readings.
+
+## What people verify and own
+
+A person validates each interpretation of the terms. The agent proposes a reading, and a person decides whether the contract says that.
+
+The verifier assigns one accountable owner per obligation, then records the verified status in the register. A single name per obligation, not a team and not two names, because an obligation with two owners has none. The approved register is the record. The draft is only input to it.
+
+A human-in-the-loop workflow node pauses the run before the register changes and posts the request to Slack. The message carries the summary and a link to the full draft in agent-fs, so the verifier approves or rejects without digging through files. On approve the verified items enter the register. On reject the draft is archived and the run stops there.
+
+## Ongoing checks
+
+Later runs compare the approved register with authorized project updates. Each run looks for three things: an obligation with no evidence of progress, an item whose due date has passed, and a commitment the register holds that no update mentions.
+
+The run flags what it finds and routes each discrepancy to the owner of that obligation, with the register line and the update attached. The agent reports. The owner decides whether the commitment stands, whether the date moves, or whether the team tells the customer, and the owner acts.
+
+## Exceptions that go to a person
+
+Five cases take the exception path rather than a best guess.
+
+- **Access restrictions.** The agent cannot read a document or an update. It reports the gap in the run and never works around permissions. A folder it cannot open is a stated gap, not an empty source.
+- **Superseded agreements.** An amendment replaces a clause. The older version is marked superseded and stays in the folder, and the two versions are never merged into one reading.
+- **Ambiguous terms.** A clause that supports two readings becomes an open question for the owner. The agent states the ambiguity and does not pick a reading.
+- **Missing dates.** An obligation with no stated date is listed as undated. The date is never invented from a delivery cycle or from a typical contract.
+- **Conflicting evidence.** Two updates disagree about the same commitment. The owner resolves it. The agent never reconciles the two silently, because a quietly reconciled conflict is the error nobody reviews.
+
+## How it maps to documented mechanics
+
+Four pieces ship with agent-swarm and need no custom code.
+
+- **agent-fs per-customer directories** give each account a persistent folder with durable shared account context and append-only notes, and every later session reads it before acting ([Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)).
+- **Accumulated account notes and human review** are the documented shape of per-account work, where a report is drafted from the folder and a person signs off before it leaves ([Proactive Customer Support](/docs/playbooks/proactive-customer-support)).
+- **swarm-script nodes** call each source over HTTP or SQL and return one JSON payload, so collection stays deterministic and the model is not doing arithmetic ([Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)).
+- **The human-in-the-loop workflow node** pauses the run, posts the request and resumes on approve or ends on reject ([HITL Gates](/docs/playbooks/patterns/hitl-gates)). Agents can also ask a person directly with the `request-human-input` tool, which is a different mechanism from the workflow node.
+
+Applying these patterns to contract obligations is an adaptation your team builds. Any connector to a project tool, a ticketing system or a contract repository is custom work, and it needs its own permissions and its own testing.
+
+## When a contract-management system or manual register is better
+
+A contract-management system is the better choice when it already holds the obligations, the owners and the reminders your team needs. Adding a second register beside it splits the record, and the team then maintains two answers to one question. Keep the system and skip this design.
+
+Legal review on every reading is the second case. If your counsel has to approve each interpretation of a clause before anyone acts on it, the agent's draft is not the bottleneck, and the workflow adds a step without removing one.
+
+Low volume is the third. When a team signs a handful of agreements a year and one named person can recheck the commitments by hand before each delivery review, a maintained spreadsheet is simpler than any workflow and holds the same information.
+
+## Before you start
+
+Write these five things down before the first run, because each one turns an argument later into a decision now.
+
+1. **The accountable owner per account, plus a backup.** One named person who verifies interpretations and answers the approval gate, and one who covers for them.
+2. **The source of truth for agreements and for project updates.** Which system holds the approved agreement, which holds the amendment, and which system wins for delivery status. A field with two owners has no owner.
+3. **Who may read which documents.** The access list per account folder, stated before the first run, because a permission the agent lacks becomes a reported gap rather than a workaround.
+4. **The review cadence.** How often the runs compare the register with project updates, and how old an update can be before it counts as missing evidence.
+5. **The actions that never happen without approval.** Sending an external message, changing a commitment, and editing the approved record.
+
+## Related
+
+- [Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories) for the folder shape this register lives in.
+- [Proactive Customer Support](/docs/playbooks/proactive-customer-support) for accumulated account notes and human review.
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources) for deterministic multi-source collection.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates) for the approval node and its two branches.
+- [Customer renewal review](/docs/guides/customer-renewal-review) for the renewal decision that follows a delivery.
+- [AI operations governance](/docs/guides/ai-operations-governance) for where approval thresholds belong in a written control record.

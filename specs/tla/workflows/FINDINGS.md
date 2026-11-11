@@ -944,3 +944,71 @@ that holds keeps its distinct-state count. `src/tests/workflow-tla-races.test.ts
 | `Probe-orphan-sweep.cfg` | CX15 found | 4,502 | 35 |
 | `Probe-task-skip.cfg` | holds | 131,404 | - |
 | `Probe-task-skip-sweep.cfg` | CX12 found | 828,465 | 34 |
+
+## Sync with #2955, #2957, #2963, #2966 and #2974 (`main` @ `1de54cf08`)
+
+#2957 and #2966 change the walker: a `waiting` outcome no longer ends the walk. It pauses only
+that branch, the walk routes its siblings' successors, and it ends in its finalizer. New fix flag
+F10 `FixParkSiblings` drops the `hasW` stop from `WBatchEnd`. In the model's graph the join `M`
+already waits on a parked branch (F6 `Awaited`), so F10 adds interleavings (a walk now reaches
+`WFinal` after a park, and a sibling's event can make `M` ready inside the same walk) and no new
+dropped successor.
+
+#2966 and #2974 add a process-local hold on the run (`successor-routing.ts`): a claim that
+completes a step with successors takes it inside its transaction and hands it to the walk it
+starts, every other walk takes one at entry, and a walk releases it just before its finalizer.
+Every run finalizer (`WFinal`, `finalizeOrWait`, `completeIfSettled`, `completeRunIfSettled`)
+leaves a held run to the holder. New fix flag F11 `FixSuccessorDebt` models it as a per-thread
+`dh` set by `Call` and cleared on the way to `WFinal` or `WRet`, and adds `~Owed` to `WFinal`,
+`FinalizeOrWait` (`EFin`, `H13`), `H4` and `P9`. The model fuses each claim with its `walkGraph`
+call, so the claim's hold and the walk's hold are the same flag.
+
+New invariant `CompletedRunRouted`: a completed run has a row for every node one of whose
+predecessors' latest row completed. New `Probe-successor-debt.cfg` (both flags on, two async
+branches joining on `M`, no sweeps) holds; `Probe-successor-debt-control.cfg` (F11 off) finds it.
+
+### CX16 (closed by #2966): a finalizer completes the run while another walk still owes a successor
+
+The initial walk executes `T`, then dispatches `A`, which parks (`XCkWait`), with `B` still in the
+same batch and no row yet. `A`'s task completes; its event claims `A` (`E2`) and walks `{M}`.
+That walk's seed filter holds `M` (`B` was routed to and has no row), so it goes straight to its
+finalizer: no row is running or waiting, `A` completed, and the run commits `completed`. The
+initial walk's `XDedup` for `B` then halts on the completed run, so `B` and `M` never execute.
+This is #2966's fourth repro shape. With F11 the initial walk still holds the run, so the event
+walk's finalizer leaves it, and the initial walk finalizes after `B` and `M`. F11 off: found at 347 distinct
+states (trace 18).
+
+Not modelled: #2963 (the retry poller's stop, process lifecycle only), the context merge
+`adoptStoredContext` (no run context in the model), #2974's foreach drive hold (no foreach node)
+and its release on an outer rollback (the model's transactions always commit). #2955 changes
+test timing only.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 12` for
+`Probe-child-run.cfg`). Every config gives the same verdict as on `b3ba784f4`. Configs with F10
+and F11 off that hold keep their distinct-state counts; violation counts and trace lengths vary
+with worker scheduling. Configs that model current `main` grow with the new interleavings.
+`src/tests/workflow-tla-races.test.ts` + `src/tests/workflow-sub-workflow.test.ts` +
+`src/tests/workflow-cascade-cancel.test.ts` + `src/tests/workflow-agent-task-retry.test.ts`: 88
+pass / 0 fail / 0 `test.failing`; with #2966's `workflow-finalization-races.test.ts` and #2957's
+`workflow-parallel-park.test.ts`: 105 pass / 0 fail.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 24,162 | 23 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 12,757 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 280 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,550 / 2,985 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,175 / 2,197 / 28,725 / 7,127 / 325 / 993 | 22 / 18 / 28 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,014 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 495 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 1,227,535 | 35 |
+| `Probe-input-await.cfg` | CX6 found | 360 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,140 / 17,562 | 19 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 7,825,516 / 489,558 | - / 35 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,269 | 18 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 10,704 / 622 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 7,784 | 36 |
+| `Probe-task-skip.cfg` | holds | 199,408 | - |
+| `Probe-task-skip-sweep.cfg` | CX12 found | 1,408,845 | 35 |
+| `Probe-successor-debt.cfg` / control (new) | holds / CX16 found | 498,792 / 347 | - / 18 |
