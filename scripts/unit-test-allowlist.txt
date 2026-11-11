@@ -6,7 +6,8 @@
 # One entry per line: `<path>  # <reason>`. The reason is required (10+ characters).
 # - A path ending in `/` allows every file under that directory.
 # - Any other path is one file, matched with or without its extension.
-# - A path ending in `.test.ts` or `.test.tsx` exempts that test file as a whole.
+# - A test file path (any name `bun test` runs, such as `.test.ts` or `.spec.ts`) exempts
+#   that test file as a whole.
 # Add an escape-hatch line only with a reason a reviewer can check.
 
 # Worker runtime: runs inside the harness, which the contract e2e suite does not start.

@@ -24,7 +24,12 @@ export type TestChange = { path: string; head: string; base?: string };
 export type Violation = { path: string; reason: string };
 
 const CODE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
-const TEST_FILE = /\.test\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+/**
+ * Every name `bun test` discovers (checked against Bun 1.4): a `.test`, `_test`, `.spec` or
+ * `_spec` suffix before any JS/TS extension, case-insensitive. Matching fewer names lets a
+ * test that Bun runs skip the rule.
+ */
+const TEST_FILE = /[._](?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i;
 const TEST_SUPPORT_DIR = "src/tests/";
 
 export function isTestFile(path: string): boolean {
@@ -194,7 +199,8 @@ async function changedTests(base: string, root: string): Promise<TestChange[]> {
     const status = fields[i++]!;
     if (status.startsWith("R")) {
       const from = fields[i++]!;
-      pairs.push({ path: fields[i++]!, from });
+      // A file renamed into a test name was not run before, so all its tests are new.
+      pairs.push({ path: fields[i++]!, from: isTestFile(from) ? from : undefined });
     } else if (status.startsWith("C")) {
       // A copy is a new file: its tests did not exist before.
       i++;

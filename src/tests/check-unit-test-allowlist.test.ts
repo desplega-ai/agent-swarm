@@ -1,10 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   countTestCalls,
+  isTestFile,
   judge,
   parseAllowlist,
   type TestChange,
 } from "../../scripts/check-unit-test-allowlist";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const allowlist = parseAllowlist(
   [
@@ -88,4 +93,101 @@ describe("rule 1: no new unit tests", () => {
       countTestCalls('test("a"); it("b"); test.skip("c"); test.if(x)("d"); latest("e");'),
     ).toBe(4);
   });
+
+  // Every name `bun test` 1.4 runs, probed in an empty directory: four suffixes, eight
+  // extensions, any letter case.
+  const discovered = ["test", "spec", "TEST", "Spec"].flatMap((word) =>
+    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "TS"].flatMap((ext) => [
+      `src/tests/new-api.${word}.${ext}`,
+      `src/tests/new-api_${word}.${ext}`,
+    ]),
+  );
+
+  test("judges every file name bun test discovers", () => {
+    for (const path of discovered) {
+      expect({ path, test: isTestFile(path) }).toEqual({ path, test: true });
+      const violations = run({ path, head: `${apiTest}test("a", () => {});\n` });
+      expect({ path, violations: violations.length }).toEqual({ path, violations: 1 });
+    }
+  });
+
+  test("leaves names bun test does not discover alone", () => {
+    for (const path of [
+      "src/tests/new-api-test.ts",
+      "src/tests/new-api.tests.ts",
+      "src/tests/test.ts",
+      "src/tests/new-api.test.d.ts",
+      "src/tests/new-api.test.json",
+      "node_modules/pkg/a.spec.ts",
+    ]) {
+      expect({ path, test: isTestFile(path) }).toEqual({ path, test: false });
+    }
+  });
+});
+
+describe("rule 1 CLI against a git diff", () => {
+  const checker = join(import.meta.dir, "../../scripts/check-unit-test-allowlist.ts");
+  let repo = "";
+  let base = "";
+
+  const git = async (...args: string[]) => {
+    const result = await runChild(
+      ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
+      { cwd: repo },
+    );
+    expect(result.exitCode).toBe(0);
+    return result.stdout.trim();
+  };
+  const put = async (path: string, text: string) => {
+    await mkdir(dirname(join(repo, path)), { recursive: true });
+    await writeFile(join(repo, path), text);
+  };
+  const check = () => runChild(["bun", checker, "--base", base], { cwd: repo });
+
+  beforeAll(async () => {
+    repo = await mkdtemp(join(tmpdir(), "rule1-cli-"));
+    await git("init", "-q");
+    await put("scripts/unit-test-allowlist.txt", "src/providers/  # harness adapters\n");
+    await put("src/be/db.ts", "export const getDb = () => 1;\n");
+    await put("src/tests/notes.ts", `${apiTest}test("parked", () => {});\n`);
+    await git("add", "-A");
+    await git("commit", "-q", "-m", "base");
+    base = await git("rev-parse", "HEAD");
+  });
+  afterAll(() => rm(repo, { recursive: true, force: true }));
+
+  test(
+    "fails a new .spec.ts that imports API code",
+    async () => {
+      await put("src/tests/foo.spec.ts", `${apiTest}test("a", () => {});\n`);
+      const result = await check();
+      await rm(join(repo, "src/tests/foo.spec.ts"));
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("src/tests/foo.spec.ts: new test file");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "fails a helper renamed into a test name",
+    async () => {
+      await git("mv", "src/tests/notes.ts", "src/tests/notes.test.ts");
+      const result = await check();
+      await git("mv", "src/tests/notes.test.ts", "src/tests/notes.ts");
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("src/tests/notes.test.ts: new test file");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "passes a name bun test does not run",
+    async () => {
+      await put("src/tests/foo-test.ts", `${apiTest}test("a", () => {});\n`);
+      const result = await check();
+      await rm(join(repo, "src/tests/foo-test.ts"));
+      expect(result.exitCode).toBe(0);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
