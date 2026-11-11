@@ -955,6 +955,7 @@ declare module "swarm-sdk" {
     sh(command: string, options?: ScriptShOptions): Promise<ScriptShResult>;
     stdlib: ScriptStdlib;
     logger: ScriptLogger;
+    // Each SDK_NAMESPACES entry (src/scripts-runtime/sdk-allowlist.ts) needs a typed `<ns>` key here.
   }
 
   /**
