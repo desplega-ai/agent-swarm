@@ -37,6 +37,12 @@ import {
   createRuntimePool,
   listAgentsForPool,
 } from "../be/runtime-pools/db";
+import {
+  mintAgentToken,
+  mintRuntimeToken,
+  mintScriptRunToken,
+  mintSessionToken,
+} from "../be/users";
 import { exitIfAgentDeleted } from "../commands/runner";
 import { ensureExtensionAgent } from "../extensions/identity";
 import { handleAgentLifecycle } from "../http/agent-lifecycle";
@@ -339,6 +345,70 @@ describe("ingress for a deleted agent", () => {
     exitIfAgentDeleted(500, "worker", exit);
     exitIfAgentDeleted(410, "worker", exit);
     expect(codes).toEqual([1]);
+  });
+});
+
+describe("credentials of a deleted agent", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  async function createTaskAs(token: string): Promise<number> {
+    const res = await fetch(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ task: "token probe" }),
+    });
+    await res.text();
+    return res.status;
+  }
+
+  async function mintEveryKind(agentId: string) {
+    const agent = await mintAgentToken(agentId);
+    return {
+      agent: agent.plaintext,
+      agentChild: (
+        await mintSessionToken(agentId, crypto.randomUUID(), HOUR, {
+          tokenId: agent.tokenId,
+          runtimeId: null,
+        })
+      ).plaintext,
+      runtime: (await mintRuntimeToken(agentId, `rt-${crypto.randomUUID()}`)).plaintext,
+      task: (await mintSessionToken(agentId, crypto.randomUUID(), HOUR)).plaintext,
+      scriptRun: (await mintScriptRunToken(agentId, HOUR)).plaintext,
+    };
+  }
+
+  async function statuses(tokens: Record<string, string>) {
+    const out: Record<string, number> = {};
+    for (const [kind, token] of Object.entries(tokens)) out[kind] = await createTaskAs(token);
+    return out;
+  }
+
+  test("every token kind minted before the delete gets 401 after it, restore included", async () => {
+    const worker = await offlineWorker("sd-tokens");
+    const tokens = await mintEveryKind(worker.id);
+    // Controls: the agent and runtime kinds create tasks while the agent lives.
+    expect(await createTaskAs(tokens.agent)).toBe(201);
+    expect(await createTaskAs(tokens.runtime)).toBe(201);
+
+    const { event } = await deleteNow(worker.id);
+    const refused = Object.fromEntries(Object.keys(tokens).map((kind) => [kind, 401]));
+    expect(await statuses(tokens)).toEqual(refused);
+    expect(event.snapshot.revokedTokenCount).toBe(5);
+
+    await restoreAgent(worker.id, { reason: "back" }, OPERATOR);
+    expect(await statuses(tokens)).toEqual(refused);
+  });
+
+  test("a token minted after the delete is refused; one minted after restore works", async () => {
+    const worker = await offlineWorker("sd-token-race");
+    await deleteNow(worker.id);
+    // A mint that raced past the delete transaction: only the resolver guard stops it.
+    const raced = await mintRuntimeToken(worker.id, `rt-${crypto.randomUUID()}`);
+    expect(await createTaskAs(raced.plaintext)).toBe(401);
+
+    await restoreAgent(worker.id, { reason: "back" }, OPERATOR);
+    const fresh = await mintAgentToken(worker.id);
+    expect(await createTaskAs(fresh.plaintext)).toBe(201);
   });
 });
 

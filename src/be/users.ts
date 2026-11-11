@@ -960,6 +960,26 @@ export async function revokeAgentTokens(agentId: string): Promise<number> {
 }
 
 /**
+ * Revoke every session token that authenticates as `agentId`: agent, runtime,
+ * task and script-run kinds, plus the child task tokens they minted. Controller
+ * tokens name a controller, not the agent, and stay. Joins the caller's
+ * transaction. Returns the number of tokens revoked directly.
+ */
+export async function revokeAllAgentSessionTokens(agentId: string): Promise<number> {
+  return await getDbClient().transaction(async (client) => {
+    const rows = await client.query<{ id: string }>(
+      "SELECT id FROM session_tokens WHERE agentId = ? AND controllerId IS NULL AND revokedAt IS NULL",
+      [agentId],
+    );
+    await revokeTokensWithChildren(
+      client,
+      rows.map((row) => row.id),
+    );
+    return rows.length;
+  });
+}
+
+/**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
  * best-effort unless `touch` is false.
@@ -1014,14 +1034,20 @@ export async function resolveSessionToken(
     revokedAt: string | null;
     sourceStepId: string | null;
     sourceScriptRunId: string | null;
+    agentDeletedAt: string | null;
   }>(
     `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     s.sourceStepId, s.sourceScriptRunId, c.placement, a.deleted_at AS agentDeletedAt
+     FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     LEFT JOIN agents a ON a.id = s.agentId
      WHERE s.tokenHash = ?`,
     [hash],
   );
   if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
+  // A soft-deleted agent authenticates with nothing. The delete revokes its
+  // tokens; this also refuses one minted after the delete by a race.
+  if (row.controllerId === null && row.agentDeletedAt !== null) return null;
 
   if (row.controllerId !== null) {
     return row.placement === "remote"

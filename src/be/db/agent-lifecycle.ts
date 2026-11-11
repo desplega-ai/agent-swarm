@@ -7,6 +7,7 @@ import type {
 } from "../../types";
 import { TERMINAL_TASK_STATUSES } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
+import { revokeAllAgentSessionTokens } from "../users";
 import { getAgentById, isExtensionAgent, NOT_EXTENSION_AGENT_SQL } from "./agents";
 import { getDbClient } from "./runtime";
 
@@ -266,12 +267,21 @@ export async function softDeleteAgent(
       "UPDATE agents SET deleted_at = ?, deleted_by = ?, lastUpdatedAt = ? WHERE id = ?",
       [now, actor.userId, now, agentId],
     );
+    // Every credential that resolves to the agent dies with it. Restore leaves
+    // these revoked; the worker re-registers and gets new ones.
+    const revokedTokenCount = await revokeAllAgentSessionTokens(agentId);
     const event = await writeEvent(
       agentId,
       "deleted",
       actor,
       input.reason,
-      { name: agent.name, status: agent.status, warnings: preview.warnings, disabledScheduleIds },
+      {
+        name: agent.name,
+        status: agent.status,
+        warnings: preview.warnings,
+        disabledScheduleIds,
+        revokedTokenCount,
+      },
       now,
     );
     const deleted = await getAgentById(agentId, { includeDeleted: true });
