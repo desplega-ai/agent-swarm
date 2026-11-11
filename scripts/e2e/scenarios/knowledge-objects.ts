@@ -137,7 +137,8 @@ export const knowledgeObjects: Scenario = {
       ] as const) {
         configIds.push(await setAgentConfig(ctx, agentId, key, value));
       }
-      const path = `boards/e2e-${ctx.nonce}.excalidraw`;
+      // `#`, `?` and a space must stay in the raw URL path, or the stub never sees the file.
+      const path = `boards/e2e #${ctx.nonce}?v=1.excalidraw`;
 
       const id = await withMcp(ctx, agentId, async (mcp) => {
         const created = structured(
