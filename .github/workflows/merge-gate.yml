@@ -658,9 +658,10 @@ jobs:
         run: bun run e2e:tsc
 
       # No --strict here: a band alone covers part of the surface. The merge job gates the union.
-      # On PRs, --coverage writes one lcov per API process; a coverage problem never fails it.
+      # --coverage writes one lcov per API process (PRs for the changed-lines comment, the merge
+      # queue for the coverage-on-main trend in the tracker); a coverage problem never fails it.
       - name: Run E2E contract shard
-        run: bun run e2e --shard ${{ matrix.shard }}/3 ${{ github.event_name == 'pull_request' && '--coverage' || '' }} --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --shard ${{ matrix.shard }}/3 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -676,7 +677,7 @@ jobs:
           retention-days: 7
 
       - name: Upload shard coverage
-        if: always() && github.event_name == 'pull_request'
+        if: always()
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -734,8 +735,9 @@ jobs:
           if-no-files-found: warn
 
       # Rule 3, comment only: changed API lines no scenario runs. Nothing here fails the job.
+      # The lcov files are downloaded on every event: the tracker step below reads them too.
       - name: Download shard coverage
-        if: always() && github.event_name == 'pull_request'
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -747,7 +749,7 @@ jobs:
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         run: |
-          bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md
+          bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md --json e2e-coverage-result.json
           cat e2e-coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload changed-lines coverage comment
@@ -757,6 +759,32 @@ jobs:
         with:
           name: e2e-coverage-comment
           path: e2e-coverage-comment.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Reports the run to the results tracker (same secrets as ui-e2e.yml). Informational: the step
+      # never fails (the script exits 0, the step is continue-on-error, and its own timeout is
+      # shorter than the job's), so a tracker outage cannot fail the gate. Fork PRs have no secrets.
+      - name: Report to the results tracker
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        timeout-minutes: 4
+        env:
+          UI_E2E_INGEST_URL: ${{ secrets.UI_E2E_INGEST_URL }}
+          UI_E2E_INGEST_BEARER: ${{ secrets.UI_E2E_INGEST_BEARER }}
+          TRACKER_TRIGGER: ${{ github.event_name == 'pull_request' && 'pr' || 'main' }}
+          TRACKER_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          TRACKER_REF: ${{ github.head_ref || github.event.merge_group.head_ref || github.ref_name }}
+          TRACKER_PR: ${{ github.event.pull_request.number }}
+        run: bun scripts/e2e/tracker-ingest.ts --out e2e-tracker-payloads
+
+      - name: Upload tracker payloads
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-tracker-payloads
+          path: e2e-tracker-payloads
           if-no-files-found: ignore
           retention-days: 7
 
