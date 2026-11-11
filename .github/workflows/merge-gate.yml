@@ -777,7 +777,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 6
+    timeout-minutes: 8
     continue-on-error: true
 
     steps:
@@ -817,7 +817,7 @@ jobs:
 
       # The base of the first merge group after this lands has no tracker-ingest.ts yet: skip.
       - name: Report to the results tracker
-        timeout-minutes: 4
+        timeout-minutes: 5
         env:
           UI_E2E_INGEST_URL: ${{ secrets.UI_E2E_INGEST_URL }}
           UI_E2E_INGEST_BEARER: ${{ secrets.UI_E2E_INGEST_BEARER }}

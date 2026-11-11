@@ -153,7 +153,8 @@ export function buildPayloads(
 }
 
 const ATTEMPTS = 3;
-const ATTEMPT_TIMEOUT_MS = 60_000;
+// The first ingest after a tracker upgrade also migrates the app, which took over a minute once.
+const ATTEMPT_TIMEOUT_MS = 90_000;
 /** Stop starting new work past this; the workflow step has its own, larger, timeout. */
 const DEADLINE_MS = 150_000;
 
