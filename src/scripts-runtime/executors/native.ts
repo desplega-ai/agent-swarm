@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { chown, mkdir, rm, symlink } from "node:fs/promises";
+import { existsSync, constants as fsConstants } from "node:fs";
+import { chown, lstat, mkdir, open, rm, symlink } from "node:fs/promises";
 import { tmpdir as osTmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -75,20 +75,77 @@ export function classifyExit(
   return "eval_error";
 }
 
-async function readResultFile(path: string): Promise<unknown | undefined> {
-  const file = Bun.file(path);
-  if (!(await file.exists())) return undefined;
-  const text = await file.text();
+/** Constraints on a file the script child wrote into its run dir. */
+export interface RunDirFileCheck {
+  /** Largest file accepted, in bytes. */
+  maxBytes: number;
+  /** Required owner uid; set when the child runs under a dropped identity. */
+  ownerUid?: number;
+}
+
+// Missing flags (win32) fall back to 0, which leaves the open unchanged.
+const RUN_DIR_OPEN_FLAGS =
+  fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);
+
+/**
+ * Reads a file the script child controls. The child can replace it with a
+ * symlink, a hard link, a FIFO or an oversized file, so the API must not read
+ * it by path: open without following links (non-blocking, so a FIFO cannot
+ * stall the open), then require a regular file, the expected owner and a size
+ * within the cap on the opened descriptor. Anything else reads as absent.
+ */
+export async function readRunDirFile(
+  path: string,
+  check: RunDirFileCheck,
+): Promise<string | undefined> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, RUN_DIR_OPEN_FLAGS);
+  } catch {
+    return undefined;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) return undefined;
+    if (check.ownerUid !== undefined && stat.uid !== check.ownerUid) return undefined;
+    if (stat.size > check.maxBytes) return undefined;
+    // A surviving group member can still append: read one byte past the stat
+    // size and treat a file that changed under the read as absent.
+    const buffer = Buffer.alloc(stat.size + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > stat.size) return undefined;
+    return buffer.toString("utf8", 0, length);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Whether anything exists at `path`, without following a final symlink. */
+async function runDirEntryExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readResultFile(path: string, check: RunDirFileCheck): Promise<unknown | undefined> {
+  const text = await readRunDirFile(path, check);
   if (!text) return undefined;
   return JSON.parse(text);
 }
 
 async function readRuntimeError(
   path: string,
+  check: RunDirFileCheck,
 ): Promise<import("./types").ScriptRuntimeError | undefined> {
-  const file = Bun.file(path);
-  if (!(await file.exists())) return undefined;
-  const text = await file.text();
+  const text = await readRunDirFile(path, check);
   if (!text) return undefined;
   try {
     return JSON.parse(text) as import("./types").ScriptRuntimeError;
@@ -325,9 +382,18 @@ export class NativeScriptExecutor implements ScriptExecutor {
         readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
         proc.exited.catch(() => (timedOut ? 124 : 1)),
       ]).finally(() => clearTimeout(timeout));
-      const result = exitCode === 0 ? await readResultFile(resultFile) : undefined;
-      const runtimeError = exitCode === 0 ? undefined : await readRuntimeError(errorFile);
-      const userCodeStarted = await Bun.file(startedFile).exists();
+      // The child owns the run dir: read its files only through the checked reader.
+      const runDirCheck: RunDirFileCheck = {
+        // ulimit -f already bounds what the child can write.
+        maxBytes: input.resources.maxFileBytes,
+        ...(runAs ? { ownerUid: runAs.uid } : {}),
+      };
+      const result = exitCode === 0 ? await readResultFile(resultFile, runDirCheck) : undefined;
+      const runtimeError =
+        exitCode === 0 ? undefined : await readRuntimeError(errorFile, runDirCheck);
+      // Presence only; anything at the path (even a planted link) reads as started,
+      // the conservative side for retry safety.
+      const userCodeStarted = await runDirEntryExists(startedFile);
       const error = classifyExit(exitCode, timedOut, killed, userCodeStarted);
 
       return {
