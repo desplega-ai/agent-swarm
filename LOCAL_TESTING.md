@@ -278,7 +278,7 @@ Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/R
 
 ### CI
 
-Merge Gate runs the suite in four shards (`.github/workflows/ui-e2e-shards.yml`) on pull requests and merge groups that touch the UI, the API, or the package, and needs it: it is a required check.
+Merge Gate runs the suite in four duration-balanced shards (`.github/workflows/ui-e2e-shards.yml`, weights in `packages/ui-e2e/shard-weights.json`) on pull requests and merge groups that touch the UI, the API, or the package, and needs it: it is a required check.
 A spec reruns once. A pass on the rerun is reported as `flaky` and does not fail the shard.
 Each shard records dashboard line coverage (`UI_E2E_COVERAGE=1`: a sourcemapped build plus V8 JS coverage per test, written as `packages/ui-e2e/coverage/lcov.info`).
 `.github/workflows/ui-e2e-report.yml` merges the shard reports into the `ui-e2e-html-report` artifact, merges the coverage, and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results and the coverage line. Merge Gate does not need the report job.

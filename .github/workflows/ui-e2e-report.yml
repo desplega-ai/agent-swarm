@@ -197,13 +197,6 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
-          # shortcut: a base reporter older than this guard uploads absolute attachment paths
-          # from untrusted summaries with these credentials. Skip it on merge_group. Drop this
-          # check once no merge group can have such a base.
-          if [ "$GITHUB_EVENT_NAME" = "merge_group" ] && grep -q 'isAbsolute(path) && existsSync(path)' reporter/publish-plan.ts; then
-            echo "agent-fs publish skipped: the base reporter does not confine attachment paths"
-            exit 0
-          fi
           npm i -g @desplega.ai/agent-fs@0.18.24
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \

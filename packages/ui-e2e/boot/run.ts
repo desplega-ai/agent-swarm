@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { assertAllowedTarget, readTarget } from "./policy";
+import { balanceShardArgs } from "./shard";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const repoRoot = resolve(packageRoot, "../..");
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
   }
 
   const playwrightExit = await run(
-    [await findPlaywrightBin(), "test", ...passthrough],
+    [await findPlaywrightBin(), "test", ...(await balanceShardArgs(passthrough))],
     packageRoot,
   );
   process.exit(playwrightExit);

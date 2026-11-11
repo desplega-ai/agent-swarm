@@ -31,6 +31,8 @@ The full recipe, the env table, and the CI notes live in [LOCAL_TESTING.md](../.
 | `reporter/publish-plan.ts` | Node | Turns summaries into the agent-fs upload plan and the comment image pick. |
 | `reporter/publish-artifacts.ts` | Node | Uploads screenshots, traces, and summaries to agent-fs, writes `artifacts.json` and `images.json`. |
 | `reporter/ingest-payload.ts` | Node | Builds the tracker v1 payload from a shard summary plus `artifacts.json`. |
+| `boot/shard.ts` | Bun | Duration-balanced shard plan from `shard-weights.json`; sets `UI_E2E_SHARD` for the reporters. |
+| `reporter/shard-weights.ts` | Node | Rebuilds `shard-weights.json` from a run's `summary.json` files. |
 | `reporter/coverage.ts` | Node | Merges the shards' lcov files into `coverage.json` (the tracker's `coverage` block) and one lcov. |
 | `fixtures/coverage.ts` | Node | V8 JS coverage options and the per-test start and stop (`UI_E2E_COVERAGE=1`). |
 | `reporter/ingest.ts` | Node | Posts one payload per shard to the tracker endpoint. |
@@ -104,7 +106,7 @@ The target API must be 2.5.1 or later, or run with `SWARM_DEV_MODE=true`, for `s
 
 `.github/workflows/ui-e2e-shards.yml` runs four shards, one runner each. Merge Gate calls it on pull requests and merge groups that touch the UI, the API, or this package, and needs it. `.github/workflows/ui-e2e.yml` calls it on manual dispatch. An external scheduler dispatches that on `main` nightly at 03:00 UTC, and a dispatch on `main` reports to the tracker as a nightly run. A merge group reports as `main`.
 
-`playwright.config.ts` sets `fullyParallel: true` (shards split by test, not file) and `retries: 1`. A pass on the rerun is `flaky` and exits 0. With `UI_E2E_COVERAGE=1`, `boot/run.ts` builds with `--sourcemap`, the `page` fixture records V8 JS coverage per test (`fixtures/coverage.ts`), and global teardown writes `coverage/lcov.info`. Only the test's own `page` is measured, and only files the browser loads count.
+`boot/run.ts` turns `--shard=i/n` into a file list: `boot/shard.ts` packs the spec files into shards by `shard-weights.json` (seconds of test time per file from a CI run), so the shards take about the same time. Refresh the weights with `reporter/shard-weights.ts` when they drift (its header has the commands). `playwright.config.ts` sets `fullyParallel: true` (a shard's files spread over its workers by test) and `retries: 1`. A pass on the rerun is `flaky` and exits 0. With `UI_E2E_COVERAGE=1`, `boot/run.ts` builds with `--sourcemap`, the `page` fixture records V8 JS coverage per test (`fixtures/coverage.ts`), and global teardown writes `coverage/lcov.info`. Only the test's own `page` is measured, and only files the browser loads count.
 
 The report job in `.github/workflows/ui-e2e-report.yml` resolves the run context once: trigger, target, sha, ref, and PR number. Every later step reads that context. It merges the blob reports into the `ui-e2e-html-report` artifact. For every same-repo event, it uploads screenshots, traces, and each shard's `summary.json` to agent-fs. It merges the shards' lcov with `reporter/coverage.ts` into `coverage.json`. It builds the sticky PR comment from every `summary.json` and the coverage. It ingests one payload per shard into the UI E2E tracker (v2 with `suite: "ui"` when coverage exists; the first payload carries it). On `merge_group` it runs the reporter from the group's base commit, because it holds the secrets. It uploads the ingest payloads and `artifacts.json` as the `ui-e2e-ingest-payloads` artifact for review.
 
