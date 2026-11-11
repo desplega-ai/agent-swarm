@@ -1,5 +1,6 @@
-import type { Coverage } from "./coverage";
+import { type Coverage, strictFailures } from "./coverage";
 import type { QuarantineEntry } from "./quarantine";
+import { type Observations, parseShard, type Shard } from "./shard";
 
 export class SkipError extends Error {}
 
@@ -71,10 +72,21 @@ export type HarnessResult = {
   logTail?: string;
 };
 
+/** One shard as the merge job saw it. */
+export type ShardSummary = Shard & { durationMs: number; ok: boolean; scenarios: number };
+
 export type E2eResult = {
   startedAt: string;
+  /** Wall-clock. A merged result takes the slowest shard: the shards ran in parallel. */
   durationMs: number;
-  sut: { port: number; dbPath: string; logPath: string };
+  /** Absent on a merged result: it booted no API. */
+  sut?: { port: number; dbPath: string; logPath: string };
+  /** `--shard i/n`: the band this run covered and the raw data the merge job unions. */
+  shard?: Shard & { observations: Observations };
+  /** A merged result: one entry per shard result it read. */
+  shards?: ShardSummary[];
+  /** Reasons the merge itself fails the run: a missing, duplicate or unreadable shard. */
+  mergeProblems?: string[];
   scenarios: ScenarioResult[];
   harness: HarnessResult[];
   coverage: Coverage;
@@ -108,6 +120,7 @@ export type Options = {
   strict: boolean;
   sutEnv: Record<string, string>;
   visualsDir?: string;
+  shard?: Shard;
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -120,6 +133,8 @@ Options:
   --only name,name              Run only named contract scenarios
   --skip name,name              Skip named contract scenarios
   --group name                  Run only contract scenarios tagged with this group
+  --shard i/n                   Run one fixed band of scenarios by order (n = 3). Coverage
+                                gates move to the merge step: bun scripts/e2e/merge.ts
   --list                        Print contract scenario names and exit
   --json path                   JSON result path (default: ./e2e-results.json)
   --summary-md path             Optional Markdown summary path
@@ -203,12 +218,23 @@ export function parseOptions(
     else if (arg === "--min-route-coverage") options.minRouteCoverage = coverageValue(value(), arg);
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
     else if (arg === "--strict") options.strict = true;
+    else if (arg === "--shard") options.shard = parseShard(value());
     else if (arg === "--list") options.list = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--keep") options.keep = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
 
+  // A band alone covers a fraction of the surface; the merge step gates the union.
+  if (
+    options.shard &&
+    (options.strict || options.minRouteCoverage > 0 || options.minToolCoverage > 0)
+  ) {
+    throw new Error("--shard cannot gate coverage: pass --strict and minimums to merge.ts");
+  }
+  if (options.shard && options.harness.length > 0) {
+    throw new Error("--shard runs contract scenarios only; drop --harness");
+  }
   const names = new Set(scenarioNames);
   for (const name of [...(options.only ?? []), ...options.skip]) {
     if (!names.has(name)) throw new Error(`Unknown scenario: ${name}`);
@@ -313,6 +339,75 @@ export function harnessFailureDetails(legs: HarnessResult[]): string[] {
   return lines;
 }
 
+/** Route and tool minimums plus `--strict`, on whatever coverage the run computed. */
+export function evaluateGates(
+  coverage: Coverage,
+  coverageError: string | undefined,
+  options: Pick<Options, "strict" | "minRouteCoverage" | "minToolCoverage">,
+): E2eResult["gates"] {
+  const failures = options.strict && !coverageError ? strictFailures(coverage) : [];
+  const passed =
+    !coverageError &&
+    coverage.routes.percent >= options.minRouteCoverage &&
+    coverage.mcpTools.percent >= options.minToolCoverage &&
+    failures.length === 0;
+  return {
+    minRouteCoverage: options.minRouteCoverage,
+    minToolCoverage: options.minToolCoverage,
+    strict: options.strict,
+    failures,
+    passed,
+  };
+}
+
+/** The closing console block: totals, problems, coverage and the gate verdicts. */
+export function printTotals(result: E2eResult): void {
+  const { scenarios, harness, coverage, gates } = result;
+  const failed =
+    scenarios.filter(failsRun).length + harness.filter((leg) => leg.status === "fail").length;
+  const passes =
+    scenarios.filter((scenario) => scenario.status === "pass").length +
+    harness.filter((leg) => leg.status === "pass").length;
+  const count = (status: RunStatus) => scenarios.filter((item) => item.status === status).length;
+  const quarantinedFailures = scenarios.filter(
+    (scenario) => scenario.status === "fail" && scenario.quarantine,
+  ).length;
+  console.log(
+    `${result.ok ? "PASS" : "FAIL"}: ${passes} passed, ${failed} failed, ${count("skip")} skipped, ${count("flaky")} flaky` +
+      (quarantinedFailures > 0 ? `, ${quarantinedFailures} quarantined failed` : ""),
+  );
+  for (const problem of result.mergeProblems ?? []) console.error(`Shard merge failed: ${problem}`);
+  for (const problem of result.quarantine?.problems ?? [])
+    console.error(`Quarantine gate failed: ${problem}`);
+  const surfaceLine = (label: string, surface: Coverage["mcpTools"]) =>
+    `${label}: ${surface.covered}/${surface.total} (${surface.percent.toFixed(1)}%)` +
+    (surface.excluded > 0 ? `, ${surface.excluded} excluded` : "");
+  console.log(surfaceLine("routes", coverage.routes));
+  console.log(surfaceLine("mcp tools", coverage.mcpTools));
+  console.log(surfaceLine("workflow node types", coverage.nodeTypes));
+  for (const state of coverage.stateSurfaces)
+    console.log(surfaceLine(`state ${state.name}`, state));
+  for (const engine of coverage.engines) {
+    console.log(
+      `engine ${engine.name}: ${engine.percent.toFixed(1)}% (routes ${engine.routes.covered}/${engine.routes.total}, tools ${engine.mcpTools.covered}/${engine.mcpTools.total}, node types ${engine.nodeTypes.covered}/${engine.nodeTypes.total}, states ${engine.stateValues.covered}/${engine.stateValues.total})`,
+    );
+  }
+  console.log(
+    `latency: p50 ${coverage.latency.overall.p50} ms, p95 ${coverage.latency.overall.p95} ms over ${coverage.latency.overall.count} calls`,
+  );
+  if (!gates.passed) {
+    if (coverage.routes.percent < gates.minRouteCoverage)
+      console.error(
+        `Route coverage gate failed: ${coverage.routes.percent.toFixed(1)}% < ${gates.minRouteCoverage}%`,
+      );
+    if (coverage.mcpTools.percent < gates.minToolCoverage)
+      console.error(
+        `MCP tool coverage gate failed: ${coverage.mcpTools.percent.toFixed(1)}% < ${gates.minToolCoverage}%`,
+      );
+    for (const failure of gates.failures) console.error(`Strict coverage gate failed: ${failure}`);
+  }
+}
+
 export function markdownSummary(result: E2eResult): string {
   const lines = [
     "## Black-box E2E",
@@ -328,6 +423,35 @@ export function markdownSummary(result: E2eResult): string {
         `| ${scenario.name} | ${statusLabel(scenario)} | ${scenario.attempts?.length ?? 1} | ${seconds(scenario.durationMs)} | ${markdownCell(scenario.error ?? "")} |`,
     ),
   ];
+  if (result.shard) {
+    lines.splice(
+      3,
+      0,
+      `Shard ${result.shard.index}/${result.shard.total}: coverage gates run on the merged result.`,
+      "",
+    );
+  }
+  if (result.shards) {
+    lines.push(
+      "",
+      "### Shards",
+      "",
+      "| Shard | Status | Scenarios | Duration |",
+      "| --- | --- | ---: | ---: |",
+      ...result.shards.map(
+        (shard) =>
+          `| ${shard.index}/${shard.total} | ${shard.ok ? "PASS" : "FAIL"} | ${shard.scenarios} | ${seconds(shard.durationMs)} |`,
+      ),
+    );
+  }
+  if ((result.mergeProblems ?? []).length > 0) {
+    lines.push(
+      "",
+      "Shard merge fails the run:",
+      "",
+      ...(result.mergeProblems ?? []).map((p) => `- ${p}`),
+    );
+  }
   const flaky = result.scenarios.filter((scenario) => scenario.status === "flaky");
   if (flaky.length > 0) {
     lines.push("", `Flaky (passed on rerun): ${flaky.map((scenario) => scenario.name).join(", ")}`);
