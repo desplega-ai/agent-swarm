@@ -1,4 +1,4 @@
-// Operator-only agent soft delete and restore (migration 333): blockers,
+// Operator-only agent soft delete and restore (migration 334): blockers,
 // warnings hash, read-path filtering, ingress guards, RBAC and the audit trail.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";

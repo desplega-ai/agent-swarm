@@ -71,7 +71,7 @@ export type AgentRow = {
   runtime_pool_id: string | null;
   runtime_provision_attempts: number;
   runtime_provision_retry_at: string | null;
-  /** Migration 333: soft-delete marker. */
+  /** Migration 334: soft-delete marker. */
   deleted_at?: string | null;
   deleted_by?: string | null;
 };
@@ -237,11 +237,11 @@ export async function createAgent(
   return importChanged ? ((await getAgentById(id)) ?? rowToAgent(row)) : rowToAgent(row);
 }
 
-/** SQL predicate that drops soft-deleted rows from an `agents` scan (migration 333). */
+/** SQL predicate that drops soft-deleted rows from an `agents` scan (migration 334). */
 export const NOT_DELETED_AGENT_SQL = "deleted_at IS NULL";
 
 /**
- * A soft-deleted agent (migration 333) reads as missing unless `includeDeleted`
+ * A soft-deleted agent (migration 334) reads as missing unless `includeDeleted`
  * is set. Only ingress that must tell "deleted" from "unknown" (register, ping,
  * poll, join-swarm, task creation) and the lifecycle routes opt in.
  */

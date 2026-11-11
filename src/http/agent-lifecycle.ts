@@ -1,5 +1,5 @@
 /**
- * Operator-only agent soft delete and restore (migration 333). Every route
+ * Operator-only agent soft delete and restore (migration 334). Every route
  * checks `agent.lifecycle.manage`, which only the shared key without
  * `X-Agent-ID` (operator) and user tokens hold, so no agent, the lead included,
  * can delete or restore one. There is deliberately no MCP tool.

@@ -1657,7 +1657,7 @@ export const AgentSchema = z
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
 
-    // Migration 333 soft delete. Present only on a deleted agent, which only
+    // Migration 334 soft delete. Present only on a deleted agent, which only
     // `includeDeleted` reads and `GET /api/agents?deleted=only` return.
     deletedAt: z.string().optional(),
     // Canonical user who deleted it; null for the shared operator key.
