@@ -51,7 +51,7 @@ async function eligibleRuntimeSlots(agentId?: string): Promise<Map<string, numbe
      WHERE r.status = 'active' AND r.draining = 0
        AND (r.credential_ready IS NULL OR r.credential_ready = 1)
        AND r.last_seen_at >= ?
-       AND (a.runtime_pool_id IS NULL OR p.enabled = 1)
+       AND (a.runtime_pool_id IS NULL OR p.enabled = 1) AND a.deleted_at IS NULL
        AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
          OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped'))
        ${agentId ? "AND r.agent_id = ?" : ""}
@@ -84,7 +84,7 @@ export async function routePoolTasks(
     const pending = await getDbClient().query<AgentTaskRow>(
       `SELECT * FROM agent_tasks WHERE status = 'pending'
        AND (pool_wake_at IS NOT NULL OR agentId IN (
-         SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL
+         SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL AND deleted_at IS NULL
          UNION SELECT agent_id FROM runtime_instances WHERE pool_id IS NOT NULL
        )) AND COALESCE(routing_reason, '') != 'human_pinned'`,
     );

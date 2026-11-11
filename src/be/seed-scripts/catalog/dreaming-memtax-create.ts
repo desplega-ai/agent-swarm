@@ -784,7 +784,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
 
   async function loadSources() {
     const users = await q("users", `SELECT u.id, u.name, u.email, u.role, u.status, u.timezone, u.preferredChannel, (CASE WHEN json_extract(CASE WHEN json_valid(u.metadata) THEN u.metadata END, '$.comms') IS NOT NULL OR length(coalesce(u.notes, '')) > 0 THEN 1 ELSE 0 END) hasComms, (SELECT group_concat(DISTINCT e.kind) FROM user_external_ids e WHERE e.userId = u.id) ext FROM users u`);
-    const agents = await q("agents", `SELECT id, name, role, isLead, coalesce(harness_provider, provider) harness FROM agents`);
+    const agents = await q("agents", `SELECT id, name, role, isLead, coalesce(harness_provider, provider) harness FROM agents WHERE deleted_at IS NULL`);
     const repos = await q("repos", `SELECT id, name, url, defaultBranch, clonePath, autoClone FROM swarm_repos`);
     const { entities, skipped } = buildEntities(users, agents, repos);
     const live = new Map<string, { e: Entity; recSha: string } | { gone: string }>();

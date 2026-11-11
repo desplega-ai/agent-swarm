@@ -80,7 +80,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
 
   let agents: any[] = [];
   try {
-    agents = rows(await ctx.swarm.db_query({ sql: `SELECT id, name FROM agents WHERE name NOT LIKE 'ext:%'` }));
+    agents = rows(await ctx.swarm.db_query({ sql: `SELECT id, name FROM agents WHERE name NOT LIKE 'ext:%' AND deleted_at IS NULL` }));
   } catch (e: any) {
     // Without the roster, owners fall back to Lead / coder defaults.
     errors.push(`agent lookup: ${String(e?.message ?? e).slice(0, 200)}`);

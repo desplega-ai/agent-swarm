@@ -1,6 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createAgent, getAllAgents, getDbClient, updateAgentProfile } from "@/be/db";
+import {
+  agentDeletedMessage,
+  createAgent,
+  getAgentById,
+  getAllAgents,
+  getDbClient,
+  updateAgentProfile,
+} from "@/be/db";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -87,8 +94,10 @@ export const registerJoinSwarmTool = (server: McpServer) => {
         const agent = await getDbClient().transaction(async () => {
           const agents = await getAllAgents({ includeExtensions: true });
 
-          const existingIdAgent = agents.find((agent) => agent.id === agentId);
+          // A soft-deleted id stays taken; its name does not (getAllAgents skips it).
+          const existingIdAgent = await getAgentById(agentId, { includeDeleted: true });
 
+          if (existingIdAgent?.deletedAt) throw new Error(agentDeletedMessage(existingIdAgent));
           if (existingIdAgent) {
             throw new Error(`Agent with ID "${agentId}" already exists.`);
           }

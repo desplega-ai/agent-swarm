@@ -71,6 +71,9 @@ export type AgentRow = {
   runtime_pool_id: string | null;
   runtime_provision_attempts: number;
   runtime_provision_retry_at: string | null;
+  /** Migration 333: soft-delete marker. */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 };
 
 /** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
@@ -129,6 +132,7 @@ export function rowToAgent(row: AgentRow, slim = false): Agent {
     credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
     avatar: parseAgentAvatar(row.avatar),
     slackIcon: parseAgentSlackIcon(row.slack_icon),
+    ...(row.deleted_at ? { deletedAt: row.deleted_at, deletedBy: row.deleted_by ?? null } : {}),
   };
   if (slim) return base;
   return {
@@ -233,9 +237,38 @@ export async function createAgent(
   return importChanged ? ((await getAgentById(id)) ?? rowToAgent(row)) : rowToAgent(row);
 }
 
-export async function getAgentById(id: string): Promise<Agent | null> {
-  const row = await getDbClient().get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
+/** SQL predicate that drops soft-deleted rows from an `agents` scan (migration 333). */
+export const NOT_DELETED_AGENT_SQL = "deleted_at IS NULL";
+
+/**
+ * A soft-deleted agent (migration 333) reads as missing unless `includeDeleted`
+ * is set. Only ingress that must tell "deleted" from "unknown" (register, ping,
+ * poll, join-swarm, task creation) and the lifecycle routes opt in.
+ */
+export async function getAgentById(
+  id: string,
+  opts?: { includeDeleted?: boolean },
+): Promise<Agent | null> {
+  const row = await getDbClient().get<AgentRow>(
+    opts?.includeDeleted
+      ? "SELECT * FROM agents WHERE id = ?"
+      : `SELECT * FROM agents WHERE id = ? AND ${NOT_DELETED_AGENT_SQL}`,
+    [id],
+  );
   return row ? rowToAgent(row) : null;
+}
+
+/** Message for any attempt to reach a soft-deleted agent. */
+export function agentDeletedMessage(agent: Pick<Agent, "id" | "name" | "deletedAt">): string {
+  return `Agent "${agent.name}" (${agent.id}) was deleted on ${agent.deletedAt}. Restore it or pick another agent.`;
+}
+
+/** Thrown by task creation when the assignee or offer target is soft-deleted. */
+export class AgentDeletedError extends Error {
+  constructor(agent: Pick<Agent, "id" | "name" | "deletedAt">) {
+    super(agentDeletedMessage(agent));
+    this.name = "AgentDeletedError";
+  }
 }
 
 /**
@@ -305,11 +338,15 @@ export class ExtensionAgentAssignmentError extends Error {
 export async function getAllAgents(opts?: {
   slim?: boolean;
   includeExtensions?: boolean;
+  /** `only` lists just the soft-deleted rows (the operator's restore view). */
+  deleted?: "only";
 }): Promise<Agent[]> {
+  const where = [
+    opts?.deleted === "only" ? "deleted_at IS NOT NULL" : NOT_DELETED_AGENT_SQL,
+    ...(opts?.includeExtensions ? [] : [NOT_EXTENSION_AGENT_SQL]),
+  ].join(" AND ");
   const rows = await getDbClient().query<AgentRow>(
-    opts?.includeExtensions
-      ? "SELECT * FROM agents ORDER BY name"
-      : `SELECT * FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} ORDER BY name`,
+    `SELECT * FROM agents WHERE ${where} ORDER BY name`,
   );
   return rows.map((row) => rowToAgent(row, opts?.slim ?? false));
 }
@@ -322,7 +359,7 @@ export async function getAgentStatusCounts(): Promise<{
   offline: number;
 }> {
   const rows = await getDbClient().query<{ status: AgentStatus; count: number }>(
-    `SELECT status, COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} GROUP BY status`,
+    `SELECT status, COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} AND ${NOT_DELETED_AGENT_SQL} GROUP BY status`,
   );
   const counts = { total: 0, idle: 0, busy: 0, offline: 0 };
   for (const { status, count } of rows) {
@@ -436,7 +473,7 @@ export async function updateAgentCredStatus(
  */
 export async function listAgentsWithCredStatusByProvider(provider: string): Promise<Agent[]> {
   const rows = await getDbClient().query<AgentRow>(
-    `SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`,
+    `SELECT * FROM agents WHERE harness_provider = ? AND ${NOT_DELETED_AGENT_SQL} ORDER BY name`,
     [provider],
   );
   return rows.map((row) => rowToAgent(row));
@@ -456,7 +493,7 @@ export async function getAgentHarnessProviders(): Promise<
   const rows = await getDbClient().query<{ provider: string; count: number }>(
     `SELECT harness_provider AS provider, COUNT(*) AS count
        FROM agents
-       WHERE harness_provider IS NOT NULL
+       WHERE harness_provider IS NOT NULL AND ${NOT_DELETED_AGENT_SQL}
        GROUP BY harness_provider
        ORDER BY harness_provider`,
   );

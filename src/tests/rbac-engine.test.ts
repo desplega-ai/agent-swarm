@@ -110,6 +110,7 @@ const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "runtime_controller.write",
   "runtime_pool.write",
   "agent.token.manage",
+  "agent.lifecycle.manage",
   "user.role.manage",
 ];
 

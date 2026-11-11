@@ -169,7 +169,7 @@ export async function findAgent(entry: {
 }): Promise<Agent | null | "ambiguous"> {
   if (entry.agentId) return getAgentById(entry.agentId);
   const rows = await getDbClient().query<{ id: string }>(
-    `SELECT id FROM agents WHERE name = ? AND ${NOT_EXTENSION_AGENT_SQL} LIMIT 2`,
+    `SELECT id FROM agents WHERE name = ? AND ${NOT_EXTENSION_AGENT_SQL} AND deleted_at IS NULL LIMIT 2`,
     [entry.agentName],
   );
   if (rows.length > 1) return "ambiguous";

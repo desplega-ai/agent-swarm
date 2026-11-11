@@ -100,7 +100,7 @@ export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot>
         WHERE requestedByUserId IS NOT NULL AND createdAt >= ?`,
       [since],
     ),
-    count(`SELECT COUNT(*) AS n FROM agents`),
+    count(`SELECT COUNT(*) AS n FROM agents WHERE deleted_at IS NULL`),
   ]);
   return {
     users_total: usersTotal,

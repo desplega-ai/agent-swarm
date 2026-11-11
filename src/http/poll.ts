@@ -203,6 +203,7 @@ const pollTriggers = route({
     200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
     404: { description: "Agent not found" },
+    410: { description: "Agent was soft-deleted (`agent_deleted`); the worker must stop" },
   },
 });
 
@@ -391,10 +392,11 @@ export async function handlePoll(
     let result: PollTxnResult;
     try {
       result = await getDbClient().transaction(async () => {
-        const agent = await getAgentById(myAgentId);
+        const agent = await getAgentById(myAgentId, { includeDeleted: true });
         if (!agent) {
           return { error: "Agent not found", status: 404 };
         }
+        if (agent.deletedAt) return { error: "agent_deleted", status: 410 };
 
         // The worker's parsed MODEL_TIER_* env overrides ride on every poll so
         // claim-time resolution can honor them (no write when unchanged).

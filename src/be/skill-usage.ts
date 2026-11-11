@@ -316,7 +316,8 @@ async function computeSkillUsageSummary(
             (SELECT COALESCE(SUM(u.n), 0) FROM used u WHERE u.agentId = a.id) AS invocations,
             (SELECT MAX(u.last) FROM used u WHERE u.agentId = a.id) AS lastInvokedAt
        FROM agents a
-      WHERE a.status != 'offline' OR EXISTS (SELECT 1 FROM used u WHERE u.agentId = a.id)
+      WHERE a.deleted_at IS NULL
+        AND (a.status != 'offline' OR EXISTS (SELECT 1 FROM used u WHERE u.agentId = a.id))
       ORDER BY invocations DESC, a.name`,
     sinceArgs,
   );

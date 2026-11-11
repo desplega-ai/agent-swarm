@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
+  AgentDeletedError,
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
@@ -1338,7 +1339,7 @@ export async function handleTasks(
         createTask.respond(res, 422, { error: error.reason, extension: error.extension });
         return true;
       }
-      if (error instanceof ExtensionAgentAssignmentError) {
+      if (error instanceof ExtensionAgentAssignmentError || error instanceof AgentDeletedError) {
         jsonError(res, error.message, 400);
         return true;
       }

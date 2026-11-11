@@ -1656,8 +1656,49 @@ export const AgentSchema = z
     // (OpenAPI-generation reproducibility).
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
+
+    // Migration 333 soft delete. Present only on a deleted agent, which only
+    // `includeDeleted` reads and `GET /api/agents?deleted=only` return.
+    deletedAt: z.string().optional(),
+    // Canonical user who deleted it; null for the shared operator key.
+    deletedBy: z.string().nullable().optional(),
   })
   .openapi("Agent");
+
+export const AgentLifecycleWarningSchema = z.object({
+  kind: z.string(),
+  count: z.number().int(),
+  // Ids and names only, at most 20; never secret values.
+  items: z.array(z.object({ id: z.string(), name: z.string().nullable() })),
+});
+export type AgentLifecycleWarning = z.infer<typeof AgentLifecycleWarningSchema>;
+
+export const AgentDeletePreviewSchema = z
+  .object({
+    agentId: z.string(),
+    // Each blocker refuses the delete until the operator resolves it.
+    blockers: z.array(z.object({ code: z.string(), message: z.string() })),
+    warnings: z.array(AgentLifecycleWarningSchema),
+    // sha256 of the warnings; the delete must echo it back.
+    warningsHash: z.string(),
+  })
+  .openapi("AgentDeletePreview");
+export type AgentDeletePreview = z.infer<typeof AgentDeletePreviewSchema>;
+
+export const AgentLifecycleEventSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    action: z.enum(["deleted", "restored"]),
+    actorKind: z.enum(["user", "operator"]),
+    actorRef: z.string(),
+    createdBy: z.string().nullable(),
+    reason: z.string(),
+    snapshot: z.record(z.string(), z.unknown()),
+    createdAt: z.string(),
+  })
+  .openapi("AgentLifecycleEvent");
+export type AgentLifecycleEvent = z.infer<typeof AgentLifecycleEventSchema>;
 
 // ---------------------------------------------------------------------------
 // Worker-reported credential snapshot

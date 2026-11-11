@@ -33,7 +33,9 @@ export async function getLocalFleetStats(
        FROM agent_tasks`,
     [since, since, since],
   );
-  const agents = await client.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents");
+  const agents = await client.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM agents WHERE deleted_at IS NULL",
+  );
   return {
     tasksCreated: Number(tasks?.created ?? 0),
     tasksCompleted: Number(tasks?.completed ?? 0),

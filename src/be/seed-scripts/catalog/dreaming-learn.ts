@@ -131,7 +131,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const restored = new Set((await kvList("restored:")).map((e) => String(e.key).slice("restored:".length)));
   const pinsExisting = await kvList("pin:", 500);
   const pinKeys = new Set(pinsExisting.map((e) => String(e.key)));
-  const agents = await q("agents", `SELECT id, name, isLead, status, soulMd, identityMd, toolsMd, claudeMd, CASE WHEN id = ? THEN heartbeatMd END AS heartbeatMd FROM agents WHERE name NOT LIKE 'ext:%'`, [LEAD]);
+  const agents = await q("agents", `SELECT id, name, isLead, status, soulMd, identityMd, toolsMd, claudeMd, CASE WHEN id = ? THEN heartbeatMd END AS heartbeatMd FROM agents WHERE name NOT LIKE 'ext:%' AND deleted_at IS NULL`, [LEAD]);
   const byId = new Map(agents.map((x: any) => [x.id, x]));
   const trimStates = (await kvList("trim-state:")).map((e) => e.value ?? {});
   const hbState = parse((await ctx.swarm.kv_getOrNull({ namespace: NS, key: "hb-state:lead" }).catch(() => null))?.value) ?? null;
