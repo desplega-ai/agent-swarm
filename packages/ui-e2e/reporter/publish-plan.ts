@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { type Summary, type SummaryResult, trackerSpecId } from "./ingest-payload.ts";
 
 export interface UploadItem {
@@ -38,20 +38,25 @@ function attachmentKind(
   return undefined;
 }
 
+function isInside(base: string, path: string): boolean {
+  return path === base || path.startsWith(base + sep);
+}
+
 function localPathFor(path: string, directory: string): string | undefined {
-  if (isAbsolute(path) && existsSync(path)) return path;
   const marker = "/test-results/";
   const markerIndex = path.indexOf(marker);
   const suffix =
     markerIndex >= 0
       ? path.slice(markerIndex + marker.length)
       : path.replace(/^test-results\//, "");
-  // The suffix must stay inside the shard directory. A summary is trusted input, but an upload
-  // must never reach outside the downloaded results.
+  // Every path, absolute ones included, must stay inside the shard directory. On merge_group the
+  // summary comes from the code under test, and a path to any other runner file would be uploaded
+  // with the publisher's agent-fs credentials. realpath also stops a symlink that points outside.
   const base = resolve(directory);
   const localPath = resolve(base, suffix);
-  if (localPath !== base && !localPath.startsWith(base + sep)) return undefined;
-  return existsSync(localPath) ? localPath : undefined;
+  if (!isInside(base, localPath) || !existsSync(localPath)) return undefined;
+  if (!isInside(realpathSync(base), realpathSync(localPath))) return undefined;
+  return localPath;
 }
 
 function hasRouteScreenshot(result: SummaryResult, directory: string): boolean {

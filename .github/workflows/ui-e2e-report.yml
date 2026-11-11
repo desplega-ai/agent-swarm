@@ -164,9 +164,13 @@ jobs:
           path: packages/ui-e2e/playwright-report
           if-no-files-found: warn
 
+      # Not on merge_group: the publisher uploads the files that summary.json attachments name,
+      # and a merge group's summaries come from the code under test (possibly a fork). A
+      # crafted path (say /proc/self/environ) would upload this step's agent-fs key. Queue runs
+      # have no PR comment to show images in. Tracker ingest reads only the summaries' data.
       - name: Check agent-fs secrets
         id: image-secrets
-        if: steps.context.outputs.same_repo == 'true'
+        if: steps.context.outputs.same_repo == 'true' && github.event_name != 'merge_group'
         env:
           AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
           AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
@@ -183,7 +187,7 @@ jobs:
 
       - name: Publish artifacts to agent-fs
         continue-on-error: true
-        if: steps.context.outputs.same_repo == 'true' && steps.image-secrets.outputs.available == 'true'
+        if: steps.context.outputs.same_repo == 'true' && github.event_name != 'merge_group' && steps.image-secrets.outputs.available == 'true'
         env:
           AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
           AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
@@ -193,6 +197,13 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
+          # shortcut: a base reporter older than this guard uploads absolute attachment paths
+          # from untrusted summaries with these credentials. Skip it on merge_group. Drop this
+          # check once no merge group can have such a base.
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ] && grep -q 'isAbsolute(path) && existsSync(path)' reporter/publish-plan.ts; then
+            echo "agent-fs publish skipped: the base reporter does not confine attachment paths"
+            exit 0
+          fi
           npm i -g @desplega.ai/agent-fs@0.18.24
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \

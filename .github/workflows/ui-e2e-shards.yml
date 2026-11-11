@@ -52,7 +52,16 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
+        working-directory: packages/ui-e2e
+
+      # Best effort: the runner image already has Chromium's libraries, and this adds only
+      # fonts. A hung apt mirror (all shards, Nov 11) must not turn the required gate red. A
+      # library that is really missing still fails the shard in the next step.
+      - name: Install Chromium system dependencies
+        continue-on-error: true
+        timeout-minutes: 3
+        run: npx playwright install-deps chromium
         working-directory: packages/ui-e2e
 
       # retries: 1 in playwright.config.ts. A spec that passes on its rerun is flaky, which

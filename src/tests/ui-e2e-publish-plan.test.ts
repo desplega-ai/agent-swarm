@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Summary } from "../../packages/ui-e2e/reporter/ingest-payload.ts";
@@ -246,5 +246,37 @@ test("buildUploadPlan never resolves an attachment outside its shard directory",
   expect(plan.items.filter((item) => item.kind !== "log")).toEqual([]);
   expect(plan.warnings).toEqual([
     "Skipping missing artifact /runner/test-results/../../../../etc/hosts",
+  ]);
+});
+
+test("buildUploadPlan rejects absolute paths and symlinks that leave the shard directory", () => {
+  const outside = file(root, "runner-env/secret.env");
+  symlinkSync(outside, join(firstDirectory, "failure/link.png"));
+  const attachment = (name: string, path: string) => ({ name, contentType: "image/png", path });
+  const escaping: Summary = {
+    shard: { current: 1, total: 1 },
+    startedAt: "2026-09-07T10:00:00.000Z",
+    finishedAt: "2026-09-07T10:01:00.000Z",
+    results: [
+      {
+        specId: "chromium > specs/leak.spec.ts > leaks",
+        titlePath: ["leaks"],
+        title: "leaks",
+        file: "specs/leak.spec.ts",
+        status: "failed",
+        durationMs: 10,
+        retry: 0,
+        attachments: [
+          attachment("absolute", outside),
+          attachment("symlink", "/runner/test-results/failure/link.png"),
+        ],
+      },
+    ],
+  };
+  const plan = buildUploadPlan([{ dir: firstDirectory, summary: escaping }], "e2e/x/main/abcdef0");
+  expect(plan.items.filter((item) => item.kind !== "log")).toEqual([]);
+  expect(plan.warnings).toEqual([
+    `Skipping missing artifact ${outside}`,
+    "Skipping missing artifact /runner/test-results/failure/link.png",
   ]);
 });
