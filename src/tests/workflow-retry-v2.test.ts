@@ -238,6 +238,107 @@ describe("Workflow Retry v2 (Phase 4)", () => {
   });
 
   describe("Retry Poller", () => {
+    test("rejects schema-invalid retry output without running successors", async () => {
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "n1",
+            type: "fail-once",
+            config: { failUntilAttempt: 1 },
+            outputSchema: {
+              type: "object",
+              properties: { attempt: { type: "string" } },
+              required: ["attempt"],
+            },
+            retry: { strategy: "static", maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1 },
+            next: "successor",
+          },
+          {
+            id: "successor",
+            type: "notify",
+            config: { channel: "test", template: "must not run" },
+          },
+        ],
+      });
+
+      failCounter = 0;
+      notifyCounter = 0;
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+      const [initialStep] = await getWorkflowRunStepsByRunId(runId);
+      expect(initialStep?.status).toBe("failed");
+      expect(initialStep?.error).toBe("Intentional failure #1");
+      expect(initialStep?.nextRetryAt).toBeTruthy();
+
+      try {
+        startRetryPoller(registry, 1);
+        await waitUntil(
+          async () => {
+            const [step] = await getWorkflowRunStepsByRunId(runId);
+            return failCounter >= 2 && step?.status !== "running";
+          },
+          () => "the retry did not settle",
+        );
+      } finally {
+        stopRetryPoller();
+      }
+
+      const run = (await getWorkflowRun(runId))!;
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      expect(run.status).toBe("failed");
+      expect(run.error).toContain("Output schema validation failed");
+      expect(run.context).not.toHaveProperty("n1");
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.status).toBe("failed");
+      expect(steps[0]?.error).toContain("attempt");
+      expect(steps[0]?.output).toBeUndefined();
+      expect(steps[0]?.nextRetryAt).toBeUndefined();
+      expect(failCounter).toBe(2);
+      expect(notifyCounter).toBe(0);
+    });
+
+    test("checkpoints schema-valid retry output and runs successors", async () => {
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "n1",
+            type: "fail-once",
+            config: { failUntilAttempt: 1 },
+            outputSchema: {
+              type: "object",
+              properties: { attempt: { type: "number" } },
+              required: ["attempt"],
+            },
+            retry: { strategy: "static", maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1 },
+            next: "successor",
+          },
+          {
+            id: "successor",
+            type: "notify",
+            config: { channel: "test", template: "run after valid output" },
+          },
+        ],
+      });
+
+      failCounter = 0;
+      notifyCounter = 0;
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+      try {
+        startRetryPoller(registry, 1);
+        await waitForRunStatus(runId, "completed");
+      } finally {
+        stopRetryPoller();
+      }
+
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      const retriedStep = steps.find((step) => step.nodeId === "n1")!;
+      expect(retriedStep.status).toBe("completed");
+      expect(retriedStep.output).toEqual({ attempt: 2 });
+      expect(retriedStep.nextRetryAt).toBeUndefined();
+      expect(steps.find((step) => step.nodeId === "successor")?.status).toBe("completed");
+      expect(failCounter).toBe(2);
+      expect(notifyCounter).toBe(1);
+    });
+
     test("rehydrates completed step outputs before interpolating retry inputs", async () => {
       const workflow = await makeWorkflow({
         nodes: [

@@ -3,7 +3,7 @@
  * the calling agent's task instead of on the API server's disk, where a worker
  * container can't read them.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   closeDb,
   createAgent,
+  createInboxMessage,
   createTaskExtended,
   getDbClient,
   getTaskAttachments,
@@ -18,12 +19,14 @@ import {
 } from "../be/db";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
 import type { SlackFile } from "../slack/files";
+import * as slackFileModule from "../slack/files";
 import { createSlackTaskWithFiles, fetchSlackFiles } from "../slack/inbound-files";
 
 const TEST_DB_PATH = "./test-slack-file-tools-attachments.sqlite";
 const BOT_TOKEN = "example-slack-file-tools-token";
 const AGENT_ID = "aaaaaaaa-0000-4000-8000-00000000f001";
 const OTHER_ID = "aaaaaaaa-0000-4000-8000-00000000f002";
+const LEAD_ID = "aaaaaaaa-0000-4000-8000-00000000f003";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);
 const PNG_2 = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 8, 8, 8]);
 
@@ -135,6 +138,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   await createAgent({ id: AGENT_ID, name: "Worker", isLead: false, status: "idle" });
   await createAgent({ id: OTHER_ID, name: "Other", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Lead", isLead: true, status: "idle" });
 
   const [{ registerSlackDownloadFileTool }, { registerSlackReadTool }] = await Promise.all([
     import("../tools/slack-download-file"),
@@ -143,10 +147,18 @@ beforeAll(async () => {
   const server = new McpServer({ name: "slack-file-tools", version: "1.0.0" });
   registerSlackDownloadFileTool(server);
   registerSlackReadTool(server);
-  const tools = (server as unknown as { _registeredTools: Record<string, { handler: Handler }> })
-    ._registeredTools;
+  const tools = (
+    server as unknown as {
+      _registeredTools: Record<
+        string,
+        { handler: Handler; inputSchema: { parse(args: unknown): unknown } }
+      >;
+    }
+  )._registeredTools;
   downloadTool = tools["slack-download-file"]!.handler;
-  readTool = tools["slack-read"]!.handler;
+  const registeredRead = tools["slack-read"]!;
+  readTool = (args, context) =>
+    registeredRead.handler(registeredRead.inputSchema.parse(args), context);
 });
 
 afterAll(async () => {
@@ -485,17 +497,73 @@ describe("slack-read", () => {
     expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
-  test("attaches to the source task when reading by inbox/channel context", async () => {
+  test("explicit includeFiles attaches a direct channel read to the source task", async () => {
     await getDbClient().run("UPDATE agents SET isLead = 1 WHERE id = ?", [AGENT_ID]);
     const file = addSlackFile("F0CHAN0001", "chan.png", PNG);
     threadMessages = [{ user: "U_HUMAN", text: "c", ts: "1700000000.000200", files: [file] }];
 
     try {
-      await readTool({ channelId: "C0THREAD" }, extra({ "x-source-task-id": taskId }));
+      await readTool(
+        { channelId: "C0THREAD", includeFiles: true },
+        extra({ "x-source-task-id": taskId }),
+      );
     } finally {
       await getDbClient().run("UPDATE agents SET isLead = 0 WHERE id = ?", [AGENT_ID]);
     }
 
     expect((await getTaskAttachments(taskId)).map((a) => a.name)).toEqual(["chan.png"]);
+  });
+
+  test.each([
+    undefined,
+    "1700000000.000100",
+  ])("direct reads skip file work by default, with threadTs=%s", async (threadTs) => {
+    const file = addSlackFile("F0HEAVY001", "recording.mp4", PNG);
+    threadMessages = [{ user: "U_HUMAN", text: "recording", ts: "1", files: [file] }];
+    const download = spyOn(slackFileModule, "downloadFile").mockResolvedValue({ success: false });
+    try {
+      const result = await readTool(
+        { channelId: "C0THREAD", threadTs, limit: 100 },
+        extra({ "x-agent-id": LEAD_ID }),
+      );
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.messages).toMatchObject([{ text: "recording" }]);
+      expect(
+        (result.structuredContent.messages as Array<{ files?: unknown }>)[0]!.files,
+      ).toBeUndefined();
+      expect(download).not.toHaveBeenCalled();
+    } finally {
+      download.mockRestore();
+    }
+  });
+
+  test("direct reads with a source task still skip files by default", async () => {
+    const file = addSlackFile("F0SOURCE01", "recording.mp4", PNG);
+    threadMessages = [{ user: "U_HUMAN", text: "recording", ts: "1", files: [file] }];
+    const task = await createTaskExtended("lead task", { agentId: LEAD_ID });
+    const result = await readTool(
+      { channelId: "C0THREAD", threadTs: "1", limit: 100 },
+      extra({ "x-agent-id": LEAD_ID, "x-source-task-id": task.id }),
+    );
+    expect(result.isError).toBeFalsy();
+    expect(await getTaskAttachments(task.id)).toEqual([]);
+    expect(
+      (result.structuredContent.messages as Array<{ files?: unknown }>)[0]!.files,
+    ).toBeUndefined();
+  });
+
+  test("inbox context keeps attachments enabled when channelId is also supplied", async () => {
+    const file = addSlackFile("F0INBOX001", "inbox.png", PNG);
+    threadMessages = [{ user: "U_HUMAN", text: "see this", ts: "1", files: [file] }];
+    const inbox = await createInboxMessage(AGENT_ID, "read this", {
+      slackChannelId: "C0THREAD",
+      slackThreadTs: "1",
+    });
+    const result = await readTool(
+      { inboxMessageId: inbox.id, channelId: "C0IGNORED" },
+      extra({ "x-source-task-id": taskId }),
+    );
+    expect(result.isError).toBeFalsy();
+    expect((await getTaskAttachments(taskId)).map((a) => a.name)).toEqual(["inbox.png"]);
   });
 });

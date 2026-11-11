@@ -38,7 +38,7 @@ export const scriptInlineRun: Scenario = {
     expect(result.doubled === 42 && result.marker === marker, "inline result is wrong");
     expect(
       JSON.stringify(result.ctxKeys) ===
-        JSON.stringify(["api", "fs", "logger", "mcp", "sh", "stdlib", "swarm"]),
+        JSON.stringify(["api", "fs", "logger", "mcp", "objects", "sh", "stdlib", "swarm"]),
       `ctx offers an unexpected surface: ${JSON.stringify(result.ctxKeys)}`,
     );
     expect(

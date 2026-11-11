@@ -11733,7 +11733,8 @@
                               "agentmail",
                               "kapso",
                               "chat-sdk",
-                              "swarm-x"
+                              "swarm-x",
+                              "primitives"
                             ]
                           }
                         },
@@ -11796,7 +11797,8 @@
                               "agentmail",
                               "kapso",
                               "chat-sdk",
-                              "swarm-x"
+                              "swarm-x",
+                              "primitives"
                             ]
                           }
                         },

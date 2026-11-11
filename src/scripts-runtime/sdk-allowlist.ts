@@ -34,6 +34,12 @@ export const SDK_TOOL_NAME_MAP = {
   room_reset: "room-reset",
   room_decode: "room-decode",
 
+  // ── primitive objects (also ctx.objects, see SDK_NAMESPACES) ──
+  objects_create: "object-create",
+  objects_get: "object-get",
+  objects_list: "object-list",
+  objects_reindex: "object-reindex",
+
   // ── repos ──
   repo_list: "get-repos",
   repo_update: "update-repo",
@@ -232,4 +238,67 @@ export function isMcpToolAllowedForScripts(mcpToolName: string): boolean {
 
 export function mcpToolNameForSdkMethod(name: string): string {
   return SDK_TOOL_NAME_MAP[name as keyof typeof SDK_TOOL_NAME_MAP] ?? name;
+}
+
+/** `{ ns: methods }`: `ctx.<ns>.<m>(args)` calls SDK method `<ns>_<m>` and returns its unwrapped result. */
+export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * Tool groups exposed as top-level `ctx.<ns>` namespaces in native and QuickJS
+ * scripts and in script workflows. A new entry also needs its `<ns>_<m>`
+ * methods in SDK_TOOL_NAME_MAP and a typed key on `ScriptContext` in
+ * `src/be/scripts/typecheck.ts`.
+ */
+export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
+  objects: ["create", "get", "list", "reindex"],
+});
+
+/** ctx keys a namespace may never shadow. */
+export const RESERVED_CTX_KEYS: readonly string[] = [
+  "swarm",
+  "api",
+  "mcp",
+  "fs",
+  "sh",
+  "stdlib",
+  "logger",
+  "run",
+  "step",
+  "config",
+];
+
+const NAMESPACE_NAME = /^[a-z][a-zA-Z]*$/;
+
+export function sdkMethodForNamespace(ns: string, method: string): string {
+  return `${ns}_${method}`;
+}
+
+/** Throws unless every namespace is unreserved, well-named and maps to allowlisted SDK methods. */
+export function assertNamespaces(registry: SdkNamespaceRegistry): void {
+  for (const [ns, methods] of Object.entries(registry)) {
+    if (!NAMESPACE_NAME.test(ns)) throw new Error(`SDK namespace '${ns}' has an invalid name`);
+    if (RESERVED_CTX_KEYS.includes(ns)) throw new Error(`SDK namespace '${ns}' is reserved`);
+    for (const method of methods) {
+      if (!NAMESPACE_NAME.test(method)) {
+        throw new Error(`SDK namespace method '${ns}.${method}' has an invalid name`);
+      }
+      const sdkMethod = sdkMethodForNamespace(ns, method);
+      if (!Object.hasOwn(SDK_TOOL_NAME_MAP, sdkMethod)) {
+        throw new Error(
+          `SDK namespace method '${ns}.${method}' needs '${sdkMethod}' in SDK_TOOL_NAME_MAP`,
+        );
+      }
+    }
+  }
+}
+
+/** A tool's structured payload as a namespace returns it: throws on a refusal, else drops `success`. */
+export function unwrapToolPayload(label: string, payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const { success, ...rest } = payload as Record<string, unknown>;
+  if (success === false) {
+    const reason = typeof rest.message === "string" ? rest.message : "tool refused the call";
+    throw new Error(`${label} failed: ${reason}`);
+  }
+  return rest;
 }

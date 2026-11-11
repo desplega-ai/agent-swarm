@@ -9,6 +9,7 @@ import { buildCtx, type RuntimeCtx } from "../ctx";
 import { Redacted, type Redacted as RedactedValue } from "../redacted";
 import { SCRIPT_SDK_RESPONSE_LIMIT_BYTES } from "../response-limit";
 import { ctxSignatureHintFor } from "../script-error-hints";
+import { SDK_NAMESPACES, type SdkNamespaceRegistry } from "../sdk-allowlist";
 import { runtimeFetch } from "../stdlib/fetch";
 import { table } from "../stdlib/table";
 import { SwarmConfig } from "../swarm-config";
@@ -34,6 +35,8 @@ export type QuickJSJob = {
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
   network: ExecutorInput["network"];
+  /** Tests inject a fixture; production uses `SDK_NAMESPACES`. */
+  namespaces?: SdkNamespaceRegistry;
 };
 
 // Set while a ctx.swarm or ctx.mcp host call runs. Those calls go to the swarm
@@ -224,6 +227,7 @@ function callable(target: unknown, name: string): (...args: unknown[]) => Promis
 /** Runs an async host call that the sandbox requested. Only these paths exist. */
 async function dispatchCall(
   hostCtx: RuntimeCtx,
+  namespaces: SdkNamespaceRegistry,
   sqlApiSlugs: ReadonlySet<string>,
   path: string,
   args: unknown[],
@@ -267,6 +271,10 @@ async function dispatchCall(
       first in Object.prototype ? undefined : hostCtx.swarm[first],
       `ctx.swarm.${first}`,
     );
+    return swarmHostCalls.run(true, () => method(...args));
+  }
+  if (kind && Object.hasOwn(namespaces, kind) && first && rest.length === 0) {
+    const method = callable(own(own(hostCtx, kind), first), `ctx.${kind}.${first}`);
     return swarmHostCalls.run(true, () => method(...args));
   }
   if ((kind === "api" || kind === "mcp") && first && rest.length > 0) {
@@ -530,7 +538,9 @@ async function evaluateJob(
   }
 
   const config = new SwarmConfig(job.configPayload);
+  const namespaces = job.namespaces ?? SDK_NAMESPACES;
   const hostCtx = buildCtx({
+    namespaces,
     swarmConfig: config,
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
@@ -545,6 +555,7 @@ async function evaluateJob(
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
     mcp: Object.fromEntries(Object.entries(hostCtx.mcp).map(([slug, c]) => [slug, Object.keys(c)])),
     fs: Object.keys(hostCtx.fs),
+    namespaces,
   };
   // Accept both shapes, like eval-harness: callers may pass already-serialized JSON.
   const args = typeof job.args === "string" ? JSON.parse(job.args) : (job.args ?? null);
@@ -613,7 +624,7 @@ async function evaluateJob(
     return bridge(async () => {
       const bodyBytes = FETCH_PATHS.has(path) ? binaryBodySize(callArgs?.[0]) : 0;
       return host.call(
-        () => dispatchCall(hostCtx, sqlApiSlugs, path, callArgs, host.signal),
+        () => dispatchCall(hostCtx, namespaces, sqlApiSlugs, path, callArgs, host.signal),
         true,
         bodyBytes,
       );
