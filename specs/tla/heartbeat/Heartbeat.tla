@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ b3ba784f. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 1de54cf0. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -236,8 +236,8 @@ Complete(w, t) ==
                    hb, rb, apiUp, wc, ac, liveKill, badAcc, bt, cut>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
-\* reconcileActiveTasks, runner.ts:5617): cancelled on every poll via
-\* /cancelled-tasks (core.ts:699), failed/superseded on a 30 s status read.
+\* reconcileActiveTasks, runner.ts:5713): cancelled on every poll via
+\* /cancelled-tasks (core.ts:701), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
@@ -260,9 +260,16 @@ AbortTerminal(w, t) ==
 \* profile on another key or the next fallback profile. Same guards and the same state change, so this action
 \* covers it; PROVIDER_FALLBACK enables it without the drain. No fallback left
 \* is a no-op on the server (the worker then fails the task: Complete).
+\* Since #2970 a provider-fallback resume carries the parent's generation
+\* (createResumeFollowUp, reason provider_fallback) and a drain resume takes
+\* the next one, so the resume's gen is either, per enabled source.
 \* A workflow-step task takes the route's other branch: failTask with reason
 \* superseded_workflow_task and no resume (drain only; a provider fallback
 \* changes nothing for a step). The engine's actions below take it from there.
+HandoffGens(t) ==
+    (IF DRAIN_HANDOFF THEN {gen[t] + 1} ELSE {})
+        \cup (IF PROVIDER_FALLBACK THEN {gen[t]} ELSE {})
+
 DrainHandoff(w, t) ==
     /\ (DRAIN_HANDOFF \/ PROVIDER_FALLBACK) /\ apiUp /\ alive[w] /\ t \in running[w]
     /\ st[t] = "in_progress" /\ own[t] = w
@@ -271,11 +278,11 @@ DrainHandoff(w, t) ==
               /\ st'  = [st  EXCEPT ![t] = "failed"]
               /\ cut' = [cut EXCEPT ![t] = "cut"]
               /\ UNCHANGED <<own, par, gen, pin>>
-         ELSE /\ \E s \in Free :
+         ELSE /\ \E s \in Free, g \in HandoffGens(t) :
                    /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
                    /\ own' = [own EXCEPT ![s] = w]
                    /\ par' = [par EXCEPT ![s] = t]
-                   /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
+                   /\ gen' = [gen EXCEPT ![s] = g]
                    /\ pin' = [pin EXCEPT ![s] = TRUE]
               /\ UNCHANGED cut
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
