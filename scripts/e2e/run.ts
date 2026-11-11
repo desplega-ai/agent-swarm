@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
+import { calledCliCommands, cleanupCliTemp, setCliCoverageDir } from "./cli";
 import {
   type CoverageManifest,
   coverageFrom,
@@ -182,6 +183,7 @@ async function cleanup(keep: boolean): Promise<void> {
   await stopActiveAgents();
   await stopHarnessChildren();
   for (const stack of [...stacks]) await stopStack(stack, keep);
+  await cleanupCliTemp(keep);
 }
 
 async function bootStack(
@@ -400,6 +402,8 @@ async function main(): Promise<number> {
   }
   // A fresh directory: the report unions every lcov in it, and stale ones would count.
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
+  // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
+  setCliCoverageDir(options.coverageDir);
   const { sut, db, ctx } = await bootStack(options, journalPath);
   const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
@@ -474,6 +478,9 @@ async function main(): Promise<number> {
           ...rerunObserved.nodeTypes,
         ]),
       ],
+      // Process-wide, like the HTTP call journal. CLI scenarios declare no `needs`, so a
+      // rerun replay never runs one.
+      calledCommands: [...calledCliCommands()],
       stateValues: Object.fromEntries(
         manifest.stateSurfaces.map((spec) => [
           spec.query,
