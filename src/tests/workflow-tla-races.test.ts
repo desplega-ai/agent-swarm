@@ -391,4 +391,33 @@ describe("TLA+ workflow counterexamples", () => {
       stopRetryPoller();
     }
   });
+
+  test("CX8: the join does not fire while a branch is pending its retry", async () => {
+    plans.clear();
+    calls.length = 0;
+    const def = fanOut(true);
+    plans.set("A", ["fail", "ok"]);
+    plans.set("B", ["ok"]);
+    const { runId, walk } = await newRun(def);
+
+    // XFail (A retry pending) -> XCkOk (B) -> WBatchEnd. No poller is running.
+    await walk(["T"]);
+    const [stepA] = await stepsOf(runId, "A");
+    expect(stepA?.status).toBe("failed");
+    expect(stepA?.nextRetryAt).toBeTruthy();
+    const joinCallsBeforeRetry = callsOf("M");
+
+    // P1..P9: the poller retries A; A succeeds and walks to M.
+    await sleep(5);
+    startRetryPoller(registry, 1);
+    try {
+      await waitForRunStatus(runId, "completed");
+    } finally {
+      stopRetryPoller();
+    }
+
+    expect(joinCallsBeforeRetry).toBe(0);
+    expect(callsOf("M")).toBe(1);
+    expect(callsOf("A")).toBe(2);
+  });
 });
