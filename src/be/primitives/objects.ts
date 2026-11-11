@@ -128,6 +128,7 @@ const versionOf = (value: string | null | undefined): number | null =>
  */
 async function saveRow(
   row: Omit<ObjectRow, "createdAt" | "updatedAt" | "deletedAt">,
+  opts: { onlyNewer?: boolean } = {},
 ): Promise<ObjectRow> {
   const now = new Date().toISOString();
   return getDbClient().transaction(async (tx) => {
@@ -142,7 +143,10 @@ async function saveRow(
        ON CONFLICT(id) DO UPDATE SET
          kind = excluded.kind, orgId = excluded.orgId, driveId = excluded.driveId,
          path = excluded.path, title = COALESCE(excluded.title, primitive_objects.title),
-         fileVersion = excluded.fileVersion, deletedAt = NULL, updatedAt = excluded.updatedAt`,
+         fileVersion = excluded.fileVersion, deletedAt = NULL, updatedAt = excluded.updatedAt
+       WHERE ? = 0 OR primitive_objects.path <> excluded.path
+         OR primitive_objects.fileVersion IS NULL
+         OR primitive_objects.fileVersion < excluded.fileVersion`,
       [
         row.id,
         row.kind,
@@ -155,6 +159,8 @@ async function saveRow(
         row.ownerAgentId,
         now,
         now,
+        // Concurrent events for one path: an older read must not overwrite a newer one.
+        opts.onlyNewer ? 1 : 0,
       ],
     );
     const saved = await tx.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [row.id]);
@@ -616,15 +622,18 @@ export async function applyFileChange(
     };
   }
   const title = swarmBlock(json).title;
-  await saveRow({
-    id,
-    kind: kindName,
-    orgId,
-    driveId,
-    path,
-    title: typeof title === "string" ? title : (byId?.title ?? null),
-    fileVersion: fileVersion ?? version,
-    ownerAgentId: byId?.ownerAgentId ?? null,
-  });
+  await saveRow(
+    {
+      id,
+      kind: kindName,
+      orgId,
+      driveId,
+      path,
+      title: typeof title === "string" ? title : (byId?.title ?? null),
+      fileVersion: fileVersion ?? version,
+      ownerAgentId: byId?.ownerAgentId ?? null,
+    },
+    { onlyNewer: true },
+  );
   return { action: byId ? "moved" : "restored", path, id };
 }

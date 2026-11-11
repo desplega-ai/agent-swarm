@@ -348,6 +348,36 @@ describe("file.changed receiver", () => {
     expect(wrong).toEqual([]);
   });
 
+  test("two events that restore one path together keep the newer file version", async () => {
+    const board = (id: string, version: number) => ({
+      download: async () =>
+        new Response(JSON.stringify({ type: "excalidraw", elements: [], swarm: { id } }), {
+          headers: { "x-agent-fs-version": String(version) },
+        }),
+      exists: async () => false,
+    });
+    const wrong: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const id = `restore-race-${i}`;
+      const change = {
+        orgId: "org-race",
+        driveId: "drive-race",
+        path: `/boards/restore-race-${i}.excalidraw`,
+        operation: "edit",
+      };
+      await Promise.all([
+        applyFileChange({ ...change, version: 5 }, board(id, 5)),
+        applyFileChange({ ...change, version: 4 }, board(id, 4)),
+      ]);
+      const row = await getDbClient().get<{ fileVersion: number }>(
+        "SELECT fileVersion FROM primitive_objects WHERE id = ?",
+        [id],
+      );
+      if (row?.fileVersion !== 5) wrong.push(id);
+    }
+    expect(wrong).toEqual([]);
+  });
+
   test("an edit that drops the embedded id leaves the file for object-reindex to adopt", async () => {
     const { hookId, object } = await boardWithHook("boards/heal.excalidraw");
     // A stock Excalidraw save writes the scene without the swarm block.
