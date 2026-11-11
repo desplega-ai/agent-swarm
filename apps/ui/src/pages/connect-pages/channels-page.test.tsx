@@ -188,6 +188,7 @@ describe("ChannelsPage", () => {
       ["telegram", "none"],
       ["discord", "none"],
       ["teams", "none"],
+      ["rocketchat", "none"],
       ["kapso", "none"],
     ]);
     expect(html).not.toContain("More channels");
@@ -206,6 +207,7 @@ describe("ChannelsPage", () => {
       ["telegram", "connected"],
       ["discord", "configured"],
       ["teams", "none"],
+      ["rocketchat", "none"],
       ["kapso", "none"],
     ]);
     expect(html).toContain("Missing publicKey");

@@ -783,7 +783,7 @@ export interface McpUserConfigResponse {
 
 /** `GET /api/integrations/chat/status`. Never carries secret values. */
 export interface ChatSdkAdapterStatus {
-  name: "telegram" | "slack" | "discord" | "teams";
+  name: "telegram" | "slack" | "discord" | "teams" | "rocketchat";
   configured: boolean;
   /** False when the entry carries `enabled: false`: configured and kept, not started. */
   enabled: boolean;

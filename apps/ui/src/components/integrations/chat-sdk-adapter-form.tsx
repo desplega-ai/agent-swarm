@@ -101,6 +101,7 @@ const WEBHOOK_LABEL: Record<ChatSdkAdapterName, string> = {
   slack: "Event Subscriptions request URL",
   discord: "Interactions endpoint URL",
   teams: "Messaging endpoint",
+  rocketchat: "Outgoing WebHook URL",
 };
 
 export interface AdapterPanelProps {

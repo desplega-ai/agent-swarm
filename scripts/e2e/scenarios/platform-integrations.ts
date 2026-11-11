@@ -5,7 +5,7 @@ import { cleanupStack, deleteConfig, putConfig, reloadConfig } from "./platform-
 // Operator-facing integration status, the Slack app manifest, the MCP client config and the
 // disabled adapters of the Chat SDK channel and the Claude Managed integration.
 
-const CHAT_ADAPTERS = ["telegram", "slack", "discord", "teams"] as const;
+const CHAT_ADAPTERS = ["telegram", "slack", "discord", "teams", "rocketchat"] as const;
 
 export const platformIntegrations: Scenario = {
   name: "platform-integrations",
@@ -153,7 +153,7 @@ export const platformIntegrations: Scenario = {
       const adapters = asRecords(chat, "adapters");
       expect(
         adapters.map((a) => a.name).join() === CHAT_ADAPTERS.join(),
-        "status lists the four adapters in order",
+        "status lists every adapter in order",
       );
       for (const adapter of adapters) {
         expect(

@@ -491,7 +491,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: "chat-sdk",
     name: "Chat SDK",
     description:
-      "Chat with the swarm on Telegram, Slack, Discord, or Microsoft Teams. Mentions and DMs become tasks, results post back to the thread. Agents use the built-in chat-sdk skill (no install).",
+      "Chat with the swarm on Telegram, Slack, Discord, Microsoft Teams, or Rocket.Chat. Mentions and DMs become tasks, results post back to the thread. Agents use the built-in chat-sdk skill (no install).",
     category: "comm",
     iconKey: "message-square",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/chat-sdk",

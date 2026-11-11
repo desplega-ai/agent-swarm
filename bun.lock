@@ -46,6 +46,7 @@
         "@x402/fetch": "^2.5.0",
         "ai": "^6.0.116",
         "chat": "4.44.0",
+        "chat-adapter-rocketchat": "0.1.0",
         "cron-parser": "^5.4.0",
         "date-fns": "^4.1.0",
         "e2b": "2.26.0",
@@ -1914,6 +1915,8 @@
     "character-reference-invalid": ["character-reference-invalid@2.0.1", "", {}, "sha512-iBZ4F4wRbyORVsu0jPV7gXkOsGYjGHPmAyv+HiHG8gi5PtC9KI2j1+v8/tlibRvjoWX027ypmG/n0HtO5t7unw=="],
 
     "chat": ["chat@4.44.0", "", { "dependencies": { "@chat-adapter/catalog": "4.44.0", "@workflow/serde": "4.1.0-beta.2", "mdast-util-to-string": "^4.0.0", "remark-gfm": "^4.0.0", "remark-parse": "^11.0.0", "remark-stringify": "^11.0.0", "remend": "^1.2.1", "unified": "^11.0.5" }, "peerDependencies": { "ai": "^6.0.182 || ^7.0.0", "workflow": "^5.0.0-beta.35", "zod": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["ai", "workflow", "zod"] }, "sha512-DGVc9yV1ifOJFpe8Pz6BAoOBVT7/iI/7kkMuB+ZUrpyQ1iw1ElibxyvYBx7tEo1qPl6w510+Acvt1XSVPSgKjA=="],
+
+    "chat-adapter-rocketchat": ["chat-adapter-rocketchat@0.1.0", "", { "dependencies": { "@chat-adapter/shared": "^4.44.0" }, "peerDependencies": { "chat": "^4.44.0" } }, "sha512-bt+kZDZ4aE/y3ptzZfx7kHzfYXMizUhytpLsZ3DQu3Qk/SP9y7w+xEFs0JqZZgP/1KZdG3qFsrHrbfUDP3TRng=="],
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 
