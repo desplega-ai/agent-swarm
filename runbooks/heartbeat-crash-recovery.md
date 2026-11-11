@@ -499,7 +499,7 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 # supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:
 if resume created: backfillSupersedeTaskResumeTaskId(parent, resume)   # log entry + settle(parent, resume)
-else:              settleSupersededTaskDependents(parent, null); failTask(parent, resume_creation_skipped_<reason>)
+else:              settleSupersededTaskDependents(parent, null)   # parent stays superseded (terminal); failTask would no-op; warn only
 clean session when stale or pooled
 restore agent state
 if pooled: recover sibling sessions under the same runtime lock
@@ -691,6 +691,7 @@ session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
 if session and now - session.lastHeartbeatAt < STALL_THRESHOLD_STALE_HEARTBEAT_MIN: skip
 failTask(task.id, cascadeDependents=false)                    # then create the retry child below
+if task.workflowRunStepId: no retry child                     # the workflow engine recovers the step from task.failed
 
 # reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
