@@ -3,6 +3,7 @@ import {
   type DshStepUsage,
   normalizeDshStepUsage,
 } from "../../../../src/utils/dsh-usage";
+import { classifyClaudeThinking } from "../../../../src/utils/reasoning-events";
 import { asString, isRecord, makeItem, resultBlockText, stringifyForDisplay } from "./helpers";
 import { resultImages } from "./result-images";
 import type { CallUsage, DecodedRecord, LogRole, NormalizedItem } from "./types";
@@ -17,6 +18,9 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
   // Claude logs one assistant line per content block. The lines of one API
   // response share `message.id` and carry the same usage: count it once.
   const seenMessageIds = new Set<string>();
+  // Claude text, thinking and tool_use items per `message.id`, in log order:
+  // the input of the pre-tool update rule.
+  const claudeBlocks = new Map<string, NormalizedItem[]>();
 
   for (const d of ordered) {
     const ev = d.event;
@@ -145,9 +149,41 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
       for (let i = firstBlockItem; i < items.length; i++)
         items[i].parentToolUseId = parentToolUseId;
     }
+    const messageId = asString(message?.id);
+    if (d.rec.cli === "claude" && messageId) {
+      const blocks = claudeBlocks.get(messageId) ?? [];
+      for (let i = firstBlockItem; i < items.length; i++) {
+        const kind = items[i].kind;
+        if (kind === "text" || kind === "reasoning" || kind === "tool_call") blocks.push(items[i]);
+      }
+      claudeBlocks.set(messageId, blocks);
+    }
   }
 
+  for (const blocks of claudeBlocks.values()) tagClaudeUpdates(blocks);
   return items;
+}
+
+/**
+ * Claude 5.1+ writes a short pre-tool update as the last of two or more
+ * thinking blocks before a `tool_use` (`classifyClaudeThinking`, shared with
+ * the server's `reasoningKind`). That block becomes a progress text item, not
+ * reasoning. Nothing is dropped.
+ */
+function tagClaudeUpdates(blocks: NormalizedItem[]): void {
+  const thinking = blocks.filter((item) => item.kind === "reasoning");
+  if (thinking.length < 2) return;
+  const kinds = classifyClaudeThinking(
+    blocks.map((item) => ({
+      type:
+        item.kind === "reasoning" ? "thinking" : item.kind === "tool_call" ? "tool_use" : "text",
+    })),
+  );
+  kinds.forEach((kind, i) => {
+    if (kind !== "update") return;
+    thinking[i].kind = "text";
+    thinking[i].progress = true;
+  });
 }
 
 export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {
