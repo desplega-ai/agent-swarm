@@ -60,6 +60,8 @@ bun run e2e                                        # same scenarios, report only
 bun run e2e --only <name>,<name>                   # a subset while debugging
 bun run e2e --strict --json out.json --summary-md out.md
 bun run e2e --keep                                 # keep db, logs, temp dirs (paths printed as KEEP ...)
+bun run e2e --coverage                             # plus lcov per API process in ./e2e-coverage/
+bun scripts/e2e/diff-coverage.ts                   # the PR comment: changed API lines no scenario runs
 ```
 
 Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios dominate.
@@ -127,6 +129,16 @@ missing, duplicated or red. It needs no `bun install`. The Merge Gate needs both
 To reproduce a red merge locally, download the three `e2e-contract-shard-<i>` artifacts and
 run the same `merge.ts` command on them. The nightly workflow runs unsharded, plus real
 harness legs.
+
+On a PR, each shard also runs with `--coverage` and uploads `e2e-coverage-shard-<i>` (one lcov
+per API process). The **E2E Contract** job then runs `diff-coverage.ts --base HEAD^1` (HEAD is
+the PR merge commit) and upserts one sticky comment, `<!-- e2e-coverage -->`: covered over
+changed API lines, per file, with the uncovered line ranges. It never blocks. Every coverage
+step is `continue-on-error`, and a coverage problem becomes a comment that says so. A PR that
+changes no executable API line gets no new comment (an earlier one is updated). Fork PRs have a
+read-only token, so the upsert step skips; the comment text is still in the job summary.
+Coverage made one local full run about 20% slower (333 s against 278 s, 124 of 124 pass both ways). Rules for scope
+and exemptions: [scripts/e2e/README.md § Changed lines](../scripts/e2e/README.md#changed-lines---coverage).
 
 ## Relation to unit tests
 

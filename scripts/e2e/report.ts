@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { type Coverage, strictFailures } from "./coverage";
 import type { QuarantineEntry } from "./quarantine";
 import { type Observations, parseShard, type Shard } from "./shard";
@@ -121,6 +122,8 @@ export type Options = {
   sutEnv: Record<string, string>;
   visualsDir?: string;
   shard?: Shard;
+  /** `--coverage`: lcov per API process lands here (`./e2e-coverage`). */
+  coverageDir?: string;
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -135,6 +138,9 @@ Options:
   --group name                  Run only contract scenarios tagged with this group
   --shard i/n                   Run one fixed band of scenarios by order (n = 3). Coverage
                                 gates move to the merge step: bun scripts/e2e/merge.ts
+  --coverage                    Run the API under bun test with lcov on: one
+                                ./e2e-coverage/<process>/lcov.info per API process. Report
+                                it with: bun scripts/e2e/diff-coverage.ts
   --list                        Print contract scenario names and exit
   --json path                   JSON result path (default: ./e2e-results.json)
   --summary-md path             Optional Markdown summary path
@@ -219,6 +225,7 @@ export function parseOptions(
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
     else if (arg === "--strict") options.strict = true;
     else if (arg === "--shard") options.shard = parseShard(value());
+    else if (arg === "--coverage") options.coverageDir = resolve("e2e-coverage");
     else if (arg === "--list") options.list = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--keep") options.keep = true;

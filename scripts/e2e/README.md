@@ -14,6 +14,8 @@ bun run e2e                       # every scenario, coverage report, no gate
 bun run e2e --strict              # the full contract, one process
 bun run e2e --shard 2/3           # one fixed band, as each CI shard runs it
 bun scripts/e2e/merge.ts --strict shard-1.json shard-2.json shard-3.json  # gate the union
+bun run e2e --coverage            # also write lcov per API process to ./e2e-coverage/
+bun scripts/e2e/diff-coverage.ts  # changed API lines (vs origin/main) no scenario runs
 bun run e2e --only <name>,<name>  # while authoring
 bun run e2e --list                # scenario names in run order
 bun run e2e --keep                # keep the db, logs and temp dirs after the run
@@ -44,6 +46,8 @@ This file is the authoring guide.
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
+| `coverage-sut.ts` | `--coverage` only: the API entry under `bun test`, so Bun writes lcov when the process stops. |
+| `diff-coverage.ts`, `coverage-exemptions.txt` | The changed-lines comment: lcov union against `git diff`, and the paths it skips, each with a reason. |
 | `harness.ts` | Optional real-worker legs (`--harness`), credentials required. |
 | `scenarios/` | One file per scenario (or per tight family). `registry.ts` discovers them. |
 
@@ -211,6 +215,33 @@ surface), `coverage.scenariosWithoutFlow`, `coverage.flows`, `coverage.latency.b
 
 Adding an exclusion is a review decision. Write the reason so a reviewer can verify it
 ("provider webhook, needs a Basic auth secret the mock does not issue", not "flaky").
+
+### Changed lines (`--coverage`)
+
+Route coverage says an operation was called; it does not say your new branch ran. On every PR
+the E2E jobs also post a sticky comment (`<!-- e2e-coverage -->`) listing the changed API lines
+no scenario runs. It is a comment only: nothing blocks.
+
+1. `bun run e2e --coverage` starts each API process as
+   `bun --config=<toml> test ./scripts/e2e/coverage-sut.ts` with lcov on, and keeps one
+   `e2e-coverage/<process>/lcov.info` per process (boot, each restart, each rerun). The toml is
+   its own: the repo `bunfig.toml` would preload the unit-test setup. If an API process does not
+   boot under `bun test`, it boots plain and leaves a `.plain` marker, so coverage never fails
+   the run.
+2. `diff-coverage.ts` unions every lcov (a line is covered when any process hit it), then reads
+   `git diff -U0 <base>...HEAD -- src/`. A changed line counts only when lcov lists it as
+   executable. A file no process loaded counts its changed code lines in full, unless it holds
+   types only; the comment marks it `(not loaded)`.
+3. Scope: API files under `src/`. Worker code (`src/commands/`, `src/providers/`, `src/hooks/`,
+   `src/prompts/`, `src/claude.ts`, `src/cli.tsx`), tests, `.d.ts` and the paths in
+   `coverage-exemptions.txt` drop out. Nothing outside `src/` counts.
+
+Locally: `bun run e2e --coverage`, then `bun scripts/e2e/diff-coverage.ts` (default base
+`origin/main`, comment in `e2e-coverage-comment.md`). Use `--only <name>` to check the
+scenario you wrote reaches the lines you changed.
+
+An exemption needs a reason a reviewer can verify, like the code that runs in a subprocess the
+runner does not instrument. Prefer a scenario.
 
 ## Benchmarks
 

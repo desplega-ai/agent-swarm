@@ -658,8 +658,9 @@ jobs:
         run: bun run e2e:tsc
 
       # No --strict here: a band alone covers part of the surface. The merge job gates the union.
+      # On PRs, --coverage writes one lcov per API process; a coverage problem never fails it.
       - name: Run E2E contract shard
-        run: bun run e2e --shard ${{ matrix.shard }}/3 --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --shard ${{ matrix.shard }}/3 ${{ github.event_name == 'pull_request' && '--coverage' || '' }} --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -674,6 +675,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Upload shard coverage
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-coverage-shard-${{ matrix.shard }}
+          path: e2e-coverage/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Keeps the E2E Contract name: unions the shards' coverage, then applies --strict once.
   e2e-contract:
     name: E2E Contract
@@ -683,11 +694,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # The sticky changed-lines coverage comment. Fork PRs get a read-only token and skip it.
+      pull-requests: write
     timeout-minutes: 10
 
     steps:
+      # Depth 2: on a PR, HEAD is the merge commit and HEAD^1 its base, for the changed lines.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -718,6 +734,42 @@ jobs:
           name: e2e-contract-results
           path: e2e-results.json
           if-no-files-found: warn
+
+      # Rule 3, comment only: changed API lines no scenario runs. Nothing here fails the job.
+      - name: Download shard coverage
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: e2e-coverage-shard-*
+          path: e2e-coverage
+          merge-multiple: true
+
+      - name: Build changed-lines coverage comment
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          bun scripts/e2e/diff-coverage.ts --base HEAD^1 --lcov-dir e2e-coverage --out e2e-coverage-comment.md
+          cat e2e-coverage-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Same upsert as the UI E2E comment. A PR with no changed API line gets no new comment,
+      # but an earlier one is updated so it never goes stale.
+      - name: Upsert changed-lines coverage comment
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          test -f e2e-coverage-comment.md || exit 0
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.body | startswith("<!-- e2e-coverage -->")) | .id' | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<e2e-coverage-comment.md)"
+          elif ! grep -q '<!-- e2e-coverage:empty -->' e2e-coverage-comment.md; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<e2e-coverage-comment.md)"
+          fi
 
   test:
     name: Run Tests (${{ matrix.shard }}/4)
