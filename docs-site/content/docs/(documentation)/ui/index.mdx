@@ -3,7 +3,7 @@ title: "Overview"
 description: "The Agent Swarm dashboard — what it is, the hosted instance at app.agent-swarm.dev, and how to self-host it"
 ---
 
-The Agent Swarm **dashboard** is the web UI for operating a swarm: watch agents, tasks, and inter-agent chat in real time, review approvals, manage workflows, scripts, schedules, skills, and memory, and administer settings — secrets, API keys, integrations, and [swarm configuration](/docs/ui/configuration).
+The Agent Swarm **dashboard** is the web UI for operating a swarm: watch agents and tasks in real time, review approvals, manage workflows, scripts, schedules, skills, and memory, and administer settings — secrets, API keys, integrations, and [swarm configuration](/docs/ui/configuration).
 
 ## Apps
 
@@ -18,6 +18,18 @@ Settings → Appearance lets each browser choose light, dark, or system mode and
 The Usage page can filter costs by canonical requester and shows **Cost by User** alongside the overall totals. Spend tied to a user is attributed to that identity; background work without a requester is grouped as **Unattributed (autonomous)** so operator-driven and autonomous spend remain distinguishable.
 
 When a dashboard tab authenticates with a user-bound `aswt_` token, the dashboard resolves the principal from `GET /api/whoami` and locks the tab to that user. Identity switching and local identity overrides stay hidden so requester and audit attribution cannot diverge from the bearer token. Operator-key sessions keep the existing user picker.
+
+## AI providers
+
+Connect → AI providers manages provider credentials, not harness connections.
+A provider is the account, key or gateway that authorizes model calls: Anthropic, OpenAI, DeepSeek, OpenRouter, a Claude or ChatGPT subscription.
+The page lists each provider with its key pool, status and spend.
+A harness is the runtime that drives the model: Claude Code, Codex, opencode, pi.
+See [Harness configuration](/docs/guides/harness-configuration) to pick one.
+
+A harness can authenticate with a credential the API does not manage, such as an opencode `auth.json` mounted into the worker.
+Its agents run tasks while this page shows **No AI providers yet**.
+Check the harness credential on the Agents page (each agent's **Credentials** tab) or with [`GET /api/agents/credential-status`](/docs/api-reference/agents).
 
 ## Subscriptions vs API
 

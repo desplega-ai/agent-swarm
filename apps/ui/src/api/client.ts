@@ -39,8 +39,6 @@ import type {
   BudgetRefusalsResponse,
   BudgetScope,
   BudgetsResponse,
-  ChannelMessage,
-  ChannelsResponse,
   ChatSdkStatusResponse,
   ChatSdkTelegramWebhookResponse,
   ChecklistAddRequest,
@@ -91,7 +89,6 @@ import type {
   McpServer,
   McpServersResponse,
   McpUserConfigResponse,
-  MessagesResponse,
   Metric,
   MetricRunResult,
   MetricSaveInput,
@@ -1372,83 +1369,6 @@ class ApiClient {
         Array.isArray(err.skipped) ? err.skipped : [],
       );
     }
-    return res.json();
-  }
-
-  async createChannel(data: {
-    name: string;
-    description?: string;
-    type?: string;
-  }): Promise<{ channel: { id: string; name: string } }> {
-    const url = `${this.getBaseUrl()}/api/channels`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to create channel: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async deleteChannel(id: string): Promise<{ success: boolean }> {
-    const url = `${this.getBaseUrl()}/api/channels/${id}`;
-    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to delete channel: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async fetchChannels(): Promise<ChannelsResponse> {
-    const url = `${this.getBaseUrl()}/api/channels`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch channels: ${res.status}`);
-    return res.json();
-  }
-
-  async fetchMessages(
-    channelId: string,
-    options?: { limit?: number; since?: string; before?: string },
-  ): Promise<MessagesResponse> {
-    const params = new URLSearchParams();
-    if (options?.limit) params.set("limit", String(options.limit));
-    if (options?.since) params.set("since", options.since);
-    if (options?.before) params.set("before", options.before);
-    const queryString = params.toString();
-    const url = `${this.getBaseUrl()}/api/channels/${channelId}/messages${queryString ? `?${queryString}` : ""}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`);
-    return res.json();
-  }
-
-  async fetchThreadMessages(channelId: string, messageId: string): Promise<MessagesResponse> {
-    const url = `${this.getBaseUrl()}/api/channels/${channelId}/messages/${messageId}/thread`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch thread: ${res.status}`);
-    return res.json();
-  }
-
-  async postMessage(
-    channelId: string,
-    content: string,
-    options?: { agentId?: string; replyToId?: string; mentions?: string[] },
-  ): Promise<ChannelMessage> {
-    const url = `${this.getBaseUrl()}/api/channels/${channelId}/messages`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify({
-        content,
-        agentId: options?.agentId,
-        replyToId: options?.replyToId,
-        mentions: options?.mentions,
-      }),
-    });
-    if (!res.ok) throw new Error(`Failed to post message: ${res.status}`);
     return res.json();
   }
 

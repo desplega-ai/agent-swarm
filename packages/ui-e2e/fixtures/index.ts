@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { test as base, expect as baseExpect } from "@playwright/test";
 import type { SeedManifest } from "../boot/manifest";
 import { readTarget } from "../boot/policy";
+import { coverageEnabled, startCoverage, stopCoverage } from "./coverage";
 
 interface BootHandle {
   apiUrl: string;
@@ -176,6 +177,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     },
     { scope: "worker" },
   ],
+  // Only the test's own page is measured. Pages a test opens in a new context or tab are not.
+  page: async ({ page }, use) => {
+    if (!coverageEnabled) {
+      await use(page);
+      return;
+    }
+    await startCoverage(page);
+    await use(page);
+    await stopCoverage(page);
+  },
   // biome-ignore lint/correctness/noEmptyPattern: Playwright parses the destructuring pattern to resolve fixture dependencies
   baseURL: async ({}, use) => {
     await use(requireUiUrl());

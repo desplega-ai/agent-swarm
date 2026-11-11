@@ -129,6 +129,33 @@ describe("resolveHttpRequestAuth with aseph_ token", () => {
   });
 });
 
+describe("resolveHttpRequestAuth with the operator key", () => {
+  const request = (bearer: string) =>
+    ({ headers: { authorization: `Bearer ${bearer}` } }) as IncomingMessage;
+
+  test("resolves the configured key to kind:operator", async () => {
+    expect(await resolveHttpRequestAuth(request(API_KEY), API_KEY)).toMatchObject({
+      kind: "operator",
+    });
+  });
+
+  test("returns null for a wrong key of the same length", async () => {
+    const wrong = `${API_KEY.slice(0, -1)}X`;
+    expect(wrong.length).toBe(API_KEY.length);
+    expect(await resolveHttpRequestAuth(request(wrong), API_KEY)).toBeNull();
+  });
+
+  test("returns null for a prefix of the key and for a non-ASCII bearer", async () => {
+    expect(await resolveHttpRequestAuth(request(API_KEY.slice(0, 5)), API_KEY)).toBeNull();
+    expect(await resolveHttpRequestAuth(request(`${API_KEY.slice(0, -1)}é`), API_KEY)).toBeNull();
+  });
+
+  test("never treats a bearer as the operator when no key is configured", async () => {
+    expect(await resolveHttpRequestAuth(request("anything"), "")).toBeNull();
+    expect(await resolveHttpRequestAuth(request("anything"), undefined)).toBeNull();
+  });
+});
+
 // ─── HTTP endpoint tests ──────────────────────────────────────────────────────
 
 describe("POST /api/sessions/tokens", () => {

@@ -92,6 +92,12 @@ describe("Azure DevOps auth", () => {
       expect(verifyAzureDevOpsWebhook("Bearer example-test-secret")).toBe(false);
     });
 
+    test("rejects, without throwing, a same-length password with a multi-byte character", () => {
+      const header = basic("agent-swarm", "example-test-secreé");
+      expect(() => verifyAzureDevOpsWebhook(header)).not.toThrow();
+      expect(verifyAzureDevOpsWebhook(header)).toBe(false);
+    });
+
     test("rejects everything when the integration is not initialized", () => {
       resetAzureDevOps();
       expect(verifyAzureDevOpsWebhook(basic("agent-swarm", "example-test-secret"))).toBe(false);

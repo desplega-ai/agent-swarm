@@ -2,14 +2,25 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./specs",
-  fullyParallel: false,
+  // Test-level, not file-level: `--shard=i/4` then splits by test count. File-level left
+  // overflow.spec.ts (206 s) on one worker. Each worker still has its own API and DB, and
+  // `mode: "serial"` describes stay together.
+  fullyParallel: true,
   workers: process.env.CI ? 2 : 3,
-  retries: process.env.CI ? 2 : 1,
+  // One rerun. A pass on it reports as flaky (comment and tracker) and exits 0.
+  retries: 1,
   timeout: 60_000,
   grepInvert: process.env.E2E_API_URL ? /@local/ : undefined,
   globalSetup: "./global-setup.ts",
   reporter: process.env.CI
-    ? [["blob"], ["./reporter/summary.ts"]]
+    ? [
+        // One file name per shard: the report job downloads every shard's blob into one folder.
+        [
+          "blob",
+          { fileName: `report-${(process.env.UI_E2E_SHARD ?? "1/1").replace("/", "-of-")}.zip` },
+        ],
+        ["./reporter/summary.ts"],
+      ]
     : [["list"], ["html", { open: "never" }], ["./reporter/summary.ts"]],
   use: {
     trace: "on-first-retry",

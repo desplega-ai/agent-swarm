@@ -90,6 +90,8 @@ export interface NormalizedItem {
   status?: "running" | "completed" | "failed";
   /** Wall-clock span from the started to the terminal event, set once a merged item reaches status. */
   durationMs?: number;
+  /** A text item that is a pre-tool progress note (a Claude update block), not prose. */
+  progress?: boolean;
 }
 
 export interface ParseGate {
@@ -116,6 +118,8 @@ export interface TranscriptParseResult {
 export interface TextBlock {
   type: "text";
   text: string;
+  /** A pre-tool progress note (a Claude update block): shown as a muted line, not prose. */
+  progress?: boolean;
 }
 
 export interface ToolUseBlock {

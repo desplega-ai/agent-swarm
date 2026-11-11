@@ -37,6 +37,7 @@ import {
   FileText,
   Globe,
   type LucideIcon,
+  MessageSquareText,
   Plug,
   RotateCcw,
   Send,
@@ -745,7 +746,38 @@ function WorkEntryLine({
   if (entry.kind === "tool") {
     return <ToolLine entry={entry} running={running} onOpen={onOpen} className={className} />;
   }
+  if (entry.kind === "progress") {
+    return <ProgressLine entry={entry} running={running} arrived={arrived} />;
+  }
   return <EventLine entry={entry} running={running} arrived={arrived} />;
+}
+
+/** A pre-tool progress note (a Claude update): one muted line, the full text on hover. */
+function ProgressLine({
+  entry,
+  running,
+  arrived,
+}: {
+  entry: Extract<WorkEntry, { kind: "progress" }>;
+  running: boolean;
+  arrived: boolean;
+}) {
+  const text = useRevealText(entry.text, running, arrived);
+  return (
+    <div
+      data-slot="transcript-progress"
+      title={entry.text}
+      className={arrived ? ARRIVE_CLASS : undefined}
+    >
+      <TraceLine status={running ? "running" : undefined} className="min-h-6 text-xs">
+        <TraceIcon>
+          <MessageSquareText className="size-3 text-muted-foreground/70" />
+        </TraceIcon>
+        <TraceTitle className="text-muted-foreground/80">{text}</TraceTitle>
+        <EntryTime at={entry.at} />
+      </TraceLine>
+    </div>
+  );
 }
 
 /** A status event or a progress note. The live one reveals its words. */
@@ -853,7 +885,10 @@ function ToolLine({
   );
 }
 
-/** A reasoning block: a one-line preview that opens to the full text. */
+/**
+ * A reasoning block: a one-line preview that opens to the full text. It reads
+ * "Thinking" while it is the live run's newest step, then "Thought".
+ */
 function ThinkingLine({
   text,
   running,
@@ -873,7 +908,7 @@ function ThinkingLine({
             <Brain className="size-3" />
           </TraceIcon>
           <TraceTitle>
-            <span className="font-medium italic">Thinking</span>
+            <span className="font-medium italic">{running ? "Thinking" : "Thought"}</span>
             {open ? null : <span className="opacity-70"> {preview}</span>}
           </TraceTitle>
         </TraceLine>

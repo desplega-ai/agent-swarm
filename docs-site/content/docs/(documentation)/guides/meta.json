@@ -6,6 +6,8 @@
     "customer-renewal-review",
     "customer-commitment-tracking",
     "ai-invoice-discrepancy-review",
+    "ai-operations-shift-handoff",
+    "supplier-security-evidence-review",
     "deployment",
     "one-click-deploy",
     "kubernetes",

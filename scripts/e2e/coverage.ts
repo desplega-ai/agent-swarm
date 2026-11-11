@@ -119,6 +119,24 @@ export const EMPTY_MANIFEST: CoverageManifest = {
   flows: {},
 };
 
+export function emptyCoverage(): Coverage {
+  const empty = { total: 0, covered: 0, excluded: 0, percent: 0, uncovered: [] };
+  const latency = { count: 0, p50: 0, p95: 0, max: 0 };
+  return {
+    engines: [],
+    routes: { ...empty, byGroup: {}, unknown: [] },
+    mcpTools: { ...empty },
+    nodeTypes: { ...empty },
+    stateSurfaces: [],
+    flows: [],
+    scenariosWithoutFlow: [],
+    staleExclusions: [],
+    deadExclusions: [],
+    unknownFlowScenarios: [],
+    latency: { byGroup: {}, overall: latency },
+  };
+}
+
 const METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 
 function escapeRegex(value: string): string {
@@ -229,17 +247,43 @@ export type CoverageInputs = {
   manifest: CoverageManifest;
 };
 
-export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): Promise<Coverage> {
+/**
+ * What the server exposes: route operations (`METHOD /template`) and workflow node types.
+ * Plain data, so a shard can ship it to the merge job, which has no API to ask.
+ */
+export type CoverageUniverse = { routes: string[]; nodeTypes: string[] };
+
+export async function fetchUniverse(api: ApiClient): Promise<CoverageUniverse> {
   const response = await api("GET", "/openapi.json");
   expectStatus(response, [200], "fetch OpenAPI document");
-  const operations = readOperations(response.json);
   const executorTypes = await api("GET", "/api/executor-types");
   expectStatus(executorTypes, [200], "fetch executor types");
-  const nodeTypeUniverse = new Set(
-    (asRecord(executorTypes.json).executorTypes as unknown[]).map((entry) =>
+  return {
+    routes: readOperations(response.json).map(
+      (operation) => `${operation.method} ${operation.template}`,
+    ),
+    nodeTypes: (asRecord(executorTypes.json).executorTypes as unknown[]).map((entry) =>
       String(asRecord(entry).type),
     ),
-  );
+  };
+}
+
+export async function computeCoverage(api: ApiClient, inputs: CoverageInputs): Promise<Coverage> {
+  return coverageFrom(await fetchUniverse(api), inputs);
+}
+
+export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs): Coverage {
+  const operations = universe.routes.map((key) => {
+    const space = key.indexOf(" ");
+    const template = key.slice(space + 1);
+    return {
+      method: key.slice(0, space),
+      template,
+      group: groupFor(template),
+      literalLength: literalLength(template),
+    };
+  });
+  const nodeTypeUniverse = new Set(universe.nodeTypes);
 
   const coveredKeys = new Set<string>();
   const unknown = new Set<string>();
