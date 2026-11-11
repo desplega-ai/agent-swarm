@@ -12,6 +12,7 @@
     "one-click-deploy",
     "kubernetes",
     "worker-recovery-decision",
+    "agent-deletion",
     "podman-rootless",
     "published-artifacts",
     "asset-namespaces",

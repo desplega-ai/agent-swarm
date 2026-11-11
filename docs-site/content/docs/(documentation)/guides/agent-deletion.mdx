@@ -1,0 +1,47 @@
+---
+title: Deleting and Restoring Agents
+description: Operator-only agent delete into the append-only agent_history table, with blockers, restore, and a record of who, when and why
+---
+
+A delete copies the full agent row into the append-only `agent_history` table, then removes it from `agents`. A restore reinserts the latest copy under the same id. Every delete and restore records who did it, when and why.
+
+Only people can do this. The routes check `agent.lifecycle.manage`, which the shared API key without `X-Agent-ID` (operator) and dashboard user tokens hold. Every agent, the lead included, gets `403`. There is no MCP tool.
+
+```bash
+curl -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+  -d '{"reason":"retired after the migration"}' \
+  "$MCP_BASE_URL/api/agents/$AGENT/delete"
+```
+
+## Blockers
+
+The delete answers `409` with every blocker in `blockers` and changes nothing.
+
+| Code | Fix |
+|---|---|
+| `open_tasks` | Finish, cancel or reassign every non-terminal task assigned or offered to the agent. |
+| `not_offline` | Stop the worker; the agent goes offline when its container stops. |
+| `pool_bound` | Unbind the agent from its runtime pool (`PUT /api/agents/{id}/runtime-pool` with `poolId: null`). |
+| `schedules` | Disable or retarget the enabled schedules that target the agent. |
+| `owned_skills`, `owned_mcp_servers`, `inboxes` | Remove or reassign the skills, MCP servers and AgentMail inboxes the agent owns. |
+| `lead` | The lead cannot be deleted. |
+| `extension` | Uninstall the extension instead. |
+
+## What a delete removes
+
+The delete revokes every session token of the agent and removes its skill and MCP server installs. The database then deletes or clears rows that point at the agent through a foreign key:
+
+- Deleted: `active_sessions`, `channel_messages`, `channel_read_state`, `context_versions`, `inbox_messages`, `request_composition`, `runtime_instances`, `services`, `session_costs`, `task_context_snapshots`.
+- Set to null: `channels.createdBy`, `context_versions.changedByAgentId`.
+
+A restore does not bring these back. Data keyed by the agent id without a foreign key (tasks, memories, scripts, config, credential bindings) stays and reattaches on restore.
+
+A worker that starts with a deleted id gets `410 agent_deleted` on register, and `join-swarm` refuses the id.
+
+## Restore
+
+`POST /api/agents/{id}/restore` with `{ "reason": "...", "newName"?: "..." }`. The agent comes back offline with the system-default skills reinstalled. Start its worker yourself. If another agent took its name, the restore answers `409 name_taken` until you pass `newName`.
+
+## History
+
+`GET /api/agent-history?agentId=<id>` returns deletes and restores, newest first: event, actor (`user:<id>` or the operator key fingerprint), time, reason, and the agent row at that moment. Without `agentId` it lists every agent's events. Triggers refuse any update or delete on the table.
