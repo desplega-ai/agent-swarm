@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { openAICompatibleBaseUrlVars, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { getApiKey } from "../utils/api-key";
-import { isSensitiveKey, scrubSecrets } from "../utils/secret-scrubber";
+import { isSensitiveKey, scrubSecrets, urlForms } from "../utils/secret-scrubber";
 
 export type EnvMap = Record<string, string>;
 
@@ -174,6 +174,8 @@ export function redactWithEnv(text: string, env: EnvMap): string {
   let out = text;
   const entries = Object.entries(env)
     .filter(([key, value]) => isSensitiveKey(key) && value.length >= 8)
+    .flatMap(([key, value]) => urlForms(value).map((form): [string, string] => [key, form]))
+    .filter(([, form]) => form.length >= 8)
     .sort((a, b) => b[1].length - a[1].length);
 
   for (const [key, value] of entries) {
