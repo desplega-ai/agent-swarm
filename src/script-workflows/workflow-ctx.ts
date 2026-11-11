@@ -152,6 +152,8 @@ export type WorkflowCtx = {
   swarm: Record<string, (args?: unknown) => Promise<unknown>>;
   stdlib: typeof stdlib;
   logger: Console;
+  /** Registered `SDK_NAMESPACES` clients (`ctx.<ns>.<method>`); guest ctx only. */
+  [namespace: string]: unknown;
 };
 
 function encodeStepKey(label: string): string {

@@ -66,6 +66,19 @@ Room snapshots have a 2 MiB encoded limit and normally flush within one second. 
 
 See the [Rooms API reference](/docs/api-reference/rooms) for request schemas.
 
+## Primitive objects
+
+The `primitives` capability (off by default; scripts always reach it through the SDK bridge) exposes four tools over agent-fs files on the caller's default drive. Every call runs as the caller's own agent-scoped `AGENT_FS_API_KEY`.
+
+| Tool | Purpose |
+|------|---------|
+| `object-create` | Create a file create-only and give it a stable id. Kind `board` writes an empty `.excalidraw` scene. |
+| `object-get` | Read one object by `id` or `path`, optionally with its content. |
+| `object-list` | List objects by `kind` and path `prefix`. |
+| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. |
+
+Scripts use `ctx.objects.create/get/list/reindex`.
+
 ## Core Tools
 
 Always available tools for basic swarm operations.
@@ -659,7 +672,7 @@ Create a new automation workflow with a DAG definition.
 
 Upstream outputs require an `inputs` mapping. Agent-task templates may interpolate declared aliases, but executable source uses a stricter security boundary: inline `script` source allows only `input`, `workflow`, `swarm`, and `run` values, while named `swarm-script` source is never workflow-interpolated. Pass trigger and upstream values through `config.args`; unresolved source tokens fail the node before execution.
 
-Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`. A `webhook` trigger accepts an optional `events` list (for example `["pull_request"]`): other deliveries are dropped after signature verification, before any run is saved. The event name is read from `eventHeader` (default `X-GitHub-Event`). See [Workflows](/docs/concepts/workflows).
+Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`. A `webhook` trigger accepts an optional `filter` with `headers` and `body` allowlists (every field must match) and a `preset` (`github`, `gitlab`, `standard-webhooks`): non-matching deliveries are dropped after signature verification, before any run is saved. The older `events` list and `eventHeader` still work as a deprecated alias of one filter clause. See [Workflows](/docs/concepts/workflows).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

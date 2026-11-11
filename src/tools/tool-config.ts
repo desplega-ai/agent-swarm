@@ -221,6 +221,12 @@ export const DEFERRED_TOOLS = new Set([
   "room-reset",
   "room-decode",
 
+  // Primitive objects (4)
+  "object-create",
+  "object-get",
+  "object-list",
+  "object-reindex",
+
   // Reusable scripts and extensions (13)
   "script-upsert",
   "script-delete",

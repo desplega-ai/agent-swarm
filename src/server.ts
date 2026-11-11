@@ -89,6 +89,12 @@ import { registerCheckModelProfileTool } from "./tools/model-profiles/check-mode
 import { registerListModelProfilesTool } from "./tools/model-profiles/list-model-profiles";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
+import {
+  registerObjectCreateTool,
+  registerObjectGetTool,
+  registerObjectListTool,
+  registerObjectReindexTool,
+} from "./tools/objects";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
 // Prompt template tools
@@ -245,6 +251,7 @@ export const ALL_CAPABILITIES = [
   "kapso",
   "chat-sdk",
   "swarm-x",
+  "primitives",
 ] as const;
 
 type CAPABILITIES_T = (typeof ALL_CAPABILITIES)[number];
@@ -276,6 +283,7 @@ const DEFAULT_CAPABILITIES: string = [
   // "agentmail",
   // "kapso",
   // "chat-sdk", (added by getEnabledCapabilities when CHAT_SDK_ENABLED is true)
+  // "primitives", (scripts still reach object-* through the full-surface bridge)
 ].join(",");
 
 // Note: unknown names are kept (they never match hasCapability); workers
@@ -683,6 +691,14 @@ export async function createServer(
     registerRoomChangeTool(server);
     registerRoomResetTool(server);
     registerRoomDecodeTool(server);
+  }
+
+  // Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).
+  if (hasCapability("primitives")) {
+    registerObjectCreateTool(server);
+    registerObjectGetTool(server);
+    registerObjectListTool(server);
+    registerObjectReindexTool(server);
   }
 
   // Slack capability - Slack integration tools (no-op if Slack is not configured)

@@ -80,6 +80,8 @@ const RESERVED_KEYS = new Set([
   // tokens, so only the deployment env may redirect it.
   "GITHUB_URL",
   "GITHUB_API_URL",
+  // Picks which App installation workers get tokens for; a config writer must not choose it.
+  "GITHUB_APP_INSTALLATION_ID",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over

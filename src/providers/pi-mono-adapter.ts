@@ -2138,6 +2138,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       isLead: config.role === "lead",
       env: sessionEnv,
       mcpServers: piMcpServers,
+      runnerSessionId: config.runnerSessionId,
     });
 
     const features: PiSessionFeatures = {

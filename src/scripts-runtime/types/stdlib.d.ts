@@ -216,6 +216,61 @@ declare module "swarm-sdk" {
     state: unknown;
   }
 
+  export type PrimitiveObjectKind = "board";
+
+  export interface PrimitiveObject {
+    id: string;
+    kind: PrimitiveObjectKind;
+    orgId: string;
+    driveId: string;
+    /** agent-fs path, no leading slash. */
+    path: string;
+    title: string | null;
+    fileVersion: number | null;
+    ownerAgentId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    /** Live app link to the file. */
+    link: string | null;
+  }
+
+  export interface PrimitiveReindexReport {
+    scanned: number;
+    adopted: string[];
+    restored: string[];
+    missing: string[];
+    conflicts: Array<{ path: string; reason: string }>;
+    truncated: boolean;
+  }
+
+  /**
+   * Primitive objects: agent-fs files on your default drive with a stable id.
+   * Calls run as your own agent-fs identity. Each method throws on a refusal.
+   */
+  export interface ObjectsNamespace {
+    /** Create-only. `board` writes an empty Excalidraw scene; the path must end in `.excalidraw`. */
+    create(args: {
+      kind: PrimitiveObjectKind;
+      path: string;
+      title?: string;
+    }): Promise<{ message: string; object: PrimitiveObject }>;
+    get(args: {
+      id?: string;
+      path?: string;
+      includeContent?: boolean;
+    }): Promise<{ message: string; object: PrimitiveObject; missing: boolean; content?: unknown }>;
+    list(args?: {
+      kind?: PrimitiveObjectKind;
+      prefix?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<{ message: string; objects: PrimitiveObject[]; total: number }>;
+    /** Rebuild the index from the drive. Ids survive; rows whose file is gone are reported, not deleted. */
+    reindex(args?: {
+      kind?: PrimitiveObjectKind;
+    }): Promise<{ message: string } & PrimitiveReindexReport>;
+  }
+
   export interface SwarmSdk {
     // --- memory ---
     memory_search(args: {
@@ -307,6 +362,20 @@ declare module "swarm-sdk" {
       state?: unknown;
     }): Promise<unknown>;
     room_decode(args: { value: unknown }): Promise<unknown>;
+    // --- primitive objects (prefer ctx.objects.*, which unwraps and throws) ---
+    objects_create(args: {
+      kind: PrimitiveObjectKind;
+      path: string;
+      title?: string;
+    }): Promise<unknown>;
+    objects_get(args: { id?: string; path?: string; includeContent?: boolean }): Promise<unknown>;
+    objects_list(args?: {
+      kind?: PrimitiveObjectKind;
+      prefix?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<unknown>;
+    objects_reindex(args?: { kind?: PrimitiveObjectKind }): Promise<unknown>;
     // --- repos ---
     repo_list(args?: Record<string, unknown>): Promise<unknown>;
     // --- schedules ---
@@ -955,6 +1024,9 @@ declare module "swarm-sdk" {
     sh(command: string, options?: ScriptShOptions): Promise<ScriptShResult>;
     stdlib: ScriptStdlib;
     logger: ScriptLogger;
+    // Each SDK_NAMESPACES entry (src/scripts-runtime/sdk-allowlist.ts) needs a typed `<ns>` key here.
+    /** Primitive objects on your default agent-fs drive (object-* tools). */
+    objects: ObjectsNamespace;
   }
 
   /**

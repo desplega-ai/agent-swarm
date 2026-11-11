@@ -32,6 +32,11 @@ export function recordedHttpCalls(): readonly HttpCall[] {
   return calls;
 }
 
+/** Drop every call recorded after `length` (a rerun's prerequisite replay). */
+export function truncateHttpCalls(length: number): void {
+  calls.length = length;
+}
+
 /**
  * Record a call made outside the client (a raw fetch, a WebSocket upgrade, an SSE
  * stream) so it counts toward route coverage. `path` is the request pathname.

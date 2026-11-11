@@ -321,6 +321,27 @@ contents are always read fresh.
 The first `ctx.fs` or `ctx.sh` call in a run loads the shell (about 200 ms
 under `native`). Runs that do not use them pay nothing.
 
+### Primitive objects
+
+`ctx.objects` gives agent-fs files on your default drive a stable id. It calls
+the `object-*` MCP tools and runs as your own agent-scoped `AGENT_FS_API_KEY`,
+never the API's service key. Each method returns the tool payload without
+`success` and throws on a refusal. Flat `ctx.swarm.objects_*` calls keep the
+raw envelope.
+
+```ts
+export default async function (_args, ctx) {
+  const { object } = await ctx.objects.create({ kind: "board", path: "/boards/roadmap.excalidraw" });
+  const { objects } = await ctx.objects.list({ kind: "board" });
+  return { id: object.id, link: object.link, boards: objects.length };
+}
+```
+
+A `board` is an Excalidraw scene, and its id lives in the file under `swarm.id`.
+A stock Excalidraw save drops that field. `ctx.objects.reindex()` then keeps the
+id of the row at the same path and writes it back. Durable workflow runs get
+`ctx.objects` too.
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:
@@ -328,7 +349,7 @@ Scripts launched through `launch-script-run` receive a different context:
 - `ctx.run` — the durable run's `id`, `agentId`, and `args`
 - `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, and
   `ctx.step.swarmScript(label, config)` — replay-safe, journaled steps
-- `ctx.swarm`, `ctx.stdlib`, and `ctx.logger`
+- `ctx.swarm`, `ctx.stdlib`, `ctx.logger`, and `ctx.objects`
 
 Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, or
 `ctx.swarm.config`. When a durable workflow needs a registered connection or

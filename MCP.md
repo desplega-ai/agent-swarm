@@ -17,7 +17,7 @@ bridge always builds a full-surface server (its surface is governed by the
 SDK allowlist instead), and HTTP REST routes are generally not gated.
 
 - Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`
+- Disabled by default: `primitives`, `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`
 
 ## Table of Contents
 
@@ -173,6 +173,11 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [room-change](#room-change)
   - [room-reset](#room-reset)
   - [room-decode](#room-decode)
+- [Primitives Tools](#primitives-tools)
+  - [object-create](#object-create)
+  - [object-get](#object-get)
+  - [object-list](#object-list)
+  - [object-reindex](#object-reindex)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -1425,7 +1430,7 @@ Capability: `workflows` (enabled by default)
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). Inline script nodes also accept config.env, an interpolated string-to-string map of environment variables that can be used alongside args. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event). - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', built-in trigger/input/workflow/swarm/run context remains available, but upstream outputs do not. Agent-task templates may interpolate trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not: inline script source allows only input/workflow/swarm/run values, while named swarm-script source is not workflow-interpolated. Pass dynamic trigger or upstream values through config.args (argv for inline scripts; the args object for swarm-script). Inline script nodes also accept config.env, an interpolated string-to-string map of environment variables that can be used alongside args. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' runs its body once per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: <any executor except foreach>, config: {...} }, concurrency?: <integer >= 1, items in flight; unbounded when absent>, failurePolicy?: 'fail-fast' | 'collect-outcomes' }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. failurePolicy defaults from onNodeFailure ('continue' = collect-outcomes, else fail-fast); fail-fast cancels queued items. retry-workflow-run on a failed fan-out reruns only failed and cancelled items. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WEBHOOK DELIVERY FILTER: optional filter on a webhook trigger drops deliveries after signature verification and before any run is saved (200 { skipped: true, reason }). filter.headers and filter.body are allowlists (a string or an array of scalars); every field must match. Header names are case-insensitive; values and JSON paths are exact, with no type coercion. preset "github" | "gitlab" | "standard-webhooks" selects where the deprecated events allowlist is read (X-GitHub-Event, X-Gitlab-Event, or JSON body type). events and eventHeader still work and are AND-ed with filter; eventHeader overrides preset. Omit filter and events to accept every delivery. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1433,7 +1438,7 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/workflow:<id>/ resource key. |
 | `description` | `string` | No | - | Description of what this workflow does |
 | `definition` | `unknown` | Yes | - | The workflow definition with nodes (each node has id, type, config, and optional next/retry/validation) |
-| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
+| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
 | `cooldown` | `unknown` | No | - | Optional cooldown configuration to prevent re-triggering too frequently |
 | `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
@@ -1469,7 +1474,7 @@ Get a workflow by ID, including its definition, triggers, cooldown, input, and a
 
 **Update Workflow**
 
-Update an existing workflow's name, description, definition, triggers, cooldown, input, triggerSchema, or enabled state. Creates a version snapshot before applying changes. TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. WEBHOOK VERIFICATION: webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). WEBHOOK EVENT FILTER: optional events: ['pull_request'] on a webhook trigger drops other deliveries after signature verification, before any run is saved (2xx skipped reply). The event is read from eventHeader (default X-GitHub-Event).
+Update an existing workflow's name, description, definition, triggers, cooldown, input, triggerSchema, or enabled state. Creates a version snapshot before applying changes. TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. WEBHOOK VERIFICATION: webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, { format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } (standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). WEBHOOK DELIVERY FILTER: optional filter on a webhook trigger drops deliveries after signature verification and before any run is saved (200 { skipped: true, reason }). filter.headers and filter.body are allowlists (a string or an array of scalars); every field must match. Header names are case-insensitive; values and JSON paths are exact, with no type coercion. preset "github" | "gitlab" | "standard-webhooks" selects where the deprecated events allowlist is read (X-GitHub-Event, X-Gitlab-Event, or JSON body type). events and eventHeader still work and are AND-ed with filter; eventHeader overrides preset. Omit filter and events to accept every delivery.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1478,7 +1483,7 @@ Update an existing workflow's name, description, definition, triggers, cooldown,
 | `name` | `string` | No | - | New name for the workflow |
 | `description` | `string` | No | - | New description |
 | `definition` | `unknown` | No | - | New workflow definition |
-| `triggers` | `array` | No | - | New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
+| `triggers` | `array` | No | - | Replacement trigger list. A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
 | `cooldown` | `unknown` | No | - | New cooldown configuration (null to remove) |
 | `input` | `object` | No | - | New input values (null to remove) |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (null to remove) |
@@ -2146,6 +2151,59 @@ Decode a room snapshot value that the caller already holds.
 |-----------|------|----------|---------|-------------|
 | `value` | `unknown` | Yes | - | - |
 
+## Primitives Tools
+
+*Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).*
+
+Capability: `primitives` — **disabled by default**; add `primitives` to `CAPABILITIES` to enable.
+
+### object-create
+
+**Create primitive object**
+
+Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). |
+| `path` | `string` | Yes | - | Drive path, e.g. /boards/roadmap.excalidraw. |
+| `title` | `string` | No | - | - |
+
+### object-get
+
+**Get primitive object**
+
+Get a primitive object on your default agent-fs drive by `id` or `path`. `missing: true` means the row exists but the file is gone. `includeContent` returns the parsed file.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | - |
+| `path` | `string` | No | - | - |
+| `includeContent` | `boolean` | No | - | - |
+
+### object-list
+
+**List primitive objects**
+
+List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | No | - | - |
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### object-reindex
+
+**Reindex primitive objects**
+
+Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `unknown` | No | - | - |
+
 ## Slack Tools
 
 *Slack capability - Slack integration tools (no-op if Slack is not configured)*
@@ -2179,7 +2237,7 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 | `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). A user ID (U…/W…) reads the bot's DM with that user. |
 | `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
 | `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
-| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task. |
+| `includeFiles` | `boolean` | No | - | Include and download file attachments. Defaults to false for direct channelId reads, and true for taskId or inboxMessageId reads. From a task, files are also stored as attachments of that task. |
 
 ### slack-post
 

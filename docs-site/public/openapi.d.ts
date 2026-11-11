@@ -2354,7 +2354,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x" | "primitives")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -2368,7 +2368,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x" | "primitives")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -9220,6 +9220,79 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/installation-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a GitHub App installation token for worker git and gh
+         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Installation token and its expiry (ISO 8601) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            token: string;
+                            expiresAt: string;
+                        };
+                    };
+                };
+                /** @description Caller is not a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description GitHub App worker auth is not configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description GitHub refused or failed to mint the token */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -19148,7 +19221,7 @@ export interface paths {
         put?: never;
         /**
          * Record the request composition manifest of a task session
-         * @description The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.
+         * @description The worker posts the size of each prompt part it assembled. The server adds the MCP tool-schema estimate for the agent's effective tool surface and stores the manifest as the session's next seq. A `harness-hook` post (pi, opencode) carries exact sizes measured from the request payload plus the call's prompt tokens: the server merges it with the session's worker manifest and folds the observed chars-to-tokens ratio into the provider's average. Only the agent assigned to the task may post, and a task keeps at most 100 manifests.
          */
         post: {
             parameters: {
@@ -19179,6 +19252,17 @@ export interface paths {
                              */
                             fidelity?: "exact" | "estimate";
                         }[];
+                        /**
+                         * @default worker
+                         * @enum {string}
+                         */
+                        source?: "worker" | "harness-hook";
+                        harness?: {
+                            systemChars: number;
+                            payloadChars: number;
+                            promptTokens: number;
+                            firstMessageChars?: number;
+                        };
                     };
                 };
             };

@@ -98,6 +98,7 @@ import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
 import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
+import { handleGitHubToken } from "./github-token";
 import { handleHeartbeat } from "./heartbeat";
 import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
@@ -393,6 +394,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePoolKeys(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
+        () => handleGitHubToken(req, res, pathSegments, myAgentId),
         () => handleAgentFsProxy(req, res),
         () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),

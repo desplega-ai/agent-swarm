@@ -78,6 +78,11 @@ writing CSS from scratch.
 page-session cookie via the launch endpoint) before the page can call the
 swarm API.
 
+## Known limits
+
+- The page CSP sets `connect-src 'self'`, so `fetch` to another origin is blocked. Inline the data you need, or read it through the Browser SDK.
+- The pages API returns 403 for a page owned by another agent. To restyle someone else's page, create a new page you own.
+
 ---
 
 # Design system

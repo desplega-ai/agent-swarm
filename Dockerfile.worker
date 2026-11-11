@@ -404,6 +404,9 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
+COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
+COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper
 
 # Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
@@ -728,7 +731,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.41.2",
+    "agent-browser": "0.42.0",
     "playwright": "1.63.0"
   },
   "overrides": {
@@ -826,6 +829,9 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
+COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
+COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper
 
 # Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/

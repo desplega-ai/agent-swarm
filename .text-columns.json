@@ -1917,6 +1917,39 @@
       "exempt": "identifier"
     }
   },
+  "primitive_objects": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "orgId": {
+      "exempt": "identifier"
+    },
+    "driveId": {
+      "exempt": "identifier"
+    },
+    "path": {
+      "exempt": "agent-fs file path; must round-trip byte-exact to address the file"
+    },
+    "title": "scrubbed",
+    "ownerAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "principal_roles": {
     "id": {
       "exempt": "identifier"

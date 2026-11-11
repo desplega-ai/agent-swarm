@@ -12,6 +12,18 @@ export function listedMcpTools(): ReadonlySet<string> {
   return listedToolNames;
 }
 
+/** Snapshot of the recorded tool sets; pass it to `restoreMcpTools` to undo later records. */
+export function mcpToolsMark(): { called: string[]; listed: string[] } {
+  return { called: [...calledToolNames], listed: [...listedToolNames] };
+}
+
+export function restoreMcpTools(mark: { called: string[]; listed: string[] }): void {
+  calledToolNames.clear();
+  for (const name of mark.called) calledToolNames.add(name);
+  listedToolNames.clear();
+  for (const name of mark.listed) listedToolNames.add(name);
+}
+
 export type McpConnection = Awaited<ReturnType<ReturnType<typeof createMcpConnector>>>;
 
 export type McpConnectOptions = {

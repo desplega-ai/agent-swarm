@@ -80,5 +80,17 @@ export async function loadScenarios(): Promise<Scenario[]> {
     }
   }
 
+  // A rerun replays `needs` before the scenario, so each one must exist and run earlier.
+  const orderOf = new Map(scenarios.map((scenario) => [scenario.name, scenario.order]));
+  for (const scenario of scenarios) {
+    for (const name of scenario.needs ?? []) {
+      const order = orderOf.get(name);
+      if (order === undefined) throw new Error(`${scenario.name} needs unknown scenario ${name}`);
+      if (order >= scenario.order) {
+        throw new Error(`${scenario.name} needs ${name}, which does not run before it`);
+      }
+    }
+  }
+
   return scenarios.sort((a, b) => a.order - b.order);
 }

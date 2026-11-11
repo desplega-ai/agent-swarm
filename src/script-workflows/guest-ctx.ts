@@ -1,3 +1,9 @@
+import {
+  SDK_NAMESPACES,
+  type SdkNamespaceRegistry,
+  sdkMethodForNamespace,
+  unwrapToolPayload,
+} from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 import { WORKFLOW_SWARM_CAPABILITY_ALLOWLIST } from "./swarm-capabilities";
 import type { WorkflowCtx } from "./workflow-ctx";
@@ -23,6 +29,8 @@ export function buildGuestWorkflowCtx(input: {
   agentId: string;
   args: unknown;
   invokeTool: InvokeTool;
+  /** Tests inject a fixture; production uses `SDK_NAMESPACES`. */
+  namespaces?: SdkNamespaceRegistry;
 }): WorkflowCtx {
   const invokeStep = (name: string, label?: string, config?: unknown) =>
     invokeJson(input.invokeTool, `step.${name}`, label === undefined ? [] : [label, config]);
@@ -34,7 +42,31 @@ export function buildGuestWorkflowCtx(input: {
     ]),
   ) as WorkflowCtx["swarm"];
 
+  // ctx.<ns>.<m> calls the flat, already allowlisted `swarm.<ns>_<m>` capability and unwraps it.
+  const namespaces = Object.fromEntries(
+    Object.entries(input.namespaces ?? SDK_NAMESPACES).map(([ns, methods]) => [
+      ns,
+      Object.freeze(
+        Object.fromEntries(
+          methods.map((method) => [
+            method,
+            async (args?: unknown) =>
+              unwrapToolPayload(
+                `ctx.${ns}.${method}`,
+                await invokeJson(
+                  input.invokeTool,
+                  `swarm.${sdkMethodForNamespace(ns, method)}`,
+                  args ?? {},
+                ),
+              ),
+          ]),
+        ),
+      ),
+    ]),
+  );
+
   return {
+    ...namespaces,
     run: { id: input.runId, agentId: input.agentId, args: input.args },
     step: {
       rawLlm: (label, config) => invokeStep("rawLlm", label, config),

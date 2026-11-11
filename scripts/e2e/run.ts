@@ -4,6 +4,7 @@ import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
 import {
   type Coverage,
+  type CoverageManifest,
   computeCoverage,
   EMPTY_MANIFEST,
   loadManifest,
@@ -17,12 +18,22 @@ import {
   pollUntil,
   recordedHttpCalls,
   recordHttpCall,
+  truncateHttpCalls,
 } from "./http";
-import { calledMcpTools, createMcpConnector, listedMcpTools } from "./mcp";
+import {
+  calledMcpTools,
+  createMcpConnector,
+  listedMcpTools,
+  mcpToolsMark,
+  restoreMcpTools,
+} from "./mcp";
 import { type MockLlm, startMockLlm } from "./mocks/llm";
+import { loadQuarantine, quarantineProblems } from "./quarantine";
 import {
   type E2eResult,
+  failsRun,
   helpText,
+  type Options,
   parseOptions,
   printHarness,
   printScenario,
@@ -30,6 +41,7 @@ import {
   SkipError,
   writeReports,
 } from "./report";
+import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
@@ -77,8 +89,16 @@ export type Scenario = {
    * the workflow file.
    */
   groups?: string[];
+  /**
+   * Scenarios whose state this one reads (lower `order` only). A failed scenario reruns
+   * once on a fresh API and DB; these replay first, in order, so the rerun starts from the
+   * same state. Leave it empty when the scenario passes alone (`--only <name>`).
+   */
+  needs?: string[];
   run: (ctx: ScenarioContext) => Promise<void>;
 };
+
+type BaseContext = Omit<ScenarioContext, "markThread">;
 
 type ThreadMark = { scenario: string; label: string; channel: string; ts: string };
 
@@ -149,10 +169,10 @@ async function probeToolUniverse(
   }
 }
 
-let activeSut: Sut | undefined;
-let activeSlack: SlackHarness | undefined;
-let activeLlm: MockLlm | undefined;
-let activeDb: ReadOnlyDb | undefined;
+/** One isolated environment: Slack mock, inference mock, API process and its DB. */
+type Stack = { slack?: SlackHarness; llm?: MockLlm; sut?: Sut; db?: ReadOnlyDb };
+
+const stacks = new Set<Stack>();
 const activeAgents = new Set<SimulatedAgent>();
 let cleaning = false;
 
@@ -162,16 +182,189 @@ async function stopActiveAgents(): Promise<void> {
   await Promise.all(agents.map((agent) => agent.stop().catch(() => {})));
 }
 
+async function stopStack(stack: Stack, keep: boolean): Promise<void> {
+  stacks.delete(stack);
+  // Close the read-only handle before stopSut deletes the database files.
+  stack.db?.close();
+  if (stack.sut) await stopSut(stack.sut, keep);
+  if (stack.slack) await stopSlackMock(stack.slack, keep);
+  if (stack.llm) await stack.llm.stop();
+}
+
 async function cleanup(keep: boolean): Promise<void> {
   if (cleaning) return;
   cleaning = true;
   await stopActiveAgents();
   await stopHarnessChildren();
-  // Close the read-only handle before stopSut deletes the database files.
-  activeDb?.close();
-  if (activeSut) await stopSut(activeSut, keep);
-  if (activeSlack) await stopSlackMock(activeSlack, keep);
-  if (activeLlm) await activeLlm.stop();
+  for (const stack of [...stacks]) await stopStack(stack, keep);
+}
+
+async function bootStack(
+  options: Options,
+  journalPath?: string,
+): Promise<{ stack: Stack; sut: Sut; db: ReadOnlyDb; ctx: BaseContext }> {
+  const stack: Stack = {};
+  stacks.add(stack);
+  try {
+    const slack = await startSlackMock(options.keep, journalPath);
+    stack.slack = slack;
+    const llm = await startMockLlm();
+    stack.llm = llm;
+    const sut = await startSut(options.keep, { ...slack.mock.env, ...llm.env }, options.sutEnv);
+    stack.sut = sut;
+    try {
+      await slack.mock.waitForConnection(60_000);
+    } catch (error) {
+      sut.flushLog();
+      throw new Error(
+        `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${sut.logPath}:\n${await tailLog(sut.logPath, 40)}`,
+      );
+    }
+    const db = openReadOnlyDb(sut.dbPath);
+    stack.db = db;
+    const api = createApiClient(sut.baseUrl, sut.apiKey);
+    const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
+    const nonce = randomBytes(6).toString("hex");
+    await probeToolUniverse(api, connectMcp, nonce);
+    const ctx: BaseContext = {
+      api,
+      connectMcp,
+      baseUrl: sut.baseUrl,
+      apiKey: sut.apiKey,
+      db,
+      slack: slack.mock,
+      llm,
+      async startAgent(agentOptions) {
+        const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
+        activeAgents.add(agent);
+        return agent;
+      },
+      recordHttpCall,
+      sutEnv: sut.env,
+      async sutLog() {
+        sut.flushLog();
+        return Bun.file(sut.logPath).text();
+      },
+      async restartSut() {
+        const connectionCalls = slack.mock.apiCalls("apps.connections.open").length;
+        // A scenario that moved Slack to HTTP mode has no socket to come back.
+        const hadSocket = slack.mock.connectionCount > 0;
+        db.close();
+        await restartSut(sut);
+        if (!hadSocket) return;
+        const reconnected = await pollUntil(
+          () => slack.mock.apiCalls("apps.connections.open").length > connectionCalls,
+          60_000,
+        );
+        if (!reconnected) {
+          throw new Error("Restarted API did not request a new Slack socket-mode connection");
+        }
+        await slack.mock.waitForConnection(60_000);
+      },
+      log: console.log,
+      nonce,
+    };
+    return { stack, sut, db, ctx };
+  } catch (error) {
+    await stopStack(stack, options.keep);
+    throw error;
+  }
+}
+
+/** Run one scenario, then stop its pollers and scripted answers so none outlive it. */
+async function runInStack(
+  scenario: Scenario,
+  ctx: BaseContext,
+  markThread: ScenarioContext["markThread"],
+): Promise<ScenarioResult> {
+  const result = await runScenario(scenario, { ...ctx, markThread });
+  await stopActiveAgents();
+  ctx.llm.reset();
+  return result;
+}
+
+async function printLogTails(sut: Sut): Promise<void> {
+  sut.flushLog();
+  const tails = await Promise.all(
+    sut.logPaths.map(async (path) => `Last 40 lines of ${path}:\n${await tailLog(path, 40)}`),
+  );
+  console.error(tails.join("\n"));
+}
+
+/** Coverage only the API process of a rerun saw: its DB is gone once the rerun stops. */
+type RerunObservations = { nodeTypes: Set<string>; stateValues: Map<string, Set<string>> };
+
+function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations {
+  const stateValues = new Map<string, Set<string>>();
+  for (const spec of manifest.stateSurfaces) {
+    stateValues.set(
+      spec.query,
+      new Set(db.query<{ value: unknown }>(spec.query).map((row) => String(row.value))),
+    );
+  }
+  const nodeTypes = new Set(
+    db
+      .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+      .map((row) => row.nodeType),
+  );
+  return { nodeTypes, stateValues };
+}
+
+/**
+ * Rerun a failed scenario once, alone, on a fresh API process and DB, after replaying the
+ * scenarios it `needs`. Coverage the replay records is dropped (the first pass counted it);
+ * the rerun's own calls join the run's sets, which are unions, so nothing counts twice.
+ */
+async function rerunScenario(
+  first: ScenarioResult,
+  scenario: Scenario,
+  all: readonly Scenario[],
+  options: Options,
+  manifest: CoverageManifest,
+  observed: RerunObservations,
+): Promise<ScenarioResult> {
+  const callMark = recordedHttpCalls().length;
+  const toolMark = mcpToolsMark();
+  const noThreads = () => {};
+  let booted: Awaited<ReturnType<typeof bootStack>> | undefined;
+  try {
+    const plan = rerunPlan(scenario, all);
+    const replay = plan.slice(0, -1).map((prerequisite) => prerequisite.name);
+    console.log(
+      `RERUN ${scenario.name} on a fresh API and DB${replay.length > 0 ? ` after ${replay.join(", ")}` : ""}`,
+    );
+    booted = await bootStack(options);
+    for (const prerequisite of plan.slice(0, -1)) {
+      const result = await runInStack(prerequisite, booted.ctx, noThreads);
+      if (result.status !== "pass") {
+        throw new Error(
+          `prerequisite ${prerequisite.name} did not pass: ${result.error ?? result.status}`,
+        );
+      }
+    }
+    truncateHttpCalls(callMark);
+    restoreMcpTools(toolMark);
+    const before = observe(booted.db, manifest);
+    const rerun = await runInStack(scenario, booted.ctx, noThreads);
+    const after = observe(booted.db, manifest);
+    // Only what the rerun itself added, never what the replay produced.
+    for (const type of after.nodeTypes) {
+      if (!before.nodeTypes.has(type)) observed.nodeTypes.add(type);
+    }
+    for (const [query, values] of after.stateValues) {
+      const seen = observed.stateValues.get(query) ?? new Set<string>();
+      for (const value of values) if (!before.stateValues.get(query)?.has(value)) seen.add(value);
+      observed.stateValues.set(query, seen);
+    }
+    if (rerun.status === "fail") await printLogTails(booted.sut);
+    return settleRerun(first, rerun);
+  } catch (error) {
+    truncateHttpCalls(callMark);
+    restoreMcpTools(toolMark);
+    return settleRerun(first, { error: errorMessage(error) });
+  } finally {
+    if (booted) await stopStack(booted.stack, options.keep);
+  }
 }
 
 async function main(): Promise<number> {
@@ -191,6 +384,13 @@ async function main(): Promise<number> {
   }
   // Fail before booting anything when the manifest itself is malformed.
   const manifest = options.strict ? await loadManifest(MANIFEST_PATH) : EMPTY_MANIFEST;
+  const quarantine = await loadQuarantine();
+  const quarantineByName = new Map(quarantine.map((entry) => [entry.scenario, entry]));
+  const quarantineIssues = quarantineProblems(
+    quarantine,
+    new Set(scenarios.map((scenario) => scenario.name)),
+    new Date().toISOString().slice(0, 10),
+  );
 
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
@@ -202,96 +402,45 @@ async function main(): Promise<number> {
       .delete()
       .catch(() => {});
   }
-  activeSlack = await startSlackMock(options.keep, journalPath);
-  activeLlm = await startMockLlm();
-  activeSut = await startSut(
-    options.keep,
-    { ...activeSlack.mock.env, ...activeLlm.env },
-    options.sutEnv,
-  );
-  try {
-    await activeSlack.mock.waitForConnection(60_000);
-  } catch (error) {
-    activeSut.flushLog();
-    throw new Error(
-      `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${activeSut.logPath}:\n${await tailLog(activeSut.logPath, 40)}`,
-    );
-  }
-  activeDb = openReadOnlyDb(activeSut.dbPath);
-  const api = createApiClient(activeSut.baseUrl, activeSut.apiKey);
-  const connectMcp = createMcpConnector(activeSut.baseUrl, activeSut.apiKey);
-  const nonce = randomBytes(6).toString("hex");
-  await probeToolUniverse(api, connectMcp, nonce);
-  const llm = activeLlm;
-  const ctx: Omit<ScenarioContext, "markThread"> = {
-    api,
-    connectMcp,
-    baseUrl: activeSut.baseUrl,
-    apiKey: activeSut.apiKey,
-    db: activeDb,
-    slack: activeSlack.mock,
-    llm,
-    async startAgent(agentOptions) {
-      const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
-      activeAgents.add(agent);
-      return agent;
-    },
-    recordHttpCall,
-    sutEnv: activeSut.env,
-    async sutLog() {
-      if (!activeSut) throw new Error("E2E harness is not running");
-      activeSut.flushLog();
-      return Bun.file(activeSut.logPath).text();
-    },
-    async restartSut() {
-      if (!activeSut || !activeSlack) throw new Error("E2E harness is not running");
-      const connectionCalls = activeSlack.mock.apiCalls("apps.connections.open").length;
-      // A scenario that moved Slack to HTTP mode has no socket to come back.
-      const hadSocket = activeSlack.mock.connectionCount > 0;
-      activeDb?.close();
-      await restartSut(activeSut);
-      if (!hadSocket) return;
-      const reconnected = await pollUntil(
-        () => activeSlack!.mock.apiCalls("apps.connections.open").length > connectionCalls,
-        60_000,
-      );
-      if (!reconnected) {
-        throw new Error("Restarted API did not request a new Slack socket-mode connection");
-      }
-      await activeSlack.mock.waitForConnection(60_000);
-    },
-    log: console.log,
-    nonce,
-  };
+  const { sut, db, ctx } = await bootStack(options, journalPath);
+  const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
   const threadMarks: ThreadMark[] = [];
   for (const scenario of scenarios) {
     if (options.only && !options.only.has(scenario.name)) continue;
     if (options.skip.has(scenario.name)) continue;
     if (options.group && !scenario.groups?.includes(options.group)) continue;
-    const result = await runScenario(scenario, {
-      ...ctx,
-      markThread(label, channel, ts) {
-        if (!/^[a-z0-9-]+$/.test(label)) {
-          throw new Error(`Invalid visual thread label: ${label}`);
-        }
-        threadMarks.push({ scenario: scenario.name, label, channel, ts });
-      },
+    const result = await runInStack(scenario, ctx, (label, channel, ts) => {
+      if (!/^[a-z0-9-]+$/.test(label)) {
+        throw new Error(`Invalid visual thread label: ${label}`);
+      }
+      threadMarks.push({ scenario: scenario.name, label, channel, ts });
     });
-    // Scenario hygiene: no poller and no scripted answer outlives its scenario.
-    await stopActiveAgents();
-    llm.reset();
     scenarioResults.push(result);
     printScenario(result);
   }
-  if (scenarioResults.some((result) => result.status === "fail")) {
-    activeSut.flushLog();
-    const tails = await Promise.all(
-      activeSut.logPaths.map(
-        async (path) => `Last 40 lines of ${path}:\n${await tailLog(path, 40)}`,
-      ),
+  if (scenarioResults.some((result) => result.status === "fail")) await printLogTails(sut);
+
+  // A failure reruns once, alone, on a fresh API: a pass there is `flaky`, not a failure.
+  const rerunObserved: RerunObservations = { nodeTypes: new Set(), stateValues: new Map() };
+  const byName = new Map(scenarios.map((scenario) => [scenario.name, scenario]));
+  for (const [index, first] of scenarioResults.entries()) {
+    if (first.status !== "fail") continue;
+    const settled = await rerunScenario(
+      first,
+      byName.get(first.name)!,
+      scenarios,
+      options,
+      manifest,
+      rerunObserved,
     );
-    console.error(tails.join("\n"));
+    scenarioResults[index] = settled;
+    printScenario(settled);
+  }
+  for (const result of scenarioResults) {
+    const entry = quarantineByName.get(result.name);
+    if (entry)
+      result.quarantine = { owner: entry.owner, reason: entry.reason, expires: entry.expires };
   }
 
   const harnessResults = [];
@@ -299,8 +448,8 @@ async function main(): Promise<number> {
     const result = await runHarnessLeg(
       provider,
       api,
-      activeSut.baseUrl,
-      activeSut.apiKey,
+      sut.baseUrl,
+      sut.apiKey,
       ctx.nonce,
       options.harnessAttempts,
     );
@@ -311,11 +460,12 @@ async function main(): Promise<number> {
   let coverage = emptyCoverage();
   let coverageError: string | undefined;
   try {
-    const observedNodeTypes = new Set(
-      activeDb
+    const observedNodeTypes = new Set([
+      ...db
         .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
         .map((row) => row.nodeType),
-    );
+      ...rerunObserved.nodeTypes,
+    ]);
     coverage = await computeCoverage(api, {
       calls: recordedHttpCalls(),
       toolUniverse: listedMcpTools(),
@@ -323,8 +473,12 @@ async function main(): Promise<number> {
       observedNodeTypes,
       scenarios: scenarioResults,
       knownScenarios: new Set(scenarios.map((scenario) => scenario.name)),
-      queryValues: (sql) =>
-        activeDb!.query<{ value: unknown }>(sql).map((row) => String(row.value)),
+      queryValues: (sql) => [
+        ...new Set([
+          ...db.query<{ value: unknown }>(sql).map((row) => String(row.value)),
+          ...(rerunObserved.stateValues.get(sql) ?? []),
+        ]),
+      ],
       manifest,
     });
   } catch (error) {
@@ -337,20 +491,26 @@ async function main(): Promise<number> {
     coverage.routes.percent >= options.minRouteCoverage &&
     coverage.mcpTools.percent >= options.minToolCoverage &&
     failures.length === 0;
-  const scenarioFailures = scenarioResults.filter((result) => result.status === "fail").length;
+  const scenarioFailures = scenarioResults.filter(failsRun).length;
+  const quarantinedFailures = scenarioResults.filter(
+    (result) => result.status === "fail" && result.quarantine,
+  ).length;
+  const flaky = scenarioResults.filter((result) => result.status === "flaky").length;
   const skips = scenarioResults.filter((result) => result.status === "skip").length;
   const harnessFailures = harnessResults.filter((result) => result.status === "fail").length;
   const passes =
     scenarioResults.filter((result) => result.status === "pass").length +
     harnessResults.filter((result) => result.status === "pass").length;
-  const ok = scenarioFailures === 0 && harnessFailures === 0 && gatesPassed;
+  const ok =
+    scenarioFailures === 0 && harnessFailures === 0 && gatesPassed && quarantineIssues.length === 0;
   const result: E2eResult = {
     startedAt,
     durationMs: Date.now() - started,
-    sut: { port: activeSut.port, dbPath: activeSut.dbPath, logPath: activeSut.logPath },
+    sut: { port: sut.port, dbPath: sut.dbPath, logPath: sut.logPath },
     scenarios: scenarioResults,
     harness: harnessResults,
     coverage,
+    quarantine: { entries: quarantine, problems: quarantineIssues },
     gates: {
       minRouteCoverage: options.minRouteCoverage,
       minToolCoverage: options.minToolCoverage,
@@ -386,8 +546,10 @@ async function main(): Promise<number> {
     );
   }
   console.log(
-    `${ok ? "PASS" : "FAIL"}: ${passes} passed, ${scenarioFailures + harnessFailures} failed, ${skips} skipped`,
+    `${ok ? "PASS" : "FAIL"}: ${passes} passed, ${scenarioFailures + harnessFailures} failed, ${skips} skipped, ${flaky} flaky` +
+      (quarantinedFailures > 0 ? `, ${quarantinedFailures} quarantined failed` : ""),
   );
+  for (const problem of quarantineIssues) console.error(`Quarantine gate failed: ${problem}`);
   const surfaceLine = (label: string, surface: Coverage["mcpTools"]) =>
     `${label}: ${surface.covered}/${surface.total} (${surface.percent.toFixed(1)}%)` +
     (surface.excluded > 0 ? `, ${surface.excluded} excluded` : "");

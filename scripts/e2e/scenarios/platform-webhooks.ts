@@ -8,6 +8,7 @@ import {
   putConfig,
   reloadConfig,
 } from "./platform-helpers";
+import { registerWorker } from "./platformb-helpers";
 
 // Inbound provider webhooks. Every provider is off in the test SUT, so each route must first
 // answer its disabled contract (503). The shared secret is then supplied through swarm_config
@@ -70,6 +71,27 @@ export const platformWebhooks: Scenario = {
     try {
       // Webhook receivers authenticate with the provider's signature, not the swarm key.
       await expectDisabled(ctx, "before configuring");
+
+      // Worker GitHub App tokens: only a registered agent may ask, and with no App
+      // installation configured the answer is 404 so workers keep GITHUB_TOKEN.
+      const tokenPath = "/api/github/installation-token";
+      expectStatus(
+        await ctx.api("POST", tokenPath, { apiKey: null, body: {} }),
+        [401],
+        "installation-token without a key",
+      );
+      expectStatus(
+        await ctx.api("POST", tokenPath, { body: {} }),
+        [403],
+        "installation-token without an agent",
+      );
+      const workerId = await registerWorker(ctx, `e2e-gh-token-${ctx.nonce}`);
+      const unconfigured = await ctx.api("POST", tokenPath, { agentId: workerId, body: {} });
+      expectStatus(unconfigured, [404], "installation-token with no App installation");
+      expect(
+        asRecord(unconfigured.json).error === "GitHub App worker auth is not configured",
+        `installation-token says it is not configured, got ${unconfigured.text}`,
+      );
 
       const agentmailSecret = `whsec_${Buffer.from(`e2e-agentmail-secret-${ctx.nonce}`).toString("base64")}`;
       await set("GITLAB_WEBHOOK_SECRET", secret("gitlab"), true);

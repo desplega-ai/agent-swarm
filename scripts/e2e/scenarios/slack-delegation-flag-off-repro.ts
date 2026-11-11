@@ -81,10 +81,9 @@ export const slackDelegationFlagOffRepro: Scenario = {
     await settleWorkerFollowUp(ctx, leadId, childId);
 
     // The repro: the child's finished answer never posts anywhere in the
-    // thread, no matter how long the watcher keeps ticking. Timeout matches
-    // slack-delegation-child-result.ts's waitForOutcome default for the
-    // equivalent flag-on child card, so this is a bounded assertion of
+    // thread, no matter how long the watcher keeps ticking. The default
+    // window spans several watcher ticks, so this is a bounded assertion of
     // absence, not a race won by polling too briefly.
-    await waitForOutcomeAbsence(ctx, message.ts, childOutput, 30_000);
+    await waitForOutcomeAbsence(ctx, message.ts, childOutput);
   },
 };

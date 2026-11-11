@@ -15,7 +15,8 @@ This runbook is for operators and reviewers. Authors read
 | MCP tools | `tools/list` for a worker registered before any scenario, every capability on | a scenario called the tool over `/mcp` | uncovered and not excluded → fail |
 | Workflow node types | `GET /api/executor-types` | a run executed the node (`workflow_run_steps.nodeType`) | uncovered and not excluded → fail |
 | Engine states | `stateSurfaces` in `coverage-manifest.json`: task, workflow run, workflow step and script run statuses, script step types, scopes, fs modes, executors | the suite left at least one row in that state (read from the database after the run) | a declared value never produced, or a database value the universe does not list → fail |
-| Flows | `flows` in `coverage-manifest.json` | every named scenario ran and passed, and every scenario belongs to a flow | missing, failing or orphan → fail |
+| Flows | `flows` in `coverage-manifest.json` | every named scenario ran and passed (`flaky` counts as passed, a quarantined failure does not block), and every scenario belongs to a flow | missing, failing or orphan → fail |
+| Quarantine | `scripts/e2e/quarantine.json` | | an expired, unknown or duplicate entry → fail |
 | Manifest hygiene | the manifest itself | | stale (excluded but covered) or dead (matches nothing) → fail |
 
 Exclusions live in `scripts/e2e/coverage-manifest.json` with a reason each. Adding one is a
@@ -60,6 +61,9 @@ bun run e2e --keep                                 # keep db, logs, temp dirs (p
 ```
 
 Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios dominate.
+The runner boots the API with a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`)
+instead of the 10 s server default; `--sut-env SLACK_TASK_WATCHER_INTERVAL_MS=10000` runs
+the suite at production cadence, and the Slack absence windows widen with it.
 
 ## Reading a failure
 
@@ -73,6 +77,14 @@ Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios 
    scenario (preferred) or add a manifest exclusion with a reviewable reason.
 4. A scenario that starts failing after a server change is a contract change. Decide whether
    the server or the scenario is wrong before touching either.
+5. Every failure reruns once on a fresh API (`RERUN <scenario> ...` in the console). A pass
+   there prints `FLAKY` and keeps the run green; the row in `scenarios[]` has status
+   `flaky`, both `attempts`, and the first attempt's error. A flaky scenario is still a
+   bug: read the first attempt's error and the API log tail printed above it.
+6. A scenario that flakes repeatedly can go into `scripts/e2e/quarantine.json` with an
+   owner, a reason and an `expires` date. It keeps running and reporting as
+   `FAIL (quarantined)` without failing the run. The entry fails the run the day after it
+   expires, so fix the scenario or extend the entry with a reason.
 
 ## Benchmarks
 

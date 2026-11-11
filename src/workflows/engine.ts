@@ -61,7 +61,7 @@ import {
   type SuccessorWalkDebt,
 } from "./successor-routing";
 import { deepInterpolate } from "./template";
-import { runStepValidation, type ValidationRunResult } from "./validation";
+import { runStepValidation, type ValidationRunResult, validateOutputSchema } from "./validation";
 
 // Read dynamically, NOT captured at module load: `src/http/index.ts` imports
 // this module before `loadGlobalConfigsIntoEnv()` hydrates `swarm_config` into
@@ -1200,19 +1200,20 @@ async function runClaimedStep(
   }
 
   // 6b. Validate output against node-level outputSchema if defined
-  if (node.outputSchema && result.status === "success") {
-    const outputErrors = validateJsonSchema(
-      node.outputSchema as Record<string, unknown>,
-      result.output,
-    );
-    if (outputErrors.length > 0) {
-      const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
-      const { stale: lost } = await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, {
+  const outputSchemaError = validateOutputSchema(node, result);
+  if (outputSchemaError) {
+    const { stale: lost } = await checkpointStepFailure(
+      runId,
+      stepId,
+      outputSchemaError,
+      0,
+      undefined,
+      {
         fence,
-      });
-      if (lost) return stale;
-      throw new Error(errorMsg);
-    }
+      },
+    );
+    if (lost) return stale;
+    throw new Error(outputSchemaError);
   }
 
   // 7. Run validation if configured
