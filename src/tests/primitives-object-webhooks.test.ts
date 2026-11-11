@@ -6,7 +6,12 @@ import {
   ensureObjectWebhook,
   ensureObjectWebhooksForKnownDrives,
 } from "../be/primitives/object-webhooks";
-import { createObject, listObjects, reindexObjects } from "../be/primitives/objects";
+import {
+  applyFileChange,
+  createObject,
+  listObjects,
+  reindexObjects,
+} from "../be/primitives/objects";
 import { handleObjectWebhooks } from "../http/object-webhooks";
 import { listenOnFreePort } from "./test-net";
 
@@ -288,8 +293,11 @@ describe("file.changed receiver", () => {
     expect(row?.fileVersion).toBe(1);
   });
 
-  test("an edit bumps the version; a replay or a late event is a no-op", async () => {
+  test("an edit reads the file once and bumps the version; a replay or a late event is a no-op", async () => {
     const { hookId, object } = await boardWithHook("boards/edit.excalidraw");
+    // agent-fs applies the change before it sends the event.
+    const stored = files.get(object.path);
+    if (stored) files.set(object.path, { ...stored, version: 3 });
     const edit = { path: `/${object.path}`, version: 3, operation: "edit" };
     expect((await deliver(hookId, edit)).json).toMatchObject({ action: "updated", id: object.id });
     expect((await deliver(hookId, edit)).json).toMatchObject({
@@ -300,7 +308,58 @@ describe("file.changed receiver", () => {
     expect((await deliver(hookId, late)).json).toMatchObject({ action: "ignored" });
     const listed = await listObjects({ agentId });
     expect(listed.objects.map((o) => [o.id, o.fileVersion])).toEqual([[object.id, 3]]);
-    expect(downloads).toBe(0);
+    expect(downloads).toBe(1);
+  });
+
+  test("a delete and an older edit delivered together leave the row at the newer event", async () => {
+    // agent-fs sends a delivery batch concurrently, so both events read the row before either writes.
+    const board = (id: string, version: number) => ({
+      download: async () =>
+        new Response(JSON.stringify({ type: "excalidraw", elements: [], swarm: { id } }), {
+          headers: { "x-agent-fs-version": String(version) },
+        }),
+      exists: async () => true,
+    });
+    const wrong: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const id = `race-${i}`;
+      const now = new Date().toISOString();
+      await getDbClient().run(
+        `INSERT INTO primitive_objects
+           (id, kind, orgId, driveId, path, title, fileVersion, ownerAgentId, createdAt, updatedAt)
+         VALUES (?, 'board', 'org-race', 'drive-race', ?, NULL, 3, NULL, ?, ?)`,
+        [id, `boards/race-${i}.excalidraw`, now, now],
+      );
+      const change = {
+        orgId: "org-race",
+        driveId: "drive-race",
+        path: `/boards/race-${i}.excalidraw`,
+      };
+      await Promise.all([
+        applyFileChange({ ...change, version: 5, operation: "delete" }, board(id, 5)),
+        applyFileChange({ ...change, version: 4, operation: "edit" }, board(id, 4)),
+      ]);
+      const row = await getDbClient().get<{ deletedAt: string | null; fileVersion: number }>(
+        "SELECT deletedAt, fileVersion FROM primitive_objects WHERE id = ?",
+        [id],
+      );
+      if (row?.deletedAt === null || row?.fileVersion !== 5) wrong.push(id);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  test("an edit that drops the embedded id leaves the file for object-reindex to adopt", async () => {
+    const { hookId, object } = await boardWithHook("boards/heal.excalidraw");
+    // A stock Excalidraw save writes the scene without the swarm block.
+    files.set(object.path, {
+      body: JSON.stringify({ type: "excalidraw", elements: [] }),
+      version: 2,
+    });
+    const event = await deliver(hookId, { path: `/${object.path}`, version: 2, operation: "edit" });
+    expect(event.json).toMatchObject({ action: "updated", id: object.id });
+    const report = await reindexObjects({ agentId });
+    expect(report.adopted).toEqual([object.path]);
+    expect(JSON.parse(files.get(object.path)?.body ?? "{}").swarm?.id).toBe(object.id);
   });
 
   test("a delete tombstones the row and hides it; a later write brings it back", async () => {

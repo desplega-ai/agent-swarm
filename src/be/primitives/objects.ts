@@ -509,12 +509,33 @@ export type FileChangeResult = {
   reason?: string;
 };
 
+/** Read the file an event names; a gone or non-JSON file yields the reason to ignore it. */
+async function readChangedFile(
+  reader: FileChangeReader,
+  path: string,
+): Promise<{ json: Json; fileVersion: number | null } | { reason: string }> {
+  try {
+    const response = await reader.download(path);
+    const fileVersion = versionOf(response.headers.get("x-agent-fs-version"));
+    const parsed = JSON.parse(await response.text()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error("not an object");
+    return { json: parsed as Json, fileVersion };
+  } catch (error) {
+    if (error instanceof FilesError && error.code === "NotFound") {
+      return { reason: "file is already gone" };
+    }
+    if (error instanceof FilesError) throw error;
+    return { reason: "not a JSON object; object-reindex reports it" };
+  }
+}
+
 /**
  * Apply one agent-fs `file.changed` event to the pointer rows. Idempotent and
  * order-safe: an event at or below the row's `fileVersion` is a no-op, so a
  * replayed or late delivery changes nothing. Never writes to agent-fs (that
  * would emit another event); a file with no id, or a copy, is left for
- * object-reindex.
+ * object-reindex, and its event does not move `fileVersion` so reindex reads it.
  */
 export async function applyFileChange(
   change: FileChange,
@@ -536,39 +557,50 @@ export async function applyFileChange(
   if (change.operation === "delete") {
     if (!atPath) return { action: "ignored", path, reason: "no object at this path" };
     if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
-    await db.run(
-      "UPDATE primitive_objects SET deletedAt = ?, fileVersion = ?, updatedAt = ? WHERE id = ?",
-      [now, version, now, atPath.id],
+    // agent-fs delivers a batch concurrently, so the version check lives in the UPDATE.
+    const { changes } = await db.run(
+      `UPDATE primitive_objects SET deletedAt = ?, fileVersion = ?, updatedAt = ?
+       WHERE id = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
+      [now, version, now, atPath.id, version],
     );
+    if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     return { action: "tombstoned", path, id: atPath.id };
   }
 
   if (atPath) {
     if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
-    await db.run(
-      "UPDATE primitive_objects SET deletedAt = NULL, fileVersion = ?, updatedAt = ? WHERE id = ?",
-      [version, now, atPath.id],
+    const file = await readChangedFile(reader, path);
+    if ("reason" in file) return { action: "ignored", path, id: atPath.id, reason: file.reason };
+    // object-reindex skips a file whose stat version equals fileVersion, so only a file that
+    // still carries this row's id moves it. An id-less save (stock Excalidraw) stays visible.
+    const embedded = kind.readId(file.json);
+    const read = file.fileVersion ?? version;
+    // A read older than the event is not the content the event announced.
+    const owned = embedded === atPath.id && read >= version;
+    const { changes } = await db.run(
+      `UPDATE primitive_objects
+         SET deletedAt = NULL, updatedAt = ?, fileVersion = CASE WHEN ? THEN ? ELSE fileVersion END
+       WHERE id = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
+      [now, owned ? 1 : 0, read, atPath.id, version],
     );
-    return { action: "updated", path, id: atPath.id };
+    if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
+    if (owned) return { action: "updated", path, id: atPath.id };
+    return {
+      action: "updated",
+      path,
+      id: atPath.id,
+      reason: !embedded
+        ? "no embedded id; object-reindex adopts it"
+        : embedded === atPath.id
+          ? "read an older version than the event; object-reindex reads it again"
+          : "the file carries another id; object-reindex reconciles it",
+    };
   }
 
   // A file with no row: a move target, a restored file, or a new or copied one.
-  let json: Json;
-  let fileVersion: number | null;
-  try {
-    const response = await reader.download(path);
-    fileVersion = versionOf(response.headers.get("x-agent-fs-version"));
-    const parsed = JSON.parse(await response.text()) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      throw new Error("not an object");
-    json = parsed as Json;
-  } catch (error) {
-    if (error instanceof FilesError && error.code === "NotFound") {
-      return { action: "ignored", path, reason: "file is already gone" };
-    }
-    if (error instanceof FilesError) throw error;
-    return { action: "ignored", path, reason: "not a JSON object; object-reindex reports it" };
-  }
+  const file = await readChangedFile(reader, path);
+  if ("reason" in file) return { action: "ignored", path, reason: file.reason };
+  const { json, fileVersion } = file;
   const id = kind.readId(json);
   if (!id) return { action: "ignored", path, reason: "no embedded id; object-reindex adopts it" };
   const byId = await db.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
