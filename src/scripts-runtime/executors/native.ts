@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, symlink } from "node:fs/promises";
+import { chown, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir as osTmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -10,6 +10,8 @@ import {
 import {
   buildSandboxedCommand,
   readStreamCapped,
+  resolveSandboxIdentity,
+  type SandboxIdentity,
   sandboxSpawnEnv,
 } from "../../utils/sandboxed-process";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError } from "./types";
@@ -192,14 +194,21 @@ function harnessCommand(
   harnessPath: string,
   input: ExecutorInput,
   env: Record<string, string>,
+  runAs: SandboxIdentity | undefined,
 ): string[] {
-  return buildSandboxedCommand(["bun", "run", harnessPath], env, {
-    virtualMemoryMb: input.resources.memoryMb,
-    cpuTimeSec: input.resources.cpuTimeSec,
-    maxProcs: input.resources.maxProcs,
-    maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
-    maxFdCount: input.resources.maxFdCount,
-  });
+  return buildSandboxedCommand(
+    ["bun", "run", harnessPath],
+    env,
+    {
+      virtualMemoryMb: input.resources.memoryMb,
+      cpuTimeSec: input.resources.cpuTimeSec,
+      maxProcs: input.resources.maxProcs,
+      maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
+      maxFdCount: input.resources.maxFdCount,
+    },
+    "inline",
+    runAs,
+  );
 }
 
 export class NativeScriptExecutor implements ScriptExecutor {
@@ -220,6 +229,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const resultFile = `${tmpdir}/result.json`;
     const errorFile = `${tmpdir}/error.json`;
     const startedFile = `${tmpdir}/started.marker`;
+    const runAs = resolveSandboxIdentity();
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
@@ -257,6 +267,14 @@ export class NativeScriptExecutor implements ScriptExecutor {
         Bun.write(sourceFile, input.source),
         linkOrWriteBareImportShims(baseTmpDir, tmpdir),
       ]);
+      if (runAs) {
+        // The child writes its result and marker files into the run dir.
+        await Promise.all(
+          [tmpdir, `${tmpdir}/user-module`, argsFile, sourceFile].map((path) =>
+            chown(path, runAs.uid, runAs.gid),
+          ),
+        );
+      }
 
       // No await between this check and the spawn below.
       if (killed) return killedOutput();
@@ -268,7 +286,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
 
       const harnessEnv: Record<string, string> = {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
-        HOME: process.env.HOME ?? "/tmp",
+        // The dropped identity cannot use the API's HOME.
+        HOME: runAs ? tmpdir : (process.env.HOME ?? "/tmp"),
         LANG: process.env.LANG ?? "C.UTF-8",
         LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
         TMPDIR: tmpdir,
@@ -282,7 +301,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
 
       proc = registerProcessGroup(
-        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
+        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv, runAs), {
           // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
           // binary for argv[0] — the sandboxed command's `env -i` prelude is
           // what actually scrubs the child's environment down to `harnessEnv`
