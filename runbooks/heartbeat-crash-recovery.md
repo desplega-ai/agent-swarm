@@ -691,6 +691,7 @@ session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
 if session and now - session.lastHeartbeatAt < STALL_THRESHOLD_STALE_HEARTBEAT_MIN: skip
 failTask(task.id, cascadeDependents=false)                    # then create the retry child below
+if task.workflowRunStepId: no retry child                     # the workflow engine recovers the step from task.failed
 
 # reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
