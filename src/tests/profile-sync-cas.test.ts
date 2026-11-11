@@ -380,3 +380,77 @@ test("an accepted managed setup extract keeps its own shebang when skipping the 
   }) as typeof fetch);
   expect(requests).toBe(0);
 });
+
+/** A fetch whose response is held until `release()`, to settle it after a newer sync. */
+function heldResponse() {
+  let release!: () => void;
+  let started!: () => void;
+  const sent = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetchImpl = (async (input, init) => {
+    const response = await profileApi(input, init);
+    started();
+    await gate;
+    return response;
+  }) as typeof fetch;
+  return { fetchImpl, sent, release };
+}
+
+test("a late conflict response does not roll back a newer settled identity edit", async () => {
+  await updateAgentProfile(id, { toolsMd: "late boot" });
+  const box = workspace({ toolsMd: "late boot" });
+  await updateAgentProfile(id, { toolsMd: "late DB lead" });
+  box.files[TOOLS_MD_PATH] = "late stale edit";
+  const held = heldResponse();
+  const old = box.sync(held.fetchImpl);
+  await held.sent;
+  await box.sync(); // another sync reconciles the same conflict first
+  box.files[TOOLS_MD_PATH] = "late newer edit";
+  await box.sync();
+  expect((await getAgentById(id))?.toolsMd).toBe("late newer edit");
+  held.release();
+  await old;
+  expect(box.files[TOOLS_MD_PATH]).toBe("late newer edit");
+  box.files[TOOLS_MD_PATH] = "late follow-up edit";
+  await box.sync();
+  expect((await getAgentById(id))?.toolsMd).toBe("late follow-up edit");
+});
+
+test("a late conflict response does not roll back a newer settled setup edit", async () => {
+  const compose = (body: string) =>
+    `#!/bin/bash\n# === Agent-managed setup (from DB) ===\n${body}\n# === End agent-managed setup ===\n`;
+  await updateAgentProfile(id, { setupScript: "export LATE=boot" });
+  const box = workspace({ setupScript: "export LATE=boot" }, compose("export LATE=boot"));
+  await updateAgentProfile(id, { setupScript: "export LATE=DB" });
+  box.files[SETUP_SCRIPT_PATH] = compose("export LATE=stale");
+  const held = heldResponse();
+  const old = box.sync(held.fetchImpl);
+  await held.sent;
+  await box.sync();
+  box.files[SETUP_SCRIPT_PATH] = compose("export LATE=newer");
+  await box.sync();
+  expect((await getAgentById(id))?.setupScript).toBe("export LATE=newer");
+  held.release();
+  await old;
+  expect(box.files[SETUP_SCRIPT_PATH]).toBe(compose("export LATE=newer"));
+});
+
+test("an unreadable field is held while an independent field edit is still accepted", async () => {
+  const soul = "s".repeat(600);
+  await updateAgentProfile(id, { soulMd: soul, toolsMd: "readable base" });
+  const box = workspace({ soulMd: soul, toolsMd: "readable base" });
+  box.files[TOOLS_MD_PATH] = "readable independent edit";
+  const read = box.io.readFile;
+  box.io.readFile = async (path) => {
+    if (path === SOUL_MD_PATH) throw Object.assign(new Error("EIO soul"), { code: "EIO" });
+    return read(path);
+  };
+  await box.sync();
+  const stored = await getAgentById(id);
+  expect(stored?.toolsMd).toBe("readable independent edit");
+  expect(stored?.soulMd).toBe(soul);
+});

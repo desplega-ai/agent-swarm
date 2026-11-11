@@ -951,14 +951,25 @@ export async function collectProfilePayloads(
 
   const baselines = await readIdentityBaselines(readFile);
   const uploadsHeld = Boolean(process.env[PROFILE_UPLOADS_HELD_ENV]);
+  // One unreadable file holds only its own upload: it is skipped like an
+  // absent file, and the independent fields are still collected. Preservation
+  // keeps the strict reader, so a failed read is never replaced as missing.
+  const readForUpload = async (path: string): Promise<string | undefined> => {
+    try {
+      return await readFile(path);
+    } catch (error) {
+      console.warn(scrubSecrets(`[profile-sync] ${path} held: unreadable (${String(error)})`));
+      return undefined;
+    }
+  };
 
   if (!uploadsHeld && fields.includes("identity")) {
     const updates = buildIdentityPayload(
       {
-        soulMd: await readFile(SOUL_MD_PATH),
-        identityMd: await readFile(IDENTITY_MD_PATH),
-        toolsMd: await readFile(TOOLS_MD_PATH),
-        heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
+        soulMd: await readForUpload(SOUL_MD_PATH),
+        identityMd: await readForUpload(IDENTITY_MD_PATH),
+        toolsMd: await readForUpload(TOOLS_MD_PATH),
+        heartbeatMd: await readForUpload(HEARTBEAT_MD_PATH),
       },
       baselines,
       agentId,
@@ -974,7 +985,7 @@ export async function collectProfilePayloads(
   }
 
   if (fields.includes("claude")) {
-    const raw = await readFile(claudeMdPath);
+    const raw = await readForUpload(claudeMdPath);
     if (raw?.trim()) {
       if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
@@ -983,7 +994,7 @@ export async function collectProfilePayloads(
         // skip what a hook wrote, send an edit against the base it derives from.
         // Without a record the only base the runner knows is its boot baseline.
         const record =
-          effectiveClaudeMdLineage(await readFile(CLAUDE_MD_LINEAGE_PATH), raw) ??
+          effectiveClaudeMdLineage(await readForUpload(CLAUDE_MD_LINEAGE_PATH), raw) ??
           (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
         const body = planClaudeMdSync({ content: raw, record });
         if (body) payloads.push({ label: "claude", body });
@@ -994,7 +1005,7 @@ export async function collectProfilePayloads(
   }
 
   if (!uploadsHeld && fields.includes("setup")) {
-    const raw = await readFile(SETUP_SCRIPT_PATH);
+    const raw = await readForUpload(SETUP_SCRIPT_PATH);
     if (raw !== undefined) {
       const content = extractSetupScriptContent(raw, agentId);
       if (
@@ -1085,6 +1096,11 @@ async function settleProfileUpdate(
     async () => {
       const baselines = await readIdentityBaselines(io.readFile);
       if (!baselines?.expected?.[field]) return;
+      // A response to a request built on an older token is superseded: a newer
+      // sync already settled this field, so applying it would roll back the
+      // local copy and its tokens. The next sync re-reads the current state.
+      const sentToken = (payload.body.expectedHashes as ProfileExpectedHashes | undefined)?.[field];
+      if (sentToken !== baselines.expected[field]) return;
       let localValue = dbValue;
       if (dbValue !== sent) {
         const path = PROFILE_PATHS[field];
