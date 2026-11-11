@@ -49,6 +49,8 @@ export type StreamRow =
       isNew: boolean;
       /** The LLM call that emitted this text, when it is the call's first row. */
       usage?: CallUsage;
+      /** A pre-tool progress note (a Claude update block): one muted line, not prose. */
+      progress?: boolean;
     }
   | {
       type: "thinking";
@@ -58,6 +60,8 @@ export type StreamRow =
       text: string;
       isNew: boolean;
       usage?: CallUsage;
+      /** The running session's newest row: the label reads "Thinking", else "Thought". */
+      live?: boolean;
     }
   | {
       type: "meta";

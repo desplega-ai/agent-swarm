@@ -365,6 +365,52 @@ describe("Transcript live line", () => {
   });
 });
 
+describe("Transcript reasoning", () => {
+  const messages = [
+    {
+      id: "r1",
+      role: "assistant" as const,
+      content: [{ type: "thinking" as const, thinking: "Weigh the two configs." }],
+      iteration: 1,
+      timestamp: "2026-10-30T10:00:01Z",
+    },
+    {
+      id: "r2",
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: "Reading the config.", progress: true }],
+      iteration: 1,
+      timestamp: "2026-10-30T10:00:02Z",
+    },
+  ];
+  const label = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-slot="trace-title"] span.italic')].map(
+      (el) => el.textContent,
+    );
+
+  test("a finished reasoning step reads Thought; the progress note is a muted line", async () => {
+    const rows = buildTranscriptRows({ messages });
+    const { container, unmount } = await mount(<Transcript rows={rows} running={false} />);
+    const summary = container.querySelector(
+      '[data-slot="trace-collapsible-trigger"]',
+    ) as HTMLButtonElement;
+    expect(summary.textContent).toBe("Thought");
+    await act(async () => summary.click());
+    expect(label(container)).toEqual(["Thought"]);
+    const progress = container.querySelector('[data-slot="transcript-progress"]') as HTMLElement;
+    expect(progress.textContent).toContain("Reading the config.");
+    expect(progress.getAttribute("title")).toBe("Reading the config.");
+    expect(container.querySelector('[data-slot="transcript-assistant"]')).toBeNull();
+    await unmount();
+  });
+
+  test("the live run's newest reasoning step reads Thinking", async () => {
+    const rows = buildTranscriptRows({ messages: messages.slice(0, 1) });
+    const { container, unmount } = await mount(<Transcript rows={rows} running />);
+    expect(label(container)).toEqual(["Thinking"]);
+    await unmount();
+  });
+});
+
 describe("Transcript delegation", () => {
   test("the subtitle shows the agent's avatar before its name", async () => {
     const task = {
