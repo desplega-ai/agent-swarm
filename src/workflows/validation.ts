@@ -1,5 +1,15 @@
 import type { ExecutorMeta, WorkflowNode } from "../types";
+import type { ExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import { validateJsonSchema } from "./json-schema-validator";
+
+/** Validate successful output before step validation or checkpointing. */
+export function validateOutputSchema(node: WorkflowNode, result: ExecutorResult): string | null {
+  if (!node.outputSchema || result.status !== "success") return null;
+
+  const errors = validateJsonSchema(node.outputSchema as Record<string, unknown>, result.output);
+  return errors.length > 0 ? `Output schema validation failed: ${errors.join("; ")}` : null;
+}
 
 export type ValidationOutcome = "pass" | "halt" | "retry";
 
