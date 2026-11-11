@@ -12,6 +12,8 @@ This skill enforces a disciplined TDD workflow:
 
 **No implementation code is written without a failing test first.** This is non-negotiable.
 
+**Write the test at the level the repo asks for.** When the repo proves behavior through a black-box e2e suite and limits new unit tests, RED is a failing e2e scenario, not a new unit test. In agent-swarm that is a scenario in `scripts/e2e/scenarios/`, run alone with `bun run e2e --only <name>`. A new unit test there may import only the code listed in `scripts/unit-test-allowlist.txt` (worker runtime, tooling, rule corpora), and `bun run check:unit-test-allowlist` fails the PR otherwise.
+
 ## Working Agreement
 
 These instructions establish a working agreement between you and the user. The key principles are:
@@ -78,6 +80,7 @@ The autonomy mode is passed by the invoking command. If not specified, default t
    - **CRITICAL**: Read files yourself before spawning sub-tasks
 
 2. **Analyze test infrastructure:**
+   - Does the repo's CLAUDE.md or AGENTS.md require e2e scenarios over unit tests? That decides what every RED phase writes.
    - What testing framework is used? (Jest, pytest, Go testing, etc.)
    - Where do tests live? (co-located, `__tests__/`, `tests/`, etc.)
    - What's the test command? (`npm test`, `make test`, `pytest`, etc.)
@@ -106,8 +109,8 @@ The autonomy mode is passed by the invoking command. If not specified, default t
 
 ### Step 2: Test Strategy Design
 
-1. **Identify testable units:**
-   - What are the smallest testable pieces?
+1. **Identify testable behaviors:**
+   - What are the smallest behaviors a test can check, at the level the repo asks for (an e2e scenario where it has one)?
    - What inputs/outputs can be verified?
    - What edge cases matter?
 

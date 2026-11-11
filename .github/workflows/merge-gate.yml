@@ -34,6 +34,7 @@ jobs:
       vendored_openapi: ${{ steps.check.outputs.vendored_openapi }}
       docker: ${{ steps.check.outputs.docker }}
       ui: ${{ steps.check.outputs.ui }}
+      ui_e2e: ${{ steps.check.outputs.ui_e2e }}
       ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
       e2e: ${{ steps.check.outputs.e2e }}
@@ -141,6 +142,11 @@ jobs:
           # bun.lock + root overrides since the workspace migration.
           UI=$(match '^(apps/ui/|packages/ui-e2e/|bun\.lock|package\.json$|bunfig\.toml$)')
 
+          # Playwright: the UI paths plus the API it boots (src/http/, src/be/) and the e2e
+          # SUT it boots through (scripts/e2e/). Same set ui-e2e.yml filtered pull requests on.
+          # The merge queue honours it too: a group with no such path skips Playwright.
+          UI_E2E=$(match '^(apps/ui/|packages/ui-e2e/|scripts/e2e/|src/http/|src/be/|bun\.lock|package\.json$|bunfig\.toml$|\.github/workflows/ui-e2e(-shards|-report)?\.yml$)')
+
           # dashboard image: everything Dockerfile.ui copies, plus its smoke test.
           UI_IMAGE=$(match '^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)')
 
@@ -156,7 +162,7 @@ jobs:
           # workflows skip it.
           E2E=$(match '^(src/|packages/|templates/|vendored-openapi/|slack-manifest\.json$|scripts/e2e/|scripts/check-e2e-boundary\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
 
-          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS E2E; do
+          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_E2E UI_IMAGE TEMPLATES_WORKFLOWS E2E; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -208,6 +214,24 @@ jobs:
       # plugin, so the step does not depend on the runner's Node version.
       - name: Run anti-slop rules (Oxlint)
         run: bun run lint:slop
+
+      # Rule 1 of the e2e-first plan: a new unit test may import only the code in
+      # scripts/unit-test-allowlist.txt. It judges the diff only. On a PR the
+      # checkout is the merge commit, so its first parent is the base; the merge
+      # queue names its base. Fetches one or two commits, no full history.
+      - name: Check no new unit tests outside the allowlist
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            base="$MERGE_GROUP_BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$base"
+          else
+            git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+            base="$(git rev-parse HEAD^1)"
+          fi
+          bun run check:unit-test-allowlist --base "$base"
 
       # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
       # hook) run Bun's built-in `bun check`; the step below keeps the tsconfig
@@ -1404,6 +1428,29 @@ jobs:
       - name: Smoke test
         run: bash scripts/smoke-ui-image.sh test-ui-image:latest
 
+  # Playwright, required: Merge Gate needs it. 4 shards, one runner each; a spec that passes on
+  # its one rerun is flaky and passes. A PR or merge group with no UI E2E path skips it.
+  ui-e2e:
+    name: UI E2E
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui_e2e == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ui-e2e-shards.yml
+
+  # Not in Merge Gate's needs: the PR comment, agent-fs and the tracker never block the gate.
+  ui-e2e-report:
+    name: UI E2E Report
+    needs: ui-e2e
+    if: always() && needs.ui-e2e.result != 'skipped'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/ui-e2e-report.yml
+    with:
+      shards-result: ${{ needs.ui-e2e.result }}
+    secrets: inherit
+
   ui-lint:
     name: UI Lint and Type Check
     needs: detect-changes
@@ -1642,7 +1689,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-e2e, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout. checks: read lets the last step read the PR Body check.

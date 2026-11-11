@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { assertAllowedTarget, readTarget } from "./policy";
+import { balanceShardArgs } from "./shard";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const repoRoot = resolve(packageRoot, "../..");
@@ -48,17 +49,24 @@ async function main(): Promise<void> {
   }
 
   if (!noBuild && !process.env.E2E_UI_URL) {
-    const buildExit = await run(["bun", "run", "build"], resolve(repoRoot, "apps/ui"), {
-      ...process.env,
-      VITE_API_URL: "",
-      VITE_API_KEY: "",
-      VITE_DEMO_MODE: "",
-    });
+    // Coverage maps the bundle back to apps/ui/src, so that build needs sourcemaps. bun run
+    // appends the flag to the script's last command, `vite build`.
+    const coverage = process.env.UI_E2E_COVERAGE === "1" ? ["--sourcemap"] : [];
+    const buildExit = await run(
+      ["bun", "run", "build", ...coverage],
+      resolve(repoRoot, "apps/ui"),
+      {
+        ...process.env,
+        VITE_API_URL: "",
+        VITE_API_KEY: "",
+        VITE_DEMO_MODE: "",
+      },
+    );
     if (buildExit !== 0) process.exit(buildExit);
   }
 
   const playwrightExit = await run(
-    [await findPlaywrightBin(), "test", ...passthrough],
+    [await findPlaywrightBin(), "test", ...(await balanceShardArgs(passthrough))],
     packageRoot,
   );
   process.exit(playwrightExit);

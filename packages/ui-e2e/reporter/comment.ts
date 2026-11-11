@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseFlags } from "./cli.ts";
 
@@ -26,6 +26,7 @@ interface Options {
   runUrl: string;
   reportArtifact: string;
   trackerUrl: string | undefined;
+  coverage: string | undefined;
   out: string;
 }
 
@@ -47,7 +48,7 @@ const STATUS_ORDER = new Map([
 
 function parseArgs(argv: string[]): Options {
   const required = ["summaries", "images", "run-url", "report-artifact", "out"];
-  const values = parseFlags(argv, { required, optional: ["tracker-url"] });
+  const values = parseFlags(argv, { required, optional: ["tracker-url", "coverage"] });
 
   for (const key of required) {
     if (!values.get(key)) throw new Error(`Missing required argument --${key}`);
@@ -59,6 +60,7 @@ function parseArgs(argv: string[]): Options {
     runUrl: values.get("run-url") as string,
     reportArtifact: values.get("report-artifact") as string,
     trackerUrl: values.get("tracker-url") as string | undefined,
+    coverage: values.get("coverage") as string | undefined,
     out: values.get("out") as string,
   };
 }
@@ -222,6 +224,9 @@ function renderComment(
     lines.push("", "</details>");
   }
 
+  const coverage = coverageLine(options.coverage);
+  if (coverage) lines.push("", coverage);
+
   lines.push(
     "",
     `Run: [GitHub Actions](${options.runUrl}) | HTML report artifact: \`${escapeTable(options.reportArtifact)}\``,
@@ -229,6 +234,22 @@ function renderComment(
   if (options.trackerUrl) lines.push(`Tracker: ${options.trackerUrl}`);
   lines.push("");
   return lines.join("\n");
+}
+
+// One line from reporter/coverage.ts output. No file (coverage off or failed) prints nothing.
+function coverageLine(path: string | undefined): string | undefined {
+  if (!path || !existsSync(path)) return undefined;
+  try {
+    const { total, files } = JSON.parse(readFileSync(path, "utf8")) as {
+      total?: { covered: number; total: number };
+      files?: unknown[];
+    };
+    if (!total || total.total <= 0) return undefined;
+    const percent = ((total.covered / total.total) * 100).toFixed(1);
+    return `Dashboard line coverage: **${percent}%** (${total.covered} of ${total.total} lines in the ${files?.length ?? 0} files the browser loaded)`;
+  } catch {
+    return undefined;
+  }
 }
 
 function buildComment(results: FinalResult[], images: ImageEntry[], options: Options): string {
