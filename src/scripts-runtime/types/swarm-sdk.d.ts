@@ -257,6 +257,36 @@ declare module "swarm-sdk" {
     freezeRows: number;
   }
 
+  export interface SheetImportXlsxArgs {
+    /** An `.xlsx` on the drive. */
+    sourcePath: string;
+    /** The new sheet; must end in `.sheet.json`. */
+    path: string;
+    title?: string;
+  }
+
+  export interface SheetImportXlsxResult {
+    message: string;
+    object: PrimitiveObject;
+    link: string | null;
+    /** What the file had that a sheet cannot hold. */
+    dropped: string[];
+  }
+
+  export interface SheetExportXlsxArgs extends SheetRef {
+    targetPath: string;
+    /** Replace `targetPath` when it exists. */
+    overwrite?: boolean;
+  }
+
+  export interface SheetExportXlsxResult {
+    message: string;
+    path: string;
+    link: string | null;
+    /** What the sheet had that xlsx cannot carry. */
+    dropped: string[];
+  }
+
   export interface SheetResult {
     message: string;
     /** agent-fs version after the call. */
@@ -296,6 +326,10 @@ declare module "swarm-sdk" {
     addTab(
       args: SheetRef & { name: string; after?: string },
     ): Promise<SheetResult & { tabs: string[] }>;
+    /** Create-only. Reads an `.xlsx` on the drive. `dropped` names what a sheet cannot hold (styles, charts, comments, frozen panes, ...). Limits: 5 MiB, 20 tabs, 50,000 cells. */
+    importXlsx(args: SheetImportXlsxArgs): Promise<SheetImportXlsxResult>;
+    /** Create-only unless `overwrite`. `targetPath` must end in `.xlsx`. `dropped` names what xlsx cannot carry (frozen panes, spilled array cells). */
+    exportXlsx(args: SheetExportXlsxArgs): Promise<SheetExportXlsxResult>;
   }
 
   export interface SwarmSdk {
@@ -412,6 +446,8 @@ declare module "swarm-sdk" {
     sheets_appendRows(args: SheetRef & { tab: string; rows: SheetCellInput[][] }): Promise<unknown>;
     sheets_clearRange(args: SheetRangeArgs): Promise<unknown>;
     sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
+    sheets_importXlsx(args: SheetImportXlsxArgs): Promise<unknown>;
+    sheets_exportXlsx(args: SheetExportXlsxArgs): Promise<unknown>;
     // --- repos ---
     repo_list(args?: Record<string, unknown>): Promise<unknown>;
     // --- schedules ---

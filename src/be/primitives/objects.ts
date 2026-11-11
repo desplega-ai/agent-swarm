@@ -90,7 +90,7 @@ const MAX_REINDEX_FILES = 500;
 
 const withLink = (row: ObjectRow): PrimitiveObject => ({ ...row, link: buildAgentFsLiveUrl(row) });
 
-async function clientFor(agentId: string | undefined) {
+export async function clientFor(agentId: string | undefined) {
   const client = agentId ? await agentFsClientFor(agentId) : undefined;
   if (!client) throw new ObjectsError(NO_AGENT_FS_IDENTITY);
   const { orgId, driveId } = client.identity;
@@ -105,7 +105,7 @@ function kindFor(kind: string): PrimitiveKind {
   return def;
 }
 
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   try {
     return normalizeStoredKey(path);
   } catch (error) {

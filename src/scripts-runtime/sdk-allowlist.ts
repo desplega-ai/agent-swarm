@@ -49,6 +49,8 @@ export const SDK_TOOL_NAME_MAP = {
   sheets_appendRows: "sheet-append-rows",
   sheets_clearRange: "sheet-clear-range",
   sheets_addTab: "sheet-add-tab",
+  sheets_importXlsx: "sheet-import-xlsx",
+  sheets_exportXlsx: "sheet-export-xlsx",
 
   // ── repos ──
   repo_list: "get-repos",
@@ -261,7 +263,18 @@ export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
  */
 export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
   objects: ["create", "get", "list", "reindex"],
-  sheets: ["create", "get", "list", "getRange", "setRange", "appendRows", "clearRange", "addTab"],
+  sheets: [
+    "create",
+    "get",
+    "list",
+    "getRange",
+    "setRange",
+    "appendRows",
+    "clearRange",
+    "addTab",
+    "importXlsx",
+    "exportXlsx",
+  ],
 });
 
 /** ctx keys a namespace may never shadow. */

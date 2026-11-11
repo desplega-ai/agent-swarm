@@ -368,6 +368,27 @@ single-cell `range` is the top-left corner of the `values`; a larger one must
 match their size. Limits: 20 tabs, 50,000 cells, 5 MiB, 10,000 cells per range
 call. Durable workflow runs get `ctx.sheets` too.
 
+`ctx.sheets.importXlsx` turns an `.xlsx` on the drive into a new sheet, and
+`ctx.sheets.exportXlsx` writes a sheet to a new `.xlsx`. Both return `dropped`,
+the features the other side cannot hold (styles, charts, comments, frozen panes,
+and so on). An import refuses a file over 5 MiB, 20 tabs or 50,000 cells, and
+creates nothing when it refuses. An export refuses an existing `targetPath`
+unless `overwrite: true`.
+
+```ts
+export default async function (_args, ctx) {
+  const { object, dropped } = await ctx.sheets.importXlsx({
+    sourcePath: "in/budget.xlsx",
+    path: "out/budget.sheet.json",
+  });
+  const { path } = await ctx.sheets.exportXlsx({
+    id: object.id,
+    targetPath: "out/budget-copy.xlsx",
+  });
+  return { dropped, path };
+}
+```
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:

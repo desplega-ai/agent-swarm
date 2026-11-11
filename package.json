@@ -261,6 +261,7 @@
     "svix": "^1.62.0",
     "viem": "^2.46.3",
     "ws": "8.21.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "y-protocols": "1.0.7",
     "yjs": "13.6.32",
     "zod": "^4.2.1",
