@@ -9,7 +9,8 @@
  * 2. `git diff -U0 <base>...HEAD`: the added lines per file.
  * 3. A changed line counts only when lcov lists it as executable. A file no API process
  *    loaded counts its changed code lines in full (a type-only file counts none).
- * 4. Scope: API files under src/, minus worker code, tests and coverage-exemptions.txt.
+ * 4. Scope: API and CLI files under src/, minus worker code, tests and coverage-exemptions.txt.
+ *    CLI scenarios run the CLI under lcov too (scripts/e2e/cli.ts), so its lines count.
  *
  * A coverage problem never exits non-zero: the comment says what went wrong instead.
  * Imports no package, so CI runs it without `bun install`.
@@ -26,8 +27,23 @@ const NOT_API = [
   "src/hooks/",
   "src/prompts/",
   "src/claude.ts",
-  "src/cli.tsx",
   "src/tests/",
+];
+
+/** The CLI entry and its operator commands: CLI scenarios run them, so they count. */
+const CLI = [
+  "src/cli.tsx",
+  "src/commands/onboard.tsx",
+  "src/commands/onboard/",
+  "src/commands/setup.tsx",
+  "src/commands/shared/",
+  "src/commands/controller.ts",
+  "src/commands/codex-login.ts",
+  "src/commands/claude-managed-setup.ts",
+  "src/commands/worker-token.ts",
+  "src/commands/x.ts",
+  "src/commands/e2b.ts",
+  "src/commands/e2b-stack-wizard.tsx",
 ];
 
 /** file -> line -> hits. */
@@ -110,7 +126,7 @@ export function inScope(path: string, exemptions: readonly string[]): boolean {
     path.startsWith("src/") &&
     /\.(ts|tsx|js|mjs)$/.test(path) &&
     !/\.d\.ts$|\.(test|spec)\.tsx?$/.test(path) &&
-    !matches(path, NOT_API) &&
+    (matches(path, CLI) || !matches(path, NOT_API)) &&
     !matches(path, exemptions)
   );
 }
