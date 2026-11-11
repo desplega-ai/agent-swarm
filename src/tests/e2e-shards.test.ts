@@ -34,7 +34,11 @@ describe("shard bands", () => {
   });
 });
 
-const universe = { routes: ["GET /api/a", "GET /api/b"], nodeTypes: ["script"] };
+const universe = {
+  routes: ["GET /api/a", "GET /api/b"],
+  nodeTypes: ["script"],
+  cliCommands: ["docs", "help"],
+};
 
 function shard(index: number, observed: Partial<Observations>, ok = true): ShardFile {
   const result: E2eResult = {
@@ -54,6 +58,7 @@ function shard(index: number, observed: Partial<Observations>, ok = true): Shard
         toolUniverse: ["t1", "t2"],
         calledTools: [],
         nodeTypes: [],
+        calledCommands: [],
         stateValues: {},
         ...observed,
       },
@@ -68,9 +73,9 @@ const strict = { strict: true, minRouteCoverage: 100, minToolCoverage: 100 };
 
 describe("merge", () => {
   const shards = [
-    shard(1, { calls: [call("/api/a")], calledTools: ["t1"] }),
+    shard(1, { calls: [call("/api/a")], calledTools: ["t1"], calledCommands: ["docs"] }),
     shard(2, { calls: [call("/api/b")], nodeTypes: ["script"] }),
-    shard(3, { calledTools: ["t2"] }),
+    shard(3, { calledTools: ["t2"], calledCommands: ["help"] }),
   ];
 
   test("strict passes on the union when no shard covers everything alone", () => {
@@ -80,6 +85,7 @@ describe("merge", () => {
     expect(merged.ok).toBe(true);
     expect(merged.coverage.routes.covered).toBe(2);
     expect(merged.coverage.mcpTools.covered).toBe(2);
+    expect(merged.coverage.cliCommands.covered).toBe(2);
     expect(merged.durationMs).toBe(3000);
     expect(merged.scenarios.map((s) => s.status)).toEqual(["pass", "flaky", "pass"]);
     expect(markdownSummary(merged)).toContain("| 2/3 | PASS | 1 | 2.0s |");

@@ -53,7 +53,7 @@ Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; re
 
 Boundaries: `src/scripts-runtime/` is on both `check-db-boundary.sh` (no `src/be/db` imports) and `check-api-key-boundary.sh` (must use `getApiKey()`) allowlists.
 
-Tests: `bun run test:root -- src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
+Tests: `bun run test:root -- src/tests/scripts-*.test.ts` runs the existing units. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight, with new cases as e2e scenarios (`scripts/e2e/scenarios/script-*.ts`), not new unit tests.
 
 New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
 
@@ -193,7 +193,7 @@ templates/skills/<name>/
 
 <important if="you are adding or modifying CLI commands or CLI help text">
 
-CLI help lives in `src/cli.tsx` — plain `console.log`, not Ink. To add/modify: update `COMMAND_HELP`, add to the `commands` array in `printHelp()`, then route in the `App` switch (UI commands) or before `render()` (non-UI). Verify with `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`.
+CLI help lives in `src/cli.tsx` — plain `console.log`, not Ink. To add/modify: update `COMMAND_HELP`, add to the `commands` array in `printHelp()`, then route in the `App` switch (UI commands) or before `render()` (non-UI). Verify with `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`. Then add a CLI scenario (`runCli` in `scripts/e2e/cli.ts`) that runs the command and checks its exit code, output and written files, or a reasoned `cliCommands` exclusion in `scripts/e2e/coverage-manifest.json`: `bun run e2e --strict` fails a listed command with neither.
 
 </important>
 
@@ -307,6 +307,7 @@ Read [DESIGN.md](./DESIGN.md) before UI work.
 Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, agent-browser UI verification, swarm-local-e2e skill, memory tests, Slack E2E.
 
 Hard rules:
+- **No new unit tests for API or CLI code.** Prove a change with an e2e scenario in `scripts/e2e/scenarios/` (`bun run e2e --only <name>` before push; authoring: [scripts/e2e/README.md](./scripts/e2e/README.md)). A new `*.test.ts` file, or a new `test(` call in an old one, may import only the worker runtime, tooling, rule corpora, migrations and the dashboard listed in `scripts/unit-test-allowlist.txt`. `bun run check:unit-test-allowlist` (Lint job) enforces it on the diff; the escape hatch is a line with a reason in that file. Editing or deleting an existing unit test is fine.
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; its workflow `ui-e2e.yml` is informational.
 - Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
@@ -324,9 +325,9 @@ Hard rules:
 
 </important>
 
-<important if="you are adding or changing an HTTP route, an MCP tool, or a workflow executor, or the merge-gate job 'E2E Contract' failed on coverage">
+<important if="you are adding or changing an HTTP route, an MCP tool, a workflow executor or a CLI command, or the merge-gate job 'E2E Contract' failed on coverage">
 
-`bun run e2e --strict` (CI) fails when a route operation, MCP tool or workflow node type the server exposes has no black-box scenario and no reasoned exclusion in `scripts/e2e/coverage-manifest.json`. A new route or tool ships with a scenario in `scripts/e2e/scenarios/` in the same PR. Authoring rules, the mocked edges (inference, embeddings, SystemOne, Slack) and the simulated agent: [scripts/e2e/README.md](./scripts/e2e/README.md). Operator view and failure triage: [runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md).
+`bun run e2e --strict` (CI) fails when a route operation, MCP tool, workflow node type or CLI command (the list `agent-swarm help` prints) has no black-box scenario and no reasoned exclusion in `scripts/e2e/coverage-manifest.json`. A new route, tool or command ships with a scenario in `scripts/e2e/scenarios/` in the same PR; CLI scenarios run the command through `runCli` in `scripts/e2e/cli.ts`. Authoring rules, the mocked edges (inference, embeddings, SystemOne, Slack) and the simulated agent: [scripts/e2e/README.md](./scripts/e2e/README.md). Operator view and failure triage: [runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md).
 
 </important>
 

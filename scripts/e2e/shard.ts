@@ -65,6 +65,8 @@ export type Observations = {
   toolUniverse: string[];
   calledTools: string[];
   nodeTypes: string[];
+  /** CLI commands the shard's scenarios ran. */
+  calledCommands: string[];
   /** Manifest state-surface query to the distinct values the database held. */
   stateValues: Record<string, string[]>;
 };
@@ -88,6 +90,7 @@ export function mergeObservations(parts: readonly Observations[]): Observations 
     toolUniverse: union(parts.map((part) => part.toolUniverse)),
     calledTools: union(parts.map((part) => part.calledTools)),
     nodeTypes: union(parts.map((part) => part.nodeTypes)),
+    calledCommands: union(parts.map((part) => part.calledCommands ?? [])),
     stateValues: Object.fromEntries(
       queries.map((query) => [query, union(parts.map((part) => part.stateValues[query] ?? []))]),
     ),
@@ -104,6 +107,7 @@ export function coverageInputs(
     toolUniverse: new Set(observations.toolUniverse),
     calledTools: new Set(observations.calledTools),
     observedNodeTypes: new Set(observations.nodeTypes),
+    calledCommands: new Set(observations.calledCommands ?? []),
     scenarios,
     knownScenarios: new Set(observations.knownScenarios),
     queryValues: (sql) => observations.stateValues[sql] ?? [],

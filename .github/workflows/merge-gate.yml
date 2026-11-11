@@ -209,6 +209,24 @@ jobs:
       - name: Run anti-slop rules (Oxlint)
         run: bun run lint:slop
 
+      # Rule 1 of the e2e-first plan: a new unit test may import only the code in
+      # scripts/unit-test-allowlist.txt. It judges the diff only. On a PR the
+      # checkout is the merge commit, so its first parent is the base; the merge
+      # queue names its base. Fetches one or two commits, no full history.
+      - name: Check no new unit tests outside the allowlist
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            base="$MERGE_GROUP_BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$base"
+          else
+            git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+            base="$(git rev-parse HEAD^1)"
+          fi
+          bun run check:unit-test-allowlist --base "$base"
+
       # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
       # hook) run Bun's built-in `bun check`; the step below keeps the tsconfig
       # clean under it.

@@ -392,6 +392,7 @@ export function printTotals(result: E2eResult): void {
   console.log(surfaceLine("routes", coverage.routes));
   console.log(surfaceLine("mcp tools", coverage.mcpTools));
   console.log(surfaceLine("workflow node types", coverage.nodeTypes));
+  console.log(surfaceLine("cli commands", coverage.cliCommands));
   for (const state of coverage.stateSurfaces)
     console.log(surfaceLine(`state ${state.name}`, state));
   for (const engine of coverage.engines) {
@@ -495,6 +496,8 @@ export function markdownSummary(result: E2eResult): string {
     "",
     surfaceLine("workflow node types", result.coverage.nodeTypes),
     "",
+    surfaceLine("cli commands", result.coverage.cliCommands),
+    "",
     ...result.coverage.engines.flatMap((engine) => [
       `engine ${engine.name}: ${engine.percent.toFixed(1)}% (routes ${engine.routes.covered}/${engine.routes.total}, tools ${engine.mcpTools.covered}/${engine.mcpTools.total}, node types ${engine.nodeTypes.covered}/${engine.nodeTypes.total}, states ${engine.stateValues.covered}/${engine.stateValues.total})`,
       "",
@@ -551,6 +554,13 @@ export function markdownSummary(result: E2eResult): string {
     "<summary>Uncovered workflow node types</summary>",
     "",
     ...result.coverage.nodeTypes.uncovered.map((type) => `- ${type}`),
+    "",
+    "</details>",
+    "",
+    "<details>",
+    "<summary>Uncovered CLI commands</summary>",
+    "",
+    ...result.coverage.cliCommands.uncovered.map((command) => `- ${command}`),
     "",
     "</details>",
     "",
