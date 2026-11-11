@@ -262,3 +262,48 @@ describe("SessionLogViewer call composition", () => {
     expect(document.querySelector('[data-testid="call-usage-chip"]')).toBeNull();
   });
 });
+
+describe("SessionLogViewer reasoning", () => {
+  const block = (id: string, n: number, content: Record<string, unknown>) =>
+    claude(id, n, {
+      type: "assistant",
+      message: { id: "msg_think", role: "assistant", content: [content] },
+    });
+  const thinking = block("t1", 1, { type: "thinking", thinking: "Weigh the two configs." });
+  const update = block("t2", 2, { type: "thinking", thinking: "Reading the config." });
+  const read = block("t3", 3, { type: "tool_use", id: "toolu_read", name: "Read", input: {} });
+
+  async function render(rows: SessionLog[], isRunning: boolean) {
+    const router = createMemoryRouter(
+      [{ path: "/", element: <SessionLogViewer logs={rows} isRunning={isRunning} /> }],
+      { initialEntries: ["/"] },
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<RouterProvider router={router} />));
+    await act(async () => {});
+    unmounts.push(async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    });
+    return container;
+  }
+  const labels = (container: HTMLElement) =>
+    [...container.querySelectorAll("button span.italic")].map((el) => el.textContent?.trim());
+
+  test("a finished thinking row reads Thought; the pre-tool update is a muted progress line", async () => {
+    const container = await render([thinking, update, read], false);
+    expect(labels(container)).toEqual(["Thought"]);
+    const progress = container.querySelector('[data-slot="session-log-progress"]') as HTMLElement;
+    expect(progress.textContent).toContain("Reading the config.");
+    // Not the agent's prose and not a second thinking row.
+    const prose = [...container.querySelectorAll(".prose-chat")].map((el) => el.textContent);
+    expect(prose.some((text) => text?.includes("Reading the config."))).toBe(false);
+  });
+
+  test("a running session's newest thinking row reads Thinking", async () => {
+    const container = await render([thinking], true);
+    expect(labels(container)).toEqual(["Thinking"]);
+  });
+});

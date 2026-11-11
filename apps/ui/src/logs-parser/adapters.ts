@@ -3,6 +3,7 @@ import {
   type DshStepUsage,
   normalizeDshStepUsage,
 } from "../../../../src/utils/dsh-usage";
+import { classifyClaudeThinking, extractReasoning } from "../../../../src/utils/reasoning-events";
 import { asString, isRecord, makeItem, resultBlockText, stringifyForDisplay } from "./helpers";
 import { resultImages } from "./result-images";
 import type { CallUsage, DecodedRecord, LogRole, NormalizedItem } from "./types";
@@ -147,7 +148,61 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
     }
   }
 
+  tagClaudeUpdates(ordered, items);
   return items;
+}
+
+/**
+ * Claude 5.1+ writes a short pre-tool update as the last of two or more
+ * thinking blocks before a `tool_use`. That block becomes a progress text
+ * item, not reasoning. Nothing is dropped.
+ *
+ * Mirrors the server's `reasoningKind` exactly (`classifyClaudeUpdate` in
+ * src/be/db/session-log-reasoning.ts): the run is the thinking lines of the
+ * tool's `message.id` at the consecutive lineNumbers directly before the
+ * tool_use line, read per line with the same `extractReasoning`. Any other
+ * line in between (another message, text, tool_progress, unparsable) or a
+ * missing lineNumber ends the run.
+ */
+function tagClaudeUpdates(ordered: DecodedRecord[], items: NormalizedItem[]): void {
+  const lineKey = (d: DecodedRecord, lineNumber: number) =>
+    `${d.rec.sessionId}\u0000${d.rec.iteration}\u0000${lineNumber}`;
+  // Thinking lines by position; null marks a duplicated lineNumber, which ends a run.
+  const thinkingAt = new Map<string, { recId: string; messageId: string } | null>();
+  const toolLines: Array<{ d: DecodedRecord; messageId: string }> = [];
+  for (const d of ordered) {
+    if (d.rec.cli !== "claude") continue;
+    const line = extractReasoning("claude", d.rec.content);
+    const messageId = line.reasoning?.messageId;
+    if (messageId) {
+      const key = lineKey(d, d.rec.lineNumber);
+      thinkingAt.set(key, thinkingAt.has(key) ? null : { recId: d.rec.id, messageId });
+    }
+    if (line.toolUseMessageId) toolLines.push({ d, messageId: line.toolUseMessageId });
+  }
+  if (toolLines.length === 0) return;
+
+  const lastThinkingItem = new Map<string, NormalizedItem>();
+  for (const item of items) if (item.kind === "reasoning") lastThinkingItem.set(item.recId, item);
+
+  for (const { d, messageId } of toolLines) {
+    const run: string[] = [];
+    for (let n = d.rec.lineNumber - 1; ; n--) {
+      const at = thinkingAt.get(lineKey(d, n));
+      if (!at || at.messageId !== messageId) break;
+      run.unshift(at.recId);
+    }
+    const kinds = classifyClaudeThinking([
+      ...run.map(() => ({ type: "thinking" })),
+      { type: "tool_use" },
+    ]);
+    kinds.forEach((kind, i) => {
+      const item = kind === "update" ? lastThinkingItem.get(run[i] as string) : undefined;
+      if (!item) return;
+      item.kind = "text";
+      item.progress = true;
+    });
+  }
 }
 
 export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {

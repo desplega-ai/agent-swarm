@@ -49,7 +49,11 @@ import {
   systemOneUnresolvedError,
 } from "./executors/system-one-decision";
 import { parkAndDriveForeach } from "./foreach-driver";
-import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
+import {
+  FOREACH_TERMINAL_STEP_STATUSES,
+  isRetryPending,
+  resolveForeachParent,
+} from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
@@ -667,7 +671,13 @@ async function walkGraphOwned(
       const activePreds = allPreds.filter(
         (predId) => activeEdges.has(`${predId}→${nodeId}`) || batchAwaited.has(predId),
       );
-      const allActivePredsCompleted = activePreds.every((p) => completedNodeIds.has(p));
+      // A branch pending its retry was added to completedNodeIds by this walk
+      // (executeStep reports it as completed with no successors), but its
+      // output does not exist yet: hold the join until the retry settles.
+      const allActivePredsCompleted = activePreds.every((p) => {
+        const latest = batchLatest.get(p);
+        return completedNodeIds.has(p) && !(latest && isRetryPending(latest));
+      });
 
       if (allActivePredsCompleted) {
         readyNext.push(node);
@@ -759,17 +769,20 @@ function latestStepByNode(steps: WorkflowRunStep[]): Map<string, WorkflowRunStep
 
 /**
  * Nodes a join must wait for even without an active edge to it: the node's
- * latest step is running or waiting, or a predecessor routed to it and it has
- * no step yet. A terminally failed node is not awaited, so partial failure
- * still lets the join run. An older `running` row superseded by a newer one
- * (crash recovery) and the `pending` row a user retry leaves behind are
- * ignored because only the latest step counts.
+ * latest step is running, waiting, or failed with a retry pending, or a
+ * predecessor routed to it and it has no step yet. A terminally failed node
+ * (no retry left) is not awaited, so partial failure still lets the join run.
+ * An older `running` row superseded by a newer one (crash recovery) and the
+ * `pending` row a user retry leaves behind are ignored because only the
+ * latest step counts.
  */
 function awaitedNodeIds(steps: WorkflowRunStep[], activeEdges: Set<string>): Set<string> {
   const latest = latestStepByNode(steps);
   const awaited = new Set<string>();
   for (const [nodeId, step] of latest) {
-    if (step.status === "running" || step.status === "waiting") awaited.add(nodeId);
+    if (step.status === "running" || step.status === "waiting" || isRetryPending(step)) {
+      awaited.add(nodeId);
+    }
   }
   for (const edge of activeEdges) {
     const target = edge.slice(edge.indexOf("→") + 1);
