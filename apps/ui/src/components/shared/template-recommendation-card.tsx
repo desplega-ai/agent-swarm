@@ -3,10 +3,8 @@
  * top recommendation derived from `/status`. Used by the empty states on
  * `/templates`, `/tasks`, `/workflows` and the home "First steps" section.
  *
- * The card is presentational — the parent decides when to show it. Click
- * routes to `/templates` (the prompt-templates list). A future iteration
- * may deep-link to a per-template detail view once the agent-template
- * registry is exposed in the UI; for now we keep the navigation honest.
+ * The parent decides when to show the card. Its action opens the recommended
+ * template's detail page, unless the parent supplies an explicit target.
  */
 
 import { ArrowRight, Sparkles } from "lucide-react";
@@ -35,7 +33,7 @@ export interface TemplateRecommendationCardProps {
    * you", "Try this", "Recommended"). Defaults to "Recommended template".
    */
   eyebrow?: string;
-  /** Override the action target (defaults to `/templates`). */
+  /** Override the action target (defaults to `/templates/<recommended-template-id>`). */
   actionHref?: string;
   /** Override the action label (defaults to "Browse templates"). */
   actionLabel?: string;
@@ -45,15 +43,11 @@ export interface TemplateRecommendationCardProps {
 
 /**
  * Reads `/status` from the shared context. If `/status` is unavailable
- * (loading, errored, or older API returned 404), renders nothing — empty
- * states stay generic.
- *
- * TODO(taras): Refactor this to be actually useful,
- * redirecting to templates is useless
+ * (loading, errored, or older API returned 404), renders nothing.
  */
 export function TemplateRecommendationCard({
   eyebrow = "Recommended template",
-  actionHref = "/templates",
+  actionHref,
   actionLabel = "Browse templates",
   compact = false,
 }: TemplateRecommendationCardProps) {
@@ -64,7 +58,7 @@ export function TemplateRecommendationCard({
     <RecommendationCardInner
       rec={rec}
       eyebrow={eyebrow}
-      actionHref={actionHref}
+      actionHref={actionHref ?? `/templates/${rec.templateId}`}
       actionLabel={actionLabel}
       compact={compact}
       detectedCount={detectedFromStatus(status).size}
