@@ -910,6 +910,18 @@ describe("checkOpencodeCredentials", () => {
     ).toBe(true);
   });
 
+  test("OPENCODE_API_KEY (OpenCode Go) satisfies opencode, pinned model or not", () => {
+    const env = { OPENCODE_API_KEY: "x" };
+    expect(checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles }).ready).toBe(true);
+    const pinned = { MODEL_OVERRIDE: "opencode-go/glm-5.2" };
+    const missing = checkOpencodeCredentials(pinned, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("OPENCODE_API_KEY");
+    expect(
+      checkOpencodeCredentials({ ...pinned, ...env }, { homeDir: HOME, fs: noFiles }).ready,
+    ).toBe(true);
+  });
+
   test("strict: nan/* needs NAN_API_KEY or its HELMCODE_API_NAN alias", () => {
     const env = { MODEL_OVERRIDE: "nan/glm5.3-flash", OPENROUTER_API_KEY: "x" };
     const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });

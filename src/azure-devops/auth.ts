@@ -1,4 +1,5 @@
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { verifyTokenEquality } from "../workflows/triggers";
 
 /**
  * Azure DevOps Authentication & Webhook Verification
@@ -46,9 +47,7 @@ export function verifyAzureDevOpsWebhook(authorizationHeader: string | undefined
   const separator = decoded.indexOf(":");
   if (separator === -1) return false;
   const password = decoded.slice(separator + 1);
-  // timingSafeEqual throws on different lengths, so guard first
-  if (password.length !== webhookSecret.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(password), Buffer.from(webhookSecret));
+  return verifyTokenEquality(webhookSecret, password);
 }
 
 /** Get the Azure DevOps PAT for API calls. */

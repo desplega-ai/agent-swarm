@@ -54,6 +54,7 @@ import {
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { definitionNodeIds, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
+import { serverRefInputDeniedMessage, serverRefInputKeys } from "../workflows/input";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { workflowModelErrors } from "../workflows/model-validation";
 import { patchWorkflowDefinition } from "../workflows/patch-definition";
@@ -61,6 +62,7 @@ import { workflowSaveWarnings } from "../workflows/readiness";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
+import { requestSecretReadScope } from "./config";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import {
   idempotencyKeyHeader,
@@ -192,6 +194,7 @@ const createWorkflowRoute = route({
   responses: {
     201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
     400: { description: "Invalid definition, or a malformed Idempotency-Key" },
+    403: { description: "Env var or secret input requires config.read.secrets" },
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow created under this Idempotency-Key was deleted" },
   },
@@ -248,6 +251,7 @@ const updateWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid definition" },
+    403: { description: "Env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
   },
 });
@@ -266,6 +270,7 @@ const patchWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
+    403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
   },
 });
@@ -284,6 +289,7 @@ const patchWorkflowNodeRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
+    403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow or node not found" },
   },
 });
@@ -721,6 +727,12 @@ export async function handleWorkflows(
       return true;
     }
 
+    const refKeys = serverRefInputKeys(parsed.body.input);
+    if (refKeys.length > 0 && (await requestSecretReadScope(req)) !== "all") {
+      jsonError(res, serverRefInputDeniedMessage(refKeys), 403);
+      return true;
+    }
+
     const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
     let key: string | undefined;
     try {
@@ -821,12 +833,17 @@ export async function handleWorkflows(
       registry: getExecutorRegistry(),
       snapshotAgentId: myAgentId,
       snapshotOptional: true,
+      serverRefInputAllowed: (await requestSecretReadScope(req)) === "all",
       updates: { updatedBy: updatedBy0 },
     });
     if (!result.ok) {
       if (result.reason === "not_found") {
         res.writeHead(404);
         res.end();
+        return true;
+      }
+      if (result.reason === "forbidden") {
+        jsonError(res, result.errors.join("; "), 403);
         return true;
       }
       // The only patch operation here is one update, so a patch error means the node is absent.
@@ -880,12 +897,17 @@ export async function handleWorkflows(
       registry: getExecutorRegistry(),
       snapshotAgentId: myAgentId,
       snapshotOptional: true,
+      serverRefInputAllowed: (await requestSecretReadScope(req)) === "all",
       updates: updateArgs,
     });
     if (!result.ok) {
       if (result.reason === "not_found") {
         res.writeHead(404);
         res.end();
+        return true;
+      }
+      if (result.reason === "forbidden") {
+        jsonError(res, result.errors.join("; "), 403);
         return true;
       }
       jsonError(
@@ -938,6 +960,16 @@ export async function handleWorkflows(
         jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
         return true;
       }
+    }
+
+    // New ref input, or a new definition over stored ref input, decides where
+    // server-resolved values go: both need config.read.secrets.
+    const refKeys = serverRefInputKeys(
+      body.input !== undefined ? body.input : body.definition ? existing.input : undefined,
+    );
+    if (refKeys.length > 0 && (await requestSecretReadScope(req)) !== "all") {
+      jsonError(res, serverRefInputDeniedMessage(refKeys), 403);
+      return true;
     }
 
     const updatedBy2 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;

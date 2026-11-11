@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
+import { basename } from "node:path";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
@@ -45,6 +46,8 @@ export type Sut = {
   flushLog: () => void;
   drains: Promise<void>;
   env: Record<string, string>;
+  /** `--coverage`: each API process writes `<dir>/<stamp>-<n>/lcov.info`. */
+  coverageDir?: string;
 };
 
 export function minimalEnv(): Record<string, string> {
@@ -79,11 +82,32 @@ function drain(stream: ReadableStream<Uint8Array>, writer: Bun.FileSink) {
   })();
 }
 
-function spawnSutProcess(logPath: string, env: Record<string, string>) {
+/** One lcov directory and bunfig per API process, so a restart never overwrites a boot's lcov. */
+async function coverageCommand(sut: Sut) {
+  if (!sut.coverageDir) return ["run", "src/http.ts"];
+  const name = `${basename(sut.logPaths[0]!, ".log")}-${sut.logPaths.length}`;
+  const configPath = `/tmp/${name}.toml`;
+  sut.tempPaths.push(configPath);
+  // Its own bunfig: the repo one preloads the unit-test setup, which opens a test DB.
+  await Bun.write(
+    configPath,
+    [
+      "[test]",
+      "coverage = true",
+      'coverageReporter = ["lcov"]',
+      `coverageDir = ${JSON.stringify(`${sut.coverageDir}/${name}`)}`,
+      'coveragePathIgnorePatterns = ["scripts/**", "node_modules/**"]',
+      "",
+    ].join("\n"),
+  );
+  return [`--config=${configPath}`, "test", "./scripts/e2e/coverage-sut.ts"];
+}
+
+function spawnSutProcess(logPath: string, env: Record<string, string>, command: string[]) {
   const writer = Bun.file(logPath).writer();
   // --no-orphans: the SUT env is built from scratch, so the flag cannot be inherited.
   // A runner that is SIGKILLed never reaches stopSut; the server then exits on its own.
-  const child = Bun.spawn(["bun", "--no-orphans", "run", "src/http.ts"], {
+  const child = Bun.spawn(["bun", "--no-orphans", ...command], {
     cwd: repoRoot,
     env,
     stdout: "pipe",
@@ -93,6 +117,30 @@ function spawnSutProcess(logPath: string, env: Record<string, string>) {
     .then(() => undefined)
     .finally(() => writer.end());
   return { child, drains, flushLog: () => writer.flush() };
+}
+
+/** Start the API process for `sut` and wait for /health. */
+async function launch(sut: Sut, keep: boolean): Promise<void> {
+  const spawned = spawnSutProcess(sut.logPath, sut.env, await coverageCommand(sut));
+  sut.process = spawned.child;
+  sut.flushLog = spawned.flushLog;
+  sut.drains = spawned.drains;
+  if (!sut.coverageDir) return waitForHealth(sut, keep);
+  try {
+    // keep: a failed coverage boot must not delete the state the plain boot reuses.
+    await waitForHealth(sut, true);
+  } catch (error) {
+    // Coverage never fails the run: this process boots plain, and the report says so.
+    const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+    console.warn(`--coverage: API did not boot under bun test (${reason}); booting it plain`);
+    await Bun.write(`${sut.coverageDir}/${basename(sut.logPath)}.plain`, `${reason}\n`).catch(
+      () => {},
+    );
+    sut.coverageDir = undefined;
+    sut.logPath = `${sut.logPaths[0]}.plain-${sut.logPaths.length}`;
+    sut.logPaths.push(sut.logPath);
+    await launch(sut, keep);
+  }
 }
 
 async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
@@ -123,7 +171,14 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
 async function stopSutProcess(sut: Sut): Promise<void> {
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGTERM");
-    await Promise.race([sut.process.exited, Bun.sleep(5_000)]);
+    // Under --coverage, Bun writes lcov for every loaded file after the API exits. A cleared
+    // timer, not Bun.sleep: a pending sleep keeps the runner alive after its last line.
+    let timer: Timer | undefined;
+    const grace = new Promise((done) => {
+      timer = setTimeout(done, sut.coverageDir ? 60_000 : 5_000);
+    });
+    await Promise.race([sut.process.exited, grace]);
+    clearTimeout(timer);
   }
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGKILL");
@@ -152,6 +207,7 @@ export async function startSut(
   keep: boolean,
   slackEnv: Record<string, string>,
   extraEnv: Record<string, string> = {},
+  coverageDir?: string,
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
@@ -221,7 +277,6 @@ export async function startSut(
     ANONYMIZED_TELEMETRY: "false",
     ...extraEnv,
   };
-  const spawned = spawnSutProcess(logPath, env);
   const sut: Sut = {
     port,
     baseUrl: `http://127.0.0.1:${port}`,
@@ -230,12 +285,14 @@ export async function startSut(
     logPath,
     logPaths: [logPath],
     tempPaths: [fsDir, secretsDir, homeDir],
-    process: spawned.child,
-    flushLog: spawned.flushLog,
-    drains: spawned.drains,
     env,
+    coverageDir,
+    // Placeholders: launch() sets the process, its log flush and drains.
+    process: undefined as unknown as Sut["process"],
+    flushLog: () => {},
+    drains: Promise.resolve(),
   };
-  await waitForHealth(sut, keep);
+  await launch(sut, keep);
   return sut;
 }
 
@@ -244,11 +301,7 @@ export async function restartSut(sut: Sut): Promise<void> {
   await stopSutProcess(sut);
   sut.logPath = `${sut.logPaths[0]}.restart-${sut.logPaths.length}`;
   sut.logPaths.push(sut.logPath);
-  const spawned = spawnSutProcess(sut.logPath, sut.env);
-  sut.process = spawned.child;
-  sut.flushLog = spawned.flushLog;
-  sut.drains = spawned.drains;
-  await waitForHealth(sut, true);
+  await launch(sut, true);
 }
 
 export async function stopSut(sut: Sut, keep: boolean): Promise<void> {

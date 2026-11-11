@@ -92,6 +92,8 @@ docker-compose.desplega.yaml
 # Standalone black-box E2E reports
 e2e-results.json
 e2e-summary.md
+e2e-coverage/
+e2e-coverage-comment.md
 packages/ui-e2e/test-results/
 packages/ui-e2e/playwright-report/
 packages/ui-e2e/blob-report/
@@ -101,6 +103,10 @@ packages/ui-e2e/images.json
 packages/ui-e2e/comment.md
 packages/ui-e2e/ingest-payloads/
 packages/ui-e2e/artifacts.json
+packages/ui-e2e/coverage/
+packages/ui-e2e/all-coverage/
+packages/ui-e2e/coverage.json
+packages/ui-e2e/lcov.info
 
 # Python bytecode
 __pycache__/

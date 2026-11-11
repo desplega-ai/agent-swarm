@@ -19,6 +19,11 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
+import {
+  agentMaySetServerRefInput,
+  serverRefInputDeniedMessage,
+  serverRefInputKeys,
+} from "@/workflows/input";
 import { workflowModelErrors } from "@/workflows/model-validation";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
@@ -87,7 +92,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .record(z.string(), InputValueSchema)
           .optional()
           .describe(
-            "Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals)",
+            "Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals). Env var and secret references require config.read.secrets (the lead agent).",
           ),
         dir: z
           .string()
@@ -144,6 +149,11 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         const modelErrors = await workflowModelErrors(definition, { vcsRepo });
         if (modelErrors.length > 0) {
           return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
+        }
+
+        const refKeys = serverRefInputKeys(input);
+        if (refKeys.length > 0 && !(await agentMaySetServerRefInput(requestInfo.agentId))) {
+          return toolErr(serverRefInputDeniedMessage(refKeys));
         }
 
         const createdBy =

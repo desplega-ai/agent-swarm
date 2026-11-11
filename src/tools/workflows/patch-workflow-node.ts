@@ -10,6 +10,7 @@ import {
 } from "@/tools/utils";
 import { WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
+import { agentMaySetServerRefInput } from "@/workflows/input";
 import { patchWorkflowDefinition } from "@/workflows/patch-definition";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
@@ -45,6 +46,8 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           patch: { update: [{ nodeId, node: nodeFields }] },
           registry: getExecutorRegistry(),
           snapshotAgentId: requestInfo.agentId,
+          serverRefInputAllowed:
+            !!requestInfo.agentId && (await agentMaySetServerRefInput(requestInfo.agentId)),
           updates: updatedBy !== undefined ? { updatedBy } : {},
         });
         if (!result.ok) {
@@ -52,6 +55,7 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           if (result.reason === "patch") {
             return toolErr(`Patch errors: ${result.errors.join("; ")}`);
           }
+          if (result.reason === "forbidden") return toolErr(result.errors.join("; "));
           return toolErr(`Invalid definition: ${result.errors.join("; ")}`);
         }
         const { workflow, version } = result;

@@ -29996,6 +29996,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Env var or secret input requires config.read.secrets */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Idempotency-Key was already used for a different request */
                 409: {
                     headers: {
@@ -30209,6 +30218,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Env var or secret input requires config.read.secrets */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow not found */
                 404: {
                     headers: {
@@ -30285,6 +30303,15 @@ export interface paths {
                 };
                 /** @description Invalid patch or resulting definition */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Stored env var or secret input requires config.read.secrets */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30375,6 +30402,15 @@ export interface paths {
                 };
                 /** @description Invalid patch or resulting definition */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Stored env var or secret input requires config.read.secrets */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

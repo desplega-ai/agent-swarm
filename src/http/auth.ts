@@ -9,6 +9,7 @@ import {
 import type { User } from "../types";
 import { verifyPageSession } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
+import { verifyTokenEquality } from "../workflows/triggers";
 
 function extractBearer(req: IncomingMessage): string | null {
   const raw = req.headers.authorization;
@@ -30,7 +31,7 @@ export async function resolveHttpRequestAuth(
   const bearer = extractBearer(req);
   if (!bearer) return null;
 
-  if (apiKey && bearer === apiKey) {
+  if (apiKey && verifyTokenEquality(apiKey, bearer)) {
     const pageSession = singleHeader(req, "x-page-session");
     if (pageSession !== null) {
       const pageId = singleHeader(req, "x-page-id");

@@ -1699,6 +1699,73 @@ describe.each([
   });
 });
 
+describe("claude pre-tool updates", () => {
+  function line(id: string, n: number, messageId: string, block: unknown, cli = "claude") {
+    return log(id, cli, n, {
+      type: "assistant",
+      message: { id: messageId, role: "assistant", content: [block] },
+    });
+  }
+  const think = (text: string) => ({ type: "thinking", thinking: text });
+  const read = { type: "tool_use", id: "t1", name: "Read", input: {} };
+  const shape = (logs: SessionLogRecord[]) =>
+    parseSessionLogs(logs)
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? `${b.progress ? "progress" : "text"}:${b.text}` : b.type));
+
+  test("the last of 2+ thinking blocks before a tool_use is a progress line; nothing is dropped", () => {
+    // The live shape from the Phase 1 sample: thinking(404) thinking(203) tool_use.
+    const logs = [
+      line("a1", 1, "msg_1", think("Weigh the two configs.")),
+      line("a2", 2, "msg_1", think("Reading the config.")),
+      line("a3", 3, "msg_1", read),
+    ];
+    expect(shape(logs)).toEqual(["thinking", "progress:Reading the config.", "tool_use"]);
+    const items = normalizeSessionLogs(logs).items;
+    expect(items.find((i) => i.recId === "a2")).toMatchObject({ kind: "text", progress: true });
+  });
+
+  test("one thinking block before a tool_use stays reasoning", () => {
+    expect(
+      shape([line("a1", 1, "msg_1", think("Just read it.")), line("a2", 2, "msg_1", read)]),
+    ).toEqual(["thinking", "tool_use"]);
+  });
+
+  test("blocks group by message.id: thinking in another message does not count", () => {
+    expect(
+      shape([
+        line("a1", 1, "msg_1", think("first call")),
+        line("a2", 2, "msg_2", think("second call")),
+        line("a3", 3, "msg_2", read),
+      ]),
+    ).toEqual(["thinking", "thinking", "tool_use"]);
+  });
+
+  test("text between thinking and the tool_use, or no tool_use, keeps reasoning", () => {
+    expect(
+      shape([
+        line("a1", 1, "msg_1", think("a")),
+        line("a2", 2, "msg_1", think("b")),
+        line("a3", 3, "msg_1", { type: "text", text: "Done." }),
+        line("a4", 4, "msg_1", read),
+      ]),
+    ).toEqual(["thinking", "thinking", "text:Done.", "tool_use"]);
+    expect(shape([line("a1", 1, "msg_1", think("a")), line("a2", 2, "msg_1", think("b"))])).toEqual(
+      ["thinking", "thinking"],
+    );
+  });
+
+  test("the rule is Claude's: pi lines of the same shape stay reasoning", () => {
+    expect(
+      shape([
+        line("a1", 1, "msg_1", think("a"), "pi"),
+        line("a2", 2, "msg_1", think("b"), "pi"),
+        line("a3", 3, "msg_1", read, "pi"),
+      ]),
+    ).toEqual(["thinking", "thinking", "tool_use"]);
+  });
+});
+
 describe("per-call usage", () => {
   const claudeUsage = {
     input_tokens: 6,

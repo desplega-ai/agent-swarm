@@ -6,12 +6,17 @@ HTTP and MCP. No Docker, no model, no access to `src/`. The runner sees exactly 
 operator sees: the API, the keys, and a read-only handle on the database file.
 
 The suite is the reliability contract of the swarm. `--strict` fails when any route
-operation, MCP tool or workflow node type the server exposes is neither covered by a
-scenario nor excluded with a reason in `coverage-manifest.json`. CI runs strict.
+operation, MCP tool or workflow node type the server exposes, or any command the CLI lists,
+is neither covered by a scenario nor excluded with a reason in `coverage-manifest.json`.
+CI runs strict.
 
 ```bash
 bun run e2e                       # every scenario, coverage report, no gate
-bun run e2e --strict              # the CI contract
+bun run e2e --strict              # the full contract, one process
+bun run e2e --shard 2/3           # one fixed band, as each CI shard runs it
+bun scripts/e2e/merge.ts --strict shard-1.json shard-2.json shard-3.json  # gate the union
+bun run e2e --coverage            # also write lcov per API process to ./e2e-coverage/
+bun scripts/e2e/diff-coverage.ts  # changed API lines (vs origin/main) no scenario runs
 bun run e2e --only <name>,<name>  # while authoring
 bun run e2e --list                # scenario names in run order
 bun run e2e --keep                # keep the db, logs and temp dirs after the run
@@ -28,6 +33,7 @@ This file is the authoring guide.
 | Path | Role |
 |---|---|
 | `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, reruns failures once on a fresh SUT, computes coverage, applies gates, writes reports. |
+| `shard.ts`, `merge.ts` | `--shard i/3` bands (`SHARD_CUTS`) and the raw coverage observations a shard writes; `merge.ts` unions them and applies `--strict` and the minimums once. |
 | `rerun.ts` | Rerun plan (`needs`, transitively) and how two attempts settle into one result (`flaky` or `fail`). |
 | `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
@@ -41,6 +47,9 @@ This file is the authoring guide.
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
+| `coverage-sut.ts` | `--coverage` only: the API entry under `bun test`, so Bun writes lcov when the process stops. |
+| `cli.ts`, `coverage-cli.ts` | `runCli(args, options)`: the CLI as a child (`bun run src/cli.tsx`) with a temp HOME and working directory, and the command universe from `cli help`. Under `--coverage` the child is the CLI entry under `bun test`, like the API. |
+| `diff-coverage.ts`, `coverage-exemptions.txt` | The changed-lines comment: lcov union against `git diff`, and the paths it skips, each with a reason. |
 | `harness.ts` | Optional real-worker legs (`--harness`), credentials required. |
 | `scenarios/` | One file per scenario (or per tight family). `registry.ts` discovers them. |
 
@@ -128,6 +137,20 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
 
+### Shards
+
+CI splits the run into three bands by `order`, cut at 130 and 140 (`SHARD_CUTS` in
+`shard.ts`): shard 1 runs below 130, shard 2 runs 130 up to 140, shard 3 runs 140 on. Each
+band boots its own API process and database, so a band starts from a fresh server. The cuts
+sit where the Slack renderer flags change for the rest of a process: `SLACK_RENDER_V2` goes
+on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
+
+- A scenario's `needs` must sit in its own band. `--shard` refuses to start when one crosses
+  a cut.
+- A scenario at the start of a band must set the flag state it asserts itself. Placing a
+  scenario that relied on an earlier band's leftovers just after a cut breaks it in CI only.
+  Check with `bun run e2e --shard i/3 --only <name>` before you pick an order near a cut.
+
 ## The scenario context
 
 | Field | What it gives you |
@@ -142,6 +165,7 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut()` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
+| `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
 
 ### Mocked edges
@@ -183,7 +207,11 @@ After the scenarios, `coverage.ts`:
    list is a new engine state and fails strict until it is declared.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
-6. Rolls `engines` up: each named engine (script, workflow, task) sums its route groups, tool
+6. Runs `bun run src/cli.tsx help` for the CLI command universe and counts the commands
+   scenarios ran through `runCli` (scenarios/cli.ts). A new command needs a scenario or a
+   `cliCommands` exclusion; worker commands (`worker`, `lead`, `hook` and the like) are excluded
+   because the nightly harness legs spawn them.
+7. Rolls `engines` up: each named engine (script, workflow, task) sums its route groups, tool
    patterns, node types and state surfaces into one covered/total figure. Strict requires
    100% for every engine, so "how covered is the script engine?" has one answer in the report.
 
@@ -194,6 +222,49 @@ surface), `coverage.scenariosWithoutFlow`, `coverage.flows`, `coverage.latency.b
 
 Adding an exclusion is a review decision. Write the reason so a reviewer can verify it
 ("provider webhook, needs a Basic auth secret the mock does not issue", not "flaky").
+
+### Changed lines (`--coverage`)
+
+Route coverage says an operation was called; it does not say your new branch ran. On every PR
+the E2E jobs also post a sticky comment (`<!-- e2e-coverage -->`) listing the changed API lines
+no scenario runs. It is a comment only: nothing blocks.
+
+1. `bun run e2e --coverage` starts each API process as
+   `bun --config=<toml> test ./scripts/e2e/coverage-sut.ts` with lcov on, and keeps one
+   `e2e-coverage/<process>/lcov.info` per process (boot, each restart, each rerun). The toml is
+   its own: the repo `bunfig.toml` would preload the unit-test setup. If an API process does not
+   boot under `bun test`, it boots plain and leaves a `.plain` marker, so coverage never fails
+   the run.
+2. `diff-coverage.ts` unions every lcov (a line is covered when any process hit it), then reads
+   `git diff -U0 <base>...HEAD -- src/`. A changed line counts only when lcov lists it as
+   executable. A file no process loaded counts its changed code lines in full, unless it holds
+   types only; the comment marks it `(not loaded)`.
+3. Scope: API and CLI files under `src/`. CLI children write lcov next to the API's, so
+   `src/cli.tsx` and the operator commands (`onboard`, `setup`, `controller`, `codex-login`,
+   `claude-managed-setup`, `worker-token`, `x`, `e2b`) count. Worker code (the rest of
+   `src/commands/`, `src/providers/`, `src/hooks/`, `src/prompts/`, `src/claude.ts`), tests,
+   `.d.ts` and the paths in `coverage-exemptions.txt` drop out. Nothing outside `src/` counts.
+
+Locally: `bun run e2e --coverage`, then `bun scripts/e2e/diff-coverage.ts` (default base
+`origin/main`, comment in `e2e-coverage-comment.md`). Use `--only <name>` to check the
+scenario you wrote reaches the lines you changed.
+
+An exemption needs a reason a reviewer can verify, like the code that runs in a subprocess the
+runner does not instrument. Prefer a scenario.
+
+### Results tracker
+
+The E2E Tracker Report job reports each run to the swarm's results tracker with
+`scripts/e2e/tracker-ingest.ts`: one `suite: "contract"` payload per shard (scenario, status
+`pass`/`fail`/`flaky`/`skip`, duration, retries), and on the first one a `coverage` block (whole-run
+lines, per-file lines, and on a PR the changed-lines result above). It uses the secrets
+`ui-e2e.yml` uses (`UI_E2E_INGEST_URL`, `UI_E2E_INGEST_BEARER`) and never fails the gate: a missing
+secret, a fork PR or a tracker outage logs a warning and the job goes on. It is a separate job
+that reads the shard results as artifacts, so the secrets never reach a runner that ran PR code. A
+merge group can hold a fork PR, so there it runs the script from the group's base (`main`). The
+queue's runs report as `main`, which is what the coverage-on-main trend reads. Dry run, which writes the payloads and
+posts nothing: `bun scripts/e2e/tracker-ingest.ts --dry-run --out /tmp/payloads` with the
+`GITHUB_REPOSITORY`, `TRACKER_SHA` and `TRACKER_REF` variables set.
 
 ## Benchmarks
 

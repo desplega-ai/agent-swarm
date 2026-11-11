@@ -2,13 +2,14 @@ import { randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
+import { calledCliCommands, cleanupCliTemp, setCliCoverageDir } from "./cli";
 import {
-  type Coverage,
   type CoverageManifest,
-  computeCoverage,
+  coverageFrom,
   EMPTY_MANIFEST,
+  emptyCoverage,
+  fetchUniverse,
   loadManifest,
-  strictFailures,
 } from "./coverage";
 import { openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
@@ -31,18 +32,21 @@ import { type MockLlm, startMockLlm } from "./mocks/llm";
 import { loadQuarantine, quarantineProblems } from "./quarantine";
 import {
   type E2eResult,
+  evaluateGates,
   failsRun,
   helpText,
   type Options,
   parseOptions,
   printHarness,
   printScenario,
+  printTotals,
   type ScenarioResult,
   SkipError,
   writeReports,
 } from "./report";
 import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
+import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
 
@@ -123,24 +127,6 @@ async function runScenario(scenario: Scenario, ctx: ScenarioContext): Promise<Sc
   }
 }
 
-function emptyCoverage(): Coverage {
-  const empty = { total: 0, covered: 0, excluded: 0, percent: 0, uncovered: [] };
-  const latency = { count: 0, p50: 0, p95: 0, max: 0 };
-  return {
-    engines: [],
-    routes: { ...empty, byGroup: {}, unknown: [] },
-    mcpTools: { ...empty },
-    nodeTypes: { ...empty },
-    stateSurfaces: [],
-    flows: [],
-    scenariosWithoutFlow: [],
-    staleExclusions: [],
-    deadExclusions: [],
-    unknownFlowScenarios: [],
-    latency: { byGroup: {}, overall: latency },
-  };
-}
-
 /**
  * The MCP tool universe is what tools/list returns to a registered agent. Probing it
  * here, before any scenario, makes the denominator independent of which scenarios ran
@@ -197,6 +183,7 @@ async function cleanup(keep: boolean): Promise<void> {
   await stopActiveAgents();
   await stopHarnessChildren();
   for (const stack of [...stacks]) await stopStack(stack, keep);
+  await cleanupCliTemp(keep);
 }
 
 async function bootStack(
@@ -210,7 +197,12 @@ async function bootStack(
     stack.slack = slack;
     const llm = await startMockLlm();
     stack.llm = llm;
-    const sut = await startSut(options.keep, { ...slack.mock.env, ...llm.env }, options.sutEnv);
+    const sut = await startSut(
+      options.keep,
+      { ...slack.mock.env, ...llm.env },
+      options.sutEnv,
+      options.coverageDir,
+    );
     stack.sut = sut;
     try {
       await slack.mock.waitForConnection(60_000);
@@ -382,8 +374,14 @@ async function main(): Promise<number> {
     for (const scenario of scenarios) console.log(scenario.name);
     return 0;
   }
-  // Fail before booting anything when the manifest itself is malformed.
-  const manifest = options.strict ? await loadManifest(MANIFEST_PATH) : EMPTY_MANIFEST;
+  if (options.shard) {
+    const crossings = bandProblems(scenarios);
+    if (crossings.length > 0) throw new Error(`Shard bands broken:\n${crossings.join("\n")}`);
+  }
+  // Fail before booting anything when the manifest itself is malformed. A shard loads it
+  // so its state-surface values reach the merge job, which gates strict on the union.
+  const manifest =
+    options.strict || options.shard ? await loadManifest(MANIFEST_PATH) : EMPTY_MANIFEST;
   const quarantine = await loadQuarantine();
   const quarantineByName = new Map(quarantine.map((entry) => [entry.scenario, entry]));
   const quarantineIssues = quarantineProblems(
@@ -402,6 +400,10 @@ async function main(): Promise<number> {
       .delete()
       .catch(() => {});
   }
+  // A fresh directory: the report unions every lcov in it, and stale ones would count.
+  if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
+  // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
+  setCliCoverageDir(options.coverageDir);
   const { sut, db, ctx } = await bootStack(options, journalPath);
   const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
@@ -410,6 +412,7 @@ async function main(): Promise<number> {
     if (options.only && !options.only.has(scenario.name)) continue;
     if (options.skip.has(scenario.name)) continue;
     if (options.group && !scenario.groups?.includes(options.group)) continue;
+    if (options.shard && bandOf(scenario.order) !== options.shard.index) continue;
     const result = await runInStack(scenario, ctx, (label, channel, ts) => {
       if (!/^[a-z0-9-]+$/.test(label)) {
         throw new Error(`Invalid visual thread label: ${label}`);
@@ -459,50 +462,51 @@ async function main(): Promise<number> {
 
   let coverage = emptyCoverage();
   let coverageError: string | undefined;
+  let observations: Observations | undefined;
   try {
-    const observedNodeTypes = new Set([
-      ...db
-        .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
-        .map((row) => row.nodeType),
-      ...rerunObserved.nodeTypes,
-    ]);
-    coverage = await computeCoverage(api, {
-      calls: recordedHttpCalls(),
-      toolUniverse: listedMcpTools(),
-      calledTools: calledMcpTools(),
-      observedNodeTypes,
-      scenarios: scenarioResults,
-      knownScenarios: new Set(scenarios.map((scenario) => scenario.name)),
-      queryValues: (sql) => [
+    observations = {
+      universe: await fetchUniverse(api),
+      knownScenarios: scenarios.map((scenario) => scenario.name),
+      calls: [...recordedHttpCalls()],
+      toolUniverse: [...listedMcpTools()],
+      calledTools: [...calledMcpTools()],
+      nodeTypes: [
         ...new Set([
-          ...db.query<{ value: unknown }>(sql).map((row) => String(row.value)),
-          ...(rerunObserved.stateValues.get(sql) ?? []),
+          ...db
+            .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+            .map((row) => row.nodeType),
+          ...rerunObserved.nodeTypes,
         ]),
       ],
-      manifest,
-    });
+      // Process-wide, like the HTTP call journal. CLI scenarios declare no `needs`, so a
+      // rerun replay never runs one.
+      calledCommands: [...calledCliCommands()],
+      stateValues: Object.fromEntries(
+        manifest.stateSurfaces.map((spec) => [
+          spec.query,
+          [
+            ...new Set([
+              ...db.query<{ value: unknown }>(spec.query).map((row) => String(row.value)),
+              ...(rerunObserved.stateValues.get(spec.query) ?? []),
+            ]),
+          ],
+        ]),
+      ),
+    };
+    coverage = coverageFrom(
+      observations.universe,
+      coverageInputs(observations, scenarioResults, manifest),
+    );
   } catch (error) {
     coverageError = `Coverage calculation failed: ${errorMessage(error)}`;
     console.error(coverageError);
   }
-  const failures = options.strict && !coverageError ? strictFailures(coverage) : [];
-  const gatesPassed =
-    !coverageError &&
-    coverage.routes.percent >= options.minRouteCoverage &&
-    coverage.mcpTools.percent >= options.minToolCoverage &&
-    failures.length === 0;
-  const scenarioFailures = scenarioResults.filter(failsRun).length;
-  const quarantinedFailures = scenarioResults.filter(
-    (result) => result.status === "fail" && result.quarantine,
-  ).length;
-  const flaky = scenarioResults.filter((result) => result.status === "flaky").length;
-  const skips = scenarioResults.filter((result) => result.status === "skip").length;
-  const harnessFailures = harnessResults.filter((result) => result.status === "fail").length;
-  const passes =
-    scenarioResults.filter((result) => result.status === "pass").length +
-    harnessResults.filter((result) => result.status === "pass").length;
+  const gates = evaluateGates(coverage, coverageError, options);
   const ok =
-    scenarioFailures === 0 && harnessFailures === 0 && gatesPassed && quarantineIssues.length === 0;
+    !scenarioResults.some(failsRun) &&
+    !harnessResults.some((leg) => leg.status === "fail") &&
+    gates.passed &&
+    quarantineIssues.length === 0;
   const result: E2eResult = {
     startedAt,
     durationMs: Date.now() - started,
@@ -511,15 +515,10 @@ async function main(): Promise<number> {
     harness: harnessResults,
     coverage,
     quarantine: { entries: quarantine, problems: quarantineIssues },
-    gates: {
-      minRouteCoverage: options.minRouteCoverage,
-      minToolCoverage: options.minToolCoverage,
-      strict: options.strict,
-      failures,
-      passed: gatesPassed,
-    },
+    gates,
     ok,
   };
+  if (options.shard && observations) result.shard = { ...options.shard, observations };
   await writeReports(result, options.jsonPath, options.summaryPath);
   if (visualsDir) {
     await Bun.write(
@@ -545,39 +544,15 @@ async function main(): Promise<number> {
       )}\n`,
     );
   }
-  console.log(
-    `${ok ? "PASS" : "FAIL"}: ${passes} passed, ${scenarioFailures + harnessFailures} failed, ${skips} skipped, ${flaky} flaky` +
-      (quarantinedFailures > 0 ? `, ${quarantinedFailures} quarantined failed` : ""),
-  );
-  for (const problem of quarantineIssues) console.error(`Quarantine gate failed: ${problem}`);
-  const surfaceLine = (label: string, surface: Coverage["mcpTools"]) =>
-    `${label}: ${surface.covered}/${surface.total} (${surface.percent.toFixed(1)}%)` +
-    (surface.excluded > 0 ? `, ${surface.excluded} excluded` : "");
-  console.log(surfaceLine("routes", coverage.routes));
-  console.log(surfaceLine("mcp tools", coverage.mcpTools));
-  console.log(surfaceLine("workflow node types", coverage.nodeTypes));
-  for (const state of coverage.stateSurfaces)
-    console.log(surfaceLine(`state ${state.name}`, state));
-  for (const engine of coverage.engines) {
-    console.log(
-      `engine ${engine.name}: ${engine.percent.toFixed(1)}% (routes ${engine.routes.covered}/${engine.routes.total}, tools ${engine.mcpTools.covered}/${engine.mcpTools.total}, node types ${engine.nodeTypes.covered}/${engine.nodeTypes.total}, states ${engine.stateValues.covered}/${engine.stateValues.total})`,
-    );
-  }
-  console.log(
-    `latency: p50 ${coverage.latency.overall.p50} ms, p95 ${coverage.latency.overall.p95} ms over ${coverage.latency.overall.count} calls`,
-  );
-  if (!gatesPassed) {
-    if (coverage.routes.percent < options.minRouteCoverage)
-      console.error(
-        `Route coverage gate failed: ${coverage.routes.percent.toFixed(1)}% < ${options.minRouteCoverage}%`,
-      );
-    if (coverage.mcpTools.percent < options.minToolCoverage)
-      console.error(
-        `MCP tool coverage gate failed: ${coverage.mcpTools.percent.toFixed(1)}% < ${options.minToolCoverage}%`,
-      );
-    for (const failure of failures) console.error(`Strict coverage gate failed: ${failure}`);
-  }
+  printTotals(result);
   await cleanup(options.keep);
+  // lcov lands when each API process stops, so count it after cleanup. Never fails the run.
+  if (options.coverageDir) {
+    const lcov = await Array.fromAsync(
+      new Bun.Glob("*/lcov.info").scan({ cwd: options.coverageDir, onlyFiles: true }),
+    ).catch(() => []);
+    console.log(`Coverage: ${lcov.length} lcov file(s) in ${options.coverageDir}`);
+  }
   return ok ? 0 : 1;
 }
 

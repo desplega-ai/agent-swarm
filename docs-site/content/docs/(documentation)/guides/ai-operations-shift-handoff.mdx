@@ -1,0 +1,61 @@
+---
+title: 'Handing off unresolved operational work between shifts with AI agents'
+description: "Agent Swarm can be configured to assemble a source-linked shift handoff that outgoing and incoming leads check, correct and accept, item by item."
+agent:
+  when: "Someone wants a source-linked shift handoff that the incoming lead accepts"
+---
+
+Agent Swarm can be configured to assemble a source-linked handoff of unresolved operational work for a defined shift window, and the outgoing and incoming shift leads check and accept it. The handoff is assembled from documented parts, not a built-in shift-management feature, and it does not guarantee safe operations or an accurate handoff. What the parts change is who carries each open item across the shift change, and whether that transfer was agreed or assumed.
+
+Open work at a shift change rarely sits in one place. A case stays open in the ticketing tool, the service it concerns reports its state on a separate status page, and the note that explains what was tried last sits in a channel or a document. The outgoing lead knows which items are real and which are noise. The incoming lead starts from a list, and each item's ownership moves by assumption. By the next morning nobody can say which items were handed over and which were merely visible.
+
+## When a shared checklist or shift-management tool is the better fit
+
+A shared checklist or the shift and on-call tool the team already runs fits better in most cases, and it is the cheaper answer. One system that already holds every open item removes the gathering step. A small or co-located team can hand over in a conversation. A tool that already records handover acknowledgement gives the incoming lead a place to accept each item. When the incoming lead opens the same queue the outgoing lead used, the handoff is a property of that tool, and a second system only splits the record.
+
+Agent Swarm fits a narrower case: open work lives in several systems, and each item needs a source link and a named owner. That is assembly work, and a shift-management tool starts from a list it already holds.
+
+## An illustrative workflow
+
+This section is an illustration of how documented pieces fit together. No customer ran it, no result was measured, and the product ships no shift handoff feature. It needs permissions, configuration and possibly custom integrations, and the team tests it before a shift depends on it.
+
+**1. The operator fixes the window and the sources.** Open cases, service status and shift notes for a defined start and end are the input set. The operator records which system holds each one and limits the agent's tools and credentials to them. A schedule fires at shift end, on a cron expression with the team's timezone in its `timezone` field, which defaults to UTC in the [scheduling concept](/docs/concepts/scheduling).
+
+**2. Deterministic collection.** [swarm-script](/docs/concepts/workflows) nodes call each source and emit a unified JSON payload, so no model is in the fetch. Deterministic rules then flag the items that are still unresolved and the items with no owner. That split is the one the [multi-source reports playbook](/docs/playbooks/reports-multiple-sources) documents for reporting: deterministic fetching first, then a model that synthesizes. Its date-window discipline does not carry over as written. The playbook aligns a report to complete days and leaves out the partial current day because a day's metrics are incomplete. A handoff has no partial period to wait for: its window ends at the shift cutoff, so a shift closing at 16:00 includes the update logged at 15:00 the same day. Bound the window by the shift's start and end timestamps, and take every item updated between them.
+
+**3. An agent drafts the handoff.** Each item carries the last update with its timestamp and a link to the source, the next action, the person accountable for it, and the uncertainties the reading left open. A [property-match](/docs/concepts/workflows) node can route items by source, and a [validate](/docs/concepts/workflows) node halts or asks for a retry when the draft comes back with an item that has no owner.
+
+**4. The outgoing lead checks and the incoming lead accepts.** A [human-in-the-loop](/docs/playbooks/patterns/hitl-gates) node pauses the run, posts the draft to Slack and resumes only when a person responds. The outgoing lead corrects what the draft got wrong. The incoming lead acknowledges each item, and that acknowledgement is the transfer. Define both the approve and the reject branch, and set a timeout or fallback, so a gate nobody answers does not wedge the run.
+
+**5. The handoff and the acknowledgement are archived.** The pair goes into agent-fs as the record of the shift change. It answers the question that arrives a week later: who accepted this item, and what did the source say at the time.
+
+The agent proposes. People accept. Nothing in the sequence declares an item safe or closed, and nothing moves it to another owner.
+
+## What the handoff has to handle
+
+**Conflicting status between two sources.** A case marked resolved in the ticketing tool while monitoring still fires on it is not a data error to smooth over. The handoff shows both records with links and leaves the decision to a person, because only a person knows which system the team treats as true for that case. An agent that picks one silently removes the signal the incoming lead needed. The rule from the [AI operations governance guide](/docs/guides/ai-operations-governance) applies: name the source of truth per field, and route the disagreement to its owner.
+
+**Time zones.** A team spread across zones has a shift boundary that falls at a different clock time in each place. Run the schedule in the team's timezone, and print every timestamp with its zone rather than a bare local time. A note written at 23:40 in one zone and read at 08:10 in another is one shift apart or the same night depending on the zone, and the incoming lead should not have to work that out.
+
+**Missing sources.** A source that returned nothing and a source that returned no open items are different facts. The handoff names the source that returned nothing and marks that section as not collected. It never prints an empty section in a way that reads as nothing open.
+
+**Stale notes.** Each note carries its age, and notes older than the window are flagged instead of quoted as current. An instruction from four shifts ago may still stand, but the incoming lead should see that it is old before relying on it.
+
+**Privacy.** Collect only the fields the handoff needs. A handoff widens the audience of whatever it contains, so customer detail, free-text notes that name individuals and internal commentary about people do not belong in it. Limit the tool surface with `SWARM_ENABLED_TOOLS` or `CAPABILITIES` before the run, as the [agent capabilities guide](/docs/guides/agent-capabilities) sets out. Then register a [script connection](/docs/guides/script-connections) only for the sources in scope, so credentials are injected at egress and never sit in script source. Naming the sources does not restrict the agent's reach on its own.
+
+**Escalation.** An item past its threshold goes to a named person, with the threshold written down before the first run. The agent does not escalate to a customer and does not change a system state to move an item along. If the named person does not answer, the fallback is another named person. A wider broadcast has no owner.
+
+**A failed collection.** When a source cannot be read, the handoff is marked incomplete and says which source failed. That is distinct from a quiet shift, where every source answered and the answer was that nothing is open. A quiet shift still produces an explicit handoff that the incoming lead acknowledges, because an absent message and a checked and cleared shift look identical from outside. The [no-op pattern](/docs/playbooks/patterns/no-op-workflows) exists for scheduled reports, and a handoff is not the place for it.
+
+## What stays with people
+
+Safety decisions stay with people. So do customer communications and changes to systems. The agent does not decide that a service is safe to leave running, and it does not send an update to a customer. It does not act on any system it read, so nothing is restarted and nothing is closed or reassigned. The incoming lead owns every item they accept, and the outgoing lead keeps the items nobody accepted, because an unacknowledged item has not moved.
+
+The design also needs one owner for the workflow itself: the person who defines the shift window and its sources, and who writes the escalation thresholds. The [AI operations governance guide](/docs/guides/ai-operations-governance) treats that named owner as the first control, ahead of any technical setting.
+
+## Related
+
+- [Reviewing supplier invoice and purchase order discrepancies with AI agents](/docs/guides/ai-invoice-discrepancy-review) applies deterministic collection and a human decision to a finance exception.
+- [Reviewing customer help content for conflicts with AI agents](/docs/guides/support-knowledge-conflict-review) handles the same disagreement problem between two written sources.
+- [AI operations governance for small companies](/docs/guides/ai-operations-governance) covers ownership, source-of-truth rules and approval thresholds.
+- [Pattern: HITL gates](/docs/playbooks/patterns/hitl-gates) documents the pause this workflow depends on.

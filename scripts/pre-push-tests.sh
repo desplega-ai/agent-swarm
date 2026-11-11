@@ -68,6 +68,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/script-connections-sql.test.ts \
     src/tests/script-connections.test.ts \
     src/tests/script-executor-conformance.test.ts \
+    src/tests/script-native-sandbox-identity.test.ts \
     src/tests/script-native-startup.test.ts \
     src/tests/script-native-unawaited-drain.test.ts \
     src/tests/script-workflows-runtime-e2e.test.ts \

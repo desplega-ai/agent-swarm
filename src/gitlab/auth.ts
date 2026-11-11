@@ -1,4 +1,5 @@
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { verifyTokenEquality } from "../workflows/triggers";
 
 /**
  * GitLab Authentication & Webhook Verification
@@ -33,14 +34,12 @@ export function initGitLab(): void {
 
 /**
  * Verify a GitLab webhook request.
- * GitLab uses simple string comparison of X-Gitlab-Token header against the configured secret.
+ * The X-Gitlab-Token header is compared to the configured secret in constant time, by digest.
  */
 export function verifyGitLabWebhook(tokenHeader: string | undefined): boolean {
   if (!webhookSecret) return false;
   if (!tokenHeader) return false;
-  // timingSafeEqual throws on different lengths, so guard first
-  if (tokenHeader.length !== webhookSecret.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(tokenHeader), Buffer.from(webhookSecret));
+  return verifyTokenEquality(webhookSecret, tokenHeader);
 }
 
 /** Get the GitLab API token for making API calls. */

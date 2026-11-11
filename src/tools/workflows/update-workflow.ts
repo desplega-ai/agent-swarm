@@ -19,6 +19,11 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
+import {
+  agentMaySetServerRefInput,
+  serverRefInputDeniedMessage,
+  serverRefInputKeys,
+} from "@/workflows/input";
 import { workflowModelErrors } from "@/workflows/model-validation";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 import { snapshotAndUpdateWorkflow } from "@/workflows/version";
@@ -141,6 +146,18 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           if (modelErrors.length > 0) {
             return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
           }
+        }
+
+        // New ref input, or a new definition over stored ref input, decides
+        // where server-resolved values go: both need config.read.secrets.
+        const refKeys = serverRefInputKeys(
+          input !== undefined ? input : definition ? existing.input : undefined,
+        );
+        if (
+          refKeys.length > 0 &&
+          !(requestInfo.agentId && (await agentMaySetServerRefInput(requestInfo.agentId)))
+        ) {
+          return toolErr(serverRefInputDeniedMessage(refKeys));
         }
 
         const updatedBy =

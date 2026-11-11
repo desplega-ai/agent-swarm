@@ -871,19 +871,11 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
+    // The task is already `superseded` (terminal), so `failTask` would be a no-op:
+    // it stays superseded and is not an auto-failure. Dependents fail as before.
     await settleSupersededTaskDependents(task.id, null);
-    const failed = await failTask(task.id, reason);
-    if (failed) {
-      findings.autoFailedTasks.push({
-        taskId: task.id,
-        agentId: task.agentId,
-        reason,
-      });
-    }
     console.warn(
-      `[Heartbeat] Task ${task.id.slice(0, 8)} failed because no resume was created (${
-        resume.kind === "skipped" ? resume.reason : "workflow-skip"
-      })`,
+      `[Heartbeat] Task ${task.id.slice(0, 8)} left superseded: no resume was created (${reason})`,
     );
   }
 
@@ -1016,6 +1008,14 @@ export async function runRebootSweep(): Promise<void> {
 
         // Don't retry system-generated heartbeat tasks
         if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "")) {
+          rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+          continue;
+        }
+
+        // Workflow carve-out: failTask above emitted task.failed with the step
+        // ids, and the engine retries the step or fails the run. A standalone
+        // retry here would run the same work a second time, outside the run.
+        if (task.workflowRunStepId != null) {
           rebootAffectedTasks.push({ original: failed, retryTaskId: null });
           continue;
         }

@@ -72809,6 +72809,16 @@
               }
             }
           },
+          "403": {
+            "description": "Env var or secret input requires config.read.secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Idempotency-Key was already used for a different request",
             "content": {
@@ -73339,6 +73349,16 @@
               }
             }
           },
+          "403": {
+            "description": "Env var or secret input requires config.read.secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow not found",
             "content": {
@@ -73423,6 +73443,16 @@
           },
           "400": {
             "description": "Invalid patch or resulting definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -73604,6 +73634,16 @@
           },
           "400": {
             "description": "Invalid patch or resulting definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {

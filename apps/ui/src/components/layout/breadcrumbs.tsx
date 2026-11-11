@@ -44,7 +44,6 @@ const routeLabels: Record<string, string> = {
   agents: "Agents",
   tasks: "Tasks",
   sessions: "Sessions",
-  chat: "Chat",
   services: "Services",
   schedules: "Schedules",
   workflows: "Workflows",

@@ -126,11 +126,52 @@ export type SandboxEnvironmentMode = {
   env: Readonly<Record<string, string>>;
 };
 
+/** Identity a sandboxed child switches to before exec'ing the inner command. */
+export interface SandboxIdentity {
+  uid: number;
+  gid: number;
+}
+
+/** `nobody:nogroup`: owns nothing the API process writes. */
+export const UNPRIVILEGED_SANDBOX_IDENTITY: SandboxIdentity = { uid: 65534, gid: 65534 };
+
+let warnedMissingSetpriv = false;
+
+/**
+ * Identity the native script child should run as. An API running as root
+ * hands the child `nobody:nogroup` through `setpriv`, so script code cannot
+ * read root-owned 0600 files (the secrets key) or inspect the API process.
+ * A non-root API has no identity to drop to and keeps today's behavior.
+ */
+export function resolveSandboxIdentity(
+  euid: number | undefined = process.geteuid?.(),
+  hasSetpriv: () => boolean = () => Bun.which("setpriv") !== null,
+): SandboxIdentity | undefined {
+  if (process.platform === "win32" || euid !== 0) return undefined;
+  if (!hasSetpriv()) {
+    // Every shipped image has util-linux; keep scripts working elsewhere, loudly.
+    if (!warnedMissingSetpriv) {
+      warnedMissingSetpriv = true;
+      console.warn(
+        "[scripts] running as root without setpriv: native script children keep the API's UID",
+      );
+    }
+    return undefined;
+  }
+  return UNPRIVILEGED_SANDBOX_IDENTITY;
+}
+
+function setprivPrefix(runAs: SandboxIdentity | undefined): string {
+  if (!runAs) return "";
+  return `setpriv --reuid=${runAs.uid} --regid=${runAs.gid} --clear-groups --no-new-privs `;
+}
+
 function buildSandboxedCommandCore(
   innerCommand: readonly string[],
   limits: SandboxResourceLimits,
   profile: { useBashShell: boolean; applyInterpreterFloor: boolean },
   environment: SandboxEnvironmentMode,
+  runAs?: SandboxIdentity,
 ): string[] {
   if (process.platform === "win32") return [...innerCommand];
 
@@ -165,6 +206,8 @@ function buildSandboxedCommandCore(
           .join(" ")
       : "";
   const quotedInner = withBunNoOrphans(innerCommand).map(shellQuote).join(" ");
+  // After the ulimits: they are set as the caller and survive the UID switch.
+  const dropPrivileges = setprivPrefix(runAs);
 
   if (environment.kind === "spawn") {
     // -p ignores BASH_ENV and imported shell options/functions before ulimit.
@@ -175,14 +218,14 @@ function buildSandboxedCommandCore(
       "--norc",
       "-p",
       "-c",
-      `${ulimits}; exec env -u PWD -u SHLVL ${quotedInner}`,
+      `${ulimits}; exec ${dropPrivileges}env -u PWD -u SHLVL ${quotedInner}`,
     ];
   }
 
   return [
     useBashShell ? "bash" : "sh",
     "-c",
-    `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`,
+    `${ulimits}; exec ${dropPrivileges}env -i ${envAssignments} ${quotedInner}`,
   ];
 }
 
@@ -191,6 +234,7 @@ export function buildSandboxedCommand(
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
   environmentKind: SandboxEnvironmentMode["kind"] = "inline",
+  runAs?: SandboxIdentity,
 ): string[] {
   return buildSandboxedCommandCore(
     innerCommand,
@@ -200,6 +244,7 @@ export function buildSandboxedCommand(
       applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
     },
     { kind: environmentKind, env },
+    runAs,
   );
 }
 
