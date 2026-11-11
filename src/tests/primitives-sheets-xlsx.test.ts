@@ -302,6 +302,86 @@ describe("parseXlsx", () => {
     expect(cells[1]?.B3?.v).toBe("007");
   });
 
+  describe("dropped-feature detection stays linear on a hostile archive", () => {
+    // Rebuild a workbook with `edit` applied to one part's text, through the header-exact zip helper.
+    const patched = (part: string, edit: (xml: string) => string): Uint8Array => {
+      const wb = XLSX.read(workbook({ Data: XLSX.utils.aoa_to_sheet([[42]]) }), {
+        type: "array",
+        bookFiles: true,
+      });
+      // `mt` marks the zip parts; the other entry is SheetJS's internal compound-file stub.
+      const parts = Object.entries(
+        (wb as { files: Record<string, { content: Uint8Array; mt?: unknown }> }).files,
+      ).filter(([, file]) => file.mt);
+      return zip(
+        parts.map(([name, { content }]) => ({
+          name,
+          data:
+            name === part
+              ? new TextEncoder().encode(edit(new TextDecoder().decode(content)))
+              : content,
+        })),
+      );
+    };
+    const SHEET = "xl/worksheets/sheet1.xml";
+    const STYLES = "xl/styles.xml";
+    const before = (tag: string, insert: string) => (xml: string) => xml.replace(tag, insert + tag);
+    // 32k tokens are 192 KB of XML: nowhere near any cap, and about 6 s on the old regexes.
+    const comment = (token: string) => `<!--${token.repeat(32_000)}-->`;
+    const timed = async (bytes: Uint8Array) => {
+      const start = performance.now();
+      const result = await parseXlsx(bytes);
+      return { ...result, ms: performance.now() - start };
+    };
+
+    test("32k unclosed <pane tokens in a comment parse in well under a second and still read the data", async () => {
+      const { tabs, dropped, ms } = await timed(
+        patched(SHEET, before("</worksheet>", comment("<pane "))),
+      );
+      expect(tabs[0]?.cells.A1).toEqual({ v: 42 });
+      expect(dropped).not.toContain("frozen panes");
+      expect(ms).toBeLessThan(1000);
+    });
+
+    test("32k unclosed <font> tokens in a comment parse in well under a second and still read the data", async () => {
+      const { tabs, dropped, ms } = await timed(
+        patched(STYLES, before("</styleSheet>", comment("<font>"))),
+      );
+      expect(tabs[0]?.cells.A1).toEqual({ v: 42 });
+      expect(dropped).not.toContain("cell styling (fills, bold, borders)");
+      expect(ms).toBeLessThan(1000);
+    });
+
+    test("a real frozen pane and a real bold font are still named after the hostile run", async () => {
+      const pane =
+        '<sheetViews><sheetView><pane state="frozen" ySplit="1"/></sheetView></sheetViews>';
+      const frozen = await timed(
+        patched(SHEET, before("</worksheet>", `${comment("<pane ")}${pane}`)),
+      );
+      expect(frozen.dropped).toContain("frozen panes");
+      expect(frozen.ms).toBeLessThan(1000);
+      const bold = await timed(
+        patched(STYLES, before("</styleSheet>", `${comment("<font>")}<font><b/></font>`)),
+      );
+      expect(bold.dropped).toContain("cell styling (fills, bold, borders)");
+      expect(bold.ms).toBeLessThan(1000);
+    });
+
+    test("a pane that is not frozen, and a font that is not bold, are not reported", async () => {
+      const plain = await parseXlsx(
+        patched(
+          SHEET,
+          before("</worksheet>", '<pane xSplit="1"/><pane ySplit="1" state="split"/>'),
+        ),
+      );
+      expect(plain.dropped).not.toContain("frozen panes");
+      const font = await parseXlsx(
+        patched(STYLES, before("</styleSheet>", "<font><i/></font><font><sz/></font>")),
+      );
+      expect(font.dropped).not.toContain("cell styling (fills, bold, borders)");
+    });
+  });
+
   test("strips the _xlws prefix Excel writes and keeps a multi-cell array formula as values", async () => {
     const ws = XLSX.utils.aoa_to_sheet([[1, 2, 3]]);
     ws.D1 = { t: "n", v: 6, f: "_xlfn.IFS(A1=1,B1+C1)+_xlfn._xlws.SORT(A1:C1)" };

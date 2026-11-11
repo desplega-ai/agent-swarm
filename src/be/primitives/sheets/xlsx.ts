@@ -178,6 +178,31 @@ const ERROR_CODES: Record<string, number> = {
 
 type Zip = Record<string, { content?: string | Uint8Array } | undefined>;
 
+/**
+ * Whether any `<tag ...>` start tag in `xml` has `attr` inside its own tag.
+ * One pass: every step moves past the tag it read, so a crafted run of `<pane ` tokens cannot make it quadratic the way a backtracking regex does.
+ */
+function hasTagWith(xml: string, tag: string, attr: string): boolean {
+  for (let at = xml.indexOf(tag); at !== -1; at = xml.indexOf(tag, at)) {
+    const end = xml.indexOf(">", at);
+    if (end === -1) return false;
+    if (xml.slice(at, end).includes(attr)) return true;
+    at = end + 1;
+  }
+  return false;
+}
+
+/** Whether a `<font>` element holds `<b/>`. Linear for the same reason as `hasTagWith`: each step moves past the `</font>` it reached. */
+function hasBoldFont(styles: string): boolean {
+  for (let at = styles.indexOf("<font>"); at !== -1; at = styles.indexOf("<font>", at)) {
+    const end = styles.indexOf("</font>", at);
+    if (end === -1) return false;
+    if (styles.slice(at, end).includes("<b/>")) return true;
+    at = end + 7;
+  }
+  return false;
+}
+
 /** Features of the file that a `swarm-sheet/1` workbook does not carry, read from the zip parts. */
 function lostFeatures(names: Set<string>, files: Zip, definedNames: boolean): string[] {
   const found = new Set<string>();
@@ -200,12 +225,12 @@ function lostFeatures(names: Set<string>, files: Zip, definedNames: boolean): st
     if (xml.includes("<autoFilter")) found.add("autofilter");
     if (xml.includes("<hyperlink ")) found.add("hyperlinks");
     if (xml.includes("<sheetProtection")) found.add("sheet protection");
-    if (/<pane [^>]*state="frozen"/.test(xml)) found.add("frozen panes");
+    if (hasTagWith(xml, "<pane ", 'state="frozen"')) found.add("frozen panes");
   }
   const styles = text("xl/styles.xml");
   if (
     /<patternFill patternType="solid"/.test(styles) ||
-    /<font>(?:(?!<\/font>).)*<b\/>/s.test(styles) ||
+    hasBoldFont(styles) ||
     /<(left|right|top|bottom) style="/.test(styles)
   ) {
     found.add("cell styling (fills, bold, borders)");
