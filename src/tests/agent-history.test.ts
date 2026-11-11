@@ -1,5 +1,7 @@
 // Operator-only agent delete and restore through the append-only agent_history
-// table (migration 334): blockers, snapshot round trip, ingress, tokens, RBAC.
+// table (migration 334): blockers, snapshot round trip, append-only triggers, tokens.
+// The HTTP routes, the 410 on re-register and RBAC live in the e2e scenario
+// scripts/e2e/scenarios/core-agent-lifecycle.ts.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -33,8 +35,6 @@ import {
   mintSessionToken,
 } from "../be/users";
 import { ensureExtensionAgent } from "../extensions/identity";
-import { handleAgentLifecycle } from "../http/agent-lifecycle";
-import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -47,21 +47,6 @@ const OP = "op:test";
 let server: Server;
 let baseUrl = "";
 let leadId = "";
-
-async function api(method: string, path: string, body?: unknown, agentId?: string) {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${API_KEY}`,
-    "Content-Type": "application/json",
-  };
-  if (agentId) headers["X-Agent-ID"] = agentId;
-  const response = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : undefined };
-}
 
 async function offlineWorker(name: string) {
   return await createAgent({ name, isLead: false, status: "offline" });
@@ -98,10 +83,7 @@ beforeAll(async () => {
     if (await handleCore(req, res, myAgentId, API_KEY)) return;
     const pathSegments = getPathSegments(req.url ?? "");
     const query = parseQueryParams(req.url ?? "");
-    if (await handleAgentRegister(req, res, pathSegments, myAgentId)) return;
-    for (const handler of [handleAgentLifecycle, handleAgentsRest, handleTasks]) {
-      if (await handler(req, res, pathSegments, query, myAgentId)) return;
-    }
+    if (await handleTasks(req, res, pathSegments, query, myAgentId)) return;
     res.writeHead(404);
     res.end(JSON.stringify({ error: "Not found" }));
   });
@@ -221,14 +203,6 @@ describe("delete and restore", () => {
     );
     await expect(getDbClient().run("DELETE FROM agent_history")).rejects.toThrow("append-only");
   });
-
-  test("a restarted worker cannot re-register a deleted id", async () => {
-    const agent = await offlineWorker("ah-register");
-    await deleteAgentToHistory(agent.id, "retired worker", OP);
-    const register = await api("POST", "/api/agents", { name: "ah-register" }, agent.id);
-    expect(register).toEqual({ status: 410, body: { error: "agent_deleted" } });
-    expect(await rowOf(agent.id)).toBeNull();
-  });
 });
 
 describe("credentials of a deleted agent", () => {
@@ -280,50 +254,5 @@ describe("credentials of a deleted agent", () => {
     await restoreAgentFromHistory(worker.id, { reason: "back" }, OP);
     expect(await statuses()).toEqual(refused);
     expect(await createTaskAs((await mintAgentToken(worker.id)).plaintext)).toBe(201);
-  });
-});
-
-describe("HTTP routes", () => {
-  test("operator deletes, lists history and restores", async () => {
-    const agent = await offlineWorker("ah-http");
-    expect((await api("POST", `/api/agents/${agent.id}/delete`, { reason: "x" })).status).toBe(400);
-    const deleted = await api("POST", `/api/agents/${agent.id}/delete`, {
-      reason: "retired worker",
-    });
-    expect(deleted.status).toBe(200);
-    expect(deleted.body.event).toMatchObject({ event: "deleted", agentId: agent.id });
-    expect((await api("GET", `/api/agents/${agent.id}`)).status).toBe(404);
-
-    const live = await createAgent({ name: "ah-http-live", isLead: false, status: "idle" });
-    const blocked = await api("POST", `/api/agents/${live.id}/delete`, { reason: "retired" });
-    expect(blocked.status).toBe(409);
-    expect(blocked.body).toMatchObject({
-      code: "not_offline",
-      blockers: [{ code: "not_offline" }],
-    });
-
-    const restored = await api("POST", `/api/agents/${agent.id}/restore`, { reason: "came back" });
-    expect(restored.status).toBe(200);
-    expect(restored.body.agent.id).toBe(agent.id);
-    const history = await api("GET", `/api/agent-history?agentId=${agent.id}`);
-    expect(history.body.events.map((e: { event: string }) => e.event)).toEqual([
-      "restored",
-      "deleted",
-    ]);
-  });
-
-  test("every agent caller, the lead included, gets 403", async () => {
-    const target = await offlineWorker("ah-rbac");
-    const worker = await offlineWorker("ah-rbac-caller");
-    for (const caller of [leadId, worker.id]) {
-      for (const [method, path, body] of [
-        ["POST", `/api/agents/${target.id}/delete`, { reason: "nope" }],
-        ["POST", `/api/agents/${target.id}/restore`, { reason: "nope" }],
-        ["GET", "/api/agent-history", undefined],
-      ] as const) {
-        expect((await api(method, path, body, caller)).status).toBe(403);
-      }
-    }
-    expect(await getAgentById(target.id)).not.toBeNull();
   });
 });
