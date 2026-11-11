@@ -30,6 +30,7 @@ export const ALL_CAPABILITIES = [
   "agentmail",
   "kapso",
   "swarm-x",
+  "primitives",
 ] as const;
 
 export type Sut = {

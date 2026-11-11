@@ -34,6 +34,12 @@ export const SDK_TOOL_NAME_MAP = {
   room_reset: "room-reset",
   room_decode: "room-decode",
 
+  // ── primitive objects (also ctx.objects, see SDK_NAMESPACES) ──
+  objects_create: "object-create",
+  objects_get: "object-get",
+  objects_list: "object-list",
+  objects_reindex: "object-reindex",
+
   // ── repos ──
   repo_list: "get-repos",
   repo_update: "update-repo",
@@ -243,7 +249,9 @@ export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
  * methods in SDK_TOOL_NAME_MAP and a typed key on `ScriptContext` in
  * `src/be/scripts/typecheck.ts`.
  */
-export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({});
+export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
+  objects: ["create", "get", "list", "reindex"],
+});
 
 /** ctx keys a namespace may never shadow. */
 export const RESERVED_CTX_KEYS: readonly string[] = [
