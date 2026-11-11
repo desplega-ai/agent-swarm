@@ -245,13 +245,15 @@ runner does not instrument. Prefer a scenario.
 
 ### Results tracker
 
-The E2E Contract merge job also reports each run to the swarm's results tracker with
+The E2E Tracker Report job reports each run to the swarm's results tracker with
 `scripts/e2e/tracker-ingest.ts`: one `suite: "contract"` payload per shard (scenario, status
 `pass`/`fail`/`flaky`/`skip`, duration, retries), and on the first one a `coverage` block (whole-run
 lines, per-file lines, and on a PR the changed-lines result above). It uses the secrets
 `ui-e2e.yml` uses (`UI_E2E_INGEST_URL`, `UI_E2E_INGEST_BEARER`) and never fails the gate: a missing
-secret, a fork PR or a tracker outage logs a warning and the job goes on. The queue's runs report as
-`main`, which is what the coverage-on-main trend reads. Dry run, which writes the payloads and
+secret, a fork PR or a tracker outage logs a warning and the job goes on. It is a separate job
+that reads the shard results as artifacts, so the secrets never reach a runner that ran PR code. A
+merge group can hold a fork PR, so there it runs the script from the group's base (`main`). The
+queue's runs report as `main`, which is what the coverage-on-main trend reads. Dry run, which writes the payloads and
 posts nothing: `bun scripts/e2e/tracker-ingest.ts --dry-run --out /tmp/payloads` with the
 `GITHUB_REPOSITORY`, `TRACKER_SHA` and `TRACKER_REF` variables set.
 
