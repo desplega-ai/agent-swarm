@@ -19,6 +19,13 @@ interface SummaryResult {
   attachments: Array<{ name: string; contentType: string; path: string }>;
 }
 
+// boot/run.ts balances shards by duration and runs each one as a file list, so Playwright's
+// config.shard is unset there. UI_E2E_SHARD ("i/n") carries the shard instead.
+function shardFromEnv(): FullConfig["shard"] {
+  const match = /^(\d+)\/(\d+)$/.exec(process.env.UI_E2E_SHARD ?? "");
+  return match ? { current: Number(match[1]), total: Number(match[2]) } : null;
+}
+
 class SummaryReporter implements Reporter {
   private readonly results: SummaryResult[] = [];
   private outputDir = resolve(import.meta.dirname, "../test-results");
@@ -26,7 +33,7 @@ class SummaryReporter implements Reporter {
   private startedAt = new Date().toISOString();
 
   onBegin(config: FullConfig): void {
-    this.shard = config.shard;
+    this.shard = config.shard ?? shardFromEnv();
     this.startedAt = new Date().toISOString();
     this.outputDir = config.projects[0]?.outputDir ?? this.outputDir;
   }
