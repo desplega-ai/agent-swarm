@@ -20,13 +20,12 @@ import { cleanupStack, hmacSignature, putConfig, reloadConfig } from "./platform
 type EventWaitRow = {
   status: string;
   firedBy: string | null;
-  headSha: string | null;
   kind: string;
 };
 
 function waitRow(ctx: ScenarioContext, scheduleId: string): EventWaitRow | null {
   return ctx.db.get<EventWaitRow>(
-    "SELECT status, firedBy, headSha, kind FROM deferred_event_waits WHERE scheduleId = ?",
+    "SELECT status, firedBy, kind FROM deferred_event_waits WHERE scheduleId = ?",
     [scheduleId],
   );
 }
@@ -137,9 +136,8 @@ export const deferWakePrMerged: Scenario = {
           "A rejected deferral must leave the task running",
         );
 
-        // An open PR is accepted; the wait records its head SHA.
-        const headSha = "b".repeat(40);
-        ctx.llm.setGithubPull(repo, 2, { merged: false, headSha });
+        // An open PR is accepted (the repo is matched case-insensitively).
+        ctx.llm.setGithubPull(repo, 2, { merged: false });
         const waiter = await claim("Wait for PR 2");
         const deferred = await expectToolOk(worker, "defer-task", {
           ...base(waiter),
@@ -148,9 +146,7 @@ export const deferWakePrMerged: Scenario = {
         const scheduleId = String(deferred.data.scheduleId);
         const pending = waitRow(ctx, scheduleId);
         expect(
-          pending?.status === "pending" &&
-            pending.kind === "pr.merged" &&
-            pending.headSha === headSha,
+          pending?.status === "pending" && pending.kind === "pr.merged",
           `PR wait row is wrong: ${JSON.stringify(pending)}`,
         );
         expect(
@@ -175,7 +171,7 @@ export const deferWakePrMerged: Scenario = {
         );
 
         // Positive: GitHub now confirms the merge, the same event wakes it.
-        ctx.llm.setGithubPull(repo, 2, { merged: true, headSha });
+        ctx.llm.setGithubPull(repo, 2, { merged: true });
         await closedMerged(2);
         expect(
           await pollUntil(() => waitRow(ctx, scheduleId)?.status === "fired", 15_000),

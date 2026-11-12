@@ -24,6 +24,7 @@ import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
 import { ensure } from "../utils/business-use";
+import { getCurrentRequestAuth } from "../utils/request-auth-context";
 
 /** Thrown inside the transaction to abort and roll back the schedule INSERT. */
 class DeferAbortedError extends Error {}
@@ -341,8 +342,13 @@ export const registerDeferTaskTool = (server: McpServer) => {
       );
 
       // Read GitHub before the transaction: no network call under the write lock.
-      let prHeadSha: string | undefined;
       if (prWait) {
+        // The read may use the App installation token: refuse the ACP task tokens that
+        // /api/github/installation-token also refuses.
+        const auth = getCurrentRequestAuth();
+        if (auth?.kind === "agent" && auth.tokenKind === "task") {
+          return toolErr("A task-scoped token cannot defer on a PR; defer on a timer instead.");
+        }
         if (!isGitHubEnabled()) {
           return toolErr(
             "GitHub integration is off, so no PR event can wake you; defer on a timer instead.",
@@ -355,7 +361,6 @@ export const registerDeferTaskTool = (server: McpServer) => {
               `PR ${prWait.repo}#${prWait.number} is already merged; read its result instead of deferring.`,
             );
           }
-          prHeadSha = pr.headSha;
         } catch (error) {
           return toolErr(
             `Could not read PR ${prWait.repo}#${prWait.number} from GitHub (${error instanceof Error ? error.message : "unknown error"}); defer on a timer instead.`,
@@ -440,13 +445,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           if (prWait) {
             await getDbClient().run(
-              "INSERT INTO deferred_event_waits (scheduleId, kind, repo, prNumber, headSha, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO deferred_event_waits (scheduleId, kind, repo, prNumber, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
               [
                 schedule.id,
                 "pr.merged",
                 prWait.repo,
                 prWait.number,
-                prHeadSha ?? null,
                 createdBy ?? null,
                 createdBy ?? null,
               ],

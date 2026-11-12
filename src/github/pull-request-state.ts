@@ -1,7 +1,7 @@
 import { githubApiUrl } from "../utils/github-host";
 import { getWorkerInstallationToken } from "./app";
 
-export type PullRequestState = { merged: boolean; state: "open" | "closed"; headSha: string };
+export type PullRequestState = { merged: boolean; state: "open" | "closed" };
 
 /**
  * Read one PR from GitHub. A webhook only names a candidate; callers that wake
@@ -26,11 +26,9 @@ export async function fetchPullRequestState(
   const pr = (await response.json()) as {
     merged?: boolean;
     state?: string;
-    head?: { sha?: string };
   };
   return {
     merged: pr.merged === true,
     state: pr.state === "open" ? "open" : "closed",
-    headSha: pr.head?.sha ?? "",
   };
 }
