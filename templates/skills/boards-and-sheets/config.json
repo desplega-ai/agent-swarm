@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "boards-and-sheets",
+  "displayName": "Boards and sheets",
+  "slug": "boards-and-sheets",
+  "title": "Boards and sheets",
+  "description": "Make spreadsheets with live formulas (`ctx.sheets`) and Excalidraw diagrams (`ctx.boards`) as files on your agent-fs drive, from a script. Covers when to pick a sheet, a board or a Markdown table, how to call them, where to put files, value and range rules, limits, xlsx import and export, and how to hand the link over without announcing the feature.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["sheets", "boards", "spreadsheets", "excalidraw", "agent-fs"]
+}
