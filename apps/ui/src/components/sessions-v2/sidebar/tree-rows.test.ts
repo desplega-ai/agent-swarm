@@ -22,6 +22,7 @@ import {
   openByDefault,
   sessionRange,
   type TreeRow,
+  wholeListOn,
   wholeListTotal,
 } from "./tree-rows";
 
@@ -421,6 +422,15 @@ describe("list selection", () => {
     expect(wholeListTotal(loaded, "inbox")).toBeNull();
     // No View all row: the list fits in 10.
     expect(wholeListTotal(rows, "inbox")).toBeNull();
+  });
+
+  test("wholeListOn: Select all 12 with all 10 loaded rows unchecked still holds the 2 unloaded", () => {
+    expect(wholeListOn(0, 12, 10)).toBe(true);
+    expect(wholeListOn(9, 12, 1)).toBe(true);
+    // Every session unchecked, or nothing past the loaded rows: the selection ends.
+    expect(wholeListOn(0, 12, 12)).toBe(false);
+    expect(wholeListOn(0, null, 10)).toBe(false);
+    expect(wholeListOn(1, null, 9)).toBe(true);
   });
 });
 

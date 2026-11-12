@@ -230,6 +230,15 @@ export function wholeListTotal(rows: TreeRow[], container: ContainerId): number 
 }
 
 /**
+ * "Select all N" stays on while it still stands for a session: a loaded row
+ * still checked, or, past the loaded rows, a list `total` larger than the
+ * unchecked rows. Unchecking every loaded row of a longer list keeps it on.
+ */
+export function wholeListOn(selected: number, total: number | null, except: number): boolean {
+  return selected > 0 || (total !== null && total > except);
+}
+
+/**
  * Open until folded: the Inbox, Working, Later (the mockup default), and
  * other people's groups. Sources and their groups start folded.
  */

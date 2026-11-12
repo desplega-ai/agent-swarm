@@ -9,6 +9,8 @@ import {
   listSessionIds,
   sessionRange,
   type TreeRow,
+  wholeListOn,
+  wholeListTotal,
 } from "./tree-rows";
 
 /**
@@ -25,8 +27,9 @@ import {
  * "Select all N" (`selectWholeList`) stands for every session of that list,
  * loaded or not: the bulk bar acts on the server by list. Unchecking a row
  * of that list keeps it on and leaves the row out (`wholeExcept`), as in
- * Gmail; checking it again puts it back. Any other change to the selection
- * ends it.
+ * Gmail; checking it again puts it back. With every loaded row unchecked it
+ * stays on while the list has unloaded sessions (`wholeListOn`). Any other
+ * change to the selection ends it.
  */
 export function useSessionSelection(rows: TreeRow[]) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
@@ -57,6 +60,12 @@ export function useSessionSelection(rows: TreeRow[]) {
         : new Set([...picked].filter((id) => visible.has(id))),
     [wholeIds, except, picked, visible],
   );
+  // "Select all N" with every loaded row unchecked still stands for the
+  // unloaded sessions: the bar stays, and acts on them.
+  const wholeOn =
+    wholeIds !== undefined &&
+    list !== null &&
+    wholeListOn(selected.size, wholeListTotal(rows, list), except.size);
 
   // The row key a Shift+click range starts at.
   const anchor = useRef<string | null>(null);
@@ -81,7 +90,7 @@ export function useSessionSelection(rows: TreeRow[]) {
   const toggle = useStableHandler((id: string, rowKey?: string) => {
     if (rowKey) anchor.current = rowKey;
     // "Select all N" stays on: the row leaves the whole list, or comes back.
-    if (wholeIds?.includes(id)) {
+    if (wholeOn && wholeIds?.includes(id)) {
       const next = new Set(except);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -127,7 +136,7 @@ export function useSessionSelection(rows: TreeRow[]) {
 
   return {
     selected,
-    selectionMode: selected.size > 0,
+    selectionMode: selected.size > 0 || wholeOn,
     toggle,
     selectRange,
     clear,
@@ -144,7 +153,7 @@ export function useSessionSelection(rows: TreeRow[]) {
       setWholeList(fullList() !== null);
     },
     /** The list that "Select all N" covers, while it is on. A poll that loads new rows keeps it. */
-    wholeList: wholeList && selected.size > 0 ? list : null,
+    wholeList: wholeOn ? list : null,
     /** The rows unchecked while "Select all N" is on: the server action leaves them out. */
     wholeExcept: except,
     /** What a key acts on: the selection, else the cursor's session. */

@@ -212,6 +212,68 @@ test.describe("sessions sidebar", () => {
     await clean.assertClean();
   });
 
+  test("after Select all N, unchecking every loaded row keeps the unloaded ones, and Done marks only them", async ({
+    page,
+    api,
+    swarm,
+    seed,
+    clean,
+  }, testInfo) => {
+    const run = randomUUID().slice(0, 8);
+    const userId = seed!.user.id;
+    const agentId = await worker(api, run);
+    // A group of the test's own: Done on the whole list touches no other test's sessions.
+    const name = `e2e-except-${run}`;
+    const title = `e2e except ${run}`;
+    const ids = new Map<string, string>();
+    for (let i = 0; i < 12; i++) {
+      const id = await session(
+        api,
+        swarm,
+        { userId, agentId, title: `${title} ${i}`, key: `shared/${name}/` },
+        true,
+      );
+      ids.set(`${title} ${i}`, id);
+    }
+    await page.goto("/sessions");
+    const tree = page.getByRole("tree", { name: "Sessions" });
+    const group = container(page.getByRole("group", { name: /^My groups/ }), name, 1);
+    await expand(group, name);
+    const rows = tree.getByRole("treeitem", { name: new RegExp(title), level: 2 });
+    await expect(rows).toHaveCount(10);
+
+    await group.hover();
+    await group.locator('button[role="checkbox"]').click();
+    const bar = page.locator("[data-bulk-bar]");
+    await bar.getByRole("button", { name: `Select all 12 in ${name}` }).click();
+    await expect(bar).toContainText(`All 12 in ${name}`);
+
+    const loaded = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      const row = rows.nth(i);
+      const label = (await row.textContent()) ?? "";
+      const match = [...ids.keys()].find((t) => new RegExp(`${t}(\\D|$)`).test(label));
+      expect(match, `row ${i}: ${label}`).toBeTruthy();
+      loaded.add(match!);
+      await row.locator('button[role="checkbox"]').click();
+    }
+    // Every loaded row unchecked: the bar stays on the 2 sessions not loaded.
+    await expect(bar).toContainText(`2 of 12 in ${name}`);
+    await shot(page, testInfo, "select-all-minus-every-loaded-row");
+
+    await bar.getByRole("button", { name: /^Done/ }).click();
+    await expect(bar).toBeHidden();
+    const done = await call<{ sessions: { root: { id: string } }[] }>(
+      swarm,
+      "GET",
+      `/api/sessions?q=${encodeURIComponent(title)}&triage=done&limit=50`,
+      { userId },
+    );
+    const unloaded = [...ids].filter(([t]) => !loaded.has(t)).map(([, id]) => id);
+    expect(done.sessions.map((s) => s.root.id).sort()).toEqual(unloaded.sort());
+    await clean.assertClean();
+  });
+
   test("a starred session lists under Starred", async ({
     page,
     api,

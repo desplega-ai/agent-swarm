@@ -846,7 +846,7 @@ export function SessionTree({
     <TooltipProvider delayDuration={300} skipDelayDuration={300}>
       {phone ? (
         <MobileBulkBar
-          open={selected.length > 0}
+          open={selection.selectionMode}
           count={selected.length}
           canTriage={canTriage}
           anyUnread={anyUnread}
@@ -858,7 +858,7 @@ export function SessionTree({
           onSelectList={selectionList ? () => selection.selectList(selectionList) : undefined}
           whole={whole}
         />
-      ) : selected.length > 0 ? (
+      ) : selection.selectionMode ? (
         <BulkBar
           count={selected.length}
           canTriage={canTriage}
