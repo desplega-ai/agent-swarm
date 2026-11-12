@@ -403,6 +403,74 @@ export const platformUsersLifecycle: Scenario = {
       "resolve the second unmapped identity",
     );
 
+    // ── dismiss and undo (platform-webhooks covers the [bot] filter: kv keys reject "[") ──
+    const dismissA = `plat-dis-${ctx.nonce}`;
+    const dismissB = `plat-dis2-${ctx.nonce}`;
+    await seedUnmapped(ctx, "github", dismissA, 4, "2026-10-30T11:00:00.000Z");
+    await seedUnmapped(ctx, "github", dismissB, 1, "2026-10-30T12:00:00.000Z");
+    const githubIds = async (query = "") => {
+      const response = await ctx.api("GET", `/api/users/unmapped?kind=github&limit=1000${query}`);
+      expectStatus(response, [200], `list unmapped github ${query}`);
+      return asRecords(response.json, "unmapped").map((r) => String(r.externalId));
+    };
+    expect((await githubIds()).includes(dismissA), "the seeded login is in the queue");
+
+    const dismiss = (path: string, ids: string[]) =>
+      ctx.api("POST", `/api/users/unmapped/${path}`, {
+        body: { identities: ids.map((externalId) => ({ kind: "github", externalId })) },
+      });
+    expectStatus(
+      await ctx.api("POST", "/api/users/unmapped/dismiss", { body: { identities: [] } }),
+      [400],
+      "dismiss with no identities",
+    );
+    const dismissed = await dismiss("dismiss", [dismissA, dismissB]);
+    expectStatus(dismissed, [200], "bulk dismiss");
+    expect(asRecord(dismissed.json).dismissed === 2, `dismiss counts both, got ${dismissed.text}`);
+    const afterDismiss = await githubIds();
+    expect(
+      !afterDismiss.includes(dismissA) && !afterDismiss.includes(dismissB),
+      "dismissed identities leave the queue",
+    );
+    const dismissedView = await ctx.api(
+      "GET",
+      "/api/users/unmapped?kind=github&dismissed=true&limit=1000",
+    );
+    const savedA = asRecords(dismissedView.json, "unmapped").find(
+      (r) => r.externalId === dismissA,
+    );
+    expect(
+      savedA?.count === 4 && typeof savedA.dismissedAt === "string",
+      `the dismissed view keeps the count and the dismiss time: ${JSON.stringify(savedA)}`,
+    );
+    expect(
+      ctx.db.get("SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?", [
+        dismissA,
+      ]) === null,
+      "dismiss links the identity to no user",
+    );
+
+    const restored = await dismiss("restore", [dismissA]);
+    expectStatus(restored, [200], "undo a dismissal");
+    expect(asRecord(restored.json).restored === 1, `undo restores one, got ${restored.text}`);
+    expect((await githubIds()).includes(dismissA), "undo returns the identity to the queue");
+    expect(
+      !asRecords(
+        (await ctx.api("GET", "/api/users/unmapped?kind=github&dismissed=true&limit=1000")).json,
+        "unmapped",
+      ).some((r) => r.externalId === dismissA),
+      "undo takes the identity off the dismissed view",
+    );
+    const again = await dismiss("restore", [dismissA]);
+    expect(asRecord(again.json).restored === 0, "undo of a live identity restores nothing");
+    // Leave nothing behind for the next scenario that reads the queue.
+    expectStatus(await dismiss("restore", [dismissB]), [200], "undo the second dismissal");
+    for (const id of [dismissA, dismissB]) {
+      const key = encodeURIComponent(id);
+      await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${key}:meta`);
+      await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${key}:count`);
+    }
+
     // ── merge ────────────────────────────────────────────────────────────────
     expectStatus(
       await ctx.api("POST", `/api/users/${alice.id}/merge`, { body: { sourceUserId: alice.id } }),

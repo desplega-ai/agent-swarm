@@ -21,9 +21,91 @@
  * checker enforces that worker-side paths don't import this file.
  */
 
-import { getKv, incrKv, upsertKv } from "./db";
+import { deleteKv, getDbClient, getKv, incrKv, upsertKv } from "./db";
 
 const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Operator ignore list: `integration:unmapped-dismissed:<kind>` / `<externalId>`,
+ * no TTL. Dismissing only hides an identity from triage and stops the tracker
+ * re-recording it. It never links, maps or trusts the identity.
+ */
+export function dismissedNamespace(kind: string): string {
+  return `integration:unmapped-dismissed:${kind}`;
+}
+
+/** Value stored on the ignore list: the tracker row at dismiss time, for the dismissed view and Undo. */
+export interface DismissedUnmapped {
+  dismissedAt: string;
+  dismissedBy: string;
+  meta: unknown;
+  count: number;
+}
+
+export async function isUnmappedIdentityDismissed(
+  kind: string,
+  externalId: string,
+): Promise<boolean> {
+  return (await getKv(dismissedNamespace(kind), externalId)) !== null;
+}
+
+/** Move an identity from the triage queue to the ignore list. */
+export async function dismissUnmappedIdentity(
+  kind: string,
+  externalId: string,
+  dismissedBy: string,
+): Promise<void> {
+  const ns = namespace(kind);
+  await getDbClient().transaction(async () => {
+    const meta = await getKv(ns, `${externalId}:meta`);
+    const count = await getKv(ns, `${externalId}:count`);
+    await upsertKv({
+      namespace: dismissedNamespace(kind),
+      key: externalId,
+      value: {
+        dismissedAt: new Date().toISOString(),
+        dismissedBy,
+        meta: meta?.value ?? null,
+        count: Number(count?.value ?? 0),
+      } satisfies DismissedUnmapped,
+      valueType: "json",
+    });
+    await deleteKv(ns, `${externalId}:meta`);
+    await deleteKv(ns, `${externalId}:count`);
+  });
+}
+
+/**
+ * Undo a dismissal: drop the ignore-list row and put the saved tracker row
+ * back with a fresh TTL. Returns false when the identity was not dismissed.
+ */
+export async function restoreUnmappedIdentity(kind: string, externalId: string): Promise<boolean> {
+  const ns = namespace(kind);
+  return getDbClient().transaction(async () => {
+    const row = await getKv(dismissedNamespace(kind), externalId);
+    if (!row) return false;
+    await deleteKv(dismissedNamespace(kind), externalId);
+    const saved = row.value as Partial<DismissedUnmapped> | null;
+    const expiresAt = Date.now() + TTL_MS;
+    if (saved?.meta && typeof saved.meta === "object") {
+      await upsertKv({
+        namespace: ns,
+        key: `${externalId}:meta`,
+        value: saved.meta,
+        valueType: "json",
+        expiresAt,
+      });
+      await upsertKv({
+        namespace: ns,
+        key: `${externalId}:count`,
+        value: Number(saved.count ?? 0),
+        valueType: "integer",
+        expiresAt,
+      });
+    }
+    return true;
+  });
+}
 
 /** Metadata stored under `<externalId>:meta`. */
 export interface UnmappedMeta {
@@ -57,6 +139,7 @@ export async function recordUnmappedIdentity(
   externalId: string,
   meta: { sampleEventType: string; sampleContext: string },
 ): Promise<void> {
+  if (await isUnmappedIdentityDismissed(kind, externalId)) return;
   const ns = namespace(kind);
   const now = new Date().toISOString();
   const expiresAt = Date.now() + TTL_MS;

@@ -1,14 +1,25 @@
 import type { ColDef } from "ag-grid-community";
-import { Check, ChevronsUpDown, Copy, Filter, LinkIcon, Search, UserPlus } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  Copy,
+  EyeOff,
+  Filter,
+  LinkIcon,
+  Search,
+  Undo2,
+  UserPlus,
+} from "lucide-react";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useResolveUnmapped, useUnmapped } from "@/api/hooks/use-users";
+import { useResolveUnmapped, useSetUnmappedDismissed, useUnmapped } from "@/api/hooks/use-users";
 import type { UnmappedIdentity } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -19,9 +30,10 @@ import {
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { IdentityBadge } from "../identity-badges";
 import { IntegrationIcon } from "../integration-icons";
@@ -68,6 +80,10 @@ function buildUnmappedHaystack(row: UnmappedIdentity): string {
   return parts.join(" ").toLowerCase();
 }
 
+function rowKey(row: UnmappedIdentity): string {
+  return JSON.stringify([row.kind, row.externalId]);
+}
+
 function unmappedMatches(row: UnmappedIdentity, query: string): boolean {
   const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return true;
@@ -80,8 +96,16 @@ export function UnmappedTab() {
   const { searchParams, setParam } = useUrlSearchState();
   const kind = coerceKind(readStringParam(searchParams, "kind", "all"));
   const [filterOpen, setFilterOpen] = useState(false);
-  const { data, isLoading } = useUnmapped({ kind: kind === "all" ? undefined : kind });
+  const showDismissed = readBooleanParam(searchParams, "unmappedDismissed");
+  const includeBots = readBooleanParam(searchParams, "unmappedBots");
+  const { data, isLoading } = useUnmapped({
+    kind: kind === "all" ? undefined : kind,
+    dismissed: showDismissed,
+    includeBots,
+  });
   const resolve = useResolveUnmapped();
+  const setDismissed = useSetUnmappedDismissed();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const [linkTarget, setLinkTarget] = useState<UnmappedIdentity | null>(null);
   const [createTarget, setCreateTarget] = useState<UnmappedIdentity | null>(null);
@@ -99,6 +123,55 @@ export function UnmappedTab() {
     return data.filter((row) => unmappedMatches(row, q));
   }, [data, deferredQuery]);
 
+  // Selection outside the current view is ignored, so a filter change needs no reset.
+  const selectedRows = useMemo(
+    () => (filteredData ?? []).filter((row) => selected.has(rowKey(row))),
+    [filteredData, selected],
+  );
+  const allSelected = !!filteredData?.length && selectedRows.length === filteredData.length;
+
+  const toggleRow = useCallback((row: UnmappedIdentity, checked: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(rowKey(row));
+      else next.delete(rowKey(row));
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(
+    (checked: boolean) => setSelected(new Set(checked ? (filteredData ?? []).map(rowKey) : [])),
+    [filteredData],
+  );
+
+  const mutateDismissed = setDismissed.mutate;
+  const applyDismissed = useCallback(
+    (action: "dismiss" | "restore", rows: UnmappedIdentity[]) => {
+      const identities = rows.map(({ kind, externalId }) => ({ kind, externalId }));
+      const label = rows.length === 1 ? `"${rows[0]?.externalId}"` : `${rows.length} identities`;
+      mutateDismissed(
+        { action, identities },
+        {
+          onSuccess: () => {
+            setSelected(new Set());
+            if (action === "dismiss") {
+              toast.success(`Dismissed ${label}`, {
+                action: {
+                  label: "Undo",
+                  onClick: () => mutateDismissed({ action: "restore", identities }),
+                },
+              });
+            } else {
+              toast.success(`Restored ${label}`);
+            }
+          },
+          onError: (err) => toast.error(err instanceof Error ? err.message : String(err)),
+        },
+      );
+    },
+    [mutateDismissed],
+  );
+
   const copyId = useCallback((externalId: string) => {
     navigator.clipboard.writeText(externalId).then(
       () => toast.success(`Copied "${externalId}"`),
@@ -108,6 +181,30 @@ export function UnmappedTab() {
 
   const columnDefs = useMemo<ColDef<UnmappedIdentity>[]>(
     () => [
+      {
+        colId: "select",
+        width: 48,
+        sortable: false,
+        headerComponent: () => (
+          <Checkbox
+            aria-label="Select all"
+            checked={allSelected ? true : selectedRows.length > 0 ? "indeterminate" : false}
+            onCheckedChange={(checked) => toggleAll(checked === true)}
+          />
+        ),
+        cellRenderer: (params: { data: UnmappedIdentity | undefined }) => {
+          const row = params.data;
+          if (!row) return null;
+          return (
+            <Checkbox
+              aria-label={`Select ${row.externalId}`}
+              checked={selected.has(rowKey(row))}
+              onCheckedChange={(checked) => toggleRow(row, checked === true)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          );
+        },
+      },
       {
         field: "kind",
         headerName: "Kind",
@@ -163,6 +260,23 @@ export function UnmappedTab() {
             <span className="text-muted-foreground">-</span>
           ),
       },
+      ...(showDismissed
+        ? [
+            {
+              field: "dismissedAt",
+              headerName: "Dismissed",
+              width: 140,
+              cellRenderer: (params: { value: string | undefined }) =>
+                params.value ? (
+                  <span className="text-xs text-muted-foreground">
+                    {formatSmartTime(params.value)}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                ),
+            } satisfies ColDef<UnmappedIdentity>,
+          ]
+        : []),
       {
         field: "sampleEventType",
         headerName: "Sample event",
@@ -202,10 +316,26 @@ export function UnmappedTab() {
       },
       {
         headerName: "Actions",
-        width: 280,
+        width: showDismissed ? 120 : 380,
         cellRenderer: (params: { data: UnmappedIdentity | undefined }) => {
           if (!params.data) return null;
           const row = params.data;
+          if (showDismissed) {
+            return (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  applyDismissed("restore", [row]);
+                }}
+                disabled={setDismissed.isPending}
+              >
+                <Undo2 className="h-3 w-3 mr-1" />
+                Undo
+              </Button>
+            );
+          }
           return (
             <div className="flex items-center gap-1.5">
               <Button
@@ -231,12 +361,35 @@ export function UnmappedTab() {
                 <UserPlus className="h-3 w-3 mr-1" />
                 Create user
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  applyDismissed("dismiss", [row]);
+                }}
+                disabled={setDismissed.isPending}
+              >
+                <EyeOff className="h-3 w-3 mr-1" />
+                Dismiss
+              </Button>
             </div>
           );
         },
       },
     ],
-    [resolve.isPending, copyId],
+    [
+      resolve.isPending,
+      setDismissed.isPending,
+      copyId,
+      showDismissed,
+      applyDismissed,
+      selected,
+      selectedRows.length,
+      allSelected,
+      toggleAll,
+      toggleRow,
+    ],
   );
 
   const showEmpty = !isLoading && (data?.length ?? 0) === 0;
@@ -331,11 +484,54 @@ export function UnmappedTab() {
         </Popover>
       </div>
 
+      <div className="flex flex-wrap items-center gap-4 shrink-0 text-xs text-muted-foreground">
+        <label className="flex items-center gap-2">
+          <Switch
+            checked={includeBots}
+            onCheckedChange={(checked) =>
+              setParam("unmappedBots", checked ? "true" : "", { reset: ["unmappedPeoplePage"] })
+            }
+          />
+          Show bots
+        </label>
+        <label className="flex items-center gap-2">
+          <Switch
+            checked={showDismissed}
+            onCheckedChange={(checked) =>
+              setParam("unmappedDismissed", checked ? "true" : "", {
+                reset: ["unmappedPeoplePage"],
+              })
+            }
+          />
+          Show dismissed
+        </label>
+        {selectedRows.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            onClick={() => applyDismissed(showDismissed ? "restore" : "dismiss", selectedRows)}
+            disabled={setDismissed.isPending}
+          >
+            {showDismissed ? (
+              <Undo2 className="h-3 w-3 mr-1" />
+            ) : (
+              <EyeOff className="h-3 w-3 mr-1" />
+            )}
+            {showDismissed ? "Undo" : "Dismiss"} {selectedRows.length} selected
+          </Button>
+        )}
+      </div>
+
       {showEmpty ? (
         <EmptyState
-          icon={UserPlus}
-          title="No unmapped identities"
-          description="Inbound webhooks from unknown users will appear here for triage."
+          icon={showDismissed ? EyeOff : UserPlus}
+          title={showDismissed ? "No dismissed identities" : "No unmapped identities"}
+          description={
+            showDismissed
+              ? "Identities you dismiss move here. Undo returns them to the queue."
+              : "Inbound webhooks from unknown users will appear here for triage."
+          }
         />
       ) : isMobile ? (
         // The grid pushes the Link and Create buttons off a phone's screen;
@@ -359,27 +555,51 @@ export function UnmappedTab() {
                 row.lastSeenAt ? formatSmartTime(row.lastSeenAt) : null,
               ]}
               extras={
-                <div className="flex gap-2 px-4 pb-3">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => setLinkTarget(row)}
-                    disabled={resolve.isPending}
-                  >
-                    <LinkIcon className="h-3 w-3 mr-1" />
-                    Link to user
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => setCreateTarget(row)}
-                    disabled={resolve.isPending}
-                  >
-                    <UserPlus className="h-3 w-3 mr-1" />
-                    Create user
-                  </Button>
-                </div>
+                showDismissed ? (
+                  <div className="flex gap-2 px-4 pb-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => applyDismissed("restore", [row])}
+                      disabled={setDismissed.isPending}
+                    >
+                      <Undo2 className="h-3 w-3 mr-1" />
+                      Undo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2 px-4 pb-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => setLinkTarget(row)}
+                      disabled={resolve.isPending}
+                    >
+                      <LinkIcon className="h-3 w-3 mr-1" />
+                      Link to user
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setCreateTarget(row)}
+                      disabled={resolve.isPending}
+                    >
+                      <UserPlus className="h-3 w-3 mr-1" />
+                      Create user
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => applyDismissed("dismiss", [row])}
+                      disabled={setDismissed.isPending}
+                      aria-label={`Dismiss ${row.externalId}`}
+                    >
+                      <EyeOff className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )
               }
             />
           ))}
@@ -390,6 +610,7 @@ export function UnmappedTab() {
           columnDefs={columnDefs}
           loading={isLoading}
           paginationQueryKey="unmappedPeople"
+          getRowId={(params) => rowKey(params.data)}
           emptyMessage={
             query.trim()
               ? "No unmapped identities match this search."

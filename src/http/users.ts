@@ -14,6 +14,8 @@
  *   POST   /api/users
  *   GET    /api/users/unmapped                       (must precede /:id)
  *   POST   /api/users/unmapped/:kind/:externalId/resolve
+ *   POST   /api/users/unmapped/dismiss
+ *   POST   /api/users/unmapped/restore
  *   GET    /api/users/:id
  *   PATCH  /api/users/:id
  *   POST   /api/users/:id/mcp-tokens
@@ -61,6 +63,12 @@ import {
   OperatorGrantedTargetError,
   setUserRoles,
 } from "../be/rbac-roles";
+import {
+  type DismissedUnmapped,
+  dismissedNamespace,
+  dismissUnmappedIdentity,
+  restoreUnmappedIdentity,
+} from "../be/unmapped-identities";
 import {
   createUserMergeJob,
   findActiveUserMergeJob,
@@ -183,6 +191,16 @@ const UnmappedIdentitySchema = z.object({
   count: z.number(),
   sampleEventType: z.string().nullable(),
   sampleContext: z.unknown().nullable(),
+  /** Set only on rows from `?dismissed=true`. */
+  dismissedAt: z.string().optional(),
+  dismissedBy: z.string().optional(),
+});
+
+const UnmappedIdentityRefsSchema = z.object({
+  identities: z
+    .array(z.object({ kind: z.string().min(1), externalId: z.string().min(1) }))
+    .min(1)
+    .max(500),
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -292,6 +310,10 @@ const listUnmapped = route({
   query: z.object({
     kind: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional(),
+    /** `true` lists the dismissed identities instead of the triage queue. */
+    dismissed: z.enum(["true", "false"]).optional(),
+    /** Logins ending in `[bot]` are hidden unless this is `true`. */
+    includeBots: z.enum(["true", "false"]).optional(),
   }),
   responses: {
     200: {
@@ -332,6 +354,50 @@ const resolveUnmapped = route({
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
+});
+
+const DISMISS_RBAC = {
+  ungated:
+    "same posture as POST /api/users/unmapped/{kind}/{externalId}/resolve: bearer auth, guests rejected; it links and trusts nothing",
+};
+
+const dismissUnmapped = route({
+  method: "post",
+  path: "/api/users/unmapped/dismiss",
+  pattern: ["api", "users", "unmapped", "dismiss"],
+  summary:
+    "Dismiss unmapped identities: hide them from triage and stop recording them. Links nothing.",
+  tags: ["Users"],
+  body: UnmappedIdentityRefsSchema,
+  responses: {
+    200: {
+      description: "Identities moved to the ignore list",
+      schema: z.object({ dismissed: z.number() }),
+    },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: DISMISS_RBAC,
+});
+
+const restoreUnmapped = route({
+  method: "post",
+  path: "/api/users/unmapped/restore",
+  pattern: ["api", "users", "unmapped", "restore"],
+  summary: "Undo a dismissal: return identities to the triage queue",
+  tags: ["Users"],
+  body: UnmappedIdentityRefsSchema,
+  responses: {
+    200: {
+      description: "Count of identities taken off the ignore list",
+      schema: z.object({ restored: z.number() }),
+    },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: DISMISS_RBAC,
 });
 
 const getUserRoute = route({
@@ -863,6 +929,25 @@ async function collectUnmappedForKind(kind: string, limit: number) {
   return Array.from(byId.values());
 }
 
+/** The ignore list for one kind, in the triage-row shape plus who dismissed it and when. */
+async function collectDismissedForKind(kind: string, limit: number) {
+  const rows = await listKv(dismissedNamespace(kind), { limit, offset: 0 });
+  return rows.map((row) => {
+    const saved = (row.value ?? {}) as Partial<DismissedUnmapped>;
+    const meta = (saved.meta ?? {}) as Record<string, unknown>;
+    return {
+      kind,
+      externalId: row.key,
+      lastSeenAt: typeof meta.lastSeenAt === "string" ? meta.lastSeenAt : null,
+      count: Number(saved.count ?? 0),
+      sampleEventType: typeof meta.sampleEventType === "string" ? meta.sampleEventType : null,
+      sampleContext: meta.sampleContext ?? null,
+      dismissedAt: saved.dismissedAt,
+      dismissedBy: saved.dismissedBy,
+    };
+  });
+}
+
 const DEFAULT_CONNECTOR_CONNECT_URL = "https://mcp.agent-swarm.dev/connections";
 
 /**
@@ -1034,7 +1119,22 @@ export async function handleUsers(
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 100;
     const kinds = parsed.query.kind ? [parsed.query.kind] : UNMAPPED_KINDS;
-    const rows = (await Promise.all(kinds.map((k) => collectUnmappedForKind(k, limit)))).flat();
+    const collect =
+      parsed.query.dismissed === "true" ? collectDismissedForKind : collectUnmappedForKind;
+    const includeBots = parsed.query.includeBots === "true";
+    // A sighting that raced a dismiss can re-create a tracker row; the ignore list still wins.
+    const dismissedKeys =
+      parsed.query.dismissed === "true"
+        ? new Set<string>()
+        : new Set(
+            (await Promise.all(kinds.map((k) => collectDismissedForKind(k, 1000))))
+              .flat()
+              .map((row) => `${row.kind}\u0000${row.externalId}`),
+          );
+    const rows = (await Promise.all(kinds.map((k) => collect(k, limit))))
+      .flat()
+      .filter((row) => includeBots || !row.externalId.endsWith("[bot]"))
+      .filter((row) => !dismissedKeys.has(`${row.kind}\u0000${row.externalId}`));
     rows.sort((a, b) => {
       if (b.count !== a.count) return b.count - a.count;
       const al = a.lastSeenAt ?? "";
@@ -1042,6 +1142,31 @@ export async function handleUsers(
       return bl.localeCompare(al);
     });
     listUnmapped.respond(res, 200, { unmapped: rows.slice(0, limit) });
+    return true;
+  }
+
+  // ─── POST /api/users/unmapped/dismiss | restore ─────────────────────────────
+  if (dismissUnmapped.match(req.method, pathSegments)) {
+    const parsed = await dismissUnmapped.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = getOperatorActor(req, res);
+    if (!actor) return true;
+    for (const { kind, externalId } of parsed.body.identities) {
+      await dismissUnmappedIdentity(kind, externalId, `${actor.kind}:${actor.id}`);
+    }
+    dismissUnmapped.respond(res, 200, { dismissed: parsed.body.identities.length });
+    return true;
+  }
+
+  if (restoreUnmapped.match(req.method, pathSegments)) {
+    const parsed = await restoreUnmapped.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getOperatorActor(req, res)) return true;
+    let restored = 0;
+    for (const { kind, externalId } of parsed.body.identities) {
+      if (await restoreUnmappedIdentity(kind, externalId)) restored++;
+    }
+    restoreUnmapped.respond(res, 200, { restored });
     return true;
   }
 
