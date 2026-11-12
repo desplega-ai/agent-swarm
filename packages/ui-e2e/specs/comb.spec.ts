@@ -212,24 +212,56 @@ test("Comb mints a named key per browser, then comments, replies, and resolves",
     await dialog.getByRole("button", { name: "Dismiss all" }).click();
     await expect(dialog.getByText("Nothing left to send.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Send 0" })).toBeDisabled();
+    // With nothing left to send, the tray keeps a way back to the dismissed ones.
     await expect(tray).toHaveCount(0);
+    const dismissedTray = page.getByRole("button", {
+      name: /^Show \d+ dismissed comments$/,
+      includeHidden: true,
+    });
+    await expect(dismissedTray).toHaveAttribute("aria-label", "Show 3 dismissed comments");
     await page.screenshot({ path: test.info().outputPath("dismiss-4-all.png") });
+    const dismissedList = dialog.getByRole("list", { name: "Dismissed comments" });
+    const restoreIn = (text: string) =>
+      dismissedList
+        .getByRole("listitem")
+        .filter({ hasText: text })
+        .getByRole("button", { name: "Restore" });
 
-    // Dismissals survive a reload; restoring brings a comment back to the count.
-    await dialog.getByRole("button", { name: "Undo" }).click();
+    // Dismiss all, close, reopen: the dismissed list opens and restores.
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+    await dismissedTray.click();
+    await expect(dismissedList).toContainText("stale two");
+    await page.screenshot({ path: test.info().outputPath("dismiss-5-reopen.png") });
+    await restoreIn("still wanted").click();
     await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
+    await expect(dialog.getByRole("button", { name: "Send 1" })).toBeVisible();
+
+    // Dismissing the last file's comments, then reloading, keeps the way back too.
+    await dialog.getByRole("button", { name: "Dismiss the comments on /comb-e2e/b.md" }).click();
+    await expect(dismissedTray).toHaveAttribute("aria-label", "Show 3 dismissed comments");
     await page.reload();
+    await expect(dismissedTray).toHaveAttribute("aria-label", "Show 3 dismissed comments");
+    await expect(tray).toHaveCount(0);
+    await dismissedTray.click();
+    await restoreIn("stale one").click();
     await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
-    await tray.click();
-    await dialog.getByRole("button", { name: "Show" }).click();
+
+    // Dismissing the last comment by its own X, then Undo.
     await dialog
-      .getByRole("list", { name: "Dismissed comments" })
       .getByRole("listitem")
       .filter({ hasText: "stale one" })
-      .getByRole("button", { name: "Restore" })
+      .getByRole("button", { name: "Dismiss this comment" })
       .click();
-    await expect(tray).toHaveAttribute("aria-label", "Send 2 to swarm");
-    await expect(dialog.getByRole("button", { name: "Send 2" })).toBeVisible();
+    await expect(dismissedTray).toHaveAttribute("aria-label", "Show 3 dismissed comments");
+    await dialog.getByRole("button", { name: "Undo" }).click();
+    await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
+
+    // Sending the rest leaves the dismissed ones unsent and reachable.
+    await dialog.getByRole("button", { name: "Send 1" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(dismissedTray).toHaveAttribute("aria-label", "Show 2 dismissed comments");
+    await expect(tray).toHaveCount(0);
 
     await clean.assertClean();
   } finally {

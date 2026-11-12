@@ -263,7 +263,10 @@ export function SendBatchDialog({
   const full = checked.size >= COMB_BATCH_MAX;
   // The last dismiss, for Undo.
   const [lastDismissed, setLastDismissed] = useState<string[]>([]);
-  const [showDismissed, setShowDismissed] = useState(false);
+  // Opened with nothing left to send (the tray's "N dismissed"): list the dismissed ones.
+  const [showDismissed, setShowDismissed] = useState(
+    () => dismissedHere.length > 0 && active.length === 0,
+  );
   const [note, setNote] = useState("");
   const noteId = useId();
 
