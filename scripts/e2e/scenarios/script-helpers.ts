@@ -155,6 +155,22 @@ export type Stub = {
   stop: () => void;
 };
 
+/** agent-fs answers a PUT /raw with a JSON content type 415 (packages/server/src/routes/files.ts). */
+export function agentFsRawJsonRejection(request: Request): Response | undefined {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (request.method !== "PUT" || !contentType.toLowerCase().startsWith("application/json")) {
+    return undefined;
+  }
+  return Response.json(
+    {
+      error: "VALIDATION_ERROR",
+      message:
+        "PUT /raw expects a binary body; use POST /ops with op=write for JSON-encoded content",
+    },
+    { status: 415 },
+  );
+}
+
 /**
  * A loopback HTTP stub the SUT can reach. NODE_ENV=test lets the API's outbound guards talk
  * to loopback, so connections, MCP servers and script `fetch` can target this server.

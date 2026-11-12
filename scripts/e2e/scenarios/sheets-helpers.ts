@@ -2,7 +2,7 @@
 // Not a scenario: listed in NON_SCENARIO_FILES.
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { ScenarioContext } from "../run";
-import { startStub } from "./script-helpers";
+import { agentFsRawJsonRejection, startStub } from "./script-helpers";
 
 /** `bytes` is the exact upload; a test that seeds a text file sets only `body`. */
 export type StoredFile = { body: string; bytes?: Uint8Array; version: number };
@@ -39,6 +39,8 @@ export function startAgentFsStub(ctx: ScenarioContext, label: string): AgentFsSt
     const raw = url.pathname.match(/^\/orgs\/[^/]+\/drives\/[^/]+\/files\/(.+)\/raw$/);
     if (raw) {
       const path = decodeURIComponent(raw[1] ?? "");
+      const rejected = agentFsRawJsonRejection(request);
+      if (rejected) return rejected;
       if (request.method === "GET") {
         const current = files.get(path);
         return current
