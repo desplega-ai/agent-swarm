@@ -45,6 +45,7 @@ import {
 } from "@/lib/feedback-popup";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
+import { randomUUID } from "../../lib/uuid";
 
 const CALENDAR_URL = "https://calendar.app.google/R1ngNwcjs4vrJDk96";
 const SESSION_ID_KEY = "swarm:feedback-popup:session:v1";
@@ -85,7 +86,7 @@ function browserSessionId(): string {
   try {
     const existing = sessionStorage.getItem(SESSION_ID_KEY);
     if (existing) return existing;
-    const minted = crypto.randomUUID();
+    const minted = randomUUID();
     sessionStorage.setItem(SESSION_ID_KEY, minted);
     return minted;
   } catch {
@@ -242,7 +243,7 @@ export function FeedbackDialog() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: open once per trigger; the other values are read at that moment
   useEffect(() => {
     if (!trigger) return;
-    setActive({ submissionId: crypto.randomUUID(), trigger });
+    setActive({ submissionId: randomUUID(), trigger });
     // A fresh card: nothing carries over from an earlier one in this mount.
     setScore(null);
     setSendingScore(null);

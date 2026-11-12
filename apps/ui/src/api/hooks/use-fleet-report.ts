@@ -9,6 +9,7 @@
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { useStatusContext } from "@/app/status-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { randomUUID } from "../../lib/uuid";
 
 export function useSubscribeFleetReport() {
   const status = useStatusContext();
@@ -18,7 +19,7 @@ export function useSubscribeFleetReport() {
   return async function subscribe(email: string): Promise<void> {
     if (!userId) throw new Error("Pick a user first.");
     await submit.mutateAsync({
-      submission_id: crypto.randomUUID(),
+      submission_id: randomUUID(),
       user_id: userId,
       org_name: status.data?.identity.name ?? "",
       swarm_version: __APP_VERSION__,
