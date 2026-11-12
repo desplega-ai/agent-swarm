@@ -188,7 +188,7 @@ export interface RoomDecoded {
   state: unknown;
 }
 
-export type PrimitiveObjectKind = "board";
+export type PrimitiveObjectKind = "board" | "sheet";
 
 export interface PrimitiveObject {
   id: string;
@@ -226,6 +226,57 @@ export interface ObjectsNamespace {
   list(args?: { kind?: PrimitiveObjectKind; prefix?: string; limit?: number; offset?: number }): Promise<{ message: string; objects: PrimitiveObject[]; total: number }>;
   /** Rebuild the index from the drive. Ids survive; rows whose file is gone are reported, not deleted. */
   reindex(args?: { kind?: PrimitiveObjectKind }): Promise<{ message: string } & PrimitiveReindexReport>;
+}
+
+/** A spreadsheet cell value. A string starting with \`=\` is a formula; null clears the cell. */
+export type SheetCellInput = number | string | boolean | null;
+
+/** Identify the sheet by \`id\` or \`path\`. */
+export interface SheetRef {
+  id?: string;
+  path?: string;
+}
+
+export interface SheetRangeArgs extends SheetRef {
+  /** A1 range: \`Tasks!B2:C3\`, \`B2\`, or a whole column \`'My tab'!A:A\` (capped to the used range). */
+  range: string;
+}
+
+export interface SheetCreateArgs {
+  /** Create-only; must end in \`.sheet.json\`. Default is one tab \`Sheet1\`; \`rows\` seed a tab from A1. */
+  path: string;
+  title?: string;
+  tabs?: Array<{ name: string; rows?: SheetCellInput[][] }>;
+}
+
+export interface SheetTabSummary {
+  name: string;
+  rows: number;
+  cols: number;
+  freezeRows: number;
+}
+
+export interface SheetResult {
+  message: string;
+  /** agent-fs version after the call. */
+  version: number;
+}
+
+/**
+ * Sheets: \`swarm-sheet/1\` workbooks on your default agent-fs drive, recomputed by a spreadsheet engine.
+ * Writes retry on a concurrent edit, then throw. Each method throws on a refusal.
+ */
+export interface SheetsNamespace {
+  create(args: SheetCreateArgs): Promise<{ message: string; object: PrimitiveObject; link: string | null }>;
+  get(args: SheetRef): Promise<SheetResult & { object: PrimitiveObject; tabs: SheetTabSummary[] }>;
+  list(args?: { prefix?: string; limit?: number; offset?: number }): Promise<{ message: string; objects: PrimitiveObject[]; total: number }>;
+  /** Cached values (at most 10,000 cells). \`formulas: true\` also returns formula text. */
+  getRange(args: SheetRangeArgs & { formulas?: boolean }): Promise<SheetResult & { range: string; values: SheetCellInput[][]; formulas?: SheetCellInput[][] }>;
+  /** A single-cell \`range\` is the top-left corner; a larger one must match \`values\`. \`'=\` stores literal text beginning with \`=\`. */
+  setRange(args: SheetRangeArgs & { values: SheetCellInput[][] }): Promise<SheetResult & { range: string; changed: number; recalculated: number }>;
+  appendRows(args: SheetRef & { tab: string; rows: SheetCellInput[][] }): Promise<SheetResult & { range: string }>;
+  clearRange(args: SheetRangeArgs): Promise<SheetResult & { range: string; cleared: number }>;
+  addTab(args: SheetRef & { name: string; after?: string }): Promise<SheetResult & { tabs: string[] }>;
 }
 
 /** Palette names (Excalidraw's open-color) or a #rrggbb background. */
@@ -356,6 +407,15 @@ export interface SwarmSdk {
   objects_get(args: { id?: string; path?: string; includeContent?: boolean }): Promise<unknown>;
   objects_list(args?: { kind?: PrimitiveObjectKind; prefix?: string; limit?: number; offset?: number }): Promise<unknown>;
   objects_reindex(args?: { kind?: PrimitiveObjectKind }): Promise<unknown>;
+  // --- sheets (prefer ctx.sheets.*, which unwraps and throws) ---
+  sheets_create(args: SheetCreateArgs): Promise<unknown>;
+  sheets_get(args: SheetRef): Promise<unknown>;
+  sheets_list(args?: { prefix?: string; limit?: number; offset?: number }): Promise<unknown>;
+  sheets_getRange(args: SheetRangeArgs & { formulas?: boolean }): Promise<unknown>;
+  sheets_setRange(args: SheetRangeArgs & { values: SheetCellInput[][] }): Promise<unknown>;
+  sheets_appendRows(args: SheetRef & { tab: string; rows: SheetCellInput[][] }): Promise<unknown>;
+  sheets_clearRange(args: SheetRangeArgs): Promise<unknown>;
+  sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
   // --- boards (prefer ctx.boards.*, which unwraps and throws) ---
   boards_create(args: BoardCreateArgs): Promise<unknown>;
   boards_get(args: BoardRef & { detail?: "summary" | "full" }): Promise<unknown>;
@@ -805,6 +865,8 @@ export interface ScriptContext {
   // Each SDK_NAMESPACES entry (src/scripts-runtime/sdk-allowlist.ts) needs a typed \`<ns>\` key here.
   /** Primitive objects on your default agent-fs drive (object-* tools). */
   objects: ObjectsNamespace;
+  /** Sheets on your default agent-fs drive (sheet-* tools). */
+  sheets: SheetsNamespace;
   /** Excalidraw boards on your default agent-fs drive (board-* tools). */
   boards: BoardsNamespace;
 }

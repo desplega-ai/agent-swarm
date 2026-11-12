@@ -60,3 +60,4 @@ apps/templates-ui/  # templates site, its own package
 
 # Escape hatches for single test files.
 src/tests/agent-history.test.ts  # agent_history append-only triggers, full-row restore equality, extension and lead blockers, and revocation of every token kind need direct DB and token-mint access the black-box suite does not have; the HTTP surface is in core-agent-lifecycle
+src/tests/sheet-engine.test.ts  # engine timeout kill and queue bounds need an injected 1 ms timeout and a filled queue, unreachable black-box
