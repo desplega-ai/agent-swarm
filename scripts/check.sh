@@ -81,7 +81,7 @@ outputs_state() {
 drift() {
   local name=$1 trigger=$2 outputs=$3
   shift 3
-  grep -qE "$trigger" <<<"$changed" || return 0
+  grep -qE "$trigger" <<<"$touched" || return 0
   step "drift: $name"
   local before
   before=$(outputs_state "$outputs")
@@ -110,6 +110,9 @@ changed=$(
     git ls-files --others --exclude-standard
   } | sort -u
 )
+# Drift and E2E scoping also need deleted paths: a removed route still changes
+# openapi.json, and a removed scenario or source file must not read as "skip".
+touched=$(printf '%s\n%s\n' "$changed" "$(git diff --name-only --diff-filter=D "$base")" | sed '/^$/d' | sort -u)
 
 lint_files=$(grep -E "$BIOME_SCOPE" <<<"$changed" || true)
 if [[ -n "$lint_files" ]]; then
@@ -162,7 +165,7 @@ if [[ "$skip_e2e" == 1 ]]; then
   step "e2e contract: skipped (--skip-e2e)"
 else
   step "e2e contract: scoping the diff"
-  scope=$(bun scripts/e2e/scope.ts <<<"$changed")
+  scope=$(bun scripts/e2e/scope.ts <<<"$touched")
   case "$scope" in
     skip) step "e2e contract: the diff reaches neither the API nor the runner, skipped" ;;
     full)
