@@ -5793,6 +5793,25 @@
                             "format": {
                               "type": "string",
                               "enum": [
+                                "hmac-sha1"
+                              ]
+                            },
+                            "header": {
+                              "type": "string",
+                              "default": "X-Hub-Signature",
+                              "description": "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex."
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
                                 "timestamped-hmac-sha256"
                               ]
                             },
@@ -6644,6 +6663,25 @@
                               "type": "string",
                               "default": "X-Hub-Signature-256",
                               "description": "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex."
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "hmac-sha1"
+                              ]
+                            },
+                            "header": {
+                              "type": "string",
+                              "default": "X-Hub-Signature",
+                              "description": "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex."
                             }
                           },
                           "required": [
@@ -73222,6 +73260,25 @@
                                     "format": {
                                       "type": "string",
                                       "enum": [
+                                        "hmac-sha1"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "default": "X-Hub-Signature",
+                                      "description": "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex."
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
                                         "timestamped-hmac-sha256"
                                       ]
                                     },
@@ -73736,6 +73793,25 @@
                                       "type": "string",
                                       "default": "X-Hub-Signature-256",
                                       "description": "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex."
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "hmac-sha1"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "default": "X-Hub-Signature",
+                                      "description": "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex."
                                     }
                                   },
                                   "required": [

@@ -42,7 +42,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. " +
         "WEBHOOK VERIFICATION: webhook triggers use hmacSecret for all verification formats. " +
         "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
-        "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
+        "or set verification to { format: 'hmac-sha256', header }, { format: 'hmac-sha1', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
         "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). " +
         "WEBHOOK DELIVERY FILTER: optional filter on a webhook trigger drops deliveries after signature verification and before any run is saved " +
@@ -61,7 +61,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Replacement trigger list. A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
+            "Replacement trigger list. A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, hmac-sha1, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional()
           .nullable()
