@@ -470,6 +470,16 @@
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
       "scenarios": ["core-sessions", "core-use-case-group"]
     },
+    "sheets": {
+      "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, ctx.sheets in both executors",
+      "scenarios": [
+        "knowledge-sheets",
+        "knowledge-sheets-edges",
+        "knowledge-sheets-limits",
+        "knowledge-sheets-scripts",
+        "knowledge-sheets-values"
+      ]
+    },
     "skills-lifecycle": {
       "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",
       "scenarios": ["knowledge-skills"]

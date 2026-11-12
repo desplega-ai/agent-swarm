@@ -76,8 +76,18 @@ The `primitives` capability (off by default; scripts always reach it through the
 | `object-get` | Read one object by `id` or `path`, optionally with its content. |
 | `object-list` | List objects by `kind` and path `prefix`. |
 | `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. |
+| `sheet-create` | Create a spreadsheet (`swarm-sheet/1`, a `.sheet.json` file), optionally with named tabs seeded from A1. |
+| `sheet-get` | A sheet's object, agent-fs `version` and tabs (used rows and columns, frozen rows). |
+| `sheet-list` | List sheets by path `prefix`. |
+| `sheet-get-range` | Read cached values (and optionally formulas) from an A1 range. Spilled cells are included. |
+| `sheet-set-range` | Write a rectangle of values and recompute every formula. `=...` is a formula. |
+| `sheet-append-rows` | Append rows below the last used row of a tab. |
+| `sheet-clear-range` | Clear a range and recompute dependents. |
+| `sheet-add-tab` | Add an empty tab, at the end or after a named tab. |
 
-Scripts use `ctx.objects.create/get/list/reindex`.
+Scripts use `ctx.objects.create/get/list/reindex` and `ctx.sheets.create/get/list/getRange/setRange/appendRows/clearRange/addTab`.
+
+Sheet limits: 20 tabs, 50,000 non-empty cells per workbook, 5 MiB per file, 10,000 cells per range call. Formulas run in one worker with a 10 s timeout per call. A write that hits an agent-fs version conflict re-reads and re-applies up to three times (edits to different cells merge, the same cell is last writer wins), then refuses with "concurrent writers".
 
 Boards are `.excalidraw` objects edited as raw element JSON. Writes guard on the agent-fs file version and re-apply up to three times on a concurrent change.
 

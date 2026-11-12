@@ -23,6 +23,7 @@ const NON_SCENARIO_FILES = new Set([
   "workflow-helpers.ts",
   "knowledge-helpers.ts",
   "script-helpers.ts",
+  "sheets-helpers.ts",
 ]);
 
 function isScenario(value: unknown): value is Scenario {

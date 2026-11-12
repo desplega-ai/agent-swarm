@@ -54,9 +54,11 @@ export const registerObjectCreateTool = (server: McpServer) => {
       title: "Create primitive object",
       annotations: { readOnlyHint: false, idempotentHint: false },
       description:
-        "Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.",
+        "Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path. Kind `sheet` writes an empty `swarm-sheet/1` workbook and needs a `.sheet.json` path (edit it with the sheet-* tools).",
       inputSchema: z.object({
-        kind: KindSchema.describe("Object kind. `board`: an Excalidraw scene (.excalidraw)."),
+        kind: KindSchema.describe(
+          "Object kind. `board`: an Excalidraw scene (.excalidraw). `sheet`: a spreadsheet (.sheet.json).",
+        ),
         path: z.string().min(1).describe("Drive path, e.g. /boards/roadmap.excalidraw."),
         title: z.string().max(200).optional(),
       }),
