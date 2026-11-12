@@ -1,11 +1,14 @@
 import { FilesError } from "@/fs/provider";
+import { buildAgentFsLiveUrl } from "@/utils/constants";
 import { agentFsClientFor } from "../../agent-fs-identity";
 import { getDbClient } from "../../db";
 import {
+  clientFor,
   createObject,
   getObject,
   listObjects,
   NO_AGENT_FS_IDENTITY,
+  normalizePath,
   ObjectsError,
   type PrimitiveObject,
 } from "../objects";
@@ -24,6 +27,7 @@ import type { EnginePatch } from "./engine-worker";
 import {
   checkTabName,
   constantInput,
+  emptySheet,
   MAX_CELLS,
   MAX_FILE_BYTES,
   MAX_RANGE_CELLS,
@@ -34,6 +38,7 @@ import {
   type SheetTab,
   usedExtent,
 } from "./format";
+import { buildXlsx, MAX_XLSX_BYTES, parseXlsx, XLSX_MIME } from "./xlsx";
 
 /** One sheet call: the caller and the file, by `id` or `path`. */
 export type SheetTarget = { agentId: string | undefined; id?: string; path?: string };
@@ -76,6 +81,15 @@ async function load(target: SheetTarget) {
   return { object, version: object.fileVersion, doc: parsed.data };
 }
 
+/** The exact bytes a sheet file holds, size-checked. Save and the import preflight both use it, so they cannot disagree. */
+function sheetBody(doc: SheetDoc): string {
+  const body = JSON.stringify(doc, null, 2);
+  if (Buffer.byteLength(body) > MAX_FILE_BYTES) {
+    throw new ObjectsError(`the sheet would exceed ${MAX_FILE_BYTES} bytes (5 MiB)`);
+  }
+  return body;
+}
+
 async function save(
   agentId: string | undefined,
   object: PrimitiveObject,
@@ -83,10 +97,7 @@ async function save(
   version: number,
   op: string,
 ) {
-  const body = JSON.stringify(doc, null, 2);
-  if (Buffer.byteLength(body) > MAX_FILE_BYTES) {
-    throw new ObjectsError(`the sheet would exceed ${MAX_FILE_BYTES} bytes (5 MiB)`);
-  }
+  const body = sheetBody(doc);
   const client = agentId ? await agentFsClientFor(agentId) : undefined;
   if (!client) throw new ObjectsError(NO_AGENT_FS_IDENTITY);
   const { orgId, driveId } = client.identity;
@@ -152,7 +163,11 @@ function inputFor(value: CellInput): string {
 }
 
 /** Recalculate `doc` with `patches` and report which cells moved. */
-async function recalc(agentId: string | undefined, doc: SheetDoc, patches: EnginePatch[]) {
+async function recalc(
+  agentId: string | undefined,
+  doc: Pick<SheetDoc, "tabs">,
+  patches: EnginePatch[],
+) {
   const { cells, changed } = await sheetEngine().recalc(doc.tabs, patches, {
     maxCells: MAX_CELLS,
     caller: agentId,
@@ -412,4 +427,102 @@ export async function addSheetTab(target: SheetTarget & { name: string; after?: 
     return { doc, result: { tabs: doc.tabs.map((t) => t.name) } };
   });
   return { ...result, version };
+}
+
+/** Read an `.xlsx` off the drive. Refuses a missing file or one over the size limit before parsing. */
+async function readXlsx(agentId: string | undefined, sourcePath: string): Promise<Uint8Array> {
+  if (!/\.xlsx$/i.test(sourcePath)) throw new ObjectsError("sourcePath must end in .xlsx");
+  const { provider, scope } = await clientFor(agentId);
+  const source = normalizePath(sourcePath);
+  let response: Response;
+  try {
+    response = await provider.download(scope(source));
+  } catch (error) {
+    if (error instanceof FilesError && error.code === "NotFound") {
+      throw new ObjectsError(`no file at '${source}' on this drive`);
+    }
+    throw error;
+  }
+  const tooBig = () =>
+    new ObjectsError(`${source} is over the ${MAX_XLSX_BYTES} byte limit (5 MiB) for an xlsx`);
+  if (Number(response.headers.get("content-length")) > MAX_XLSX_BYTES) {
+    await response.body?.cancel();
+    throw tooBig();
+  }
+  // shortcut: a body with no content-length is read whole before the check; agent-fs caps files at 50 MiB.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > MAX_XLSX_BYTES) throw tooBig();
+  return bytes;
+}
+
+/**
+ * Import an `.xlsx` from the drive as a new sheet. Parse and recalculate first, so a bad
+ * file or an over-limit workbook leaves nothing behind. `dropped` names what the file had
+ * that a sheet cannot hold.
+ */
+export async function importSheetXlsx(input: {
+  agentId: string | undefined;
+  sourcePath: string;
+  path: string;
+  title?: string;
+}) {
+  if (!input.path.endsWith(".sheet.json")) {
+    throw new ObjectsError("a sheet path must end with '.sheet.json'");
+  }
+  const bytes = await readXlsx(input.agentId, input.sourcePath);
+  const { tabs, dropped } = await parseXlsx(bytes);
+  const draft = { tabs };
+  await recalc(input.agentId, draft, []);
+  // Size the file createObject writes and save rewrites with these tabs, not a compact stand-in.
+  sheetBody({ ...emptySheet(crypto.randomUUID(), input.title), tabs: draft.tabs });
+  const created = await createObject({
+    agentId: input.agentId,
+    kind: "sheet",
+    path: input.path,
+    title: input.title,
+  });
+  try {
+    const { version } = await mutate(
+      { agentId: input.agentId, id: created.id },
+      "import xlsx",
+      async (doc) => {
+        doc.tabs = draft.tabs;
+        return { doc, result: null };
+      },
+    );
+    return { object: { ...created, fileVersion: version }, link: created.link, dropped };
+  } catch (error) {
+    if (error instanceof ObjectsError) {
+      throw new ObjectsError(
+        `created ${created.path} (id ${created.id}) but could not write the imported tabs: ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Export a sheet to an `.xlsx` on the drive. Create-only unless `overwrite`. */
+export async function exportSheetXlsx(
+  target: SheetTarget & { targetPath: string; overwrite?: boolean },
+) {
+  if (!/\.xlsx$/i.test(target.targetPath)) throw new ObjectsError("targetPath must end in .xlsx");
+  const { object, doc } = await load(target);
+  const { bytes, dropped } = await buildXlsx(doc.tabs);
+  const { provider, orgId, driveId, scope } = await clientFor(target.agentId);
+  const path = normalizePath(target.targetPath);
+  try {
+    await provider.upload(scope(path), bytes, {
+      contentType: XLSX_MIME,
+      ifNoneMatch: target.overwrite ? undefined : "*",
+      message: `export ${object.path}`,
+    });
+  } catch (error) {
+    if (error instanceof FilesError && error.code === "Conflict") {
+      throw new ObjectsError(
+        `a file already exists at '${path}'; pass overwrite: true to replace it`,
+      );
+    }
+    throw error;
+  }
+  return { path, link: buildAgentFsLiveUrl({ orgId, driveId, path }), dropped };
 }

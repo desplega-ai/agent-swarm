@@ -163,8 +163,10 @@ import {
   registerSheetAppendRowsTool,
   registerSheetClearRangeTool,
   registerSheetCreateTool,
+  registerSheetExportXlsxTool,
   registerSheetGetRangeTool,
   registerSheetGetTool,
+  registerSheetImportXlsxTool,
   registerSheetListTool,
   registerSheetSetRangeTool,
 } from "./tools/sheets";
@@ -725,6 +727,8 @@ export async function createServer(
     registerSheetAppendRowsTool(server);
     registerSheetClearRangeTool(server);
     registerSheetAddTabTool(server);
+    registerSheetImportXlsxTool(server);
+    registerSheetExportXlsxTool(server);
     registerBoardCreateTool(server);
     registerBoardGetTool(server);
     registerBoardListTool(server);

@@ -39,7 +39,7 @@ const sortedKeys = (value: unknown) => Object.keys(asRecord(value)).sort();
  */
 export const knowledgeBoards: Scenario = {
   name: "knowledge-boards",
-  order: 595,
+  order: 597,
   async run(ctx) {
     const ownKey = `af_boards_${ctx.nonce}`;
     const org = `org-b-${ctx.nonce}`;
