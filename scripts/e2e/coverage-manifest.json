@@ -562,7 +562,7 @@
       "scenarios": ["core-task-tools"]
     },
     "task-defer-wake-pr-merged": {
-      "description": "defer-task wakeOn pr.merged: refused with GitHub off, already-merged and unreadable PRs rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires",
+      "description": "defer-task wakeOn vcs.pr.merged (external-event wait, github adapter): refused with GitHub off or an unknown source, already-happened and unreadable targets rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires",
       "scenarios": ["defer-wake-pr-merged"]
     },
     "task-delegation": {

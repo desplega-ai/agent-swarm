@@ -11,7 +11,8 @@ import {
 } from "./core-helpers";
 import { cleanupStack, hmacSignature, putConfig, reloadConfig } from "./platform-helpers";
 
-// defer-task `wakeOn {event: "pr.merged"}`. GitHub is off in the test SUT, so the tool refuses
+// defer-task `wakeOn {event: "vcs.pr.merged", source: "github", match}`, the first external-event
+// wait (provider adapters live in src/event-waits/). GitHub is off in the test SUT, so the tool refuses
 // first. Then the integration is switched on through swarm_config with the GitHub REST stub in the
 // mock host as its API. A `pull_request.closed` webhook only names a candidate: it wakes the waiter
 // when the stub says the PR merged, and leaves the wait pending when it does not. A wait that
@@ -20,12 +21,13 @@ import { cleanupStack, hmacSignature, putConfig, reloadConfig } from "./platform
 type EventWaitRow = {
   status: string;
   firedBy: string | null;
-  kind: string;
+  source: string;
+  event: string;
 };
 
 function waitRow(ctx: ScenarioContext, scheduleId: string): EventWaitRow | null {
   return ctx.db.get<EventWaitRow>(
-    "SELECT status, firedBy, kind FROM deferred_event_waits WHERE scheduleId = ?",
+    "SELECT status, firedBy, source, event FROM deferred_event_waits WHERE scheduleId = ?",
     [scheduleId],
   );
 }
@@ -86,12 +88,12 @@ export const deferWakePrMerged: Scenario = {
     try {
       const rejected = await claim("Wait for a PR to merge");
       await withMcp(ctx, workerId, async (worker) => {
-        const wake = { event: "pr.merged", repo, number: 1 };
+        const wake = { event: "vcs.pr.merged", source: "github", match: { repo, number: 1 } };
         await expectToolError(
           worker,
           "defer-task",
           { ...base(rejected), wakeOn: wake },
-          "GitHub integration is off",
+          "The github integration is off",
         );
 
         for (const [key, value] of [
@@ -109,27 +111,33 @@ export const deferWakePrMerged: Scenario = {
         await expectToolError(
           worker,
           "defer-task",
-          { ...base(rejected), wakeOn: { event: "pr.merged", repo } },
-          "takes repo",
+          { ...base(rejected), wakeOn: { ...wake, match: { repo } } },
+          "takes repo (owner/name) and number only",
         );
         await expectToolError(
           worker,
           "defer-task",
-          { ...base(rejected), wakeOn: { event: "settled", taskId: rejected, repo, number: 1 } },
-          "take no repo or number",
+          { ...base(rejected), wakeOn: { ...wake, source: "gitlab" } },
+          'Source "gitlab" does not serve vcs.pr.merged',
+        );
+        await expectToolError(
+          worker,
+          "defer-task",
+          { ...base(rejected), wakeOn: { event: "settled", taskId: rejected, source: "github" } },
+          "take no source or match",
         );
         ctx.llm.setGithubPull(repo, 1, { merged: true });
         await expectToolError(
           worker,
           "defer-task",
           { ...base(rejected), wakeOn: wake },
-          "already merged",
+          "already happened",
         );
         await expectToolError(
           worker,
           "defer-task",
-          { ...base(rejected), wakeOn: { ...wake, number: 404 } },
-          "Could not read PR",
+          { ...base(rejected), wakeOn: { ...wake, match: { repo, number: 404 } } },
+          "Could not read vcs.pr.merged",
         );
         expect(
           (await readTask(ctx, rejected)).status === "in_progress",
@@ -141,17 +149,25 @@ export const deferWakePrMerged: Scenario = {
         const waiter = await claim("Wait for PR 2");
         const deferred = await expectToolOk(worker, "defer-task", {
           ...base(waiter),
-          wakeOn: { event: "pr.merged", repo: repo.toUpperCase(), number: 2 },
+          wakeOn: {
+            event: "vcs.pr.merged",
+            source: "github",
+            match: { repo: repo.toUpperCase(), number: 2 },
+          },
         });
         const scheduleId = String(deferred.data.scheduleId);
         const pending = waitRow(ctx, scheduleId);
         expect(
-          pending?.status === "pending" && pending.kind === "pr.merged",
+          pending?.status === "pending" &&
+            pending.source === "github" &&
+            pending.event === "vcs.pr.merged",
           `PR wait row is wrong: ${JSON.stringify(pending)}`,
         );
         expect(
-          String((await readTask(ctx, waiter)).output).includes(`Waiting on PR ${repo}#2`),
-          "The deferral card does not name the PR",
+          String((await readTask(ctx, waiter)).output).includes(
+            `Waiting on vcs.pr.merged on github (repo=${repo.toLowerCase()}, number=2)`,
+          ),
+          "The deferral card does not name the event",
         );
 
         // Negative control: a merged webhook for a PR GitHub still reports open wakes nobody.
@@ -179,12 +195,12 @@ export const deferWakePrMerged: Scenario = {
         );
         const woke = wakeTask(ctx, waiter);
         expect(
-          woke?.task.includes(`Wake-up cause: pr.merged for ${repo.toLowerCase()}#2`),
+          woke?.task.includes(`Wake-up cause: vcs.pr.merged on github (repo=${repo.toLowerCase()}, number=2)`),
           `Wake-up task is wrong: ${JSON.stringify(woke)}`,
         );
         expect(
-          waitRow(ctx, scheduleId)?.firedBy === "pr.merged",
-          "Wait was not fired by pr.merged",
+          waitRow(ctx, scheduleId)?.firedBy === "external:github:vcs.pr.merged",
+          "Wait was not fired by the github vcs.pr.merged event",
         );
         expect(
           ctx.db.get<{ enabled: number }>("SELECT enabled FROM scheduled_tasks WHERE id = ?", [
@@ -199,7 +215,7 @@ export const deferWakePrMerged: Scenario = {
         const ceiling = await expectToolOk(worker, "defer-task", {
           ...base(capped),
           delayMs: 1500,
-          wakeOn: { event: "pr.merged", repo, number: 3 },
+          wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo, number: 3 } },
         });
         const ceilingId = String(ceiling.data.scheduleId);
         expect(

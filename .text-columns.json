@@ -1021,14 +1021,17 @@
     "scheduleId": {
       "exempt": "identifier"
     },
-    "kind": {
+    "source": {
+      "exempt": "provider id, matched against a registered adapter at defer time"
+    },
+    "event": {
       "exempt": "enum or fixed-format value"
     },
-    "repo": {
-      "exempt": "GitHub owner/name, validated against a fixed pattern at defer time"
+    "matchKey": {
+      "exempt": "canonical form of match values the adapter validated at defer time"
     },
-    "headSha": {
-      "exempt": "git commit sha read from GitHub"
+    "matchJson": {
+      "exempt": "match values the adapter validated at defer time (fixed format, no free text)"
     },
     "status": {
       "exempt": "enum or fixed-format value"

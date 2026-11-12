@@ -5,10 +5,17 @@ import {
   getUserById,
   updateScheduledTask,
 } from "@/be/db";
-import { fetchPullRequestState } from "@/github/pull-request-state";
+import {
+  describeEventWait,
+  type EventMatch,
+  EXTERNAL_EVENT_ADAPTERS,
+  type ExternalEventAdapter,
+  getExternalEventAdapter,
+  matchKeyOf,
+} from "@/event-waits";
 import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
 import { type AgentTask, type ScheduledTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "@/types";
-import { workflowEventBus } from "@/workflows/event-bus";
+import { type PrefixHandler, workflowEventBus } from "@/workflows/event-bus";
 import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
 
 export type TaskWakeEvent = "task.completed" | "task.failed" | "settled";
@@ -28,21 +35,27 @@ type WakeReason =
   | "task.failed"
   | "task.cancelled"
   | "task.skipped"
-  | "pr.merged";
+  | `external:${string}`;
 
 type WaitTable = "deferred_task_waits" | "deferred_event_waits";
 
-/** A PR wait: the sibling of a task wait, keyed by the same one-time schedule. */
+/** An external-event wait: the sibling of a task wait, keyed by the same one-time schedule. */
 type EventWait = {
   scheduleId: string;
-  kind: "pr.merged" | "pr.checks_done";
-  repo: string;
-  prNumber: number;
+  source: string;
+  event: string;
+  matchKey: string;
+  matchJson: string;
   status: "pending" | "fired";
 };
 
-/** Pending PR waits one agent may hold, so a runaway agent cannot flood the webhook fan-out. */
-export const MAX_PENDING_PR_WAITS_PER_AGENT = 20;
+/** The wake reason for an external event; it is also what the wait row records as `firedBy`. */
+export function externalWakeReason(source: string, event: string): WakeReason {
+  return `external:${source}:${event}`;
+}
+
+/** Pending external waits one agent may hold, so a runaway agent cannot flood the webhook fan-out. */
+export const MAX_PENDING_EVENT_WAITS_PER_AGENT = 20;
 
 /**
  * A member's status as waits see it. A workflow step cut by a supersede is
@@ -63,8 +76,8 @@ const WAIT_MEMBER_STATUS_SQL = `CASE
  * Pure reads: callers run it once outside the transaction (to build the task
  * through the extension pre-hooks) and once more under the write lock, where
  * the answer is authoritative. An event only identifies a candidate wait; it
- * never proves the set is ready. A PR wait reads no GitHub here (no network
- * under the write lock): its caller confirms the PR first, then dispatches.
+ * never proves the set is ready. An external wait reads no provider here (no network
+ * under the write lock): its caller confirms the event first, then dispatches.
  */
 async function resolveWaitCause(
   scheduleId: string,
@@ -85,10 +98,14 @@ async function resolveWaitCause(
     if (!eventWait || eventWait.status !== "pending") return undefined;
     if (reason === "ceiling")
       return { table: "deferred_event_waits", cause: "ceiling expired", matchedTaskIds: [] };
-    if (reason !== eventWait.kind) return undefined;
+    if (reason !== externalWakeReason(eventWait.source, eventWait.event)) return undefined;
     return {
       table: "deferred_event_waits",
-      cause: `${eventWait.kind} for ${eventWait.repo}#${eventWait.prNumber}`,
+      cause: describeEventWait(
+        eventWait.source,
+        eventWait.event,
+        JSON.parse(eventWait.matchJson) as EventMatch,
+      ),
       matchedTaskIds: [],
     };
   }
@@ -349,42 +366,65 @@ export async function reapSpentDeferredSchedules(now = new Date()): Promise<numb
 }
 
 /**
- * Fire every pending `pr.merged` wait whose PR GitHub confirms merged. A webhook
- * names the candidate PR (`only`); boot passes nothing and re-checks every
- * pending wait, which catches a merge delivered while the API was down. A PR
- * whose read fails stays pending: the ceiling still wakes the agent.
+ * Fire pending external-event waits. A webhook names the candidate target (`only`)
+ * and sets `trustEvent`: an adapter without `confirm` fires on it, one with `confirm`
+ * still has to read the provider first. With no `trustEvent` (boot, and the recheck
+ * after a wait is created, which catches a delivery missed while the API was down or
+ * before the wait existed) only adapters that can `confirm` are checked. A read that
+ * fails leaves the wait pending: the ceiling still wakes the agent.
  */
-export async function reconcileDeferredPrMergedWaits(only?: {
-  repo: string;
-  number: number;
-}): Promise<void> {
-  const waits = await getDbClient().query<Pick<EventWait, "scheduleId" | "repo" | "prNumber">>(
-    `SELECT w.scheduleId, w.repo, w.prNumber FROM deferred_event_waits w
+export async function reconcileDeferredEventWaits(
+  only?: { source: string; event: string; matchKey: string },
+  trustEvent = false,
+): Promise<void> {
+  const waits = await getDbClient().query<
+    Pick<EventWait, "scheduleId" | "source" | "event" | "matchKey" | "matchJson">
+  >(
+    `SELECT w.scheduleId, w.source, w.event, w.matchKey, w.matchJson FROM deferred_event_waits w
      JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND w.kind = 'pr.merged' AND s.enabled = 1
-       ${only ? "AND w.repo = ? AND w.prNumber = ?" : ""}`,
-    only ? [only.repo.toLowerCase(), only.number] : [],
+     WHERE w.status = 'pending' AND s.enabled = 1
+       ${only ? "AND w.source = ? AND w.event = ? AND w.matchKey = ?" : ""}`,
+    only ? [only.source, only.event, only.matchKey] : [],
   );
-  const merged = new Map<string, boolean>();
+  const satisfied = new Map<string, boolean>();
   for (const wait of waits) {
-    const key = `${wait.repo}#${wait.prNumber}`;
+    const adapter = getExternalEventAdapter(wait.source);
+    if (!adapter || (!adapter.confirm && !trustEvent)) continue;
+    const key = `${wait.source}|${wait.event}|${wait.matchKey}`;
     try {
-      if (!merged.has(key))
-        merged.set(key, (await fetchPullRequestState(wait.repo, wait.prNumber)).merged);
-      if (merged.get(key)) await dispatchDeferredTaskWait(wait.scheduleId, "pr.merged");
+      if (!satisfied.has(key))
+        satisfied.set(
+          key,
+          adapter.confirm
+            ? await adapter.confirm(wait.event, JSON.parse(wait.matchJson) as EventMatch)
+            : true,
+        );
+      if (satisfied.get(key))
+        await dispatchDeferredTaskWait(
+          wait.scheduleId,
+          externalWakeReason(wait.source, wait.event),
+        );
     } catch (err) {
       // A broken wait must not stop the others or the ceiling poller.
-      console.error(`[Scheduler] PR merged wake failed for ${wait.scheduleId}:`, err);
+      console.error(`[Scheduler] External event wake failed for ${wait.scheduleId}:`, err);
     }
   }
 }
 
-function onPullRequestClosed(payload: unknown): void {
-  const pr = payload as { repo?: unknown; number?: unknown; merged?: unknown } | null;
-  if (pr?.merged !== true || typeof pr.repo !== "string" || typeof pr.number !== "number") return;
-  void reconcileDeferredPrMergedWaits({ repo: pr.repo, number: pr.number }).catch((err) => {
-    console.error("[Scheduler] PR merged event wake failed:", err);
-  });
+/** One bus listener per adapter, kept so `stop` can detach exactly what `init` attached. */
+const externalEventListeners = new Map<ExternalEventAdapter, PrefixHandler>();
+
+function externalEventListener(adapter: ExternalEventAdapter): PrefixHandler {
+  return (busEvent, payload) => {
+    for (const { event, match } of adapter.fromBusEvent(busEvent, payload)) {
+      void reconcileDeferredEventWaits(
+        { source: adapter.source, event, matchKey: matchKeyOf(match) },
+        true,
+      ).catch((err) => {
+        console.error("[Scheduler] External event wake failed:", err);
+      });
+    }
+  };
 }
 
 function onTaskEvent(payload: unknown): void {
@@ -410,11 +450,15 @@ export async function initDeferredTaskWaits(): Promise<void> {
   workflowEventBus.on("task.superseded", onTaskEvent);
   // The resume may be committed after its parent's supersede event.
   workflowEventBus.on("task.created", onTaskEvent);
-  workflowEventBus.on("github.pull_request.closed", onPullRequestClosed);
+  for (const adapter of EXTERNAL_EVENT_ADAPTERS) {
+    const listener = externalEventListener(adapter);
+    externalEventListeners.set(adapter, listener);
+    workflowEventBus.onPrefix(adapter.busPrefix, listener);
+  }
   await reconcileDeferredTaskWaits();
-  // GitHub reads can be slow or down: never hold boot on them.
-  void reconcileDeferredPrMergedWaits().catch((err) => {
-    console.error("[Scheduler] PR merged boot reconcile failed:", err);
+  // Provider reads can be slow or down: never hold boot on them.
+  void reconcileDeferredEventWaits().catch((err) => {
+    console.error("[Scheduler] External event boot reconcile failed:", err);
   });
 }
 
@@ -425,5 +469,8 @@ export function stopDeferredTaskWaits(): void {
   workflowEventBus.off("task.skipped", onTaskEvent);
   workflowEventBus.off("task.superseded", onTaskEvent);
   workflowEventBus.off("task.created", onTaskEvent);
-  workflowEventBus.off("github.pull_request.closed", onPullRequestClosed);
+  for (const [adapter, listener] of externalEventListeners) {
+    workflowEventBus.offPrefix(adapter.busPrefix, listener);
+  }
+  externalEventListeners.clear();
 }
