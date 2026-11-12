@@ -84,3 +84,18 @@ test(
   },
   CHILD_PROCESS_TEST_BUDGET_MS,
 );
+
+test(
+  "a child can still write inside the checkout, even when it lives under /workspace",
+  async () => {
+    const paths = await simulatedWorkspace();
+    const target = join(import.meta.dir, "..", "..", `.write-guard-${crypto.randomUUID()}`);
+    roots.push(target);
+    const child = await spawnProbe(target, "bun-write", paths);
+    expect(child.stderr).not.toContain("PROFILE WRITE GUARD");
+    expect(child.exitCode).toBe(0);
+    expect(await Bun.file(target).text()).toBe("changed by child");
+    await expectIntact(paths);
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);

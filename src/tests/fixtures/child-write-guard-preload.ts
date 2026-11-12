@@ -9,15 +9,22 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import promises from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { propagateWriteGuardToChildren, WRITE_GUARD_PATHS_ENV } from "./child-write-guard";
 import { installProfileWriteGuard } from "./profile-write-guard";
 
 const injected = process.env[WRITE_GUARD_PATHS_ENV];
+const protectedPaths = injected ? JSON.parse(injected) : undefined;
+// The sandbox is the checkout: a worker's clone lives under /workspace/personal,
+// and the suite's children write logs and fixtures there. Never when the
+// checkout would contain a profile file (a clone at /workspace itself).
+const checkout = resolve(import.meta.dir, "..", "..", "..");
+const containsProfile = ["/workspace/SOUL.md", "/tmp/identity-baselines.json"]
+  .concat(protectedPaths ? [join(protectedPaths.workspace, "SOUL.md"), protectedPaths.baselines] : [])
+  .some((path) => resolve(path).startsWith(checkout + sep));
 installProfileWriteGuard(
-  // No sandbox: a child of the suite writes nowhere under the protected paths.
-  join(tmpdir(), `write-guard-no-sandbox-${crypto.randomUUID()}`),
-  injected ? JSON.parse(injected) : undefined,
+  containsProfile ? join(tmpdir(), `write-guard-no-sandbox-${crypto.randomUUID()}`) : checkout,
+  protectedPaths,
   "throw",
 );
 
