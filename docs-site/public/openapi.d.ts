@@ -28442,6 +28442,8 @@ export interface paths {
                 query?: {
                     kind?: string;
                     limit?: number;
+                    dismissed?: "true" | "false";
+                    includeBots?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -28463,6 +28465,8 @@ export interface paths {
                                 count: number;
                                 sampleEventType: string | null;
                                 sampleContext?: unknown;
+                                dismissedAt?: string;
+                                dismissedBy?: string;
                             }[];
                         };
                     };
@@ -28582,6 +28586,136 @@ export interface paths {
                 };
                 /** @description Target user not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/unmapped/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss unmapped identities: hide them from triage and stop recording them. Links nothing. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        identities: {
+                            kind: string;
+                            externalId: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Identities moved to the ignore list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            dismissed: number;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/unmapped/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo a dismissal: return identities to the triage queue */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        identities: {
+                            kind: string;
+                            externalId: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Count of identities taken off the ignore list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            restored: number;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
                     headers: {
                         [name: string]: unknown;
                     };

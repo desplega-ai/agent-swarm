@@ -77,7 +77,11 @@ for (const width of [1280, 390]) {
           await page.getByRole("button", { name: "Switch to light mode", exact: true }).click();
         }
         const task = "e2e first task session handoff";
-        await page.getByRole("textbox", { name: "Describe a goal for the swarm" }).fill(task);
+        // The loading textarea shares this name; wait for the rich editor before filling it.
+        const composer = page
+          .getByRole("textbox", { name: "Describe a goal for the swarm" })
+          .and(page.locator('[contenteditable="true"]'));
+        await composer.fill(task);
         await page.getByRole("button", { name: "Send first task", exact: true }).click();
         await expect(page).toHaveURL(/\/sessions\/[^/?]+/);
         await page.screenshot({ path: testInfo.outputPath("handoff.png") });

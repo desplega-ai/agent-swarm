@@ -58,6 +58,16 @@ const refuse = <T>(run: () => T): T => {
   }
 };
 
+/** A workbook file before `SheetDocSchema` parses it; only its `swarm` block is read. */
+type UnparsedWorkbook = { swarm?: unknown };
+
+/** The workbook's `swarm.id`, or undefined when a save dropped it. */
+function embeddedId(content: UnparsedWorkbook): string | undefined {
+  const { swarm } = content;
+  const id = swarm && typeof swarm === "object" ? (swarm as { id?: unknown }).id : undefined;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 async function load(target: SheetTarget) {
   const { object, missing, content } = await getObject({ ...target, includeContent: true });
   if (object.kind !== "sheet") {
@@ -70,7 +80,16 @@ async function load(target: SheetTarget) {
   }
   const parsed = SheetDocSchema.safeParse(content);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
+    const { issues } = parsed.error;
+    // Only the swarm block is wrong and it carries no id: a save outside the sheet tools
+    // (a hand edit, another app) dropped it, and reindex writes it back. Any other shape
+    // error keeps the generic refusal, since reindex would not fix it.
+    if (issues.every((i) => i.path[0] === "swarm") && !embeddedId(content as UnparsedWorkbook)) {
+      throw new ObjectsError(
+        `${object.path} has no embedded swarm.id, so a save outside the sheet tools dropped it; run object-reindex (ctx.objects.reindex) with prefix '${object.path}' to write the id back, then retry`,
+      );
+    }
+    const issue = issues[0];
     throw new ObjectsError(
       `${object.path} is not a valid swarm-sheet/1 workbook: ${issue?.path.join(".") || "document"}: ${issue?.message}`,
     );

@@ -17,6 +17,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { bitbucketContextKey } from "../tasks/context-key";
@@ -207,6 +208,7 @@ export async function resolveBitbucketSender(
   if (!externalId) return undefined;
   const existing = await findUserByExternalId("bitbucket", externalId);
   if (existing) return existing.id;
+  if (await isUnmappedIdentityDismissed("bitbucket", externalId)) return undefined;
 
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,

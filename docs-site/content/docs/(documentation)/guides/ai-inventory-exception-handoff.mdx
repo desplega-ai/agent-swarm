@@ -1,0 +1,91 @@
+---
+title: 'Handing off inventory discrepancies from operations to purchasing with AI agents'
+description: "Agent Swarm gathers the records for a stock mismatch, compares them and hands operations and purchasing a source-linked pack. People decide."
+agent:
+  when: "Someone wants operations and purchasing to review a stock discrepancy between expected and recorded inventory"
+  notWhen: "Someone wants a supplier invoice that does not match its purchase order reviewed, which is the invoice discrepancy guide"
+---
+
+Agent Swarm can gather the authorized records for one flagged stock discrepancy, run a deterministic comparison across them, and hand a named operations owner and a named purchasing owner a single source-linked evidence pack, while stock adjustments, purchase orders and supplier contact stay with people. The agent takes over the assembly: finding each record and lining the quantities up, with what is missing named.
+
+The scope is one exception: an expected stock quantity that differs from the warehouse record beyond a tolerance the team sets. A supplier invoice mismatch is a separate handoff with its own owner, covered in [the invoice discrepancy guide](/docs/guides/ai-invoice-discrepancy-review).
+
+## When another tool fits better
+
+Two options cover most of this.
+
+**Your inventory or warehouse management system's own cycle-count and variance reports.** When the expected quantity, the counted quantity and the movements all live in one system, its variance report already answers the question. An agent on top adds a hop between the person who owns the count and the one who reads the report.
+
+**A rule or an alert.** A threshold on variance, a reorder point, a receipt that never posted: when the fix is mechanical and needs no cross-team evidence, the rule is cheaper and more reliable. Nothing needs assembling, so nothing needs handing over.
+
+Agent Swarm fits a different shape: the records are split across systems and teams. The expected quantity sits in one system, the warehouse count in another, open purchase orders in a third, and the receiving notes where a person keeps them. Working out why the numbers disagree is the two owners' job, which is the split that [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) draws.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in inventory, warehouse or ERP integration and not a customer result. It needs integrations, access, configuration and testing your team sets up.
+
+<Mermaid title="Illustrative stock exception flow, from a flagged discrepancy to a human decision and a handoff to purchasing." chart={`flowchart LR
+  A["Discrepancy flagged<br/>(expected vs recorded)"] --> B["Gather authorized records<br/>(count, receipts, POs)"]
+  B --> C["Deterministic comparison<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked pack"]
+  D --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "approve" --> R["Handoff to<br/>purchasing owner"]
+  G -- "hold" --> H["Held, visible<br/>with its reason"]
+  G -- "escalate" --> E["Escalate to<br/>named backup owner"]
+`} />
+
+**1. A discrepancy is flagged.** The trigger is an expected quantity, from the system of record or recent receipts and shipments, that differs from the warehouse count or record beyond a tolerance the team defines. The tolerance is a written setting the agent applies as given.
+
+**2. Authorized records are gathered.** Configured connections pull the inventory record, the last count, recent receipts and shipments, open purchase orders and the receiving notes the team allows. Each of those systems is reached through [script connections](/docs/guides/script-connections), with credentials supplied by the [credential broker](/docs/guides/scripts-credential-broker) at run time, so a raw secret never appears in script source.
+
+**3. The comparison is deterministic.** A `swarm-script` node holds the comparison rules: it works out the difference per SKU and per location and writes the result as JSON, so the arithmetic never depends on a model reading the numbers. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) describes how that collected output is then synthesized.
+
+**4. The pack is assembled by an agent.** One pack is built from the JSON and the records behind it: what differs, by how much, which record each line comes from, what is missing. Every line links its source, so a reader opens the count instead of asking where it came from.
+
+**5. Two named owners, one handoff.** The operations owner reviews first, because the common causes are theirs: a count error, stock in the wrong location, damage, or a timing difference between a movement and a count. When the cause points to supply, such as a short delivery, an open purchase order or a reorder need, the same pack goes to the named purchasing owner rather than being rebuilt. A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) carries the approve, reject and timeout paths.
+
+The workflow answers two questions plainly.
+
+**How can operations and purchasing teams use shared AI agents to review inventory discrepancies?** By doing the gathering and the comparison across the systems where the numbers disagree, and by presenting the differences beside their sources, with no verdict attached.
+
+**How is a stock exception handed from operations to purchasing?** One evidence pack, one operations owner who reviews it first, and one purchasing owner who receives the same pack when the cause points to supply. Neither owner re-collects the records.
+
+## Discrepancy examples
+
+Every row below is illustrative. It names no real company or product, and there is no customer case.
+
+| Discrepancy | What the deterministic check compares | Evidence the agent attaches | Question, and to whom |
+| --- | --- | --- | --- |
+| Count lower than record | Warehouse count per SKU and location against the record quantity, net of movements since the last count | The record quantity, the counted quantity, those movements, the count timestamp | "Was anything moved or written off since the count?" to operations. "Was a delivery short?" to purchasing |
+| Receipt not posted | Purchase order lines marked delivered against the receipts posted to inventory | The order lines, the receipts that exist, the delivery date each line claims | "Did the goods arrive, and who received them?" to receiving, before operations treats the gap as a loss |
+| Open purchase order past due | Open order lines past their delivery date against stock on hand for the same item | The open lines, their dates, the on-hand quantity, the quantity already committed to open orders | "Is this order still coming, and does stock cover the gap until it does?" to purchasing |
+| Stock in the wrong location | Quantity recorded at one location against counts and movements where the item is normally held | Both location records, the last movement between them, the count at each | "Was a transfer recorded?" to operations, before any adjustment is written |
+
+## Missing data, conflicting records and escalation
+
+**Sources that disagree.** A count and a receipt can both be genuine and still not add up. When that happens, the pack carries each record with its link, says where they part and leaves the choice to the owners it names. It picks no winner.
+
+**Missing access.** A record that lives in a system the swarm cannot reach is named in the pack, together with the person who can grant that access. It leaves the value blank instead of estimating it, and nobody is asked to paste the record into a chat. The workflow's [governance](/docs/guides/ai-operations-governance) record states who may read the stock records and the purchase orders, and who grants that.
+
+**Escalation when an owner does not answer.** The gate starts a timeout and sends a reminder before it runs out. With no answer by then, the case passes to a named backup owner; if that owner stays silent, the exception goes on hold, visible with its reason, and never counts as an approval. The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends a timeout and a fallback path for every blocking approval. Nothing here moves forward on silence.
+
+## What stays human-owned
+
+- **Stock adjustments.** Correcting the quantity in the inventory system is a person's action, taken in the system that holds the record. The agent prepares the case and never writes the adjustment.
+- **Purchase orders.** Creating, changing or cancelling an order is purchasing's decision, and no agent touches the order.
+- **Supplier communication.** A conversation about a short delivery or a late order sits with whoever owns the supplier relationship.
+- **The final decision on cause.** Whether the difference traces to a counting mistake or to something that went wrong further upstream is a judgment about a physical operation, and it stays with the people who can see it.
+
+Gate the irreversible steps. Let the reversible ones run: gathering, comparing and writing the pack can all be redone.
+
+## Building blocks
+
+All of these exist in Agent Swarm and are documented. What is illustrative is pointing them at a stock exception.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): a `swarm-script` node that collects the records and emits JSON, then the agent step that writes the pack.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): where a workflow stops for an owner's answer, and what the approve, reject and timeout branches do.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a script reaches an outside system, with credentials supplied so no secret sits in source.
+- [AI operations governance](/docs/guides/ai-operations-governance): who may read which record, who owns the workflow, and where approvals and source-of-truth rules sit.
+- [Team collaboration](/docs/features/team-collaboration): the shared memory and files both teams work from.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): when the system's own variance report, a rule or a shared agent platform is the right fit.
+- [Small-company workflows](/docs/playbooks/small-company-workflows): other cross-team handoffs designed the same way.

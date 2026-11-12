@@ -14,6 +14,7 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSync,
 } from "../be/db-queries/tracker";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
@@ -431,7 +432,8 @@ async function resolveLinearActor(
     return linked.id;
   }
 
-  // No mapping + no inline email → unmapped tracker (Q14/Q17.D).
+  // No mapping + no inline email → unmapped tracker (Q14/Q17.D), unless an operator dismissed it.
+  if (await isUnmappedIdentityDismissed("linear", linearUserId)) return undefined;
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${linearUserId}:meta`,

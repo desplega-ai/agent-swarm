@@ -220,7 +220,12 @@ export interface PrimitiveReindexReport {
   truncated: boolean;
   /** Which limit cut this call short; null when the pass finished. */
   cutBy: "files" | "reads" | "time" | "bytes" | null;
+  /** True when nothing was written: \`adopted\` and \`restored\` list what a real run would change. */
+  dryRun: boolean;
 }
+
+/** \`prefix\`: only paths that start with it (as in \`list\`); without it every id-less file on the drive gets an id. \`dryRun\`: report, write nothing. */
+export type PrimitiveReindexArgs = { kind?: PrimitiveObjectKind; prefix?: string; dryRun?: boolean };
 
 /**
  * Primitive objects: agent-fs files on your default drive with a stable id.
@@ -232,7 +237,7 @@ export interface ObjectsNamespace {
   get(args: { id?: string; path?: string; includeContent?: boolean }): Promise<{ message: string; object: PrimitiveObject; missing: boolean; content?: unknown }>;
   list(args?: { kind?: PrimitiveObjectKind; prefix?: string; limit?: number; offset?: number }): Promise<{ message: string; objects: PrimitiveObject[]; total: number }>;
   /** Rebuild the index from the drive. Ids survive; rows whose file is gone are reported, not deleted. */
-  reindex(args?: { kind?: PrimitiveObjectKind }): Promise<{ message: string } & PrimitiveReindexReport>;
+  reindex(args?: PrimitiveReindexArgs): Promise<{ message: string } & PrimitiveReindexReport>;
 }
 
 /** A spreadsheet cell value. A string starting with \`=\` is a formula; null clears the cell. */
@@ -447,7 +452,7 @@ export interface SwarmSdk {
   objects_create(args: { kind: PrimitiveObjectKind; path: string; title?: string }): Promise<unknown>;
   objects_get(args: { id?: string; path?: string; includeContent?: boolean }): Promise<unknown>;
   objects_list(args?: { kind?: PrimitiveObjectKind; prefix?: string; limit?: number; offset?: number }): Promise<unknown>;
-  objects_reindex(args?: { kind?: PrimitiveObjectKind }): Promise<unknown>;
+  objects_reindex(args?: PrimitiveReindexArgs): Promise<unknown>;
   // --- sheets (prefer ctx.sheets.*, which unwraps and throws) ---
   sheets_create(args: SheetCreateArgs): Promise<unknown>;
   sheets_get(args: SheetRef): Promise<unknown>;

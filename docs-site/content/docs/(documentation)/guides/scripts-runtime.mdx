@@ -352,6 +352,19 @@ without it, object tools work as before and `reindex()` catches the index up.
 it again while `truncated` is true. A deleted file hides its object from
 `list()` until the file comes back.
 
+Without arguments, `reindex()` writes an id into every id-less file of the kind
+on your default drive, including files other people put there. Pass `prefix`
+(the same path-prefix match as `list()`; one file's path works too) to limit it,
+and `dryRun: true` to get the report with nothing written:
+
+```ts
+const plan = await ctx.objects.reindex({ kind: "sheet", prefix: "reports/", dryRun: true });
+if (plan.adopted.length > 0) await ctx.objects.reindex({ kind: "sheet", prefix: "reports/" });
+```
+
+`ctx.sheets` refuses a workbook whose `swarm.id` a save dropped, and names the
+`reindex()` call that writes it back.
+
 ### Sheets
 
 `ctx.sheets` reads and writes spreadsheets (`swarm-sheet/1`, a `.sheet.json`

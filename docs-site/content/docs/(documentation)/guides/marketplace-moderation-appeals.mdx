@@ -1,0 +1,74 @@
+---
+title: 'Preparing marketplace moderation appeals for human review with AI agents'
+description: "Agent Swarm gathers the permitted records, the dated policy and the original decision for a listing appeal, and a person decides."
+agent:
+  when: "Someone wants a marketplace appeal against a listing decision assembled into a source-linked packet for a human reviewer"
+---
+
+Agent Swarm can be configured to gather the permitted records, the dated policy that was in force and the original decision behind a marketplace moderation appeal, then draft a source-linked case packet for the reviewer who will rule on it. A named person makes that decision and records it. The setup is assembled from documented parts, not from a built-in moderation or appeals feature: nothing in the product ships as a case management system, an appeals queue or a decision engine.
+
+The scope is one case: a seller appealing a listing moderation decision that has already happened. A catalog attribute error, a conflict between two help articles, a support ticket that needs engineering, a supplier security review, an inventory exception and feedback synthesis are separate handoffs with separate owners.
+
+## When a specialist moderation platform or manual review fits better
+
+Most marketplaces should start with a cheaper answer, and for many it is the right one.
+
+**Low appeal volume.** If a reviewer can open the listing and the decision record in three screens and settle the case, that is the process. Adding agents would put a document between the reviewer and the two tabs they already have.
+
+**A trust and safety platform that already holds the case.** Moderation vendors keep the case history, the policy versions, the reviewer queue and the audit trail in one place, with the routing rules and escalation ladders that appeals work needs. When that system is where the evidence lives, its queue is the place to decide.
+
+**Categories with legal or regulatory handling.** Illegal content, material involving minors and law enforcement requests belong to specialist tooling and to counsel. An agent drafting a packet in that space adds a failure mode without adding judgement.
+
+Agent Swarm fits when the evidence sits across systems the platform does not join: the listing snapshot in the catalog service and the decision in the moderation tool, with the appeal message and the policy text in other stores. Assembling those into one packet, with a link on every fact, is the work. The decision stays with a person. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+What follows is an illustration of how the documented pieces fit together. It is not a customer run and not a measured result. Adapting it needs permissions, configuration and probably a custom integration for at least one of your systems.
+
+1. **An appeal opens a case.** A seller appeals a listing decision that already exists. The appeal arrives through whatever channel you run, and something has to tie it to the original decision. Without that link there is no case, only a message.
+2. **Deterministic steps gather only the permitted records.** Configured collection steps pull the listing as it was decided, the original decision with its reason code, the seller's appeal text and the policy version in force on the decision date, with that version's own date. These are `swarm-script` steps and they emit JSON, so no model is asked to fetch the records or to do the date arithmetic. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and synthesis.
+3. **An agent drafts the case packet.** Each fact carries a link to the record it came from. The packet holds the relevant evidence, the items that are missing and who could supply them, and the open questions the reviewer has to answer.
+4. **A named reviewer decides.** Uphold, reverse or escalate, with the reason recorded against the case. The packet is input to that decision, never a substitute for it.
+5. **A person approves anything that reaches the seller.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only when a person responds, with a summary and a link to the full packet. Nothing is sent to the seller on its own.
+
+## A fictional example
+
+Rivet & Row is invented for this example. It is a used-equipment marketplace, and nothing below reports a real case or a measured result.
+
+A seller lists a used bench grinder. The listing is removed under the marketplace's prohibited-claims policy, and the seller appeals, saying the wording the moderator quoted had been changed before the removal.
+
+The packet shows four things. The decision date is 14 May. The policy in force on that date is version 3, dated 2 February. Version 4, dated 20 May, changed the rule and post-dates the decision. The listing snapshot stored at decision time differs from the version the seller points to: a sentence about the machine's certification was edited out of the description, and the packet holds both versions side by side. And one item is missing, because the edit timestamp is not in the records the workflow is permitted to read, so the packet cannot say when the wording changed.
+
+The packet names that gap as a question for the reviewer: was the wording the moderator saw the wording that was live on the decision date, and if not, does version 3 still govern? The reviewer decides, records the reason and the governing policy version, and the case closes on a person's ruling.
+
+## What the packet has to handle
+
+**Access limits.** An agent sees only what its credentials allow. Scope tools and credentials per agent, so the one drafting appeal packets cannot read unrelated customer records. [Script connections](/docs/guides/script-connections) register an API once with scoped credentials, and the [credential broker](/docs/guides/scripts-credential-broker) substitutes the secret only for allowlisted hosts, so no raw key sits in script source. RBAC is on by default with the `admin`, `requester`, `viewer` and `auditor` roles, and the [AI operations governance guide](/docs/guides/ai-operations-governance) covers where a seller's records belong in that written record.
+
+**Sensitive content.** Appeal evidence can include images that are themselves the violation, or personal data about the seller or a buyer. Link to the record instead of copying it into the packet, redact what the packet displays and restrict who can open it at all.
+
+**Retention.** A packet holds a moderation decision and personal data, so it inherits whatever retention your policy sets. The policy is yours to write and yours to enforce. A workflow that keeps packets and logs indefinitely is a liability, not an archive.
+
+**Policy versions in conflict.** Show both dated versions and say which was in force on the decision date. Do not have the agent pick one. Which version governs is a question about your own rules, and the reviewer or counsel answers it.
+
+**Uncertain evidence.** Mark it uncertain and say what is missing. A packet that resolves a gap by inference is worse than one that names it, because months later nobody can tell the two apart.
+
+**Escalation outside the reviewer's remit.** When a packet flags a category the reviewer is not cleared for, route it to a senior reviewer or to legal. That routing rule belongs in the workflow, not in one reviewer's memory.
+
+**A route for correction.** The seller or the reviewer can flag a fact in the packet as wrong. The correction is recorded with who made it and when, and the packet version that was actually reviewed stays retrievable.
+
+## What the agent never does
+
+- It does not decide to remove or reinstate content. That decision belongs to the reviewer who signs it.
+- It does not guarantee fairness or consistency across cases. A packet makes the evidence visible; it does not make two reviewers agree.
+- It does not give legal advice, and it does not label a listing or a case as lawful.
+- It does not send an outcome to the seller without a person's approval. There is no path from packet to seller that skips the gate.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): the deterministic collection and synthesis pattern this workflow applies.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking approval node, both branches and the timeout.
+- [Script connections](/docs/guides/script-connections) and the [scripts credential broker](/docs/guides/scripts-credential-broker): how collection steps reach your systems with no raw secret in source.
+- [AI operations governance](/docs/guides/ai-operations-governance): roles, a named owner per workflow and approval thresholds.
+- [Supplier security evidence review](/docs/guides/supplier-security-evidence-review): the same packet shape for a different reviewer and a different decision.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): when a specialist platform, a manual process or a shared agent platform is the right call.

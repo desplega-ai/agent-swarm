@@ -14150,10 +14150,30 @@ function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
  */
 export async function listKv(
   namespace: string,
-  opts: { prefix?: string; limit: number; offset: number; jsonFieldEquals?: KvJsonFieldEquals[] },
+  opts: {
+    prefix?: string;
+    limit: number;
+    offset: number;
+    jsonFieldEquals?: KvJsonFieldEquals[];
+    /**
+     * Scan only the keys after `keyAfter` (through `keyThrough`, else to the end of the
+     * prefix). Replaces the prefix range: one range per column keeps SQLite from
+     * walking past the window.
+     */
+    keyAfter?: string;
+    keyThrough?: string;
+  },
 ): Promise<KvEntry[]> {
   const now = Date.now();
-  const prefix = kvPrefixCondition(opts.prefix);
+  const upper = opts.prefix === undefined ? null : kvPrefixUpperBound(opts.prefix);
+  const prefix =
+    opts.keyAfter === undefined
+      ? kvPrefixCondition(opts.prefix)
+      : opts.keyThrough !== undefined
+        ? { sql: "AND key > ? AND key <= ?", params: [opts.keyAfter, opts.keyThrough] }
+        : upper === null
+          ? { sql: "AND key > ?", params: [opts.keyAfter] }
+          : { sql: "AND key > ? AND key < ?", params: [opts.keyAfter, upper] };
   const json = kvJsonFieldConditions(opts.jsonFieldEquals);
   const rows = await getDbClient().query<KvRow>(
     `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at

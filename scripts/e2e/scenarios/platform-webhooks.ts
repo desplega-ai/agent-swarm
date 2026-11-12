@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { asRecord, expect, expectStatus, pollUntil } from "../http";
+import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   cleanupStack,
@@ -33,6 +33,66 @@ const NOT_CONFIGURED: Record<(typeof WEBHOOKS)[number], string> = {
   "/api/agentmail/webhook": "AgentMail integration not configured",
   "/api/integrations/kapso/webhook": "Kapso integration not configured",
 };
+
+/**
+ * A GitLab sender with no linked identity is linked by its payload email only when that value
+ * is an address. Values GitLab sends for senders without a public email (a redaction marker)
+ * are shared by many senders, so they link nobody.
+ */
+async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<void> {
+  const note = (id: number, username: string, email: string) =>
+    ctx.api("POST", "/api/gitlab/webhook", {
+      apiKey: null,
+      headers: { "X-Gitlab-Token": token },
+      rawBody: JSON.stringify({
+        object_kind: "note",
+        event_type: "note",
+        user: { id, name: `Sender ${username}`, username, avatar_url: "", email },
+        project: {
+          id: 1,
+          name: "app",
+          path_with_namespace: "acme/app",
+          web_url: "https://gitlab.example.test/acme/app",
+          default_branch: "main",
+        },
+        object_attributes: {
+          id: id * 10,
+          note: "a comment with no mention",
+          noteable_type: "MergeRequest",
+          noteable_id: 1,
+          url: `https://gitlab.example.test/acme/app/-/merge_requests/1#note_${id * 10}`,
+          author_id: id,
+          type: null,
+        },
+      }),
+    });
+  const linkedEmail = (username: string) =>
+    ctx.db.get<{ email: string | null }>(
+      `SELECT u.email AS email FROM user_external_ids x JOIN users u ON u.id = x.userId
+       WHERE x.kind = 'gitlab' AND x.externalId = ?`,
+      [username],
+    );
+
+  const real = `gl-real-${ctx.nonce}`;
+  expectStatus(await note(1, real, `${real}@example.test`), [200], "gitlab note, real email");
+  expect(
+    linkedEmail(real)?.email === `${real}@example.test`,
+    "a sender with an email address is linked by it",
+  );
+
+  const first = `gl-redacted-a-${ctx.nonce}`;
+  const second = `gl-redacted-b-${ctx.nonce}`;
+  expectStatus(await note(2, first, "[REDACTED]"), [200], "gitlab note, redacted email");
+  expectStatus(await note(3, second, "[REDACTED]"), [200], "gitlab note, redacted email");
+  expect(
+    linkedEmail(first) === null && linkedEmail(second) === null,
+    "senders with a redacted email stay unlinked",
+  );
+  expect(
+    ctx.db.get("SELECT 1 AS one FROM users WHERE email = ?", ["[REDACTED]"]) === null,
+    "no user is created for a redacted email",
+  );
+}
 
 /** Standard Webhooks / Svix signature headers for an AgentMail delivery. */
 function svixHeaders(secret: string, body: string): Record<string, string> {
@@ -246,6 +306,95 @@ export const platformWebhooks: Scenario = {
       expectStatus(ignored, [200], "github with an unhandled event");
       expect(asRecord(ignored.json).created === false, "an unhandled event creates no task");
 
+      // A dismissed login is not recorded again and stays untrusted: dismissing links nothing.
+      const botName = ctx.sutEnv.GITHUB_BOT_NAME || "agent-swarm-bot";
+      let commentId = 7_000_000;
+      const mention = async (login: string, association: string) => {
+        const id = commentId++;
+        const body = JSON.stringify({
+          action: "created",
+          comment: {
+            id,
+            body: `@${botName} take a look ${ctx.nonce}`,
+            html_url: `https://github.com/e2e/repo/issues/1#issuecomment-${id}`,
+            user: { login },
+            author_association: association,
+          },
+          issue: { number: 1, title: "e2e", html_url: "https://github.com/e2e/repo/issues/1" },
+          repository: { full_name: `e2e/repo-${ctx.nonce}`, html_url: "https://github.com/e2e/repo" },
+          sender: { login },
+        });
+        const response = await github(body, {
+          "X-GitHub-Event": "issue_comment",
+          "X-Hub-Signature-256": githubSig(body),
+        });
+        expectStatus(response, [200], `issue_comment from ${login}`);
+        const { created, taskId } = asRecord(response.json);
+        if (typeof taskId === "string") {
+          cleanup.add(`cancel ${taskId}`, async () => {
+            await ctx.api("POST", `/api/tasks/${taskId}/cancel`, { body: {} });
+          });
+        }
+        return created === true;
+      };
+      const trackedMeta = async (login: string) =>
+        (await ctx.api("GET", `/api/kv/_/integration:unmapped:github/${login}:meta`)).status ===
+        200;
+      const dismissedLogin = `gh-dismissed-${ctx.nonce}`;
+      const strangerLogin = `gh-stranger-${ctx.nonce}`;
+      const memberLogin = `gh-member-${ctx.nonce}`;
+      expectStatus(
+        await ctx.api("POST", "/api/users/unmapped/dismiss", {
+          body: { identities: [{ kind: "github", externalId: dismissedLogin }] },
+        }),
+        [200],
+        "dismiss a github login",
+      );
+      cleanup.add("undo the github dismissal", async () => {
+        await ctx.api("DELETE", `/api/kv/_/integration:unmapped-dismissed:github/${dismissedLogin}`);
+      });
+      expect(!(await mention(dismissedLogin, "NONE")), "a dismissed login opens no task");
+      expect(!(await trackedMeta(dismissedLogin)), "the tracker skips a dismissed login");
+      expect(
+        ctx.db.get(
+          "SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?",
+          [dismissedLogin],
+        ) === null,
+        "a dismissed login is linked to no user",
+      );
+      // Controls: the same comment from an unknown login is tracked, and from a member opens a task.
+      expect(!(await mention(strangerLogin, "NONE")), "an unknown login opens no task");
+      expect(await trackedMeta(strangerLogin), "the tracker records an unknown login");
+      expect(await mention(memberLogin, "MEMBER"), "a repo member's mention opens a task");
+      // The tracker keeps GitHub App logins; the queue hides `[bot]` unless asked.
+      const botLogin = `gh-app-${ctx.nonce}[bot]`;
+      expect(!(await mention(botLogin, "NONE")), "a bot login opens no task");
+      const githubQueue = async (query: string) =>
+        asRecords(
+          (await ctx.api("GET", `/api/users/unmapped?kind=github&limit=1000${query}`)).json,
+          "unmapped",
+        ).map((row) => row.externalId);
+      expect(
+        !(await githubQueue("")).includes(botLogin) && (await githubQueue("")).includes(strangerLogin),
+        "the queue hides a [bot] login by default",
+      );
+      expect(
+        (await githubQueue("&includeBots=true")).includes(botLogin),
+        "includeBots=true lists the [bot] login",
+      );
+      // The kv API rejects "[" in keys, so park the bot row on the ignore list instead.
+      expectStatus(
+        await ctx.api("POST", "/api/users/unmapped/dismiss", {
+          body: { identities: [{ kind: "github", externalId: botLogin }] },
+        }),
+        [200],
+        "dismiss the bot login",
+      );
+      for (const login of [strangerLogin, memberLogin]) {
+        await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${login}:meta`);
+        await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${login}:count`);
+      }
+
       // ── GitLab ─────────────────────────────────────────────────────────────
       const push = JSON.stringify({ object_kind: "push" });
       const gitlab = (body: string, token?: string) =>
@@ -274,6 +423,7 @@ export const platformWebhooks: Scenario = {
         [400],
         "gitlab with a non-json body",
       );
+      await checkGitLabSenders(ctx, secret("gitlab"));
 
       // ── Azure DevOps ───────────────────────────────────────────────────────
       const hook = JSON.stringify({ eventType: "build.complete" });
