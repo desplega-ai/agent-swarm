@@ -118,6 +118,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Runtime pools (beta)](https://docs.agent-swarm.dev/docs/guides/runtime-pools). Reference.
 - [boxd runtime provider](https://docs.agent-swarm.dev/docs/guides/boxd-runtime-provider). Reference.
 - [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-delivery-delay-handoff). Reference.
+- [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-service-capacity-planning). Reference.
 - [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/guides/support-knowledge-conflict-review). Reference.
 
 ## Other docs

@@ -1,0 +1,81 @@
+---
+title: 'Preparing a service capacity planning brief with AI agents'
+description: "Agent Swarm gathers approved demand and capacity records, compares them in agreed units and hands the owners a source-linked brief. People decide."
+agent:
+  when: "Someone wants operations and engineering to review upcoming service capacity against demand before deciding"
+---
+
+Agent Swarm can gather the approved demand and capacity records for a planning period, compare them in the unit the owners agreed, and hand operations and engineering a source-linked brief, while the decision on whether to adjust capacity or investigate further stays with people. What it takes off the team is the assembly: finding the records across systems and reconciling the units, with each mismatch in front of the people who decide.
+
+The scope is one service and one planning period, reviewed before the period starts. A shift handoff, an incident review and a demand forecast are different handoffs with different owners.
+
+## When a spreadsheet or planning system fits better
+
+Two established options cover much of this ground already.
+
+**A well-kept spreadsheet, when the data is small.** If demand and capacity come from one or two systems, in one unit, a spreadsheet the operations owner maintains answers the question. Wrapping a subtraction the owner already trusts in an agent workflow moves a rule that works into a queue that needs a person.
+
+**A specialist workforce or capacity planning product, when the team needs forecasting.** If the team needs demand forecasts, optimized staffing or automated scheduling, a product built for that work fits better. Agent Swarm provides none of the three, so a planning product is the right purchase when they are the requirement.
+
+Agent Swarm fits a different shape: evidence spread across several systems and owners. Demand records live in one system, capacity in another, and the person who knows whether a period is tight sits somewhere else again. That work is assembling and reconciling evidence for a human decision. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in forecasting feature and not a customer result. It needs permissions, configuration and possibly custom integrations that your team sets up and tests.
+
+<Mermaid title="Illustrative capacity planning flow, from a defined planning period to a human decision on capacity." chart={`flowchart LR
+  A["Planning period and<br/>sources defined"] --> B["Deterministic gather<br/>and compare<br/>(swarm-script to JSON)"]
+  B --> C["Agent assembles<br/>source-linked brief"]
+  C --> G{{"human-in-the-loop<br/>operations and engineering"}}
+  G --> R["Adjust capacity"]
+  G --> S["Investigate further"]
+`} />
+
+**1. An operations owner defines the frame.** The planning period, the approved demand sources, the approved capacity sources, and the unit the two sides are compared in. Nothing enters the comparison that this owner has not named, because the unit and the source are decisions about what counts as demand.
+
+**2. Deterministic steps gather the records and compare them.** A `swarm-script` step reaches each source through [script connections](/docs/guides/script-connections) and takes its credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in script source. The comparison runs in code and emits JSON, which keeps the arithmetic repeatable and keeps any model out of the subtraction. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split: deterministic collection first, agent synthesis after it.
+
+**3. An agent assembles the brief.** The agent turns the JSON and the source records into one document: known demand, available capacity, the periods where the two do not match, and the uncertainties the records leave open. Every line links the record it came from, so a reader who questions a figure follows the link to the system that produced it.
+
+**4. Operations and engineering validate and decide.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a short summary with a link to the full brief, and resumes only on a human response. The two owners check the assumptions behind the demand figures and the capacity figures, then decide whether to adjust capacity or investigate further. The reject branch needs its own definition, such as sending the brief back for a corrected source.
+
+A team that reviews capacity every planning period can put the run on a [schedule](/docs/concepts/scheduling), so the brief exists before the meeting rather than being assembled inside it.
+
+## Example: a fictional service
+
+The service below is invented to show the shape of a brief. It is not a customer, and no part of it is a measured result.
+
+A field repair service sends technicians to sites to fix equipment. Requests for visits arrive in a work-order system. Technician availability sits in a rostering tool. Parts availability sits in an inventory system, and someone in the warehouse knows which parts are on order.
+
+The brief for the next planning period would carry the requested visit load from the work-order system in technician hours, the scheduled technician hours from the rostering tool, and the periods where the first exceeds the second. It would list the parts constraints that could block a visit and mark each one with the record it came from and when that record was last updated.
+
+What it would leave to the owners are the questions the records cannot settle. Whether the shortfall in a period is real demand or a backlog of requests entered late. Whether the roster reflects leave that has been approved but not entered. Whether the parts constraint matters for the visits scheduled in that period. Whether to add a technician day, move non-urgent visits, or accept the queue. The brief puts those questions in one place with their evidence attached. It answers none of them.
+
+## Edge cases the brief must name
+
+**Missing or stale data.** When a source is unreachable or its last update is older than the team's threshold, the brief flags the source and its last update. It does not fill the gap by estimating, and it does not silently drop the period.
+
+**Seasonal differences.** Demand and capacity can move for reasons that have nothing to do with each other. The brief compares like periods only when the owner approves the comparison window, and it says which window it used.
+
+**Unit mismatches.** Hours versus tickets versus visits do not convert into each other on their own. A conversion happens only with an owner-approved rule, and anything left over is listed as unreconciled rather than folded into a total.
+
+**Permissions.** The swarm reads only the sources the team granted, with scoped credentials per workflow. A record behind a system the swarm cannot read is named as a gap, along with the owner who can grant access. Nobody is asked to paste it into a chat.
+
+**Escalation.** The owners agree in advance who receives the brief when a mismatch exceeds the threshold they set, and what happens if that person does not respond. The workflow must never treat silence as agreement.
+
+**Uncertainty.** Unknowns are stated in the brief, not smoothed over. A period with a thin record is labeled thin.
+
+## Limitations
+
+Agent Swarm does not forecast demand, does not calculate optimal staffing and does not schedule anyone automatically. It cannot guarantee that a capacity decision turns out well, because the decision depends on judgment the brief only informs.
+
+The output is only as good as the sources and the agreed units. A missing system, a stale export or a conversion nobody approved will show up as a gap rather than a number, which is the honest result but not a complete one.
+
+Your team owns the configuration and the testing: which sources are read, which units are agreed, which thresholds trigger escalation, and who receives the brief.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources)
+- [HITL gates](/docs/playbooks/patterns/hitl-gates)
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model)
+- [AI operations governance](/docs/guides/ai-operations-governance)
