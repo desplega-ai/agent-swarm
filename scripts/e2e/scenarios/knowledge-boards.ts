@@ -1,6 +1,7 @@
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  agentFsRawJsonRejection,
   callToolErr,
   callToolOk,
   expectRunOk,
@@ -56,6 +57,8 @@ export const knowledgeBoards: Scenario = {
       const raw = url.pathname.match(/^\/orgs\/[^/]+\/drives\/[^/]+\/files\/(.+)\/raw$/);
       if (!raw) return new Response("not found", { status: 404 });
       const path = decodeURIComponent(raw[1] ?? "");
+      const rejected = agentFsRawJsonRejection(request);
+      if (rejected) return rejected;
       if (request.method === "GET") {
         const current = files.get(path);
         return current

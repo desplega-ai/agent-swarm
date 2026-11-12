@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  agentFsRawJsonRejection,
   callToolErr,
   callToolOk,
   expectRunOk,
@@ -86,6 +87,8 @@ export const knowledgeObjects: Scenario = {
       if (raw) {
         const path = decodeURIComponent(raw[1] ?? "");
         const current = files.get(path);
+        const rejected = agentFsRawJsonRejection(request);
+        if (rejected) return rejected;
         if (request.method === "GET") {
           return current
             ? new Response(current.body, {

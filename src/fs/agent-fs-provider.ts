@@ -129,7 +129,10 @@ export class AgentFsProvider implements FileStorageProvider {
   async upload(scope: FileScope, body: FileBody, options: UploadOptions = {}): Promise<FileObject> {
     const headers = new Headers(this.authHeaders());
     if (options.contentType) {
-      headers.set("content-type", options.contentType);
+      // agent-fs answers a JSON content type on PUT /raw with 415 and stores the type it detects
+      // from the path, so JSON goes out as octet-stream; the returned FileObject keeps the caller's type.
+      const isJson = options.contentType.trim().toLowerCase().startsWith("application/json");
+      headers.set("content-type", isJson ? "application/octet-stream" : options.contentType);
     }
     if (options.ifNoneMatch) {
       headers.set("if-none-match", options.ifNoneMatch);
