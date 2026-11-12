@@ -118,18 +118,16 @@ export function isInboxAllowed(inboxId: string, filter: string | undefined): boo
 
 /**
  * Check if a sender address is allowed by the filter (full addresses or domains).
- * Returns true if no filter is set or at least one sender matches an entry.
+ * Returns true if no filter is set or the first From entry matches an entry.
+ * Only the first entry counts: handleMessageReceived takes the sender from it.
  */
 export function isSenderAllowed(
   from: AgentMailMessage["from_"],
   filter: string | undefined,
 ): boolean {
   if (!filter) return true;
-  const fromAddresses = Array.isArray(from) ? from : [from || ""];
-  return fromAddresses.some((addr) => {
-    const email = extractEmailFromField(addr);
-    return email !== undefined && matchesAddressFilter(email, filter);
-  });
+  const email = extractEmailFromField((Array.isArray(from) ? from[0] : from) ?? "");
+  return email !== undefined && matchesAddressFilter(email, filter);
 }
 
 // Simple deduplication cache (60 second TTL)

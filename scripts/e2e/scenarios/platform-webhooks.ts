@@ -59,7 +59,7 @@ async function checkAgentMailSenders(
   const bossId = String(asRecord(asRecord(boss.json).user).id);
   const leadId = await registerLead(ctx, `e2e-agentmail-lead-${ctx.nonce}`);
   try {
-    const deliver = async (eventType: string, from: string, subject: string) => {
+    const deliver = async (eventType: string, from: string | string[], subject: string) => {
       const body = JSON.stringify({
         event_type: eventType,
         event_id: `evt_${subject}`,
@@ -67,7 +67,7 @@ async function checkAgentMailSenders(
           inbox_id: `inb_${ctx.nonce}`,
           thread_id: `thr_${subject}`,
           message_id: `msg_${subject}`,
-          from_: [from],
+          from_: Array.isArray(from) ? from : [from],
           to: [`inb_${ctx.nonce}@agentmail.to`],
           labels: eventType.endsWith(".unauthenticated") ? ["unauthenticated"] : [],
           subject,
@@ -102,11 +102,19 @@ async function checkAgentMailSenders(
     // The mailbox is the trailing <...>; an address inside the display name is ignored.
     const quoted = `quoted-${ctx.nonce}`;
     await deliver("message.received", `"Boss <boss@${domain}>" <other@elsewhere.test>`, quoted);
+    // Only the first From entry is the sender; a later allowed entry does not let it through.
+    const second = `second-${ctx.nonce}`;
+    await deliver(
+      "message.received",
+      ["Other <other@elsewhere.test>", `Boss <boss@${domain}>`],
+      second,
+    );
     const signed = `signed-${ctx.nonce}`;
     await deliver("message.received", `Boss <boss@${domain}>`, signed);
     expect((await waitForTask(signed))?.requestedByUserId === bossId, "signed mail is linked");
     expect(merges() === 1, `signed mail links the user once, got ${merges()}`);
     expect(taskFor(quoted) === null, "the sender filter reads the mailbox, not the display name");
+    expect(taskFor(second) === null, "the sender filter reads the first From entry only");
 
     // A sender AgentMail could not authenticate still reaches the lead, unlinked.
     const unsigned = `unsigned-${ctx.nonce}`;
