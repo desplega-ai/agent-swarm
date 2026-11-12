@@ -6,6 +6,8 @@
     "customer-renewal-review",
     "customer-commitment-tracking",
     "ai-invoice-discrepancy-review",
+    "customer-billing-dispute-review",
+    "ai-support-escalation-handoff",
     "marketplace-catalog-discrepancy-review",
     "ai-operations-shift-handoff",
     "supplier-security-evidence-review",
