@@ -94,7 +94,7 @@ E2E scoping (`bun scripts/e2e/scope.ts <changed files>` prints the decision and 
 | A tool file in `src/tools/` | Scenarios that name one of its tools |
 | A workflow executor | The engine that owns node types in `coverage-manifest.json`, through its route groups and tools |
 | `templates/skills/`, `templates/ai-toolbox.manifest.json` | Scenarios that reach `/api/skills` or a `skill-*` tool |
-| Anything else (`src/be/`, `src/types.ts`, shared utilities, the runner, `package.json`, `bun.lock`), or a mapped file no scenario reaches | The full suite |
+| Anything else (`src/be/`, `src/types.ts`, shared utilities, the runner, `package.json`, `bun.lock`), or a mapped file no scenario reaches | The full suite, as CI's 3 shards in parallel (each log lands in a temp directory; a failing shard prints its tail) |
 
 Selected scenarios bring their `needs`. Every scoped run still boots the whole API, so a boot failure shows up. The local run is never `--strict`: coverage and the manifest stay with CI's merged strict run.
 
