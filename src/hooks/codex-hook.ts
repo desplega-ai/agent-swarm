@@ -230,6 +230,8 @@ export async function codexNativePre(
   msg: CodexHookMessage,
   config: CodexHookConfig | null,
   fetchImpl: typeof fetch = fetch,
+  deps?: PrBodyGuardDeps,
+  roomDeps?: PrRoomGuardDeps,
 ): Promise<CodexNativePre> {
   const call = nativeCallOf(msg);
   const target = nativeTargetOf(config);
@@ -239,6 +241,13 @@ export async function codexNativePre(
   // shortcut: only a Bash rewrite is applied; codex's rewrite support for apply_patch payloads is
   // unverified, so that modify is dropped. Upgrade once a codex run proves updatedInput there.
   if (decision.action === "modify" && call.tool === "bash") {
+    // The rewrite is input the PreToolUse guards never saw: check the final command too.
+    const reason = await codexPreToolUseBlock(
+      { ...msg, tool_input: decision.args },
+      deps,
+      roomDeps,
+    );
+    if (reason) return { action: "block", reason };
     return {
       action: "modify",
       output: {

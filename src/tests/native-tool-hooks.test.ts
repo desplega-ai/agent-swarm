@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { codexNativePre } from "../hooks/codex-hook";
 import {
   canonicalArgs,
   canonicalToolName,
@@ -127,5 +128,61 @@ describe("native tool hook shim", () => {
     });
     // pi and opencode already say `path`: nothing to map back.
     expect(rawArgsFromCanonical({ path: "/b" }, { path: "/a" })).toEqual({ path: "/b" });
+  });
+
+  describe("codex rewrite of a Bash command runs the PR guards on the final command", () => {
+    const config = { apiUrl: "http://api.test", apiKey: "k", agentId: "a" };
+    const msg = {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "echo safe" },
+      cwd: "/w",
+    };
+    const leaky = `gh pr create --repo desplega-ai/agent-swarm --title x --body 'taskId = ${"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'`;
+    const guardDeps = {
+      env: {},
+      readFile: async () => "",
+      repoVisibility: async () => "PUBLIC",
+    };
+    const roomDeps = {
+      env: { PR_ROOM_REPOS: "desplega-ai/agent-swarm" },
+      readFile: async () => "",
+      remoteOrigin: async () => "https://github.com/desplega-ai/agent-swarm.git",
+    };
+    const rewriteApi = (command: string) =>
+      fakeApi({
+        native: true,
+        hook: () => Response.json({ action: "modify", args: { command } }),
+      }).fetchImpl;
+    const run = (command: string) =>
+      codexNativePre(
+        { ...msg, tool_use_id: `t-${crypto.randomUUID()}` },
+        { ...config, agentId: `a-${crypto.randomUUID()}` },
+        rewriteApi(command),
+        guardDeps,
+        roomDeps,
+      );
+
+    test("a rewrite into a leaking gh pr body is blocked", async () => {
+      const decision = await run(leaky);
+      expect(decision.action).toBe("block");
+      expect((decision as { reason: string }).reason).toContain("PR body leak check");
+    });
+
+    test("a rewrite into a gh pr create with no PR room is blocked", async () => {
+      const decision = await run(
+        "gh pr create --repo desplega-ai/agent-swarm --title x --body hello",
+      );
+      expect(decision.action).toBe("block");
+      expect((decision as { reason: string }).reason).toContain("PR rooms");
+    });
+
+    test("a safe rewrite is still emitted as updatedInput", async () => {
+      const decision = await run("echo rewritten");
+      expect(decision.action).toBe("modify");
+      const out = (decision as { output: { hookSpecificOutput: { updatedInput: unknown } } })
+        .output;
+      expect(out.hookSpecificOutput.updatedInput).toEqual({ command: "echo rewritten" });
+    });
   });
 });

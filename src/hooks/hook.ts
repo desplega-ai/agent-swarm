@@ -1234,16 +1234,13 @@ export async function handleHook(): Promise<void> {
 
       // Block `gh pr create|edit` when the body for a public repo leaks internal
       // identifiers. Exit code 2 blocks the call and stderr reaches the model.
+      const prGuardBlock = async (toolInput: unknown): Promise<string | null> =>
+        (await guardGhPrBody(toolInput, msg.cwd ?? process.cwd())) ??
+        (await guardGhPrRoom(toolInput, msg.cwd ?? process.cwd()));
       if (msg.tool_name === "Bash") {
-        const prBodyBlock = await guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd());
-        if (prBodyBlock) {
-          console.error(prBodyBlock);
-          process.exitCode = 2;
-          return;
-        }
-        const prRoomBlock = await guardGhPrRoom(msg.tool_input, msg.cwd ?? process.cwd());
-        if (prRoomBlock) {
-          console.error(prRoomBlock);
+        const prBlock = await prGuardBlock(msg.tool_input);
+        if (prBlock) {
+          console.error(prBlock);
           process.exitCode = 2;
           return;
         }
@@ -1304,6 +1301,13 @@ export async function handleHook(): Promise<void> {
         }
         if (decision.action === "modify") {
           rewrittenInput = rawArgsFromCanonical(decision.args, msg.tool_input);
+          // The rewrite is input the guards above never saw: check the final Bash command too.
+          const rewriteBlock = msg.tool_name === "Bash" ? await prGuardBlock(rewrittenInput) : null;
+          if (rewriteBlock) {
+            console.error(rewriteBlock);
+            process.exitCode = 2;
+            return;
+          }
         }
       }
 
