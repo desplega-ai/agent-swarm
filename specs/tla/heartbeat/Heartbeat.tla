@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 1de54cf0. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 1f28a0c9. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -541,10 +541,12 @@ RebootFail(t) ==
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running,
                    alive, cl, acc, hb, apiUp, wc, ac, badAcc, cut>>
 
-\* Reboot retry child: fresh task, generation tag restarts at 0.
+\* Reboot retry child: fresh task, generation tag restarts at 0. Since #3008
+\* a workflow-step task (cut = "step") gets no child: the engine retries the
+\* step or fails the run from the task.failed event (not modelled).
 RebootRetry ==
     /\ apiUp /\ rb.pc = "retry"
-    /\ IF Free # {}
+    /\ IF Free # {} /\ cut[rb.t] # "step"
          THEN \E s \in Free : NewChild(s, rb.t, own[rb.t], 0, TRUE)
          ELSE UNCHANGED <<st, own, par, gen, pin>>
     /\ rb' = [rb EXCEPT !.pc = "idle"]
