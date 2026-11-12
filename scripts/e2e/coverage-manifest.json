@@ -236,6 +236,10 @@
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
       "scenarios": ["core-agent-access"]
     },
+    "agent-lifecycle": {
+      "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
+      "scenarios": ["core-agent-lifecycle"]
+    },
     "agent-fs-public-edge": {
       "description": "public share/site pages through the agent-fs proxy and the Comb review-batch gate",
       "scenarios": ["knowledge-agentfs-edges"]
@@ -578,8 +582,8 @@
       "scenarios": ["workflow-approvals"]
     },
     "workflow-definitions": {
-      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types over HTTP and MCP",
-      "scenarios": ["workflow-definitions"]
+      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
+      "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
       "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",

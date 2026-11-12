@@ -77,6 +77,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
+import { handleAgentLifecycle } from "./agent-lifecycle";
 import { handleAgentFsProxy } from "./agentfs-proxy";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
@@ -375,6 +376,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleTrackers(req, res, pathSegments),
         () => handleWebhooks(req, res, pathSegments),
         () => handleObjectWebhooks(req, res, pathSegments),
+        () => handleAgentLifecycle(req, res, pathSegments, queryParams, myAgentId),
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
         () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
         () => handleContext(req, res, pathSegments, queryParams, myAgentId),

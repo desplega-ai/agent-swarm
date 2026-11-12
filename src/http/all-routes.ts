@@ -9,6 +9,7 @@
  * registration order).
  */
 import "./active-sessions";
+import "./agent-lifecycle";
 import "./agents";
 import "./approval-requests";
 import "./apps";

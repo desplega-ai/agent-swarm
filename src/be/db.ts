@@ -299,6 +299,7 @@ export {
   SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
 } from "./db/active-sessions";
 export {
+  AgentDeletedError,
   buildRoutingAffinityFromAgent,
   createAgent,
   deleteAgent,
@@ -315,6 +316,7 @@ export {
   getRemainingCapacity,
   hasCapacity,
   incrementEmptyPollCount,
+  isAgentDeleted,
   isAgentEligibleForTask,
   isExtensionAgent,
   isPoolAffinityEnforcementEnabled,
