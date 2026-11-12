@@ -125,6 +125,7 @@ import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./
 import { handleGenericOAuth } from "./oauth-generic";
 import { handleOAuthLocks } from "./oauth-locks";
 import { handleObjectWebhooks } from "./object-webhooks";
+import { handleObjects } from "./objects";
 import { handleOnboarding } from "./onboarding";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
@@ -376,6 +377,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleTrackers(req, res, pathSegments),
         () => handleWebhooks(req, res, pathSegments),
         () => handleObjectWebhooks(req, res, pathSegments),
+        () => handleObjects(req, res, pathSegments, queryParams, myAgentId),
         () => handleAgentLifecycle(req, res, pathSegments, queryParams, myAgentId),
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
         () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),

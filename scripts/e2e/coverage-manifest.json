@@ -406,6 +406,10 @@
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
     },
+    "primitive-object-http": {
+      "description": "GET /api/objects/:id (knownVersion by stat, then from the webhook-fresh row with no agent-fs call), PUT .../content for boards (keeps swarm.id, 409 carries the version) and POST .../sheet-ops as a user, the dashboard and page sessions; operator pages are read-only, password guests, foreign drives and keyless owners are refused",
+      "scenarios": ["objects-http"]
+    },
     "primitive-objects": {
       "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; reindex prefix and dryRun scope the write-back; a sheet missing swarm.id is refused with the reindex fix; the file.changed receiver refuses unsigned, forged and oversized deliveries",
       "scenarios": ["knowledge-objects", "knowledge-objects-reindex-scope"]

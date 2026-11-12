@@ -33768,6 +33768,607 @@
         }
       }
     },
+    "/api/objects/{id}": {
+      "get": {
+        "summary": "Read a board or sheet on the shared drive, or confirm it is unchanged",
+        "tags": [
+          "Objects"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Object id (`swarm.id` in the file)"
+            },
+            "required": true,
+            "description": "Object id (`swarm.id` in the file)",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "The version the caller holds. A match answers `unchanged: true` with no content"
+            },
+            "required": false,
+            "description": "The version the caller holds. A match answers `unchanged: true` with no content",
+            "name": "knownVersion",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The object with its content, or `unchanged: true` with no content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "orgId": {
+                          "type": "string"
+                        },
+                        "driveId": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "fileVersion": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "ownerAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "link": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "orgId",
+                        "driveId",
+                        "path",
+                        "title",
+                        "fileVersion",
+                        "ownerAgentId",
+                        "createdAt",
+                        "updatedAt",
+                        "link"
+                      ]
+                    },
+                    "version": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "unchanged": {
+                      "type": "boolean"
+                    },
+                    "content": {}
+                  },
+                  "required": [
+                    "object",
+                    "version",
+                    "unchanged"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, or the object is not the kind this route edits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, a page guest, a read-only page session, or an object off the shared drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such object, or its file is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The owner agent has no agent-fs key on the object's drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/{id}/content": {
+      "put": {
+        "summary": "Save a board's full Excalidraw scene, guarded by its agent-fs version",
+        "tags": [
+          "Objects"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Object id (`swarm.id` in the file)"
+            },
+            "required": true,
+            "description": "Object id (`swarm.id` in the file)",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "The Excalidraw scene"
+                  },
+                  "ifMatch": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The version the scene was edited from"
+                  }
+                },
+                "required": [
+                  "content",
+                  "ifMatch"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "orgId": {
+                          "type": "string"
+                        },
+                        "driveId": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "fileVersion": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "ownerAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "link": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "orgId",
+                        "driveId",
+                        "path",
+                        "title",
+                        "fileVersion",
+                        "ownerAgentId",
+                        "createdAt",
+                        "updatedAt",
+                        "link"
+                      ]
+                    },
+                    "version": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, or the object is not the kind this route edits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, a page guest, a read-only page session, or an object off the shared drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such object, or its file is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The board changed since `ifMatch`; the body carries its `version`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The scene exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The owner agent has no agent-fs key on the object's drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/{id}/sheet-ops": {
+      "post": {
+        "summary": "Patch sheet cells; the server recalculates and merges concurrent edits",
+        "tags": [
+          "Objects"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Object id (`swarm.id` in the file)"
+            },
+            "required": true,
+            "description": "Object id (`swarm.id` in the file)",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "setRange"
+                        ]
+                      },
+                      "range": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "values": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "op",
+                      "range",
+                      "values"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "clearRange"
+                        ]
+                      },
+                      "range": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "op",
+                      "range"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "appendRows"
+                        ]
+                      },
+                      "tab": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rows": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "op",
+                      "tab",
+                      "rows"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied: the range written and the new version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "setRange",
+                        "clearRange",
+                        "appendRows"
+                      ]
+                    },
+                    "range": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "number"
+                    },
+                    "changed": {
+                      "type": "number"
+                    },
+                    "recalculated": {
+                      "type": "number"
+                    },
+                    "cleared": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "range",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, or the object is not the kind this route edits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, a page guest, a read-only page session, or an object off the shared drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such object, or its file is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Other writers changed the sheet on every retry; try again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The owner agent has no agent-fs key on the object's drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/oauth/refresh-locks/{key}": {
       "post": {
         "summary": "Acquire a cross-process OAuth refresh lock",
