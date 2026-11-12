@@ -480,7 +480,7 @@ const qwenTargetProfile: AcpTargetProfile = {
  * Kiro CLI reads its prompt from a Kiro agent config, not from a flag or an
  * env var, so the swarm system prompt is not injected (as with OpenCode).
  * Kiro advertises no ACP config options (checked on 2.29.1), so the model
- * rides on argv as `--model`, which `kiro-cli acp` still accepts in 3.2.0.
+ * rides on argv as `--model`, which `kiro-cli acp` still accepts in 3.2.1.
  */
 const kiroTargetProfile: AcpTargetProfile = {
   target: "kiro",
