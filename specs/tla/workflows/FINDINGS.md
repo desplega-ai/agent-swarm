@@ -18,6 +18,8 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Closed by #2377 (CX13) | **1** |
 | Open counterexamples on `main` @ `7912fff73` (CX14 from #1926) | **1**, no repro test yet |
 | Open counterexamples on `main` @ `77039db51` (CX15 from #2364) | **1**, no repro test yet |
+| Partly closed by #3019 (CX8 before the poller claims the retry; repro `CX8: the join does not fire while a branch is pending its retry`) | **1** |
+| Open counterexamples on `main` @ `1f28a0c91` (CX17, CX18, pre-existing, found by the new `JoinWaitsForRetry`) | **2**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
@@ -54,6 +56,7 @@ output. This is the gap F2 (`FixPendingRetryGate`) was proposed for.
 - Property: `JoinWaitsForBranches` (Inv3c). 16,466 distinct states, 26-state trace, `Workflows.cfg`.
 - Trace: `… XDedup (A) → XRun → XFail (A retry pending) → P1 → WPick → XDedup (B) → P2 → P3 → P4 (A running, poller) → XRun → XCkOk (B) → WBatchEnd → WPick → XDedup (M, A still running)`
 - `JoinWaitsForAll` (not claimed on `main`) fails earlier on the same root, with the retry not yet claimed: 4,717 distinct states, depth 20.
+- #3019 (F12) closes the window before `P4`: a retry-pending branch now holds the join. The trace above, where the poller already runs `A`, is still reachable (see "Sync with #2999 and #3019").
 
 ### CX9: a user retry re-executes a branch that is pending its own retry
 
@@ -1012,3 +1015,92 @@ pass / 0 fail / 0 `test.failing`; with #2966's `workflow-finalization-races.test
 | `Probe-task-skip.cfg` | holds | 199,408 | - |
 | `Probe-task-skip-sweep.cfg` | CX12 found | 1,408,845 | 35 |
 | `Probe-successor-debt.cfg` / control (new) | holds / CX16 found | 498,792 / 347 | - / 18 |
+
+## Sync with #2999 and #3019 (`main` @ `1f28a0c91`)
+
+#3019 closes the CX8 shape where the join fires before the retry is claimed. `awaitedNodeIds`
+now returns a node whose latest row is pending its retry, and the walk's batch gate does not count
+such a node as completed, although that walk added it to `completedNodeIds` at `XFail`. New fix
+flag F12 `FixJoinRetryPending` models both reads (`LatestRetry` in `Awaited`, removed from the
+gate's completed set in `WBatchEnd`). It is on in every config that has F11 on, plus
+`Probe-successor-debt-control.cfg`. New action property `JoinWaitsForRetry` (Inv3e): the join row
+is not created while a branch's latest row is pending its retry.
+
+- `Probe-join-retry-control.cfg` (F12 off, no sweep, no user retry) finds it: `… XCkOk (B) → XFail (A retry pending) → WBatchEnd → WPick → XDedup (M)`, the trace of #3019's repro test. 1,842 distinct states, trace 19.
+- `Probe-join-retry.cfg` (F12 on, no sweep, no user retry): holds, 3,026,421 distinct states.
+- With a recovery sweep (CX18) or a user retry (CX17), F12 is not enough; both are older gaps that the new property exposes.
+- CX8 stays open on `Workflows.cfg` (`JoinWaitsForBranches`). Once the poller claims the row
+  (`P4`, `running`), the row is no longer retry-pending and the branch is still in the walk's
+  `completedNodeIds`, so the gate counts it as completed and the join runs without its output.
+  #3019's test covers only the window before the poller claims the row.
+
+### CX17 (pre-existing, found during this sync): a user retry runs the join in the same batch as the branch it re-runs
+
+`A` completes. `B` fails in the walk with a retry pending, the poller retries it, and the retry
+fails again, failing the run. The user retries. `U2` resets `B`'s failed row to `pending`, and
+`retryFailedRun` walks every node with no completed row, `B` and `M`. The seed filter does not
+await `B`: its latest row is the reset `pending` row, which is neither live nor retry-pending,
+and `B` has no active edge to `M`. So `M` starts in the same batch as the new `B` row. If `B`
+fails again with a retry pending, `M` runs anyway.
+
+- Property: `JoinWaitsForRetry`. `Probe-join-retry-user.cfg` (F12 on, user retry on), 1,147,687 distinct states, trace 31.
+- Trace: `… XFail (B retry pending) → WPick → XDedup (A) → XRun → P1 → P2 → XCkOk (A) → P3 → P4 → P5 → P7 (run failed) → U1 → U2 (B pending, run running) → WStart (B, M) → WPick → XDedup (B) → XRun → XFail (B retry pending) → WPick → XDedup (M)`
+- Not introduced by #3019. With `B` still executing at `M`'s dedup, the same root breaks
+  `JoinWaitsForBranches`. Not fixed here: this PR changes the spec only.
+
+### CX18 (pre-existing, found during this sync): a recovery walk re-runs a branch that failed for good, and the join fires on a stale gate
+
+Both branches fail in the initial walk with a retry pending, and the walk leaves the run
+`running`. The poller claims `B`; a heartbeat sweep reads the run (`H1`, `H2`) while `B` runs, so
+`findReadyNodes` returns `B` (not completed, not retry-pending). The poller's retry of `B` fails
+for good and fails the run, and releases its hold; the sweep's `H3` then finds no live walk. The
+poller claims `A` (reviving the run), `A` succeeds, and its walk (`P6`) reaches `M`: its seed
+filter sees `A` completed and `B` failed for good, so `M` may join. Before that walk dedups `M`,
+the recovery walk inserts a new `B` row and fails it with a retry pending. `M` runs while `B` is
+pending its retry.
+
+- Property: `JoinWaitsForRetry`. `Probe-join-retry-sweep.cfg` (F12 on, one sweep), 27,415,837 distinct states, trace 42.
+- Trace: `… XFail (A) → XFail (B) → WBatchEnd → P1 → WFinal (run running) → WRet → P2 → H1 → P3 → P4 (B running) → P5 → H2 (B ready) → P7 (B failed, run failed) → PRel → H3 → P2 → P3 → P4 (A running, run running) → P5 → P6 (A completed) → WStart (poller walk, M) → WStart (recovery walk, B) → WPick → WPick → XDedup (new B) → XRun → XFail (B retry pending) → XDedup (M)`
+- Two older roots meet: the sweep's ready set is read outside any transaction and is stale by
+  `H3` (CX5's shape, for a row that failed for good after the read), and the join gate is read
+  outside the dedup transaction (root cause 2). Not introduced by #3019.
+
+#2999 adds one write path: a retried attempt whose output fails `node.outputSchema` now fails
+the step through the fenced `checkpointStepFailure` with no retry policy, before step validation
+and the checkpoint. That is `P5` picking `fail`, then `P7` with the retry budget spent (exact
+with `MaxRetries = 1`; ACTIONS.md, `P7`). The `engine.ts` side of #2999 moves the existing
+output check into `validateOutputSchema`, with no change in behavior. ACTIONS.md re-pins every
+`engine.ts` and `retry-poller.ts` line against `1f28a0c91`; many were already stale before
+these PRs.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 12` for
+`Probe-child-run.cfg`, `-workers 12` for `Probe-join-retry.cfg`, `-workers 8` for `Probe-join-retry-sweep.cfg`). Every config gives the same verdict as on `1de54cf08`. Configs with F12 off keep their
+distinct-state counts where they hold; the configs with F12 on that hold shrink or stay the same,
+because a held join prunes interleavings. `src/tests/workflow-tla-races.test.ts` (now with
+#3019's CX8 repro) + `workflow-sub-workflow` + `workflow-cascade-cancel` + `workflow-agent-task-retry`
++ `workflow-finalization-races` + `workflow-parallel-park` + `workflow-retry-v2` (with #2999's
+regressions): 121 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8, poller already running `A`) | 36,026 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 9,962 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 254 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,064 / 2,956 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,124 / 2,375 / 32,539 / 7,700 / 324 / 988 | 22 / 19 / 29 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,151 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 501 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 1,275,527 | 35 |
+| `Probe-input-await.cfg` | CX6 found | 290 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,217 / 17,562 | 19 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 7,825,516 / 375,088 | - / 35 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,266 | 19 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 10,704 / 693 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 7,124 | 36 |
+| `Probe-task-skip.cfg` | holds | 199,408 | - |
+| `Probe-task-skip-sweep.cfg` | CX12 found | 1,487,144 | 35 |
+| `Probe-successor-debt.cfg` / control | holds / CX16 found | 335,672 / 580 | - / 18 |
+| `Probe-join-retry.cfg` / control (new) | holds / found | 3,026,421 / 1,842 | - / 19 |
+| `Probe-join-retry-user.cfg` (new) | CX17 found | 1,147,687 | 31 |
+| `Probe-join-retry-sweep.cfg` (new) | CX18 found | 27,415,837 | 42 |
