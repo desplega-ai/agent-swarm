@@ -41,9 +41,22 @@ async function call<T>(
 }
 
 /**
- * A session the seeded user started, assigned to worker A so it can finish.
- * Unfinished it is running: it lists under Working. `finished` completes it,
- * so it lists in the Inbox.
+ * A worker of the test's own, so no seeded task moves. One task at a time:
+ * each poll claims the one pending task, which `finish` then completes.
+ */
+async function worker(api: Api, run: string): Promise<string> {
+  const agent = await api.post<{ id: string }>("/api/agents", {
+    name: `e2e-sidebar-worker-${run}`,
+    isLead: false,
+    maxTasks: 1,
+  });
+  return agent.id;
+}
+
+/**
+ * A session the seeded user started, assigned to the test's worker so it can
+ * finish. Unfinished it is pending, so it lists under Working. `finished`
+ * ends it, so it lists in the Inbox.
  */
 async function session(
   api: Api,
@@ -64,11 +77,22 @@ async function session(
   return task.id;
 }
 
+/**
+ * Claim the task (finish ignores a task that is not in progress), then end it
+ * as `skipped`: a completion queues a Lead follow-up in the same chain, which
+ * keeps the session running. A skip ends the chain with no follow-up.
+ */
 async function finish(swarm: SwarmTarget, agentId: string, taskId: string): Promise<void> {
-  await call(swarm, "POST", `/api/tasks/${taskId}/finish`, {
-    agentId,
-    body: { status: "completed" },
-  });
+  await call(swarm, "GET", "/api/poll", { agentId });
+  const result = await call<{ task?: { status?: string } }>(
+    swarm,
+    "POST",
+    `/api/tasks/${taskId}/finish`,
+    { agentId, body: { status: "skipped", failureReason: "e2e: ended by the test" } },
+  );
+  if (result.task?.status !== "skipped") {
+    throw new Error(`task ${taskId} did not end: ${result.task?.status}`);
+  }
 }
 
 /** Show Slack sessions: the default filter shows the dashboard's own sessions only. */
@@ -118,7 +142,7 @@ test.describe("sessions sidebar", () => {
   }, testInfo) => {
     const run = randomUUID().slice(0, 8);
     const userId = seed!.user.id;
-    const agentId = seed!.agents.workerA;
+    const agentId = await worker(api, run);
     const title = `e2e working ${run}`;
     const id = await session(api, swarm, { userId, agentId, title }, false);
 
@@ -137,12 +161,16 @@ test.describe("sessions sidebar", () => {
     await shot(page, testInfo, "working-open");
 
     await finish(swarm, agentId, id);
-    // Finished: back in the Inbox as unread. Folding Working no longer hides it.
-    await expect(row).toHaveAccessibleName(/^Unread\. /, { timeout: 20_000 });
-    if (await working.isVisible()) {
+    // Finished: back in the Inbox as unread. With Working folded (other specs'
+    // sessions may keep it on screen), the row shows once the lists' 10 s poll
+    // moves it.
+    if ((await working.isVisible()) && (await working.getAttribute("aria-expanded")) === "true") {
       await working.getByText("Working", { exact: true }).click();
-      await expect(row).toBeVisible();
+      await expect(working).toHaveAttribute("aria-expanded", "false");
     }
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row).toHaveAccessibleName(/^Unread\. /);
+    await shot(page, testInfo, "working-finished-in-inbox");
     await clean.assertClean();
   });
 
@@ -155,7 +183,7 @@ test.describe("sessions sidebar", () => {
   }, testInfo) => {
     const run = randomUUID().slice(0, 8);
     const userId = seed!.user.id;
-    const agentId = seed!.agents.workerA;
+    const agentId = await worker(api, run);
     // More than the 10 rows the Inbox shows, so "Select all N" is offered.
     for (let i = 0; i < 12; i++) {
       await session(api, swarm, { userId, agentId, title: `e2e select ${run} ${i}` }, true);
@@ -194,7 +222,7 @@ test.describe("sessions sidebar", () => {
     const run = randomUUID().slice(0, 8);
     const userId = seed!.user.id;
     const title = `e2e star ${run}`;
-    const id = await session(api, swarm, { userId, agentId: seed!.agents.workerA, title }, true);
+    const id = await session(api, swarm, { userId, agentId: await worker(api, run), title }, true);
 
     await page.goto(`/sessions/${id}`);
     const tree = page.getByRole("tree", { name: "Sessions" });
@@ -223,7 +251,7 @@ test.describe("sessions sidebar", () => {
   }, testInfo) => {
     const run = randomUUID().slice(0, 8);
     const userId = seed!.user.id;
-    const agentId = seed!.agents.workerA;
+    const agentId = await worker(api, run);
     const older = `e2e-fav-${run}-a`;
     const newer = `e2e-fav-${run}-b`;
     await session(
@@ -282,7 +310,7 @@ test.describe("sessions sidebar", () => {
   }, testInfo) => {
     const run = randomUUID().slice(0, 8);
     const userId = seed!.user.id;
-    const agentId = seed!.agents.workerA;
+    const agentId = await worker(api, run);
     // 11 channels, then one DM whose only session is Done.
     for (let i = 0; i < 11; i++) {
       await session(
