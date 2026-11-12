@@ -623,3 +623,108 @@ describe("completeStructuredWithModel", () => {
     expect(result).toEqual({ data: { summary: "cli", count: 1 }, model: "haiku" });
   });
 });
+
+describe("credential kinds added for fireworks and amazon-bedrock", () => {
+  const baseOpts = {
+    zodSchema: ResultZodSchema,
+    toolSchema: ResultToolSchema,
+    toolName: "record_result",
+    toolDescription: "Record the result.",
+    systemPrompt: "sys",
+    userPrompt: "user",
+  };
+  const toolCallMsg = () =>
+    makeMsg([
+      {
+        type: "toolCall",
+        id: "call_1",
+        name: "record_result",
+        arguments: { summary: "ok", count: 1 },
+      },
+    ]);
+
+  test("fireworks goes through the pi-ai path with its own key", async () => {
+    let seenApiKey: unknown;
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "fireworks",
+        apiKey: "fw-key",
+        modelDefault: "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+      },
+      _complete: async (_model, _ctx, options) => {
+        seenApiKey = (options as { apiKey?: unknown })?.apiKey;
+        return toolCallMsg();
+      },
+    });
+    expect(result).toEqual({
+      data: { summary: "ok", count: 1 },
+      model: "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+    });
+    expect(seenApiKey).toBe("fw-key");
+  });
+
+  test("bedrock sends the region, forces the tool, and never sends an apiKey", async () => {
+    let options: Record<string, unknown> | undefined;
+    let model: { api?: string; id?: string } | undefined;
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "amazon-bedrock",
+        modelDefault: "amazon-bedrock/global.anthropic.claude-haiku-5-5",
+        region: "eu-west-1",
+      },
+      _complete: async (m, _ctx, opts) => {
+        model = m as { api?: string; id?: string };
+        options = opts as Record<string, unknown>;
+        return toolCallMsg();
+      },
+    });
+
+    expect(result).toEqual({
+      data: { summary: "ok", count: 1 },
+      model: "amazon-bedrock/global.anthropic.claude-haiku-5-5",
+    });
+    // The catalog entry resolves, which is the whole reason the model default is
+    // written in pi-ai's own id form.
+    expect(model?.api).toBe("bedrock-converse-stream");
+    expect(model?.id).toBe("global.anthropic.claude-haiku-5-5");
+    expect(options?.apiKey).toBeUndefined();
+    // The resolver's region travels as the adapter's own option, which is what
+    // keeps the catalog's us-east-1 base URL from overriding it.
+    expect(options?.region).toBe("eu-west-1");
+    // The adapter needs the tool forced, same as the Anthropic adapter.
+    expect(options?.toolChoice).toEqual({ type: "tool", name: "record_result" });
+  });
+
+  test("non-bedrock kinds get no provider-specific options", async () => {
+    let options: Record<string, unknown> | undefined;
+    await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "fireworks",
+        apiKey: "fw-key",
+        modelDefault: "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+      },
+      _complete: async (_m, _ctx, opts) => {
+        options = opts as Record<string, unknown>;
+        return toolCallMsg();
+      },
+    });
+    expect(options?.region).toBeUndefined();
+    expect(options?.env).toBeUndefined();
+  });
+
+  test("a bedrock catalog miss is a clean null, not a throw", async () => {
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "amazon-bedrock",
+        modelDefault: "amazon-bedrock/not-a-real-model",
+        region: "us-east-1",
+      },
+      _complete: async () => toolCallMsg(),
+    });
+    expect(result).toBeNull();
+  });
+});

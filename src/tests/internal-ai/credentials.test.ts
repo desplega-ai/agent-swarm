@@ -393,3 +393,152 @@ describe("resolveCredentials", () => {
     expect(probed).toBe(2);
   });
 });
+
+describe("fireworks", () => {
+  test("FIREWORKS_API_KEY resolves through env and through pi-ai's key lookup", async () => {
+    for (const source of ["env", "fallback"] as const) {
+      const cred = await resolveCredential(
+        makeOpts({
+          env: source === "env" ? { FIREWORKS_API_KEY: "fw-key" } : {},
+          _getEnvApiKey: (provider) =>
+            source === "fallback" && provider === "fireworks" ? "fw-key" : undefined,
+        }),
+      );
+      expect(cred?.kind).toBe("fireworks");
+      if (cred?.kind === "fireworks") {
+        expect(cred.apiKey).toBe("fw-key");
+        expect(cred.modelDefault).toBe("fireworks/accounts/fireworks/models/deepseek-v4p1-flash");
+      }
+    }
+  });
+
+  test("a comma-separated pool picks one member, never the joined string", async () => {
+    const cred = await resolveCredential(
+      makeOpts({ env: { FIREWORKS_API_KEY: "fw-first, fw-second" } }),
+    );
+    expect(cred?.kind).toBe("fireworks");
+    if (cred?.kind === "fireworks") {
+      expect(["fw-first", "fw-second"]).toContain(cred.apiKey);
+    }
+  });
+
+  test("FIREWORKS_API_KEY does not outrank a key an operator set for this layer", async () => {
+    // Precedence decision: existing callers keep their provider.
+    for (const earlier of ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) {
+      const cred = await resolveCredential(
+        makeOpts({ env: { FIREWORKS_API_KEY: "fw", [earlier]: "earlier-key" } }),
+      );
+      expect(cred?.kind).not.toBe("fireworks");
+    }
+    const only = await resolveCredential(makeOpts({ env: { FIREWORKS_API_KEY: "fw" } }));
+    expect(only?.kind).toBe("fireworks");
+  });
+});
+
+describe("amazon-bedrock", () => {
+  /** pi-ai's `getEnvApiKey` answers the sentinel when the AWS chain is configured. */
+  const awsChain = (provider: string) =>
+    provider === "amazon-bedrock" ? "<authenticated>" : undefined;
+
+  test("resolves from the credential chain plus a region, with no apiKey field", async () => {
+    const cred = await resolveCredential(
+      makeOpts({
+        env: { AWS_PROFILE: "example-profile", AWS_REGION: "eu-west-1" },
+        _getEnvApiKey: awsChain,
+      }),
+    );
+    expect(cred).toEqual({
+      kind: "amazon-bedrock",
+      modelDefault: "amazon-bedrock/global.anthropic.claude-haiku-5-5",
+      region: "eu-west-1",
+    });
+    // The shape is the design decision: there is no apiKey to fabricate.
+    expect(cred && "apiKey" in cred).toBe(false);
+  });
+
+  test("AWS_DEFAULT_REGION is accepted when AWS_REGION is unset", async () => {
+    const cred = await resolveCredential(
+      makeOpts({
+        env: { AWS_PROFILE: "p", AWS_DEFAULT_REGION: "us-west-2" },
+        _getEnvApiKey: awsChain,
+      }),
+    );
+    expect(cred?.kind).toBe("amazon-bedrock");
+    if (cred?.kind === "amazon-bedrock") expect(cred.region).toBe("us-west-2");
+  });
+
+  test("an empty or blank AWS_REGION falls back to AWS_DEFAULT_REGION", async () => {
+    // A compose file writes `AWS_REGION=${AWS_REGION:-}`, which sets the var to
+    // an empty string. `??` would keep that and discard the real region, and
+    // Bedrock would be skipped despite a valid AWS_DEFAULT_REGION.
+    for (const blank of ["", "   "]) {
+      const cred = await resolveCredential(
+        makeOpts({
+          env: { AWS_PROFILE: "p", AWS_REGION: blank, AWS_DEFAULT_REGION: "eu-west-1" },
+          _getEnvApiKey: awsChain,
+        }),
+      );
+      expect(cred?.kind).toBe("amazon-bedrock");
+      if (cred?.kind === "amazon-bedrock") expect(cred.region).toBe("eu-west-1");
+    }
+  });
+
+  test("no region → clean no-op rather than a guessed us-east-1", async () => {
+    const cred = await resolveCredential(
+      makeOpts({ env: { AWS_PROFILE: "p" }, _getEnvApiKey: awsChain }),
+    );
+    expect(cred).toBeNull();
+  });
+
+  test("no credential chain → clean no-op even with a region", async () => {
+    expect(await resolveCredential(makeOpts({ env: { AWS_REGION: "us-east-1" } }))).toBeNull();
+  });
+
+  test("region whitespace alone is not a region", async () => {
+    const cred = await resolveCredential(
+      makeOpts({ env: { AWS_PROFILE: "p", AWS_REGION: "   " }, _getEnvApiKey: awsChain }),
+    );
+    expect(cred).toBeNull();
+  });
+
+  test("sits after fireworks and after every key-based kind", async () => {
+    const withKeys = await resolveCredentials(
+      makeOpts({
+        env: {
+          OPENROUTER_API_KEY: "or",
+          FIREWORKS_API_KEY: "fw",
+          AWS_PROFILE: "p",
+          AWS_REGION: "us-east-1",
+        },
+        _getEnvApiKey: awsChain,
+      }),
+    );
+    expect(withKeys.map((cred) => cred.kind)).toEqual([
+      "openrouter",
+      "fireworks",
+      "amazon-bedrock",
+    ]);
+
+    const ambientOnly = await resolveCredentials(
+      makeOpts({
+        env: { AWS_PROFILE: "p", AWS_REGION: "us-east-1" },
+        _getEnvApiKey: awsChain,
+      }),
+    );
+    expect(ambientOnly.map((cred) => cred.kind)).toEqual(["amazon-bedrock"]);
+  });
+
+  test("a pinned rater model applies to the bedrock credential too", async () => {
+    const saved = process.env.MEMORY_RATER_MODEL;
+    process.env.MEMORY_RATER_MODEL = "amazon-bedrock/us.anthropic.claude-haiku-5-5";
+    try {
+      const cred = await resolveCredential(
+        makeOpts({ env: { AWS_PROFILE: "p", AWS_REGION: "us-east-1" }, _getEnvApiKey: awsChain }),
+      );
+      expect(cred?.modelDefault).toBe("amazon-bedrock/us.anthropic.claude-haiku-5-5");
+    } finally {
+      if (saved === undefined) delete process.env.MEMORY_RATER_MODEL;
+      else process.env.MEMORY_RATER_MODEL = saved;
+    }
+  });
+});
