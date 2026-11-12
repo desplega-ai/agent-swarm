@@ -23,6 +23,10 @@
  * the reason to stderr, which codex-cli 0.160.0 turns into
  * "Command blocked by PreToolUse hook: <reason>".
  *
+ * Native tool calls (Bash, apply_patch) also go to `POST /api/tool-hooks`
+ * (`native-tool-hooks.ts`), so an extension with `toolSources: ["native"]`
+ * can observe, block (exit 2) or rewrite a Bash command (`updatedInput`).
+ *
  * One-shot guarantee: a message is included in hook output only after its
  * `/delivered` POST succeeded, so a message is injected at most once. A
  * failed POST leaves the row `pending` for the next lifecycle event; rows a
@@ -34,6 +38,14 @@ import type { SteeringMessage } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
+import {
+  canonicalArgs,
+  canonicalToolName,
+  type NativeCall,
+  type NativeHookTarget,
+  runNativePost,
+  runNativePre,
+} from "./native-tool-hooks";
 import { guardGhPrBody, type PrBodyGuardDeps } from "./pr-body-guard";
 import { guardGhPrRoom, type PrRoomGuardDeps } from "./pr-room-guard";
 
@@ -45,6 +57,8 @@ export interface CodexHookMessage {
   cwd?: string;
   tool_name?: string;
   tool_input?: unknown;
+  tool_response?: unknown;
+  tool_use_id?: string;
 }
 
 export interface CodexHookConfig {
@@ -177,9 +191,67 @@ export async function codexPreToolUseBlock(
   roomDeps?: PrRoomGuardDeps,
 ): Promise<string | null> {
   if (msg.hook_event_name !== "PreToolUse") return null;
+  // An apply_patch payload is patch text, never a shell command: `gh pr create` inside a patched file is not one.
+  if (msg.tool_name === "apply_patch") return null;
   const cwd = msg.cwd ?? process.cwd();
   const block = await guardGhPrBody(msg.tool_input, cwd, deps);
   return block ?? (await guardGhPrRoom(msg.tool_input, cwd, roomDeps));
+}
+
+/** Codex's own tool calls; its MCP tools (`mcp__server__tool`) reach extensions through the MCP path. */
+function nativeCallOf(msg: CodexHookMessage): NativeCall | undefined {
+  if (!msg.tool_name || msg.tool_name.startsWith("mcp__")) return undefined;
+  return {
+    harness: "codex",
+    tool: canonicalToolName(msg.tool_name),
+    nativeTool: msg.tool_name,
+    args: canonicalArgs(msg.tool_input),
+    rawArgs: msg.tool_input,
+    toolCallId: msg.tool_use_id,
+  };
+}
+
+function nativeTargetOf(config: CodexHookConfig | null): NativeHookTarget | undefined {
+  if (!config) return undefined;
+  return {
+    apiUrl: config.apiUrl,
+    headers: { Authorization: `Bearer ${config.apiKey}`, "X-Agent-ID": config.agentId },
+    taskId: config.taskId,
+  };
+}
+
+export type CodexNativePre =
+  | { action: "continue" }
+  | { action: "block"; reason: string }
+  | { action: "modify"; output: Record<string, unknown> };
+
+/** PreToolUse: what the native-tool extensions decided, as codex hook output. */
+export async function codexNativePre(
+  msg: CodexHookMessage,
+  config: CodexHookConfig | null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CodexNativePre> {
+  const call = nativeCallOf(msg);
+  const target = nativeTargetOf(config);
+  if (msg.hook_event_name !== "PreToolUse" || !call || !target) return { action: "continue" };
+  const decision = await runNativePre(target, call, fetchImpl);
+  if (decision.action === "block") return decision;
+  // shortcut: only a Bash rewrite is applied; codex's rewrite support for apply_patch payloads is
+  // unverified, so that modify is dropped. Upgrade once a codex run proves updatedInput there.
+  if (decision.action === "modify" && call.tool === "bash") {
+    return {
+      action: "modify",
+      output: {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          permissionDecisionReason: "Tool input rewritten by an extension",
+          updatedInput: decision.args,
+        },
+      },
+    };
+  }
+  return { action: "continue" };
 }
 
 /** stdin/stdout entry point used by the `codex-hook` CLI command. */
@@ -196,8 +268,25 @@ export async function handleCodexHook(): Promise<void> {
     process.exitCode = 2;
     return;
   }
+  const config = resolveCodexHookConfig();
+  const native = await codexNativePre(msg, config);
+  if (native.action === "block") {
+    console.error(native.reason);
+    process.exitCode = 2;
+    return;
+  }
+  if (native.action === "modify") {
+    console.log(JSON.stringify(native.output));
+    return;
+  }
+  const postCall = msg.hook_event_name === "PostToolUse" ? nativeCallOf(msg) : undefined;
+  const postTarget = nativeTargetOf(config);
+  if (postCall && postTarget) {
+    // shortcut: pre and post are separate processes, so durationMs is sent as 0.
+    await runNativePost(postTarget, postCall, { result: msg.tool_response, durationMs: 0 });
+  }
   try {
-    const output = await handleCodexHookEvent(msg, resolveCodexHookConfig());
+    const output = await handleCodexHookEvent(msg, config);
     if (output) console.log(JSON.stringify(output));
   } catch {
     // Never fail the harness over steering delivery.

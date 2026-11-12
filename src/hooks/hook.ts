@@ -26,6 +26,15 @@ import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { contextBoundNoteThreshold, injectClaimedContextBoundNote } from "./context-bound-note";
+import {
+  canonicalArgs,
+  canonicalToolName,
+  type NativeCall,
+  type NativeHookTarget,
+  rawArgsFromCanonical,
+  runNativePost,
+  runNativePre,
+} from "./native-tool-hooks";
 import { guardGhPrBody } from "./pr-body-guard";
 import { guardGhPrRoom } from "./pr-room-guard";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
@@ -1033,6 +1042,25 @@ export async function handleHook(): Promise<void> {
     return lines.join("\n");
   };
 
+  /** Claude's own tool calls only: swarm MCP tools reach extensions through the MCP path. */
+  const nativeCallOf = (): NativeCall | undefined => {
+    if (!msg.tool_name || msg.tool_name.startsWith("mcp__")) return undefined;
+    return {
+      harness: "claude",
+      tool: canonicalToolName(msg.tool_name),
+      nativeTool: msg.tool_name,
+      args: canonicalArgs(msg.tool_input),
+      rawArgs: msg.tool_input,
+      toolCallId: msg.tool_use_id,
+    };
+  };
+
+  const nativeTargetOf = async (): Promise<NativeHookTarget | undefined> => {
+    const apiUrl = getBaseUrl();
+    if (!mcpConfig || !apiUrl) return undefined;
+    return { apiUrl, headers: mcpConfig.headers, taskId: (await readTaskFile())?.taskId };
+  };
+
   const isToolEvent = msg.hook_event_name === "PreToolUse" || msg.hook_event_name === "PostToolUse";
 
   // Ping the server to indicate activity, then get current agent info.
@@ -1261,13 +1289,54 @@ export async function handleHook(): Promise<void> {
         }
       }
 
-      if (loopWarning) {
+      // Extensions with toolSources "native" see the call last, so every guard above wins.
+      // Block: exit 2, stderr reaches the model. Modify: updatedInput, plus any loop warning in
+      // the same JSON object (stdout must be exactly one).
+      let rewrittenInput: unknown;
+      const nativeCall = nativeCallOf();
+      const nativeTarget = nativeCall ? await nativeTargetOf() : undefined;
+      if (nativeCall && nativeTarget) {
+        const decision = await runNativePre(nativeTarget, nativeCall);
+        if (decision.action === "block") {
+          console.error(decision.reason);
+          process.exitCode = 2;
+          return;
+        }
+        if (decision.action === "modify") {
+          rewrittenInput = rawArgsFromCanonical(decision.args, msg.tool_input);
+        }
+      }
+
+      if (rewrittenInput !== undefined) {
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "Tool input rewritten by an extension",
+              updatedInput: rewrittenInput,
+              ...(loopWarning ? { additionalContext: loopWarning } : {}),
+            },
+          }),
+        );
+      } else if (loopWarning) {
         outputToolContext("PreToolUse", loopWarning);
       }
       break;
     }
 
-    case "PostToolUse":
+    case "PostToolUse": {
+      // Observe-only report to extensions with toolSources "native".
+      // shortcut: pre and post run in separate hook processes, so durationMs is sent as 0;
+      // upgrade by stamping the pre call in a temp file keyed by tool_use_id.
+      const postCall = nativeCallOf();
+      const postTarget = postCall ? await nativeTargetOf() : undefined;
+      if (postCall && postTarget) {
+        await runNativePost(postTarget, postCall, {
+          result: msg.tool_response,
+          durationMs: 0,
+        });
+      }
       // Active session heartbeat (workers only, fire-and-forget)
       if (agentInfo && !agentInfo.isLead) {
         const heartbeatTaskFile = await readTaskFile();
@@ -1373,6 +1442,7 @@ export async function handleHook(): Promise<void> {
         }
       }
       break;
+    }
 
     case "Stop":
       // Sync CLAUDE.md (then restore its backup), identity files, and setup script back to database

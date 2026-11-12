@@ -633,9 +633,9 @@ request cannot finish within the grace period.
 The image still registers `agent-swarm codex-hook` for `SessionStart`,
 `PostToolUse`, and `Stop` in `/etc/codex/requirements.toml` for legacy
 `codex exec` sessions. App-server sessions disable steering delivery in the
-hook to avoid duplicates. The image also registers it for `PreToolUse` (Bash
-calls only), in every session mode, to block `gh pr create|edit` when the PR body for a public repo
-carries internal identifiers. No shared app-server daemon is required; task continuity
+hook to avoid duplicates. The image also registers it for `PreToolUse` (`Bash` and
+`apply_patch` calls), in every session mode, to block `gh pr create|edit` when the PR body for a public repo
+carries internal identifiers and to report native calls to extensions with `toolSources: ["native"]`. No shared app-server daemon is required; task continuity
 uses the swarm context preamble.
 
 ---
