@@ -2,9 +2,7 @@ import {
   type HarnessCatalogModel,
   harnessCatalogSection,
   harnessModelIds,
-  modelFamilyKey,
 } from "@desplega/model-catalog";
-import snapshot from "../../../src/be/modelsdev-cache.json";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -81,18 +79,15 @@ type CatalogModels = Record<string, HarnessCatalogModel>;
 /**
  * The shipped tier defaults are what onboarding proposes per agent: the step 4
  * dial reads `GET /api/models-catalog/tiers`. Every catalog id among them must
- * be listed by the served catalog and run on its harness. A codex or
- * claude-managed id must also be the newest model of its family in the
- * committed snapshot, so a snapshot refresh that adds a model fails here until
- * `DEFAULT_MODEL_TIER_MAP` moves (the served catalog can be newer after a live
- * refresh, so freshness reads the snapshot). claude tiers are CLI shortnames,
- * which already resolve to the newest model.
+ * be listed by the served catalog and run on its harness. claude tiers are CLI
+ * shortnames, which already resolve to the newest model. Freshness against the
+ * bundled snapshot lives in apps/ui/src/lib/model-catalog-drift.test.ts (this
+ * runner stays black-box).
  */
 function expectTierDefaultsCurrent(
   tiers: Record<string, unknown>[],
   served: Record<string, unknown>,
 ): void {
-  const sections = snapshot as unknown as Record<string, { models: CatalogModels } | undefined>;
   for (const row of tiers) {
     const harness = String(row.provider);
     const value = String(row.defaultValue);
@@ -104,10 +99,6 @@ function expectTierDefaultsCurrent(
         asRecord(asRecord(served[section]).models) as CatalogModels,
       );
       expect(listed.includes(value), `${label} is not a ${section} model that runs on ${harness}`);
-      const newest = harnessModelIds(harness, sections[section]?.models).find(
-        (id) => modelFamilyKey(id) === modelFamilyKey(value),
-      );
-      expect(newest === value, `${label} is older than ${newest} in the bundled catalog`);
     } else if (value.startsWith("openrouter/")) {
       const models = asRecord(asRecord(served.openrouter).models);
       expect(
