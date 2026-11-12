@@ -133,8 +133,8 @@ export async function moveSessionChains(input: {
 }
 
 /**
- * Point `key` favorites under `from` at the same path under `to` (a group
- * rename). A principal that already starred the new key keeps that row, and
+ * Point `key` favorites (stars) and `hidden-key` rows (hidden groups) under
+ * `from` at the same path under `to` (a group rename). A principal that already starred the new key keeps that row, and
  * the old row goes. With `scope`, only that favorite scope's stars move.
  */
 export async function moveKeyFavorites(input: {
@@ -144,7 +144,7 @@ export async function moveKeyFavorites(input: {
 }): Promise<void> {
   const { lo, hi } = keyPrefixRange(input.from);
   const scoped = input.scope !== undefined;
-  const range = `itemType = 'key' AND itemId >= ? AND itemId < ?${scoped ? " AND favoriteScope = ?" : ""}`;
+  const range = `itemType IN ('key','hidden-key') AND itemId >= ? AND itemId < ?${scoped ? " AND favoriteScope = ?" : ""}`;
   const rangeParams = [lo, hi, ...(scoped ? [input.scope as string] : [])];
   await getDbClient().transaction(async () => {
     await getDbClient().run(
