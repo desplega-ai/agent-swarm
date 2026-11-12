@@ -400,6 +400,23 @@ jobs:
           name: timings-snapshot
           path: .bun-test-timings
 
+      # agent-swarm-ops#884: on a live worker the suite overwrote /workspace/*.md
+      # and /tmp/identity-baselines.json through the children it spawned. The
+      # runner has none of those paths, so plant known content and check after
+      # the run that no test changed it or left a copy (.bak/.tmp/.lock) beside it.
+      - name: Plant profile canaries
+        run: |
+          sudo mkdir -p /workspace
+          sudo chown "$(id -u):$(id -g)" /workspace
+          for name in SOUL IDENTITY TOOLS HEARTBEAT CLAUDE; do
+            echo "profile canary $name" > "/workspace/$name.md"
+          done
+          printf '#!/bin/bash\necho profile canary\n' > /workspace/start-up.sh
+          echo '{"canary":true}' > /tmp/identity-baselines.json
+          sha256sum /workspace/{SOUL,IDENTITY,TOOLS,HEARTBEAT,CLAUDE}.md /workspace/start-up.sh \
+            /tmp/identity-baselines.json > "$RUNNER_TEMP/profile-canaries.sha256"
+          cat "$RUNNER_TEMP/profile-canaries.sha256"
+
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
@@ -426,6 +443,16 @@ jobs:
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Check profile canaries
+        if: ${{ !cancelled() }}
+        run: |
+          sha256sum -c "$RUNNER_TEMP/profile-canaries.sha256"
+          extra=$( (ls -A /workspace; ls -A /tmp) | grep -E '^(SOUL|IDENTITY|TOOLS|HEARTBEAT|CLAUDE)\.md.|^start-up\.sh.|^identity-baselines\.json.' || true)
+          if [ -n "$extra" ]; then
+            echo "::error::A test wrote beside the profile canaries: $extra"
+            exit 1
+          fi
 
       - name: Upload this shard's test timings
         if: always()
