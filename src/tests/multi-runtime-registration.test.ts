@@ -2470,14 +2470,20 @@ describe("remediation respects runtime liveness", () => {
 });
 
 describe("poll refreshes runtime liveness", () => {
-  test("polling advances last_seen_at", async () => {
+  test("polling advances last_seen_at once it is past the fresh window", async () => {
     const id = await makeAgent(2);
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const rt = crypto.randomUUID();
     await register(id, { maxTasks: 1, runtimeInstanceId: rt });
-    const before = await getRuntimeInstanceById(rt);
+    const registered = await getRuntimeInstanceById(rt);
 
+    // Fresh (within a tenth of the 5 min threshold): the idle poll stays read-only.
     await Bun.sleep(10);
+    await pollAgent(id, rt);
+    expect((await getRuntimeInstanceById(rt))?.lastSeenAt).toBe(registered?.lastSeenAt);
+
+    await makeRuntimeStale(rt, 1);
+    const before = await getRuntimeInstanceById(rt);
     await pollAgent(id, rt);
     const after = await getRuntimeInstanceById(rt);
     expect(after && before && after.lastSeenAt > before.lastSeenAt).toBe(true);

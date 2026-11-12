@@ -132,13 +132,22 @@ export async function createTask(
 const AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS = 5 * 60 * 1000;
 const lastAffinityDispatchSkipLoggedAt = new Map<string, number>();
 
+/** Passed by the read-only poll probe: flags a due skip log instead of writing it. */
+type PendingTaskProbe = { skipLogDue: boolean };
+
 async function logAffinityDispatchSkip(
   agent: Pick<Agent, "id" | "isLead" | "role">,
   task: Pick<AgentTask, "id" | "routingAffinity" | "routingAffinityInvalid">,
+  probe?: PendingTaskProbe,
 ): Promise<void> {
   const now = Date.now();
   const lastLoggedAt = lastAffinityDispatchSkipLoggedAt.get(task.id);
   if (lastLoggedAt !== undefined && now - lastLoggedAt < AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS) {
+    return;
+  }
+  // No write and no cooldown stamp: the write pass the flag triggers logs it.
+  if (probe) {
+    probe.skipLogDue = true;
     return;
   }
   lastAffinityDispatchSkipLoggedAt.set(task.id, now);
@@ -158,7 +167,10 @@ async function logAffinityDispatchSkip(
   } catch {}
 }
 
-export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
+export async function getPendingTaskForAgent(
+  agentId: string,
+  probe?: PendingTaskProbe,
+): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
   const rows = await getDbClient().query<AgentTaskRow>(
     "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
@@ -189,11 +201,11 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
     // assignment that was already authorized (or, for provenance, never a
     // requirement) at creation time.
     if (task.routingAffinityInvalid) {
-      await logAffinityDispatchSkip(agent, task);
+      await logAffinityDispatchSkip(agent, task, probe);
       continue;
     }
     if (task.routingAffinity?.leadOnly && !isAgentEligibleForTask(agent, task)) {
-      await logAffinityDispatchSkip(agent, task);
+      await logAffinityDispatchSkip(agent, task, probe);
       continue;
     }
     const { ready } = await dependencies.checkDependencies(task.id);

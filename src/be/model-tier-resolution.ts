@@ -147,12 +147,29 @@ export async function getAgentModelTierOverrides(agentId: string): Promise<Model
   }
 }
 
+function storedModelTierOverrides(overrides: ModelTierOverrides): string | null {
+  return Object.keys(overrides).length > 0 ? JSON.stringify(overrides) : null;
+}
+
+/** Read-only twin of `setAgentModelTierOverrides`: true when that call would write. */
+export async function modelTierOverridesDiffer(
+  agentId: string,
+  overrides: ModelTierOverrides,
+): Promise<boolean> {
+  const next = storedModelTierOverrides(overrides);
+  const row = await getDbClient().get<{ id: string }>(
+    "SELECT id FROM agents WHERE id = ? AND modelTierOverrides IS NOT ?",
+    [agentId, next],
+  );
+  return row !== null;
+}
+
 /** Store the worker's overrides; no write when unchanged. Empty object clears. */
 export async function setAgentModelTierOverrides(
   agentId: string,
   overrides: ModelTierOverrides,
 ): Promise<void> {
-  const next = Object.keys(overrides).length > 0 ? JSON.stringify(overrides) : null;
+  const next = storedModelTierOverrides(overrides);
   await getDbClient().run(
     "UPDATE agents SET modelTierOverrides = ? WHERE id = ? AND modelTierOverrides IS NOT ?",
     [next, agentId, next],
