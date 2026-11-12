@@ -69,8 +69,10 @@ test.describe("invites", () => {
       expect(connections.connections[0].apiKey.startsWith("aswt_")).toBe(true);
 
       // The Requester can start a task: the new-session composer shows.
+      // A fresh context opens the sessions tour, a modal that hides the page
+      // from the accessibility tree, so match the editor's attribute, not its role.
       await ada.goto("/sessions");
-      await expect(ada.getByRole("textbox", { name: "What's the goal?" })).toBeVisible();
+      await expect(ada.locator(`[aria-placeholder="What's the goal?"]`)).toBeVisible();
     } finally {
       await teammate.close();
     }
