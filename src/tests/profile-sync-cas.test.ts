@@ -16,8 +16,14 @@ import {
   writeProfileFileFromDb,
 } from "../commands/profile-sync";
 import { withFileLock } from "../utils/file-lock";
-
+import { installProfileWriteGuard } from "./fixtures/profile-write-guard";
 import { expectChildOk, runChild } from "./test-proc";
+
+// Protect the parent too: old writeIdentityBaselines implementations ignore injected IO.
+const restoreWriteGuard = installProfileWriteGuard(
+  join(tmpdir(), `profile-cas-parent-${crypto.randomUUID()}`),
+);
+afterAll(restoreWriteGuard);
 
 const id = "cccc0000-0000-4000-8000-000000000452";
 const dbPath = join(tmpdir(), `profile-cas-${crypto.randomUUID()}.sqlite`);
@@ -237,11 +243,25 @@ test("real Stop and PostToolUse hooks share the identity and setup CAS across se
   }
 }, 105_000);
 
-async function runRunnerCase(scenario?: "baseline-error" | "preservation-error") {
+async function runRunnerCase(scenario?: "baseline-error" | "preservation-error" | "direct-write") {
   const baselineError = scenario === "baseline-error";
   const preservationError = scenario === "preservation-error";
   const { mkdtemp } = await import("node:fs/promises");
   const directory = await mkdtemp(join(tmpdir(), "runner-profile-cas-"));
+  const outside =
+    scenario === "direct-write"
+      ? await mkdtemp(join(tmpdir(), "profile-guard-outside-"))
+      : undefined;
+  const protectedPaths = outside
+    ? {
+        workspace: join(outside, "workspace"),
+        baselines: join(outside, "identity-baselines.json"),
+      }
+    : undefined;
+  if (protectedPaths) {
+    await Bun.write(join(protectedPaths.workspace, "SOUL.md"), "simulated workspace intact");
+    await Bun.write(protectedPaths.baselines, "simulated baselines intact");
+  }
   await updateAgentProfile(id, {
     toolsMd: baselineError || preservationError ? "previous DB version" : "",
     soulMd: "s".repeat(600),
@@ -278,6 +298,7 @@ async function runRunnerCase(scenario?: "baseline-error" | "preservation-error")
         directory,
         `http://localhost:${server.port}`,
         ...(scenario ? [scenario] : []),
+        ...(protectedPaths ? [JSON.stringify(protectedPaths)] : []),
       ],
       {
         cwd: directory,
@@ -296,6 +317,18 @@ async function runRunnerCase(scenario?: "baseline-error" | "preservation-error")
         },
       },
     );
+    if (scenario === "direct-write") {
+      expect(child.exitCode).toBe(86);
+      expect(child.stderr).toContain(
+        `PROFILE WRITE GUARD: escritura fuera del sandbox: ${protectedPaths!.workspace}/SOUL.md`,
+      );
+      expect(await Bun.file(join(protectedPaths!.workspace, "SOUL.md")).text()).toBe(
+        "simulated workspace intact",
+      );
+      expect(await Bun.file(protectedPaths!.baselines).text()).toBe("simulated baselines intact");
+      console.log(`${child.stderr.trim()}\nInjected workspace and baselines intact`);
+      return;
+    }
     expectChildOk(child, "profile CAS runner");
     if (baselineError || preservationError) {
       expect((await getAgentById(id))?.toolsMd).toBe("previous DB version");
@@ -306,6 +339,7 @@ async function runRunnerCase(scenario?: "baseline-error" | "preservation-error")
   } finally {
     server.stop(true);
     await rm(directory, { recursive: true, force: true });
+    if (outside) await rm(outside, { recursive: true, force: true });
   }
 }
 
@@ -512,3 +546,61 @@ test("an unreadable setup script is held while an identity edit is still accepte
   expect(stored?.toolsMd).toBe("edit beside unreadable setup");
   expect(stored?.setupScript).toBe("export READ=1");
 });
+
+test(
+  "runner fixture rejects a direct profile write outside its sandbox",
+  () => runRunnerCase("direct-write"),
+  35_000,
+);
+
+test("write guard rejects injected workspace, baselines and lock writes through every guarded API", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const root = await mkdtemp(join(tmpdir(), "profile-guard-probe-"));
+  const sandbox = join(root, "sandbox");
+  const paths = {
+    workspace: join(root, "workspace"),
+    baselines: join(root, "identity-baselines.json"),
+  };
+  const targets = [join(paths.workspace, "SOUL.md"), paths.baselines, `${paths.baselines}.lock`];
+  for (const target of targets) await Bun.write(target, "intact");
+  try {
+    for (const operation of [
+      "bun",
+      "bun-file",
+      "bun-url",
+      "writeFile",
+      "rename",
+      "rename-source",
+      "mkdir",
+      "open",
+      "writeFileSync",
+      "renameSync",
+      "mkdirSync",
+      "openSync",
+    ]) {
+      for (const target of targets) {
+        const child = await runChild(
+          [
+            process.execPath,
+            join(import.meta.dir, "fixtures/profile-write-guard-probe.ts"),
+            sandbox,
+            JSON.stringify(paths),
+            target,
+            operation,
+          ],
+          { cwd: root, env: { PATH: process.env.PATH, HOME: root } },
+        );
+        expect(child.exitCode).toBe(86);
+        expect(child.stderr).toContain(
+          `PROFILE WRITE GUARD: escritura fuera del sandbox: ${target}`,
+        );
+        expect(await Bun.file(target).text()).toBe("intact");
+      }
+    }
+    console.log(
+      "PROFILE WRITE GUARD: 36 injected write attempts blocked; simulated workspace, baselines and lock intact; sandbox writes allowed",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 35_000);

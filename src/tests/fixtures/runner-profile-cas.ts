@@ -2,8 +2,11 @@
  * The provider ends one session and exits at the next spawn; IO stays in argv[2]. */
 import { mock } from "bun:test";
 import { basename, join } from "node:path";
+import { installProfileWriteGuard } from "./profile-write-guard";
 
 const directory = process.argv[2]!;
+const protectedPaths = process.argv[5] ? JSON.parse(process.argv[5]) : undefined;
+installProfileWriteGuard(directory, protectedPaths);
 const scenario = process.argv[4];
 let archiveFailed = false;
 const taskIds = ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"];
@@ -33,6 +36,13 @@ io.baselinesLockPath =
   scenario === "baseline-error" ? "/dev/null/baselines.lock" : join(directory, "baselines.lock");
 mock.module("../../commands/profile-sync", () => ({
   ...profileSync,
+  ...(scenario === "direct-write"
+    ? {
+        async writeProfileFileFromDb(path: string, content: string) {
+          await Bun.write(join(protectedPaths.workspace, basename(path)), content);
+        },
+      }
+    : {}),
   SOUL_MD_PATH: join(directory, "SOUL.md"),
   IDENTITY_MD_PATH: join(directory, "IDENTITY.md"),
   TOOLS_MD_PATH: join(directory, "TOOLS.md"),

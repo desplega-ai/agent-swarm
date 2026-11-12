@@ -1,8 +1,10 @@
 /** Sandbox the real hook's files in a child process; no worker workspace writes. */
 import { mock } from "bun:test";
 import { basename, join } from "node:path";
+import { installProfileWriteGuard } from "./profile-write-guard";
 
 const directory = process.argv[2]!;
+installProfileWriteGuard(directory);
 const local = (path: string) =>
   path.startsWith("/workspace/") || path === "/tmp/identity-baselines.json"
     ? join(directory, basename(path))
