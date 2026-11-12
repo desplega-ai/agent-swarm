@@ -43,7 +43,8 @@ CONSTANTS
   FixStepFence,      \* F8 (#2364): executor result writes are fenced on the claim (step running, same retryCount, run live), an exhausted failure writes step and run in one transaction; with ChildRunResume: one child per attempt, an orphaned running row is re-claimed, a failed child honors node.retry, and a sweep re-walks orphaned rows
   FixCancelTree,     \* F9 (#2377): a cancel also drops queued retries and every open task of the run; a step's task is inserted only while the step runs in a live run; finalizeOrWait and the task/child claims write nothing in a run that is no longer live (cancelled tree)
   FixParkSiblings,   \* F10 (#2957, #2966): a parked step pauses only its own branch; the walk keeps routing its siblings' successors and then runs its finalizer
-  FixSuccessorDebt   \* F11 (#2966, #2974): a walk holds its run from entry until just before its finalizer (a claim's hold is handed to the walk it starts); every run finalizer leaves a held run to the holder
+  FixSuccessorDebt,  \* F11 (#2966, #2974): a walk holds its run from entry until just before its finalizer (a claim's hold is handed to the walk it starts); every run finalizer leaves a held run to the holder
+  FixJoinRetryPending \* F12 (#3019): a branch whose latest row is pending its retry holds the join: awaitedNodeIds counts it (seed filter and batch gate), and the batch gate does not count it as completed
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -104,10 +105,16 @@ RetryNodes == {steps[i].node : i \in {j \in StepIds : PendingRetry(j)}}
 \* F6 (engine.ts awaitedNodeIds): only a node's latest row counts, so an
 \* orphaned `pending` row from a user retry does not hold the join, and a
 \* terminally failed branch does not either (partial failure still joins).
+\* F12 (#3019): a branch whose latest row is pending its retry is awaited too.
 HasRow(n) == \E i \in StepIds : steps[i].node = n
 LatestSt(n) == steps[CHOOSE i \in StepIds : steps[i].node = n
                         /\ \A j \in StepIds : steps[j].node = n => j <= i].st
 LatestIn(S) == {n \in Nodes : HasRow(n) /\ LatestSt(n) \in S}
+\* F12 (#3019, foreach-join.ts isRetryPending): nodes whose latest row is
+\* failed with nextRetryAt set.
+LatestIdx(n) == CHOOSE i \in StepIds : steps[i].node = n
+                  /\ \A j \in StepIds : steps[j].node = n => j <= i
+LatestRetry == {n \in Nodes : HasRow(n) /\ PendingRetry(LatestIdx(n))}
 Awaited(p, edges) ==
   \/ /\ FixPendingRetryGate
      /\ \/ \E q \in Nodes : <<q, p>> \in edges
@@ -115,6 +122,7 @@ Awaited(p, edges) ==
   \/ /\ FixJoinWaitsLive
      /\ \/ p \in LatestIn({"running", "waiting"})
         \/ (\E q \in Nodes : <<q, p>> \in edges) /\ ~HasRow(p)
+        \/ FixJoinRetryPending /\ p \in LatestRetry
 
 \* F3: step rows an executeStep call still owns (engine.ts executingSteps,
 \* process-local, cleared by a crash). The retry poller's rows are not owned.
@@ -371,9 +379,13 @@ WBatchEnd(t) ==
               \* F6: the gate re-reads the steps; a predecessor whose latest
               \* step completed in another walk joins the completed set.
               wd == IF FixJoinWaitsLive THEN w.done \cup LatestIn({"completed"}) ELSE w.done
+              \* F12 (#3019) engine.ts:677-680: a branch this walk failed with
+              \* a retry pending is in completedNodeIds, but the gate does not
+              \* count it while its latest row is still pending the retry.
+              gd == IF FixJoinRetryPending THEN wd \ LatestRetry ELSE wd
               rn == {n \in w.nxt : n \notin w.ex
                         /\ {p \in Preds(n) : <<p, n>> \in w.edges \/ Awaited(p, w.edges)}
-                             \subseteq wd}
+                             \subseteq gd}
           IN IF rn # {}
              THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd, !.fl = FALSE])
              ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd, !.dh = FALSE])
@@ -1187,10 +1199,17 @@ JoinWaitsForAll ==
 \* Inv3c (CX3): the convergence node is only created once every branch has a
 \* step and none is still executing or waiting. Weaker than Inv3b: a branch
 \* that failed for good may still join (partial failure), and a branch pending
-\* retry is F2's concern.
+\* retry is checked by JoinWaitsForRetry (F12).
 JoinWaitsForBranches ==
   [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
         => \A b \in Branches : HasRow(b) /\ LatestSt(b) \notin {"running", "waiting", "pending"} ]_vars
+
+\* Inv3e (F12, #3019): the convergence node is not created while a branch's
+\* latest row is pending its retry (failed, nextRetryAt set). Checked by
+\* Probe-join-retry*.cfg.
+JoinWaitsForRetry ==
+  [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
+        => Branches \cap LatestRetry = {} ]_vars
 
 \* Model sanity (F7): a row dispatches at most 1 + MaxRetries tasks, so every
 \* task generation has a handler thread in EvThreads.
