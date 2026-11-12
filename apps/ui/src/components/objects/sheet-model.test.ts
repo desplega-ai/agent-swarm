@@ -4,6 +4,8 @@ import {
   defaultWindow,
   displayOf,
   inputOf,
+  MAX_WINDOW_COLS,
+  MAX_WINDOW_ROWS,
   parseInput,
   parseRange,
   parseTsv,
@@ -11,6 +13,17 @@ import {
 } from "./sheet-model";
 
 describe("sheet-model", () => {
+  test("one far cell or a huge range builds a bounded window", () => {
+    const far = defaultWindow({ name: "S", cells: { ZZZ9999999: { v: 1 } } });
+    expect(far).toEqual({ r1: 1, c1: 1, r2: MAX_WINDOW_ROWS, c2: MAX_WINDOW_COLS });
+    expect(parseRange("S!A9999990:ZZZ9999999")?.window).toEqual({
+      r1: 9999990,
+      c1: 1,
+      r2: 9999999,
+      c2: MAX_WINDOW_COLS,
+    });
+  });
+
   test("column names", () => {
     expect([1, 26, 27, 52, 703].map(colName)).toEqual(["A", "Z", "AA", "AZ", "AAA"]);
   });

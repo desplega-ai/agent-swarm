@@ -32,6 +32,20 @@ export function parseCell(ref: string): { row: number; col: number } | null {
 
 export type SheetWindow = { r1: number; c1: number; r2: number; c2: number };
 
+/**
+ * The most rows and columns one view builds. The server caps cells, not extent,
+ * so one far cell (`A9999999`) would otherwise allocate millions of grid rows.
+ * A cell past the cap stays reachable through a `range` that starts near it.
+ */
+export const MAX_WINDOW_ROWS = 10_000;
+export const MAX_WINDOW_COLS = 260;
+
+export const boundWindow = (w: SheetWindow): SheetWindow => ({
+  ...w,
+  r2: Math.min(w.r2, w.r1 + MAX_WINDOW_ROWS - 1),
+  c2: Math.min(w.c2, w.c1 + MAX_WINDOW_COLS - 1),
+});
+
 /** `B2:D10`, `Tab!B2:D10` or `'My tab'!B2`. Null when it does not parse. */
 export function parseRange(spec: string): { tab?: string; window: SheetWindow } | null {
   const m = /^(?:'((?:[^']|'')+)'!|([^'!]+)!)?([^!:]+)(?::([^!:]+))?$/.exec(spec.trim());
@@ -42,12 +56,12 @@ export function parseRange(spec: string): { tab?: string; window: SheetWindow } 
   const tab = m[1]?.replaceAll("''", "'") ?? m[2];
   return {
     ...(tab ? { tab } : {}),
-    window: {
+    window: boundWindow({
       r1: Math.min(a.row, b.row),
       c1: Math.min(a.col, b.col),
       r2: Math.max(a.row, b.row),
       c2: Math.max(a.col, b.col),
-    },
+    }),
   };
 }
 
@@ -61,7 +75,7 @@ export function defaultWindow(tab: SheetTab): SheetWindow {
     rows = Math.max(rows, cell.row);
     cols = Math.max(cols, cell.col);
   }
-  return { r1: 1, c1: 1, r2: Math.max(20, rows + 10), c2: Math.max(8, cols + 2) };
+  return boundWindow({ r1: 1, c1: 1, r2: Math.max(20, rows + 10), c2: Math.max(8, cols + 2) });
 }
 
 /** A tab-qualified range for `sheet-ops`; the server reads `'…'` with `''` as an apostrophe. */
