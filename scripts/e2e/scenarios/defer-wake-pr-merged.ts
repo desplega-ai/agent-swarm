@@ -16,7 +16,8 @@ import { cleanupStack, hmacSignature, putConfig, reloadConfig } from "./platform
 // first. Then the integration is switched on through swarm_config with the GitHub REST stub in the
 // mock host as its API. A `pull_request.closed` webhook only names a candidate: it wakes the waiter
 // when the stub says the PR merged, and leaves the wait pending when it does not. A wait that
-// reaches its ceiling is marked fired, so it stops counting toward the per-agent cap.
+// reaches its ceiling is marked fired, so it stops counting toward the per-agent cap. A task-scoped
+// token is refused, and an agent holds at most 20 pending event waits (timer-only defers still work).
 
 type EventWaitRow = {
   status: string;
@@ -47,9 +48,9 @@ export const deferWakePrMerged: Scenario = {
     const secret = `e2e-github-${ctx.nonce}`;
     const repo = `e2e/pr-wait-${ctx.nonce}`;
     const workerId = await registerWorker(ctx, "pr-wait", { maxTasks: 5 });
-    const claim = async (label: string) => {
-      const id = await createAssignedTask(ctx, workerId, `${label} ${ctx.nonce}`);
-      await claimTask(ctx, workerId, id);
+    const claim = async (label: string, wid = workerId) => {
+      const id = await createAssignedTask(ctx, wid, `${label} ${ctx.nonce}`);
+      await claimTask(ctx, wid, id);
       return id;
     };
     const base = (taskId: string) => ({
@@ -250,6 +251,66 @@ export const deferWakePrMerged: Scenario = {
             undefined,
           "Ceiling wake-up task is missing",
         );
+      });
+
+      // A task-scoped token cannot register an event wait: the wait outlives the task that holds it.
+      ctx.llm.setGithubPull(repo, 4, { merged: false });
+      const tokenTask = await claim("Task token wait");
+      const minted = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: workerId, taskId: tokenTask, ttlMs: 600_000 },
+      });
+      expectStatus(minted, [200, 201], "mint task-scoped token");
+      const scoped = await ctx.connectMcp(workerId, {
+        apiKey: String(asRecord(minted.json).plaintext),
+        headers: { "X-Source-Task-Id": tokenTask },
+      });
+      try {
+        await expectToolError(
+          scoped,
+          "defer-task",
+          {
+            ...base(tokenTask),
+            wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo, number: 4 } },
+          },
+          "task-scoped token",
+        );
+      } finally {
+        await scoped.close();
+      }
+      expect(
+        (await readTask(ctx, tokenTask)).status === "in_progress",
+        "A refused task-token deferral must leave the task running",
+      );
+
+      // The per-agent cap: 20 pending waits, the 21st is refused, a timer-only defer still works.
+      const capWorker = await registerWorker(ctx, "pr-wait-cap", { maxTasks: 25 });
+      await withMcp(ctx, capWorker, async (worker) => {
+        for (let n = 100; n < 120; n++) {
+          ctx.llm.setGithubPull(repo, n, { merged: false });
+          await expectToolOk(worker, "defer-task", {
+            ...base(await claim(`Cap wait ${n}`, capWorker)),
+            wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo, number: n } },
+          });
+        }
+        ctx.llm.setGithubPull(repo, 200, { merged: false });
+        const over = await claim("Cap wait 21", capWorker);
+        await expectToolError(
+          worker,
+          "defer-task",
+          {
+            ...base(over),
+            wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo, number: 200 } },
+          },
+          "already hold 20",
+        );
+        const held = ctx.db.get<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM deferred_event_waits w
+             JOIN scheduled_tasks s ON s.id = w.scheduleId
+            WHERE w.status = 'pending' AND s.targetAgentId = ?`,
+          [capWorker],
+        );
+        expect(held?.n === 20, `Expected 20 pending waits for the agent, got ${held?.n}`);
+        await expectToolOk(worker, "defer-task", base(over));
       });
     } finally {
       await cleanup.run();

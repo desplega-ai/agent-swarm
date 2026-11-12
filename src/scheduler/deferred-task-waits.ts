@@ -9,6 +9,7 @@ import {
   describeEventWait,
   type EventMatch,
   EXTERNAL_EVENT_ADAPTERS,
+  type ExternalEvent,
   type ExternalEventAdapter,
   getExternalEventAdapter,
   matchKeyOf,
@@ -416,7 +417,15 @@ const externalEventListeners = new Map<ExternalEventAdapter, PrefixHandler>();
 
 function externalEventListener(adapter: ExternalEventAdapter): PrefixHandler {
   return (busEvent, payload) => {
-    for (const { event, match } of adapter.fromBusEvent(busEvent, payload)) {
+    // The bus emit loop has no guard: a throwing adapter must not 500 the webhook or skip later handlers.
+    let events: ExternalEvent[];
+    try {
+      events = adapter.fromBusEvent(busEvent, payload);
+    } catch (err) {
+      console.error(`[Scheduler] ${adapter.source} adapter failed to read ${busEvent}:`, err);
+      return;
+    }
+    for (const { event, match } of events) {
       void reconcileDeferredEventWaits(
         { source: adapter.source, event, matchKey: matchKeyOf(match) },
         true,
