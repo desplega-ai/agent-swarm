@@ -16,6 +16,10 @@
  *   - a tool file (src/tools/) selects scenarios that name one of its tools
  *   - a workflow executor (src/workflows/executors/) selects the engine that owns the
  *     node types in coverage-manifest.json, through that engine's route groups and tools
+ * Only leaf modules map: a route file must declare route() calls and a tool or executor
+ * file must have no importers beyond its registration points. Shared code (route-def.ts,
+ * auth.ts, a handler other modules import) reaches more than its own names, so it asks
+ * for the full run, as does a deleted file.
  * Any other file the SUT or the runner loads (src/be/, src/types.ts, the harness,
  * package.json, templates/) cannot be scoped, so it asks for the full run. A mapped
  * file no scenario reaches asks for the full run too. Selected scenarios bring their
@@ -83,6 +87,39 @@ function toolPatterns(source: string): RegExp[] {
   );
 }
 
+// Who may import a leaf module. A mapped file any other module imports is shared code:
+// its change reaches every importer's routes, tools or callers, so it cannot be scoped.
+const LEAF_IMPORTERS = {
+  http: /^src\/http\/(index|all-routes)\.ts$/,
+  tools: /^src\/(server|server-user)\.ts$|^src\/tools\/.+\/index\.ts$/,
+  executors: /^src\/workflows\//,
+};
+
+/** Every non-test file under src/ mapped to the src/ files that import it. */
+async function srcImporters(): Promise<Map<string, string[]>> {
+  const sources = new Map<string, string>();
+  for await (const path of new Bun.Glob("src/**/*.{ts,tsx}").scan(ROOT)) {
+    if (!NOT_LOADED.test(path)) sources.set(path, await read(path));
+  }
+  const resolve = (from: string, spec: string): string | undefined => {
+    let target: string;
+    if (spec.startsWith("@/")) target = `src/${spec.slice(2)}`;
+    else if (spec.startsWith(".")) target = join(from, "..", spec);
+    else return undefined;
+    const base = target.replace(/\.(tsx?|jsx?)$/, "");
+    return [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((path) => sources.has(path));
+  };
+  const importers = new Map<string, string[]>();
+  for (const [path, text] of sources) {
+    for (const match of text.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+)["']/g)) {
+      const target = resolve(path, match[1] ?? "");
+      if (target && target !== path)
+        importers.set(target, [...(importers.get(target) ?? []), path]);
+    }
+  }
+  return importers;
+}
+
 /** Each scenario file's text plus every local file it imports, transitively. */
 async function scenarioTexts(
   files: string[],
@@ -139,6 +176,26 @@ export async function planScope(changed: string[]): Promise<{ plan: Plan; notes:
           patterns.some((pattern) => pattern.test(texts.get(file)?.text ?? "")),
         );
 
+  let importers: Map<string, string[]> | undefined;
+  /** The file's text when it is a leaf of its kind, else the reason it asks for a full run. */
+  const leafSource = async (
+    path: string,
+    kind: keyof typeof LEAF_IMPORTERS,
+  ): Promise<{ text: string } | Plan> => {
+    const text = await read(path).catch(() => undefined);
+    if (text === undefined) return { kind: "full", reason: `${path} is gone (deleted or renamed)` };
+    importers ??= await srcImporters();
+    const shared = (importers.get(path) ?? []).filter((by) => !LEAF_IMPORTERS[kind].test(by));
+    if (shared.length > 0) {
+      const more = shared.length > 3 ? ` and ${shared.length - 3} more` : "";
+      return {
+        kind: "full",
+        reason: `${path} is shared code, imported by ${shared.slice(0, 3).join(", ")}${more}`,
+      };
+    }
+    return { text };
+  };
+
   for (const path of relevant) {
     let plan: Plan | undefined;
     const base = path.slice(SCENARIOS_DIR.length + 1);
@@ -151,19 +208,32 @@ export async function planScope(changed: string[]): Promise<{ plan: Plan; notes:
     ) {
       plan = selectFiles(path, (file) => texts.get(file)?.deps.has(base) ?? false);
     } else if (/^src\/http\/[^/]+\.ts$/.test(path)) {
-      plan = byPatterns(path, routePatterns(await read(path).catch(() => "")));
+      // A handler module declares its routes through the route() factory. Any other file
+      // here (route-def.ts, auth, utils) is infrastructure every route runs through.
+      const leaf = await leafSource(path, "http");
+      if (!("text" in leaf)) plan = leaf;
+      else if (!/\broute\(\s*\{/.test(leaf.text))
+        plan = { kind: "full", reason: `${path} declares no route(): shared HTTP code` };
+      else plan = byPatterns(path, routePatterns(leaf.text));
     } else if (/^src\/tools\/.+\.ts$/.test(path)) {
-      plan = byPatterns(path, toolPatterns(await read(path).catch(() => "")));
+      const leaf = await leafSource(path, "tools");
+      plan = "text" in leaf ? byPatterns(path, toolPatterns(leaf.text)) : leaf;
     } else if (SKILL_SOURCES.test(path)) {
       plan = byPatterns(path, [groupPattern("skills", true), toolPattern("skill-*")]);
     } else if (/^src\/workflows\/executors\/[^/]+\.ts$/.test(path)) {
+      const leaf = await leafSource(path, "executors");
       const engine = manifest.engines.find((entry) => entry.nodeTypes);
-      plan = engine
-        ? byPatterns(path, [
-            ...engine.routeGroups.map((group) => groupPattern(group, true)),
-            ...engine.tools.map(toolPattern),
-          ])
-        : { kind: "full", reason: "coverage-manifest.json names no engine that owns node types" };
+      if (!("text" in leaf)) plan = leaf;
+      else if (!engine)
+        plan = {
+          kind: "full",
+          reason: "coverage-manifest.json names no engine that owns node types",
+        };
+      else
+        plan = byPatterns(path, [
+          ...engine.routeGroups.map((group) => groupPattern(group, true)),
+          ...engine.tools.map(toolPattern),
+        ]);
     } else {
       plan = { kind: "full", reason: `${path} has no scenario map` };
     }
