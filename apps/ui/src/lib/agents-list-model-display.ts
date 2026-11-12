@@ -1,4 +1,4 @@
-import type { ReasoningEffortLevel } from "@/api/types";
+import type { AgentLatestModel, ReasoningEffortLevel } from "@/api/types";
 import {
   AMP_MODES,
   findKnownModel,
@@ -11,7 +11,10 @@ export interface AgentModelDisplay {
   configured: string | null;
   lastUsed: string | null;
   primary: string | null;
+  /** The saved model differs from the last run and nothing explains it: shown as "next task". */
   diverged: boolean;
+  /** The last run's model came from the task (a pin, a tier or a profile), not from this agent's settings. */
+  lastUsedFromTask?: boolean;
   /** Effort the next task runs at: the saved REASONING_EFFORT_OVERRIDE, else the last-reported level. Absent when unset (harness default). */
   reasoningEffort?: ReasoningEffortLevel;
 }
@@ -58,6 +61,7 @@ export function getAgentModelDisplay(
   configuredModel: string | null | undefined,
   lastUsedModel: string | null | undefined,
   reasoningEffort?: ReasoningEffortLevel,
+  lastUsedSource?: AgentLatestModel["source"],
 ): AgentModelDisplay {
   const configured = cleanModel(configuredModel);
   const lastUsed = cleanModel(lastUsedModel);
@@ -79,6 +83,19 @@ export function getAgentModelDisplay(
       primary: configured,
       diverged: false,
       reasoningEffort,
+    };
+  }
+
+  // A task that carries its own model, tier or profile beats the agent's saved model. The
+  // saved model is not pending then: it still applies to the next task that carries none.
+  if (lastUsedSource === "task") {
+    return {
+      configured,
+      lastUsed,
+      primary: configured,
+      reasoningEffort,
+      diverged: false,
+      lastUsedFromTask: true,
     };
   }
 

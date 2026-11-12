@@ -105,6 +105,7 @@ export default function AgentsPage() {
           configuredModelByAgentId.get(agent.id),
           agent.credStatus?.latestModel?.model,
           configuredEffortByAgentId.get(agent.id) ?? agent.credStatus?.latestModel?.reasoningEffort,
+          agent.credStatus?.latestModel?.source,
         );
         return <AgentModelCell display={display} liveCatalog={modelsCatalog?.providers} />;
       },
