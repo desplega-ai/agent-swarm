@@ -37,6 +37,11 @@ export const PERMISSIONS = {
     description: "Mint, rotate, or revoke an agent-bound worker token.",
     namespace: "agent",
   },
+  "agent.lifecycle.manage": {
+    description:
+      "Preview, soft-delete, or restore an agent, list deleted agents, and read their delete/restore audit.",
+    namespace: "agent",
+  },
   "user.role.manage": {
     description: "Assign or remove a person's RBAC roles.",
     namespace: "user",

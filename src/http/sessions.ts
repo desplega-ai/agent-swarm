@@ -12,6 +12,7 @@ import { SOURCE_GROUPS_READ_ONLY, sourceMoveError, sourceOfKey } from "../assets
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
+  AgentDeletedError,
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
   countSessions,
@@ -325,6 +326,7 @@ const mintAgentTokenRoute = route({
     403: { description: "Operator or user credentials required" },
     404: { description: "Agent not found and no name given" },
     409: { description: "Agent already holds an active token" },
+    410: { description: "An operator deleted this agent id (`agent_deleted`); restore it first" },
   },
   rbac: { permission: "agent.token.manage" },
 });
@@ -475,8 +477,13 @@ async function handleAgentTokens(
       })
       .catch((error) => {
         if (error instanceof AgentTokenExistsError) return { status: 409 as const };
+        if (error instanceof AgentDeletedError) return { status: 410 as const };
         throw error;
       });
+    if (result.status === 410) {
+      jsonError(res, "agent_deleted", 410);
+      return true;
+    }
     if (result.status === 404) {
       jsonError(res, "Agent not found; pass name to create it", 404);
       return true;

@@ -1659,6 +1659,22 @@ export const AgentSchema = z
   })
   .openapi("Agent");
 
+/** One `agent_history` row (migration 334): a delete or restore, append-only. */
+export const AgentHistoryEventSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    event: z.enum(["deleted", "restored"]),
+    // `user:<id>` or the operator key fingerprint `op:<hex>`.
+    actorRef: z.string(),
+    reason: z.string(),
+    // The `agents` row at the event, as stored columns.
+    snapshot: z.record(z.string(), z.unknown()),
+    createdAt: z.string(),
+  })
+  .openapi("AgentHistoryEvent");
+export type AgentHistoryEvent = z.infer<typeof AgentHistoryEventSchema>;
+
 // ---------------------------------------------------------------------------
 // Worker-reported credential snapshot
 // ---------------------------------------------------------------------------

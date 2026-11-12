@@ -266,7 +266,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.322`
 - `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.167.0`
+- `CODEX_VERSION=0.167.1`
 - `OPENCODE_VERSION=2.2.7` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.

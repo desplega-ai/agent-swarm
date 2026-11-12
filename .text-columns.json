@@ -45,6 +45,27 @@
       "exempt": "identifier"
     }
   },
+  "agent_history": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agent_id": {
+      "exempt": "identifier"
+    },
+    "event": {
+      "exempt": "enum or fixed-format value"
+    },
+    "actor_ref": {
+      "exempt": "identifier"
+    },
+    "reason": "scrubbed",
+    "snapshot_json": {
+      "exempt": "byte-exact agents-row snapshot; restore reinserts it"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    }
+  },
   "agent_log": {
     "id": {
       "exempt": "identifier"
