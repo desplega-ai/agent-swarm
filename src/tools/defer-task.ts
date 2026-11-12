@@ -11,7 +11,13 @@ import {
   getUserById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
-import { reconcileDeferredTaskWaits } from "@/scheduler/deferred-task-waits";
+import { isGitHubEnabled } from "@/github/app";
+import { fetchPullRequestState } from "@/github/pull-request-state";
+import {
+  MAX_PENDING_PR_WAITS_PER_AGENT,
+  reconcileDeferredPrMergedWaits,
+  reconcileDeferredTaskWaits,
+} from "@/scheduler/deferred-task-waits";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
@@ -161,7 +167,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
+        'Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. Or provide wakeOn {event: "pr.merged", repo, number} to wake when that GitHub PR merges. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.',
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -177,21 +183,43 @@ export const registerDeferTaskTool = (server: McpServer) => {
           .describe("Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future."),
         wakeOn: z
           .object({
-            event: z.enum(["task.completed", "task.failed", "settled"]),
+            event: z.enum(["task.completed", "task.failed", "settled", "pr.merged"]),
             taskId: z.string().min(1).optional(),
             taskIds: z.array(z.string().min(1)).min(1).optional(),
             mode: z.enum(["all", "any"]).optional(),
+            repo: z
+              .string()
+              .regex(/^[\w.-]+\/[\w.-]+$/)
+              .optional(),
+            number: z.number().int().positive().optional(),
           })
           .strict()
-          .refine((wake) => (wake.taskId !== undefined) !== (wake.taskIds !== undefined), {
-            message: "Provide exactly one of wakeOn.taskId or wakeOn.taskIds.",
-          })
+          .refine(
+            (wake) =>
+              wake.event === "pr.merged" ||
+              (wake.taskId !== undefined) !== (wake.taskIds !== undefined),
+            { message: "Provide exactly one of wakeOn.taskId or wakeOn.taskIds." },
+          )
+          .refine(
+            (wake) =>
+              wake.event === "pr.merged"
+                ? wake.repo !== undefined &&
+                  wake.number !== undefined &&
+                  wake.taskId === undefined &&
+                  wake.taskIds === undefined &&
+                  wake.mode === undefined
+                : wake.repo === undefined && wake.number === undefined,
+            {
+              message:
+                "wakeOn pr.merged takes repo (owner/name) and number only; task events take no repo or number.",
+            },
+          )
           .refine((wake) => !wake.taskIds || new Set(wake.taskIds).size === wake.taskIds.length, {
             message: "wakeOn.taskIds must not contain duplicates.",
           })
           .optional()
           .describe(
-            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling, except a workflow step superseded by its queued retry, which counts as failed. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does.",
+            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling, except a workflow step superseded by its queued retry, which counts as failed. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. pr.merged wakes you once GitHub confirms the PR merged, and is rejected when it already merged or the GitHub integration is off; an agent holds at most 20 pending PR waits. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does.",
           ),
         summary: z
           .string()
@@ -281,9 +309,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       const watchedTaskIds = wakeOn?.taskIds ?? (wakeOn?.taskId ? [wakeOn.taskId] : []);
       const wakeMode = wakeOn?.mode ?? "all";
-      const wakeDescription = wakeOn
-        ? `on ${wakeOn.event} for ${wakeMode} of tasks ${watchedTaskIds.join(", ")}, or by ${nextRunAt}`
-        : `at ${nextRunAt}`;
+      // GitHub names repos case-insensitively; waits store them lowercase.
+      const prWait =
+        wakeOn?.event === "pr.merged"
+          ? { repo: wakeOn.repo!.toLowerCase(), number: wakeOn.number! }
+          : undefined;
+      const wakeDescription = prWait
+        ? `on pr.merged for ${prWait.repo}#${prWait.number}, or by ${nextRunAt}`
+        : wakeOn
+          ? `on ${wakeOn.event} for ${wakeMode} of tasks ${watchedTaskIds.join(", ")}, or by ${nextRunAt}`
+          : `at ${nextRunAt}`;
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
       // Not the audit task: the wake-up task is requested by the schedule's created_by.
@@ -305,8 +340,44 @@ export const registerDeferTaskTool = (server: McpServer) => {
         task.requestedByUserId,
       );
 
+      // Read GitHub before the transaction: no network call under the write lock.
+      let prHeadSha: string | undefined;
+      if (prWait) {
+        if (!isGitHubEnabled()) {
+          return toolErr(
+            "GitHub integration is off, so no PR event can wake you; defer on a timer instead.",
+          );
+        }
+        try {
+          const pr = await fetchPullRequestState(prWait.repo, prWait.number);
+          if (pr.merged) {
+            return toolErr(
+              `PR ${prWait.repo}#${prWait.number} is already merged; read its result instead of deferring.`,
+            );
+          }
+          prHeadSha = pr.headSha;
+        } catch (error) {
+          return toolErr(
+            `Could not read PR ${prWait.repo}#${prWait.number} from GitHub (${error instanceof Error ? error.message : "unknown error"}); defer on a timer instead.`,
+          );
+        }
+      }
+
       try {
         const committed = await getDbClient().transaction(async () => {
+          if (prWait) {
+            const pending = await getDbClient().get<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM deferred_event_waits w
+               JOIN scheduled_tasks s ON s.id = w.scheduleId
+               WHERE w.status = 'pending' AND s.enabled = 1 AND s.targetAgentId = ?`,
+              [agent.id],
+            );
+            if ((pending?.n ?? 0) >= MAX_PENDING_PR_WAITS_PER_AGENT) {
+              throw new DeferAbortedError(
+                `You already hold ${MAX_PENDING_PR_WAITS_PER_AGENT} pending PR waits; wait for one to fire.`,
+              );
+            }
+          }
           // The transaction's write lock makes admission atomic with the INSERT.
           if (watchedTaskIds.length) {
             const existing = await getDbClient().get<{ scheduleId: string; parentTaskId: string }>(
@@ -367,7 +438,26 @@ export const registerDeferTaskTool = (server: McpServer) => {
             createdBy,
           });
 
-          if (wakeOn) {
+          if (prWait) {
+            await getDbClient().run(
+              "INSERT INTO deferred_event_waits (scheduleId, kind, repo, prNumber, headSha, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [
+                schedule.id,
+                "pr.merged",
+                prWait.repo,
+                prWait.number,
+                prHeadSha ?? null,
+                createdBy ?? null,
+                createdBy ?? null,
+              ],
+            );
+            // The PR may merge between the read above and this commit; recheck after it.
+            getDbClient().afterCommit(() => {
+              void reconcileDeferredPrMergedWaits(prWait).catch((err) => {
+                console.error("[defer-task] PR merged wake reconciliation failed:", err);
+              });
+            });
+          } else if (wakeOn) {
             await getDbClient().run(
               "INSERT INTO deferred_task_waits (scheduleId, eventName, mode, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
               [schedule.id, wakeOn.event, wakeMode, createdBy ?? null, createdBy ?? null],
@@ -398,7 +488,11 @@ export const registerDeferTaskTool = (server: McpServer) => {
                 nextRunAt,
                 requesterTz,
                 isFallbackTz,
-                wakeOn ? renderWaitingOn(watchedAgentNames, watchedTaskIds.length) : undefined,
+                prWait
+                  ? `PR ${prWait.repo}#${prWait.number}`
+                  : wakeOn
+                    ? renderWaitingOn(watchedAgentNames, watchedTaskIds.length)
+                    : undefined,
               );
           const completed = await completeTask(taskId, terminalOutput, {
             addTags: ["deferred"],

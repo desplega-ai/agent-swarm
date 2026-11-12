@@ -5,6 +5,7 @@ import {
   getUserById,
   updateScheduledTask,
 } from "@/be/db";
+import { fetchPullRequestState } from "@/github/pull-request-state";
 import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
 import { type AgentTask, type ScheduledTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "@/types";
 import { workflowEventBus } from "@/workflows/event-bus";
@@ -21,7 +22,27 @@ type TaskWait = {
 
 type WaitMember = { taskId: string; taskStatus: string | null; deferred: number };
 
-type WakeReason = "ceiling" | "task.completed" | "task.failed" | "task.cancelled" | "task.skipped";
+type WakeReason =
+  | "ceiling"
+  | "task.completed"
+  | "task.failed"
+  | "task.cancelled"
+  | "task.skipped"
+  | "pr.merged";
+
+type WaitTable = "deferred_task_waits" | "deferred_event_waits";
+
+/** A PR wait: the sibling of a task wait, keyed by the same one-time schedule. */
+type EventWait = {
+  scheduleId: string;
+  kind: "pr.merged" | "pr.checks_done";
+  repo: string;
+  prNumber: number;
+  status: "pending" | "fired";
+};
+
+/** Pending PR waits one agent may hold, so a runaway agent cannot flood the webhook fan-out. */
+export const MAX_PENDING_PR_WAITS_PER_AGENT = 20;
 
 /**
  * A member's status as waits see it. A workflow step cut by a supersede is
@@ -42,21 +63,45 @@ const WAIT_MEMBER_STATUS_SQL = `CASE
  * Pure reads: callers run it once outside the transaction (to build the task
  * through the extension pre-hooks) and once more under the write lock, where
  * the answer is authoritative. An event only identifies a candidate wait; it
- * never proves the set is ready.
+ * never proves the set is ready. A PR wait reads no GitHub here (no network
+ * under the write lock): its caller confirms the PR first, then dispatches.
  */
 async function resolveWaitCause(
   scheduleId: string,
   reason: WakeReason,
-): Promise<{ wait: TaskWait; cause: string; matchedTaskIds: string[] } | undefined> {
+): Promise<
+  { table: WaitTable; mode?: "all" | "any"; cause: string; matchedTaskIds: string[] } | undefined
+> {
   const client = getDbClient();
   const wait = await client.get<TaskWait>(
     "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
     [scheduleId],
   );
-  if (!wait || wait.status !== "pending") return undefined;
+  if (!wait) {
+    const eventWait = await client.get<EventWait>(
+      "SELECT * FROM deferred_event_waits WHERE scheduleId = ?",
+      [scheduleId],
+    );
+    if (!eventWait || eventWait.status !== "pending") return undefined;
+    if (reason === "ceiling")
+      return { table: "deferred_event_waits", cause: "ceiling expired", matchedTaskIds: [] };
+    if (reason !== eventWait.kind) return undefined;
+    return {
+      table: "deferred_event_waits",
+      cause: `${eventWait.kind} for ${eventWait.repo}#${eventWait.prNumber}`,
+      matchedTaskIds: [],
+    };
+  }
+  if (wait.status !== "pending") return undefined;
   if (reason !== "ceiling" && wait.eventName !== "settled" && wait.eventName !== reason)
     return undefined;
-  if (reason === "ceiling") return { wait, cause: "ceiling expired", matchedTaskIds: [] };
+  if (reason === "ceiling")
+    return {
+      table: "deferred_task_waits",
+      mode: wait.mode,
+      cause: "ceiling expired",
+      matchedTaskIds: [],
+    };
   const members = await client.query<WaitMember>(
     `SELECT m.taskId, ${WAIT_MEMBER_STATUS_SQL} AS taskStatus, EXISTS (
        SELECT 1 FROM scheduled_tasks d
@@ -81,7 +126,12 @@ async function resolveWaitCause(
     members.length === 1
       ? `task.${matched[0]!.taskStatus} for task ${matched[0]!.taskId}`
       : `${wait.mode} tasks matched ${wait.eventName}: ${matched.map((member) => `${member.taskId} (${member.taskStatus})`).join(", ")}`;
-  return { wait, cause, matchedTaskIds: matched.map((member) => member.taskId) };
+  return {
+    table: "deferred_task_waits",
+    mode: wait.mode,
+    cause,
+    matchedTaskIds: matched.map((member) => member.taskId),
+  };
 }
 
 function wakeSchedule(schedule: ScheduledTask, cause: string): ScheduledTask {
@@ -120,9 +170,11 @@ export async function prepareDeferredTaskWait(
   const client = getDbClient();
   // Keep ordinary schedule dispatch off the write-lock path.
   if (
-    !(await client.get<TaskWait>("SELECT * FROM deferred_task_waits WHERE scheduleId = ?", [
-      scheduleId,
-    ]))
+    !(await client.get(
+      `SELECT 1 AS found FROM deferred_task_waits WHERE scheduleId = ?
+       UNION ALL SELECT 1 FROM deferred_event_waits WHERE scheduleId = ?`,
+      [scheduleId, scheduleId],
+    ))
   )
     return undefined;
   // Extension pre-hooks must run outside the transaction, so build the wake-up task
@@ -152,7 +204,7 @@ export async function dispatchDeferredTaskWait(
     if (!schedule?.enabled) return {};
     const now = new Date().toISOString();
     const claimed = await client.run(
-      "UPDATE deferred_task_waits SET status = 'fired', firedBy = ?, resolvedAt = ?, updated_at = ? WHERE scheduleId = ? AND status = 'pending'",
+      `UPDATE ${resolved.table} SET status = 'fired', firedBy = ?, resolvedAt = ?, updated_at = ? WHERE scheduleId = ? AND status = 'pending'`,
       [reason, now, now, scheduleId],
     );
     if (!claimed.changes) return {};
@@ -165,7 +217,7 @@ export async function dispatchDeferredTaskWait(
       extraTags,
       preparedForWait,
     );
-    await client.run("UPDATE deferred_task_waits SET childTaskId = ? WHERE scheduleId = ?", [
+    await client.run(`UPDATE ${resolved.table} SET childTaskId = ? WHERE scheduleId = ?`, [
       task.id,
       scheduleId,
     ]);
@@ -183,7 +235,7 @@ export async function dispatchDeferredTaskWait(
           waiterTaskId: schedule.parentTaskId ?? null,
           wakeTaskId: task.id,
           wakeAgentId: task.agentId ?? null,
-          mode: resolved.wait.mode,
+          mode: resolved.mode,
         },
       });
     }
@@ -286,10 +338,53 @@ export async function reapSpentDeferredSchedules(now = new Date()): Promise<numb
        AND NOT EXISTS (
          SELECT 1 FROM deferred_task_waits w
          WHERE w.scheduleId = scheduled_tasks.id AND w.status = 'pending'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM deferred_event_waits e
+         WHERE e.scheduleId = scheduled_tasks.id AND e.status = 'pending'
        )`,
     [cutoff],
   );
   return result.changes;
+}
+
+/**
+ * Fire every pending `pr.merged` wait whose PR GitHub confirms merged. A webhook
+ * names the candidate PR (`only`); boot passes nothing and re-checks every
+ * pending wait, which catches a merge delivered while the API was down. A PR
+ * whose read fails stays pending: the ceiling still wakes the agent.
+ */
+export async function reconcileDeferredPrMergedWaits(only?: {
+  repo: string;
+  number: number;
+}): Promise<void> {
+  const waits = await getDbClient().query<Pick<EventWait, "scheduleId" | "repo" | "prNumber">>(
+    `SELECT w.scheduleId, w.repo, w.prNumber FROM deferred_event_waits w
+     JOIN scheduled_tasks s ON s.id = w.scheduleId
+     WHERE w.status = 'pending' AND w.kind = 'pr.merged' AND s.enabled = 1
+       ${only ? "AND w.repo = ? AND w.prNumber = ?" : ""}`,
+    only ? [only.repo.toLowerCase(), only.number] : [],
+  );
+  const merged = new Map<string, boolean>();
+  for (const wait of waits) {
+    const key = `${wait.repo}#${wait.prNumber}`;
+    try {
+      if (!merged.has(key))
+        merged.set(key, (await fetchPullRequestState(wait.repo, wait.prNumber)).merged);
+      if (merged.get(key)) await dispatchDeferredTaskWait(wait.scheduleId, "pr.merged");
+    } catch (err) {
+      // A broken wait must not stop the others or the ceiling poller.
+      console.error(`[Scheduler] PR merged wake failed for ${wait.scheduleId}:`, err);
+    }
+  }
+}
+
+function onPullRequestClosed(payload: unknown): void {
+  const pr = payload as { repo?: unknown; number?: unknown; merged?: unknown } | null;
+  if (pr?.merged !== true || typeof pr.repo !== "string" || typeof pr.number !== "number") return;
+  void reconcileDeferredPrMergedWaits({ repo: pr.repo, number: pr.number }).catch((err) => {
+    console.error("[Scheduler] PR merged event wake failed:", err);
+  });
 }
 
 function onTaskEvent(payload: unknown): void {
@@ -315,7 +410,12 @@ export async function initDeferredTaskWaits(): Promise<void> {
   workflowEventBus.on("task.superseded", onTaskEvent);
   // The resume may be committed after its parent's supersede event.
   workflowEventBus.on("task.created", onTaskEvent);
+  workflowEventBus.on("github.pull_request.closed", onPullRequestClosed);
   await reconcileDeferredTaskWaits();
+  // GitHub reads can be slow or down: never hold boot on them.
+  void reconcileDeferredPrMergedWaits().catch((err) => {
+    console.error("[Scheduler] PR merged boot reconcile failed:", err);
+  });
 }
 
 export function stopDeferredTaskWaits(): void {
@@ -325,4 +425,5 @@ export function stopDeferredTaskWaits(): void {
   workflowEventBus.off("task.skipped", onTaskEvent);
   workflowEventBus.off("task.superseded", onTaskEvent);
   workflowEventBus.off("task.created", onTaskEvent);
+  workflowEventBus.off("github.pull_request.closed", onPullRequestClosed);
 }
