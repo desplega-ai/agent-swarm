@@ -39,7 +39,18 @@ describe("sheet engine", () => {
       await call("a");
       await expect(
         engine.recalc([{ name: "S", cells: { A1: { v: 1 }, A2: { v: 2 } } }], [], { maxCells: 1 }),
-      ).rejects.toThrow("the limit is 1");
+      ).rejects.toThrow("would exceed 1 cells");
+      // Incoming patches and literal spill sizes count before the worker evaluates anything.
+      const empty = [{ name: "S", cells: {} }];
+      const patch = (input: string) => [{ tab: "S", row: 1, col: 1, input }];
+      await expect(
+        engine.recalc(empty, patch("=SEQUENCE(1000000)"), { maxCells: 10 }),
+      ).rejects.toThrow("spilled by array formulas");
+      await expect(
+        engine.recalc(empty, [...patch("1"), { tab: "S", row: 2, col: 1, input: "2" }], {
+          maxCells: 1,
+        }),
+      ).rejects.toThrow("would exceed 1 cells");
     } finally {
       engine.stop();
     }

@@ -93,7 +93,7 @@ export const knowledgeSheetsLimits: Scenario = {
           Object.keys(cellsOf(storedSheet(fake, path), 1)).length === 10_000,
           "a refused write changed nothing",
         );
-        // A runaway spill is refused by the same cap instead of hanging the API.
+        // A runaway spill is refused by the same cap before the engine evaluates it.
         expect(
           (
             await refused("sheet-set-range", {
@@ -101,7 +101,7 @@ export const knowledgeSheetsLimits: Scenario = {
               range: "t8!A1",
               values: [["=SEQUENCE(1000000)"]],
             })
-          ).includes("exceed"),
+          ).includes("spilled by array formulas"),
           "spill past the cell limit",
         );
 
