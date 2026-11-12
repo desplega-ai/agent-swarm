@@ -308,6 +308,10 @@ export const knowledgeSheetsXlsx: Scenario = {
         );
         const fullText = Array.from({ length: 170 }, (_, i) => [String(i).padEnd(32_000, "x")]);
         seed(`in/text-${ctx.nonce}.xlsx`, workbook([["Text", XLSX.utils.aoa_to_sheet(fullText)]]));
+        // 40,000 cells of 100 chars: ~277 KB as xlsx and under 5 MiB as compact JSON, but over it as the pretty-printed file `save` writes
+        const wideText = "x".repeat(100);
+        const wide = Array.from({ length: 400 }, () => Array.from({ length: 100 }, () => wideText));
+        seed(`in/wide-${ctx.nonce}.xlsx`, workbook([["Wide", XLSX.utils.aoa_to_sheet(wide)]]));
         const garbage = zipOf({
           "[Content_Types].xml": "<Types/>",
           "xl/workbook.xml": "<workbook><sheets><sheet",
@@ -340,6 +344,11 @@ export const knowledgeSheetsXlsx: Scenario = {
             `in/text-${ctx.nonce}.xlsx`,
             "5 MiB",
             "a workbook that fits as xlsx but not as a 5 MiB sheet",
+          ],
+          [
+            `in/wide-${ctx.nonce}.xlsx`,
+            "5 MiB",
+            "a workbook that fits as compact JSON but not as the saved file",
           ],
         ] as const) {
           const reason = await importRefusal(source);
