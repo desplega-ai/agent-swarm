@@ -2240,6 +2240,7 @@ export const ScheduledTaskSchema = z
     lastRunAt: z.iso.datetime().optional(),
     nextRunAt: z.iso.datetime().optional(),
     createdByAgentId: z.string().optional(),
+    updatedByAgentId: z.string().optional(),
     // Set only by `defer-task`: the task this schedule wakes up to continue.
     // Passed through as the created task's `parentTaskId`.
     parentTaskId: z.string().optional(),
@@ -3197,6 +3198,7 @@ export const WorkflowSchema = z
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     createdByAgentId: z.string().optional(),
+    updatedByAgentId: z.string().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
     createdBy: z.string().optional(),
@@ -3835,6 +3837,10 @@ export const ScriptRecordSchema = z
     fsMode: ScriptFsModeSchema,
     executor: ScriptExecutorNameSchema.nullable().default(null),
     createdByAgentId: z.string().nullable(),
+    // Audit: last writing agent, and the person behind the create / last update.
+    updatedByAgentId: z.string().nullable().default(null),
+    createdBy: z.string().nullable().default(null),
+    updatedBy: z.string().nullable().default(null),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -4213,6 +4219,12 @@ export const SkillSchema = z
       .int()
       .describe("Confirmed invocations across all harnesses, at most one per runner session"),
     lastInvokedAt: z.string().nullable(),
+    // Audit: who created / last updated the skill (agent and person). NULL on
+    // seeded and system rows. ownerAgentId is ownership, not the creator.
+    createdByAgentId: z.string().nullable().default(null),
+    updatedByAgentId: z.string().nullable().default(null),
+    createdBy: z.string().nullable().default(null),
+    updatedBy: z.string().nullable().default(null),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
     lastFetchedAt: z.string().nullable(),

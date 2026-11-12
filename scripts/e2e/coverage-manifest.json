@@ -272,6 +272,15 @@
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
       "scenarios": ["knowledge-assets"]
     },
+    "audit-attribution": {
+      "description": "create, cross-actor update and no-person update record the writing agent and person on scripts, skills, workflows and schedules over HTTP, MCP and a script run's ctx.swarm calls",
+      "scenarios": [
+        "audit-attribution-workflows",
+        "audit-attribution-schedules",
+        "audit-attribution-scripts",
+        "audit-attribution-skills"
+      ]
+    },
     "budget-refusal": {
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
       "scenarios": ["core-budgets"]

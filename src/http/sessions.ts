@@ -10,7 +10,7 @@ import {
 } from "../assets/key";
 import { SOURCE_GROUPS_READ_ONLY, sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AgentDeletedError,
   AssetKeyMovesBlockedError,
@@ -770,7 +770,7 @@ async function withSessionMove(
   run: (context: { actor: SessionActor; changedBy?: string; key: string | null }) => Promise<void>,
 ): Promise<void> {
   try {
-    const changedBy = await resolveHttpAuditUserId(req, myAgentId);
+    const changedBy = await resolveHttpRequesterUserId(req, myAgentId);
     const actor = await resolveSessionActor(req, myAgentId);
     const key = destination === null ? null : await authorizeAssetKeyWrite(destination, changedBy);
     await assertAssetKeyMovesAllowed();

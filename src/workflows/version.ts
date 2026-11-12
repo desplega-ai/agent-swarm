@@ -95,7 +95,13 @@ export async function snapshotAndUpdateWorkflow(
     } else {
       version = await snapshotWorkflow(workflowId, opts.changedByAgentId);
     }
-    const workflow = await updateWorkflow(workflowId, updates);
+    // Every caller is a user-intent write: record the pair for this write
+    // (person null = unknown), never a previous writer's person.
+    const workflow = await updateWorkflow(workflowId, {
+      ...updates,
+      updatedBy: updates.updatedBy ?? null,
+      updatedByAgentId: opts.changedByAgentId ?? null,
+    });
     return { workflow, version };
   });
 }

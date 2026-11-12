@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -432,7 +432,7 @@ export async function handleSchedules(
     }
 
     try {
-      const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
+      const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
       let key: string | undefined;
       try {
         key = body.key ? await authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
@@ -484,7 +484,9 @@ export async function handleSchedules(
         params: body.params,
         requiredParams: body.requiredParams,
         requires: body.requires,
-        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
+        createdByAgentId: myAgentId,
+        // Not the audit header: a schedule fires its tasks as requested by created_by.
+        createdBy: trustedUserId ?? undefined,
       });
 
       createSchedule.respond(res, 201, schedule);
@@ -573,7 +575,7 @@ export async function handleSchedules(
       try {
         body.key = await authorizeAssetKeyWrite(
           parsed.body.key,
-          await resolveHttpAuditUserId(req, myAgentId),
+          await resolveHttpRequesterUserId(req, myAgentId),
         );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
@@ -779,8 +781,10 @@ export async function handleSchedules(
       }
     }
 
-    const updatedBy = await resolveHttpAuditUserId(req, myAgentId);
-    if (updatedBy !== null) body.updatedBy = updatedBy;
+    // The audit pair describes this write: the person is null when unknown,
+    // never left over from an earlier writer.
+    body.updatedBy = await resolveHttpAuditUserId(req, myAgentId);
+    body.updatedByAgentId = myAgentId ?? null;
     let schedule: Awaited<ReturnType<typeof updateScheduledTask>>;
     try {
       schedule = await updateScheduledTask(parsed.params.id, body);

@@ -577,6 +577,7 @@ value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setScriptRunFollowUpGuard
+value:setSkillUpdatedBy
 value:setSlackMessageTracking
 value:setTaskTitleIfUnset
 value:setUserFavorite

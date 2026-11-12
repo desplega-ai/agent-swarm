@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
@@ -1141,7 +1141,7 @@ export async function handleTasks(
     if (!parsed) return true;
 
     // Trusted identity first, then the body hint; see resolveTaskRequester.
-    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
     const requestedByUserId = await resolveTaskRequester(
       req,
       myAgentId,
@@ -1543,7 +1543,7 @@ export async function handleTasks(
       return true;
     }
 
-    const trustedUserId = await await resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await await resolveHttpRequesterUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     if (
       process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&

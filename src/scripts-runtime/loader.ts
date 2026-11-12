@@ -63,6 +63,11 @@ export type RunScriptInput = {
   apiKey?: string;
   /** Per-boot runtime identity of the invoking worker; system context, never script input. */
   runtimeInstanceId?: string;
+  /**
+   * Task the run acts for, sent as `X-Audit-Source-Task-Id` on its `ctx.swarm`
+   * calls so their writes get the same audit person. The api re-checks ownership.
+   */
+  sourceTaskId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   mcpBaseUrl?: string;
@@ -108,6 +113,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
       },
       ...(input.runtimeInstanceId
         ? { runtimeInstanceId: { value: input.runtimeInstanceId, isSecret: false as const } }
+        : {}),
+      ...(input.sourceTaskId
+        ? { auditSourceTaskId: { value: input.sourceTaskId, isSecret: false as const } }
         : {}),
     },
     user: input.userConfig ?? {},

@@ -63,5 +63,6 @@ apps/templates-ui/  # templates site, its own package
 
 # Escape hatches for single test files.
 src/tests/agent-history.test.ts  # agent_history append-only triggers, full-row restore equality, extension and lead blockers, and revocation of every token kind need direct DB and token-mint access the black-box suite does not have; the HTTP surface is in core-agent-lifecycle
+src/tests/audit-agent-person.test.ts  # written before Rule 1 landed; its schedule-context run (contextKey task:schedule:*) and per-write-path negative controls seed tasks directly in the DB, and the HTTP, MCP and ctx.swarm write paths are also covered black-box by the audit-attribution scenarios
 src/tests/sheet-engine.test.ts  # engine timeout kill and queue bounds need an injected 1 ms timeout and a filled queue, unreachable black-box
 src/tests/primitives-sheets-xlsx.test.ts  # parseXlsx/buildXlsx pure-function limits on hand-built hostile zips (mismatched end-of-directory counts, zip64 extras, linear-time dropped-feature scan, per-disk entry counts); needs byte-level archives and timing a tool call cannot craft or assert; import/export contracts live in knowledge-sheets-xlsx

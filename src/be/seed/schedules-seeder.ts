@@ -414,7 +414,15 @@ export function createSchedulesSeeder(
       const existing = await getScheduledTaskByName(schedule.name);
       if (existing) {
         // Nulls clear the previous target's fields when a template changes target.
-        await updateScheduledTask(existing.id, { ...data, nextRunAt: resolvedNextRunAt });
+        // Seed writes carry no agent and no person on purpose: the audit columns
+        // stay NULL (an update resets them) so a seeded row is never attributed
+        // to whoever booted the API.
+        await updateScheduledTask(existing.id, {
+          ...data,
+          nextRunAt: resolvedNextRunAt,
+          updatedBy: null,
+          updatedByAgentId: null,
+        });
       } else {
         await createScheduledTask({
           name: schedule.name,

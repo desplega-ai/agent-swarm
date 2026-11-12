@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   createWorkflow,
   deleteWorkflow,
@@ -733,7 +733,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
     let key: string | undefined;
     try {
       key = parsed.body.key
@@ -867,7 +867,10 @@ export async function handleWorkflows(
     const updateArgs: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
     if (parsed.body.key !== undefined) {
       try {
-        updateArgs.key = await authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
+        updateArgs.key = await authorizeAssetKeyWrite(
+          parsed.body.key,
+          await resolveHttpRequesterUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -977,7 +980,10 @@ export async function handleWorkflows(
     let key: string | undefined;
     if (body.key !== undefined) {
       try {
-        key = await authorizeAssetKeyWrite(body.key, updatedBy2);
+        key = await authorizeAssetKeyWrite(
+          body.key,
+          await resolveHttpRequesterUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -1101,7 +1107,7 @@ export async function handleWorkflows(
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
         triggeredByAgentId: myAgentId,
-        requestedByUserId: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
+        requestedByUserId: (await resolveHttpRequesterUserId(req, myAgentId)) ?? undefined,
         detach: parsed.query.wait === "false",
         // Recorded in the run's own transaction, before the walk starts.
         accept: claim

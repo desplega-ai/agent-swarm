@@ -38,7 +38,7 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
     async ({ id, nodeId, ...nodeFields }, requestInfo) => {
       try {
         const updatedBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
 
         const result = await patchWorkflowDefinition({

@@ -86,7 +86,14 @@ export async function patchWorkflowDefinition(options: {
       version = (await snapshotWorkflow(id, snapshotAgentId)).version;
     }
 
-    const workflow = await updateWorkflow(id, { ...updates, definition: patchResult.definition });
+    // Every caller is a user-intent write: record the pair for this write
+    // (person null = unknown), never a previous writer's person.
+    const workflow = await updateWorkflow(id, {
+      ...updates,
+      definition: patchResult.definition,
+      updatedBy: updates?.updatedBy ?? null,
+      updatedByAgentId: snapshotAgentId ?? null,
+    });
     if (!workflow) return { ok: false, reason: "not_found" };
 
     return { ok: true, workflow, version, definition: patchResult.definition };
