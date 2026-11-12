@@ -467,7 +467,8 @@
         "knowledge-sheets",
         "knowledge-sheets-edges",
         "knowledge-sheets-limits",
-        "knowledge-sheets-scripts"
+        "knowledge-sheets-scripts",
+        "knowledge-sheets-values"
       ]
     },
     "skills-lifecycle": {
