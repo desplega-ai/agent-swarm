@@ -36,7 +36,7 @@ const workbook = () => {
  */
 export const knowledgeSheetsXlsxScripts: Scenario = {
   name: "knowledge-sheets-xlsx-scripts",
-  order: 596,
+  order: 598,
   async run(ctx) {
     const fake = startAgentFsStub(ctx, "xlsx-script");
     const agentId = await registerAgent(ctx, "sheets-xlsx-script");
