@@ -1,0 +1,90 @@
+---
+title: 'Reviewing marketplace partner payout discrepancies with AI agents'
+description: "Agent Swarm gathers a flagged partner payout's records, matches transactions and fees, and hands finance a source-linked packet for people to decide."
+agent:
+  when: "Someone wants finance and partner operations to review a partner payout that does not match its underlying transactions"
+---
+
+Agent Swarm can gather the authorized records for a flagged marketplace partner payout, run deterministic matching of transaction identifiers, stated fees and payout records inside a settlement window the finance team defines, and hand finance and the partner-operations owner a source-linked exception packet, while data validation, any correction and partner communication stay with people. What it takes off the team is the assembly: pulling a partner's records out of different systems and lining them up against the payout.
+
+The scope is one exception: an outgoing marketplace partner payout that does not match its underlying transactions. A failed incoming customer payment, a supplier invoice against a purchase order, an inventory or catalog mismatch, a moderation appeal or a sales-pipeline record is a different handoff with a different owner.
+
+## When another tool fits better
+
+**Your payments or payout provider's own reconciliation.** If the mismatch sits inside one provider's records, its reconciliation report and dashboard are the cheaper answer. Most timing and fee differences close there.
+
+**A specialist reconciliation product.** If the volume is high and the bottleneck is matching at scale, a product built for reconciliation fits better. It brings its own matching engine and review screens, with support for each processor's settlement rules.
+
+Agent Swarm fits a different shape: cross-team exceptions. The payout record lives with the provider, the ledger in the marketplace's own database, refunds in a payment system, the fee schedule in a contract or a spreadsheet, and the partner relationship with an operations owner outside finance. When those sit apart, the work is gathering evidence for the owner who decides. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in marketplace reconciliation feature or a customer result. It needs integrations, permissions and configuration the team sets up and tests.
+
+<Mermaid title="Illustrative partner payout exception flow, from a flagged payout to a human decision." chart={`flowchart LR
+  A["Payout flagged<br/>(mismatch with transactions)"] --> B["Finance owner sets<br/>settlement window,<br/>approved records"]
+  B --> C["Gather authorized records<br/>(payout, ledger, refunds, fees)"]
+  C --> D["Deterministic matching<br/>swarm-script to JSON"]
+  D --> E["Agent assembles<br/>source-linked packet"]
+  E --> G{{"human-in-the-loop<br/>finance owner"}}
+  G -- "approve" --> R["Resolve with<br/>partner-operations owner"]
+  G -- "reject" --> S["Archive, return<br/>or escalate"]
+`} />
+
+**1. A payout is flagged.** The trigger is a check the team already runs: a payout that does not tie to the transactions it covers, caught in a monthly review or raised by partner operations. The workflow does not decide what counts as a discrepancy.
+
+**2. The finance owner sets the settlement window and the approved record sources.** Which dates the payout covers, which timezone the cutoff uses, whether a late refund belongs to this period, and which systems are the record of truth. Written down, that definition makes the arithmetic reproducible; left implicit, two people get two answers.
+
+**3. Configured connections gather the authorized records.** The payout record, the transaction ledger for the window, refunds and reversals, and the fee schedule the partner was charged against. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**4. Deterministic steps do the matching.** A `swarm-script` node matches transaction identifiers, sums the covered transactions, applies the stated fees against the fee schedule and emits JSON, so the arithmetic runs the same way every time and no model does a subtraction. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
+
+**5. An agent assembles the exception packet.** The Researcher turns the JSON and the source records into one document: which transactions are missing or counted twice, where the fee total diverges from the schedule, and what could not be retrieved. Every line links its source record. Mismatches are grouped by kind, and a missing record stays empty rather than showing a plausible number.
+
+**6. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a short summary and a link to the full packet in Slack, and resumes only on a human response. On approve, the packet goes to the partner-operations owner, who resolves the exception with finance. On reject, the packet is archived with the reason, returned for more records, or escalated to the payout owner.
+
+## Discrepancy examples
+
+Every example below is illustrative. No partner or provider is named, and none is a customer case.
+
+**Timing differences.** A transaction falls inside the payout's stated window, or one day outside it, depending on when it settled and the timezone the cutoff uses. The packet shows the transaction date, the settlement date and the window boundary, so the reader can see which side it falls on.
+
+**Partial payouts.** A payout covers most of a period's transactions but not all, because some settled after the run or were held. The packet lists covered and uncovered transactions with their dates and leaves the reason to the provider.
+
+**Fees.** The fee deducted from the payout does not match the schedule for that transaction type. The packet shows the fee charged, the fee the schedule states and the record behind the basis.
+
+**Refunds and reversals after the payout.** A refund or chargeback processed after the payout run belongs to the next period, or should have reduced this one. The packet dates it, links it to its original transaction and names the payout it affected.
+
+**Multiple currencies.** The payout arrives in one currency, the transactions are recorded in another, and the rate applied is not the one the team expected. The packet shows the source currency, the converted amount, the rate source and the date the rate was taken. The team states which rate it accepts; the swarm does not choose one.
+
+**Missing records.** A transaction appears in the ledger with no counterpart in the payout, or a fee has no matching schedule line. The packet names the gap and who holds the record rather than estimating a value.
+
+## Conflicting records, access limits and escalation
+
+**Sources that disagree.** When two records of the same payout differ, or the ledger and the provider report disagree on totals, the agent shows both with links and dates and does not pick one. The packet names the two records and the owners who must settle which is right.
+
+**Missing access.** When a record sits behind a system the swarm is not connected to, the packet names the record and the owner who can grant access. It does not work around the gap by asking someone to paste a statement into a chat, or estimate an amount to fill the hole. Who may read payout and partner data, the named owner and the roles that see the ledger belong in the workflow's [governance](/docs/guides/ai-operations-governance) record.
+
+**Escalation when the owner does not answer.** The gate carries a timeout and a fallback path, which the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends for blocking approvals. A reasonable shape is a reminder before the timeout, then a named backup owner, then an explicit hold that keeps the exception on the aged list. The reject branch needs its own definition: archive with the reason, return to the requester, or escalate. The workflow must never proceed on silence.
+
+## What stays human-owned
+
+Four decisions stay with people in every version of this workflow.
+
+- **Validating the data.** Whether the gathered records are the right ones, and whether the settlement window was applied correctly, is a person's judgement. The packet makes that check fast; it does not make it.
+- **Any correction or adjustment.** Whether a discrepancy is accepted, credited, re-billed or disputed belongs to finance and the partner-operations owner. The workflow has no path to a journal entry, a payout adjustment or a change to the fee record.
+- **Partner communication.** The agent does not message the partner. A payout conversation carries commercial weight and belongs to the person who owns the relationship, with finance reading the numbers first.
+- **Payment.** The swarm does not execute payments. It has no path to a payment instruction, and the workflow ends at a recorded human decision.
+
+Nothing here is an accounting or compliance control, and none of it guarantees an accurate payout. It assembles evidence for the people who make those calls.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a payout exception is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how scripts reach a payout provider, a payment system and a ledger with the raw secret out of source.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow, approval thresholds and rules for who may read payout and partner data.
+- [Team collaboration](/docs/features/team-collaboration): shared context for the finance and partner-operations people who work the same exception.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): when to use a provider's reconciliation or a specialist product.
