@@ -663,6 +663,24 @@ export async function resolveApiUrl(): Promise<string> {
   return raw.trim().replace(/\/+$/, "");
 }
 
+/**
+ * The API's own agent-fs credentials on the shared org (its creator, so org
+ * admin), for infrastructure calls such as webhook registration. Never
+ * provisions: null when the URL, key or org is missing.
+ */
+export async function resolveAgentFsServiceCredentials(): Promise<{
+  apiUrl: string;
+  apiKey: string;
+  orgId: string;
+} | null> {
+  const apiUrl = await resolveApiUrl();
+  const apiKey = await resolveSharedApiKey();
+  const orgId =
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) || process.env.AGENT_FS_DEFAULT_ORG_ID;
+  if (!apiUrl || !apiKey || !orgId) return null;
+  return { apiUrl, apiKey, orgId };
+}
+
 async function resolveRegisterEmail(): Promise<string> {
   const configured =
     process.env.AGENT_FS_REGISTER_EMAIL || (await getConfigValue("AGENT_FS_REGISTER_EMAIL"));

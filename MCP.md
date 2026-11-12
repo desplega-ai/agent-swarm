@@ -2201,7 +2201,7 @@ Get a primitive object on your default agent-fs drive by `id` or `path`. `missin
 
 **List primitive objects**
 
-List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
+List primitive objects on your default agent-fs drive, newest first. Hides objects whose file agent-fs reported deleted. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2214,7 +2214,7 @@ List primitive objects on your default agent-fs drive, newest first. Filter by `
 
 **Reindex primitive objects**
 
-Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.
+Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, so run it again while `truncated` is true (`cutBy` names the limit). agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

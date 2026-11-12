@@ -252,7 +252,7 @@ export const knowledgeSheets: Scenario = {
           ["sheet-list", {}],
         ] as const) {
           expect(
-            toolText(await callToolErr(mcp, name, args)).includes("no own AGENT_FS_API_KEY"),
+            toolText(await callToolErr(mcp, name, args)).includes("agent-fs is not configured for this agent"),
             `${name}: an agent without a key is refused`,
           );
         }
