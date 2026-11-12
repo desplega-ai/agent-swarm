@@ -459,7 +459,9 @@ export const knowledgeSheetsXlsx: Scenario = {
           ["sheet-export-xlsx", { id: "x", targetPath: "a.xlsx" }],
         ] as const) {
           expect(
-            toolText(await callToolErr(mcp, name, args)).includes("no own AGENT_FS_API_KEY"),
+            toolText(await callToolErr(mcp, name, args)).includes(
+              "agent-fs is not configured for this agent",
+            ),
             `${name}: an agent without a key is refused`,
           );
         }
