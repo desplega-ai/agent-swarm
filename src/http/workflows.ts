@@ -727,7 +727,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const refKeys = serverRefInputKeys(parsed.body.input);
+    const refKeys = serverRefInputKeys(parsed.body.input, parsed.body.params);
     if (refKeys.length > 0 && (await requestSecretReadScope(req)) !== "all") {
       jsonError(res, serverRefInputDeniedMessage(refKeys), 403);
       return true;
@@ -959,11 +959,15 @@ export async function handleWorkflows(
       }
     }
 
-    // New ref input, or a new definition over stored ref input, decides where
-    // server-resolved values go: both need config.read.secrets.
-    const refKeys = serverRefInputKeys(
-      body.input !== undefined ? body.input : body.definition ? existing.input : undefined,
-    );
+    // New ref input or params, or a new definition over stored ref input,
+    // decides where server-resolved values go: all need config.read.secrets.
+    const refKeys =
+      body.input !== undefined || body.params !== undefined || body.definition
+        ? serverRefInputKeys(
+            body.input !== undefined ? body.input : existing.input,
+            body.params !== undefined ? body.params : existing.params,
+          )
+        : [];
     if (refKeys.length > 0 && (await requestSecretReadScope(req)) !== "all") {
       jsonError(res, serverRefInputDeniedMessage(refKeys), 403);
       return true;
