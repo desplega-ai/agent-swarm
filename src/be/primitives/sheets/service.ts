@@ -78,20 +78,18 @@ async function load(target: SheetTarget) {
       `the file for ${object.path} is missing on the drive; run object-reindex`,
     );
   }
-  if (
-    content &&
-    typeof content === "object" &&
-    !Array.isArray(content) &&
-    !embeddedId(content as UnparsedWorkbook)
-  ) {
-    // A save outside the sheet tools (a hand edit, another app) dropped the embedded id.
-    throw new ObjectsError(
-      `${object.path} has no embedded swarm.id, so a save outside the sheet tools dropped it; run object-reindex (ctx.objects.reindex) with prefix '${object.path}' to write the id back, then retry`,
-    );
-  }
   const parsed = SheetDocSchema.safeParse(content);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
+    const { issues } = parsed.error;
+    // Only the swarm block is wrong and it carries no id: a save outside the sheet tools
+    // (a hand edit, another app) dropped it, and reindex writes it back. Any other shape
+    // error keeps the generic refusal, since reindex would not fix it.
+    if (issues.every((i) => i.path[0] === "swarm") && !embeddedId(content as UnparsedWorkbook)) {
+      throw new ObjectsError(
+        `${object.path} has no embedded swarm.id, so a save outside the sheet tools dropped it; run object-reindex (ctx.objects.reindex) with prefix '${object.path}' to write the id back, then retry`,
+      );
+    }
+    const issue = issues[0];
     throw new ObjectsError(
       `${object.path} is not a valid swarm-sheet/1 workbook: ${issue?.path.join(".") || "document"}: ${issue?.message}`,
     );
