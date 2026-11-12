@@ -10,7 +10,7 @@ import type {
   SessionSectionCounts,
   SessionTreeResponse,
 } from "../api/types";
-import { groupKeyOf } from "./session-groups";
+import { groupKeyOf, sourceOfGroupKey } from "./session-groups";
 
 /**
  * The first API that serves `GET /api/session-tree`, the session moves, and
@@ -247,6 +247,8 @@ interface SidebarListFilter {
   triage?: "inbox" | "working" | "later" | "done";
   noGroup?: boolean;
   groupKey?: string;
+  /** A source group: the group and its nested threads. */
+  keyPrefix?: string;
 }
 
 /**
@@ -267,6 +269,8 @@ export function sidebarListParams(
     return { ...base, triage: container };
   }
   if (container === "nogroup") return { ...base, noGroup: true };
+  // A source group (a channel, a DM) lists its threads' sessions too: one list, one sort.
+  if (sourceOfGroupKey(container)) return { ...base, keyPrefix: container };
   return { ...base, groupKey: container };
 }
 

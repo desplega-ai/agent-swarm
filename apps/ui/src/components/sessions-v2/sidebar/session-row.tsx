@@ -18,7 +18,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { peerColor } from "@/lib/comb/presence";
-import { chatSourceOf, groupCrumb, groupLabel, isNoGroupKey } from "@/lib/session-groups";
+import {
+  chatSourceOf,
+  groupCrumb,
+  groupLabel,
+  isNoGroupKey,
+  sourceOfGroupKey,
+} from "@/lib/session-groups";
 import { splitMatches } from "@/lib/session-search";
 import { sessionChipStatus } from "@/lib/session-status";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
@@ -262,7 +268,9 @@ function SessionRowView({
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   const activity = activityOf(session);
   const group = flat ? groupLabel(session.groupKey, me, labels) : "";
-  const chat = chatSourceOf(session.root);
+  // Under a source group the section header already names the source: no mark per row.
+  const chat =
+    flat || !sourceOfGroupKey(session.groupKey ?? "") ? chatSourceOf(session.root) : null;
   const others = othersOf(session, me);
   const nowDate = new Date(now);
 

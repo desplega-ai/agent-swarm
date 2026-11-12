@@ -59245,6 +59245,9 @@
                   "groupKey": {
                     "type": "string"
                   },
+                  "keyPrefix": {
+                    "type": "string"
+                  },
                   "show": {
                     "type": "string",
                     "enum": [

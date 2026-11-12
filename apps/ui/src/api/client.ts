@@ -3766,6 +3766,8 @@ class ApiClient {
     triage?: "inbox" | "working" | "later" | "done";
     noGroup?: boolean;
     groupKey?: string;
+    /** A source group with its nested threads. */
+    keyPrefix?: string;
     show?: "all";
     showSource?: string[];
     /** Sessions to leave out: rows unchecked after "Select all N". */

@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { sidebarGroupKey } from "@/lib/session-groups";
 import type { GroupMenuActions } from "./group-menu";
 import type { TreeDialogState } from "./tree-dialogs";
 import type { TreeMoves } from "./use-tree-moves";
@@ -42,7 +43,8 @@ export function useGroupEdits({
    * Back to the tree, with the group and its parents open and the cursor on
    * it. Null is No group.
    */
-  const revealGroup = (key: string | null) => {
+  const revealGroup = (group: string | null) => {
+    const key = group && sidebarGroupKey(group);
     setQuery("");
     moves.reveal(key);
     placeCursor(key === null ? "box:nogroup" : `group:${key}`);

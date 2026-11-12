@@ -363,7 +363,7 @@ test.describe("sessions sidebar", () => {
     await clean.assertClean();
   });
 
-  test("Slack shows its 10 newest groups, then more; a Done DM session still opens", async ({
+  test("Slack shows its 10 newest groups, then more; a DM lists its Done and thread sessions as one list", async ({
     page,
     api,
     swarm,
@@ -400,6 +400,16 @@ test.describe("sessions sidebar", () => {
       userId,
       body: { userId, itemType: "to_read", itemId: dmId, status: "done" },
     });
+    // A thread with two sessions: the server nests it, the sidebar lists its sessions inline.
+    const threadTitle = `e2e slack thread ${run}`;
+    for (let i = 0; i < 2; i++) {
+      await session(
+        api,
+        swarm,
+        { userId, agentId, title: `${threadTitle} ${i}`, key: `${dm}thread:1.2/`, source: "slack" },
+        true,
+      );
+    }
 
     await showSlack(page);
     await page.goto("/sessions");
@@ -417,6 +427,10 @@ test.describe("sessions sidebar", () => {
     await dmRow.getByText(/^DM/).first().click();
     const dmSession = tree.getByRole("treeitem", { name: new RegExp(dmTitle), level: 3 });
     await expect(dmSession).toBeVisible();
+    // One list: the thread's two sessions are rows like the DM's own, with no thread row.
+    await expect(
+      tree.getByRole("treeitem", { name: new RegExp(threadTitle), level: 3 }),
+    ).toHaveCount(2);
     await shot(page, testInfo, "slack-done-dm-session");
     await dmSession.click();
     await expect(page).toHaveURL(new RegExp(`/sessions/${dmId}(\\?|$)`));

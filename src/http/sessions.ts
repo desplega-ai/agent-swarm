@@ -678,10 +678,14 @@ const triageSessionListRoute = route({
   body: z
     .object({
       action: z.enum(["done", "inbox", "read", "unread"]),
-      /** The list: one of Inbox, Later, Done, No group, or a group. */
+      /** The list: one of Inbox, Later, Done, No group, a group, or a source group with its threads. */
       triage: z.enum(["inbox", "working", "later", "done"]).optional(),
       noGroup: z.boolean().optional(),
       groupKey: SessionKeyFilterSchema.optional(),
+      /** A source group (`shared/slack/<channel>/`) with its nested threads, as the sidebar lists it. */
+      keyPrefix: SessionKeyFilterSchema.refine((key) => sourceOfKey(key) !== null, {
+        message: "keyPrefix must be a source group",
+      }).optional(),
       show: SessionShowSchema,
       hideSource: z.array(z.string().min(1)).max(32).optional(),
       /** Root sources to keep; an empty array keeps none. */
@@ -689,9 +693,11 @@ const triageSessionListRoute = route({
       /** Root task ids to leave out: rows unchecked after 'Select all N'. */
       exceptIds: z.array(z.string().min(1)).max(500).optional(),
     })
-    .refine((body) => [body.triage, body.noGroup, body.groupKey].filter(Boolean).length === 1, {
-      message: "Name exactly one list: triage, noGroup, or groupKey",
-    }),
+    .refine(
+      (body) =>
+        [body.triage, body.noGroup, body.groupKey, body.keyPrefix].filter(Boolean).length === 1,
+      { message: "Name exactly one list: triage, noGroup, groupKey, or keyPrefix" },
+    ),
   responses: {
     200: {
       description: "The number of sessions written",

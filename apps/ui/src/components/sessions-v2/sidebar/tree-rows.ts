@@ -15,6 +15,7 @@ import {
   type SessionGroupTree,
   type SessionResourceKind,
   type SessionSource,
+  sourceOfGroupKey,
   sourceSectionLabel,
 } from "../../../lib/session-groups";
 import {
@@ -463,13 +464,15 @@ export function buildTreeRows({
   const groupNode = (node: GroupNode, level: number, readOnly = false) => {
     const open = isOpen(node.key);
     const key = `group:${node.key}`;
+    // A source group (a channel, a DM) lists its threads' sessions with its own: one list.
+    const whole = sourceOfGroupKey(node.key) !== null;
     rows.push({
       type: "group",
       key,
       level,
       node,
       open,
-      counts: open ? node.own : node.subtree,
+      counts: open && !whole ? node.own : node.subtree,
       sharedWithMe: false,
       readOnly,
       ...(hiddenGroups?.has(node.key) ? { hidden: true } : {}),
@@ -478,8 +481,9 @@ export function buildTreeRows({
       rows.push({ type: "create", key: `create:${node.key}`, level: level + 1, parent: node.key });
     }
     if (!open) return;
+    if (whole) return fill(node.key, key, node.subtree.total, level + 1, false, "group");
     const children = arrange(node.children);
-    // A source group's subgroups (its threads) page like its sessions.
+    // A resource's subgroups (an app's actions) page like its sessions.
     if (readOnly) {
       sourceGroupList(children, groupListId(node.key), level + 1, (child) =>
         groupNode(child, level + 1, readOnly),

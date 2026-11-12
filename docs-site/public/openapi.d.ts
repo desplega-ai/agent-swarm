@@ -23279,6 +23279,7 @@ export interface paths {
                         triage?: "inbox" | "working" | "later" | "done";
                         noGroup?: boolean;
                         groupKey?: string;
+                        keyPrefix?: string;
                         /**
                          * @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.
                          * @enum {string}
