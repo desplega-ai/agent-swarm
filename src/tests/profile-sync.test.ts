@@ -791,6 +791,21 @@ describe("collectProfilePayloads (baseline integration)", () => {
     ]);
   });
 
+  test("session_sync holds the workspace CLAUDE.md when no DB token was recorded", async () => {
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("original") }),
+    });
+
+    const payloads = await collectProfilePayloads(
+      ["claude"],
+      "session_sync",
+      files,
+      WORKSPACE_CLAUDE_MD_PATH,
+    );
+    expect(payloads).toEqual([]);
+  });
+
   test("session_sync holds identity uploads when no DB tokens were recorded", async () => {
     const files = reader({
       [TOOLS_MD_PATH]: "tools content",

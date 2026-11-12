@@ -643,3 +643,55 @@ test("write guard rejects injected workspace, baselines and lock writes through 
     await rm(root, { recursive: true, force: true });
   }
 }, 35_000);
+
+/** A non-Claude session (codex, pi, opencode) syncs /workspace/CLAUDE.md, not the hook's file. */
+function workspaceClaudeMd(bootClaudeMd: string) {
+  const files: Record<string, string> = {
+    [WORKSPACE_CLAUDE_MD_PATH]: bootClaudeMd,
+    [IDENTITY_BASELINES_PATH]: JSON.stringify(
+      bootIdentityBaselines({ claudeMd: bootClaudeMd }, undefined, id),
+    ),
+  };
+  const io: ProfileFileIO = {
+    readFile: async (path) => files[path],
+    writeFile: async (path, content) => {
+      files[path] = content;
+    },
+    baselinesLockPath: join(tmpdir(), `profile-cas-${crypto.randomUUID()}.lock`),
+  };
+  return {
+    files,
+    sync: () =>
+      syncProfileFilesToServer({
+        agentId: id,
+        apiUrl: "http://profile.test",
+        apiKey: "test-key",
+        fields: ["claude"],
+        claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
+        io,
+        fetchImpl: profileApi,
+      }),
+  };
+}
+
+test("a non-Claude session's stale workspace CLAUDE.md does not overwrite a later DB apply", async () => {
+  // agent-swarm-ops#452 (12/11): a codex session's end-of-session sync put back
+  // the claudeMd of an older apply over the one applied while it ran.
+  await updateAgentProfile(id, { claudeMd: "claudeMd at boot" });
+  const box = workspaceClaudeMd("claudeMd at boot");
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = "claudeMd of an older apply";
+  await updateAgentProfile(id, { claudeMd: "claudeMd applied during the session" });
+  await box.sync();
+  expect((await getAgentById(id))?.claudeMd).toBe("claudeMd applied during the session");
+});
+
+test("a non-Claude session's workspace CLAUDE.md edits are accepted one after another", async () => {
+  await updateAgentProfile(id, { claudeMd: "claudeMd at boot" });
+  const box = workspaceClaudeMd("claudeMd at boot");
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = "first session edit";
+  await box.sync();
+  expect((await getAgentById(id))?.claudeMd).toBe("first session edit");
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = "second session edit";
+  await box.sync();
+  expect((await getAgentById(id))?.claudeMd).toBe("second session edit");
+});
