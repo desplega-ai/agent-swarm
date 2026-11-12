@@ -21,7 +21,7 @@ mock.module("@excalidraw/excalidraw", () => ({
   hashElementsVersion: (e: unknown[]) => JSON.stringify(e),
   restoreElements: (e: unknown[]) => e,
   restoreAppState: (a: Props) => ({
-    viewBackgroundColor: "#ffffff",
+    viewBackgroundColor: "#fff",
     gridSize: 20,
     gridStep: 5,
     gridModeEnabled: false,
@@ -256,24 +256,24 @@ async function mountBoard(h: ReturnType<typeof boardHarness>, snapshot: Props) {
 }
 
 test("a background-only change autosaves the new background", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
-  await mountBoard(h, board(1, { elements: [], appState: { viewBackgroundColor: "#ffffff" } }));
-  h.state.appState = { ...h.state.appState, viewBackgroundColor: "#ff0000" };
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
+  await mountBoard(h, board(1, { elements: [], appState: { viewBackgroundColor: "#fff" } }));
+  h.state.appState = { ...h.state.appState, viewBackgroundColor: "#f00" };
   await runSave(await change(h));
   expect(h.puts).toHaveLength(1);
   expect(h.puts[0]?.ifMatch).toBe(1);
-  expect(h.puts[0]?.content.appState.viewBackgroundColor).toBe("#ff0000");
+  expect(h.puts[0]?.content.appState.viewBackgroundColor).toBe("#f00");
 });
 
 test("a save that returns after the board unmounted marks no version", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
   const marked: unknown[] = [];
   let finish!: (r: Response) => void;
   h.props.fetchFn = () => new Promise<Response>((r) => (finish = r));
   h.props.markVersion = (v: unknown) => void marked.push(v);
   const { root } = await mountBoard(
     h,
-    board(1, { elements: [], appState: { viewBackgroundColor: "#ffffff" } }),
+    board(1, { elements: [], appState: { viewBackgroundColor: "#fff" } }),
   );
   h.state.elements = [{ id: "mine", version: 1 }];
   await runSave(await change(h));
@@ -289,7 +289,7 @@ test("generated iframe HTML is dropped on load and on a polled update", async ()
     version: v,
     customData: { keep: 1, generationData: { status: "done", html: "<script>x</script>" } },
   });
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
   const { root } = await mountBoard(h, board(1, { elements: [frame(1)] }));
   expect(excalProps?.initialData.elements).toEqual([
     { id: "f", type: "iframe", version: 1, customData: { keep: 1 } },
@@ -303,66 +303,66 @@ test("generated iframe HTML is dropped on load and on a polled update", async ()
 });
 
 test("control: a selection or scroll change schedules no save", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
-  await mountBoard(h, board(1, { elements: [], appState: { viewBackgroundColor: "#ffffff" } }));
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
+  await mountBoard(h, board(1, { elements: [], appState: { viewBackgroundColor: "#fff" } }));
   h.state.appState = { ...h.state.appState, selectedElementIds: { a: true }, scrollX: 40 };
   expect(await change(h)).toEqual([]);
 });
 
 test("a clean poll applies the remote background, and the next drawing save keeps it", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
   const { root } = await mountBoard(
     h,
-    board(1, { elements: [], appState: { viewBackgroundColor: "#ffffff" } }),
+    board(1, { elements: [], appState: { viewBackgroundColor: "#fff" } }),
   );
   await act(async () =>
     root.render(
       <BoardView
         {...h.props}
-        snapshot={board(2, { elements: [], appState: { viewBackgroundColor: "#00ff00" } }) as never}
+        snapshot={board(2, { elements: [], appState: { viewBackgroundColor: "#0f0" } }) as never}
       />,
     ),
   );
-  expect(h.updates.at(-1)?.appState?.viewBackgroundColor).toBe("#00ff00");
+  expect(h.updates.at(-1)?.appState?.viewBackgroundColor).toBe("#0f0");
   // The applied scene is the new baseline: its own onChange saves nothing.
   expect(await change(h)).toEqual([]);
 
   h.state.elements = [{ id: "mine", version: 1 }];
   await runSave(await change(h));
   expect(h.puts[0]?.ifMatch).toBe(2);
-  expect(h.puts[0]?.content.appState.viewBackgroundColor).toBe("#00ff00");
+  expect(h.puts[0]?.content.appState.viewBackgroundColor).toBe("#0f0");
 });
 
 test("a polled scene with no background resets it to the default", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ff0000" });
+  const h = boardHarness({ viewBackgroundColor: "#f00" });
   const { root } = await mountBoard(
     h,
-    board(1, { elements: [], appState: { viewBackgroundColor: "#ff0000" } }),
+    board(1, { elements: [], appState: { viewBackgroundColor: "#f00" } }),
   );
   await act(async () =>
     root.render(<BoardView {...h.props} snapshot={board(2, { elements: [] }) as never} />),
   );
-  expect(h.state.appState.viewBackgroundColor).toBe("#ffffff");
+  expect(h.state.appState.viewBackgroundColor).toBe("#fff");
 });
 
 test("an unsaved local background meets a remote poll: conflict, then Take theirs applies it", async () => {
-  const h = boardHarness({ viewBackgroundColor: "#ffffff" });
+  const h = boardHarness({ viewBackgroundColor: "#fff" });
   const { root, host } = await mountBoard(
     h,
-    board(1, { elements: [], appState: { viewBackgroundColor: "#ffffff" } }),
+    board(1, { elements: [], appState: { viewBackgroundColor: "#fff" } }),
   );
-  h.state.appState = { ...h.state.appState, viewBackgroundColor: "#ff0000" };
+  h.state.appState = { ...h.state.appState, viewBackgroundColor: "#f00" };
   await change(h); // save scheduled, not run yet
-  const remote = board(2, { elements: [], appState: { viewBackgroundColor: "#00ff00" } });
+  const remote = board(2, { elements: [], appState: { viewBackgroundColor: "#0f0" } });
   await act(async () => root.render(<BoardView {...h.props} snapshot={remote as never} />));
   expect(host.querySelector("[role=alert]")?.textContent).toContain("Someone else changed");
   expect(h.updates).toEqual([]);
-  expect(h.state.appState.viewBackgroundColor).toBe("#ff0000");
+  expect(h.state.appState.viewBackgroundColor).toBe("#f00");
 
   h.setLatest(remote);
   const take = [...host.querySelectorAll("button")].find((b) => b.textContent === "Take theirs");
   await act(async () => (take as HTMLButtonElement).click());
-  expect(h.state.appState.viewBackgroundColor).toBe("#00ff00");
+  expect(h.state.appState.viewBackgroundColor).toBe("#0f0");
   expect(host.querySelector("[role=alert]")).toBeNull();
 });
 
