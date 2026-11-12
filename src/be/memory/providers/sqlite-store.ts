@@ -211,6 +211,9 @@ export class SqliteMemoryStore implements MemoryStore {
   private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
   private searchHealthCache: { health: MemoryHealth; db: unknown; at: number } | null = null;
+  private searchHealthRefresh: Promise<MemoryHealth> | null = null;
+  /** Bumped when the cache is dropped, so a refresh that started before the drop is not stored. */
+  private searchHealthGeneration = 0;
 
   constructor() {
     this.ensureVecTable();
@@ -477,7 +480,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     const afterCount = this.getVecCount();
-    this.searchHealthCache = null;
+    this.dropSearchHealth();
     this.lastPopulate = {
       attempted,
       inserted,
@@ -673,7 +676,7 @@ export class SqliteMemoryStore implements MemoryStore {
       });
     }
 
-    const health = this.searchHealth();
+    const health = await this.searchHealth();
     if (
       isHybridSearchEnabled() &&
       options.queryText &&
@@ -1592,7 +1595,7 @@ export class SqliteMemoryStore implements MemoryStore {
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
           // The row now misses from memory_vec: search must see the fallback.
-          this.searchHealthCache = null;
+          this.dropSearchHealth();
         }
       }
     });
@@ -1695,6 +1698,51 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
+  /**
+   * The same eight counts as getHealthCounts(), as one statement on a read
+   * worker so the scans block that thread and not the API event loop. One
+   * statement keeps the other worker free for searches while it runs.
+   */
+  private async getHealthCountsOffLoop(): Promise<MemoryHealth["counts"]> {
+    const tableUsable = this.getVecTableSchema() !== null && isSqliteVecAvailable();
+    const valid = `embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`;
+    const row = await memorySearchReader.get<Record<keyof MemoryHealth["counts"], number>>(
+      `SELECT
+         (SELECT COUNT(*) FROM agent_memory) AS total,
+         (SELECT COUNT(*) FROM agent_memory WHERE embedding IS NOT NULL) AS withEmbedding,
+         (SELECT COUNT(*) FROM agent_memory WHERE ${valid}) AS validEmbedding,
+         (SELECT COUNT(*) FROM agent_memory
+           WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}) AS invalidEmbedding,
+         (SELECT COUNT(*) FROM agent_memory
+           WHERE ${valid} AND (expiresAt IS NULL OR expiresAt > datetime('now'))) AS searchable,
+         ${tableUsable ? "(SELECT COUNT(*) FROM memory_vec)" : "0"} AS memoryVec,
+         ${
+           tableUsable
+             ? `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})
+                - (SELECT COUNT(*) FROM memory_vec v CROSS JOIN agent_memory m ON m.id = v.memory_id
+                   WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${VECTOR_BYTES})`
+             : `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})`
+         } AS missingFromVec,
+         ${
+           tableUsable
+             ? `(SELECT COUNT(*) FROM memory_vec v LEFT JOIN agent_memory m ON m.id = v.memory_id
+                 WHERE m.id IS NULL)`
+             : "0"
+         } AS extraInVec`,
+    );
+    if (!row) throw new Error("health counts returned no row");
+    return {
+      total: row.total,
+      withEmbedding: row.withEmbedding,
+      validEmbedding: row.validEmbedding,
+      invalidEmbedding: row.invalidEmbedding,
+      searchable: row.searchable,
+      memoryVec: row.memoryVec,
+      missingFromVec: row.missingFromVec,
+      extraInVec: row.extraInVec,
+    };
+  }
+
   private getHealthCounts(): MemoryHealth["counts"] {
     const db = getDb();
     const tableExists = this.getVecTableSchema() !== null;
@@ -1748,19 +1796,48 @@ export class SqliteMemoryStore implements MemoryStore {
 
   /**
    * getHealth() for the search path. The counts scan agent_memory and
-   * memory_vec synchronously, so search reuses one result per window; the
-   * health endpoint keeps calling getHealth() for fresh counts.
+   * memory_vec (about 0.8 s at 63k memories), so search never runs them on the
+   * event loop: one read worker computes them, search reuses one result per
+   * window, and an expired "vec" result is served while a refresh runs in the
+   * background. The health endpoint keeps calling getHealth() for fresh counts.
    */
-  private searchHealth(): MemoryHealth {
+  private async searchHealth(): Promise<MemoryHealth> {
     const db = getDb();
     const cached = this.searchHealthCache;
     // The db check drops a result that outlived a DB swap (tests reinit it).
-    if (cached && cached.db === db && Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) {
-      return cached.health;
+    if (cached && cached.db === db) {
+      if (Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) return cached.health;
+      // A stale "vec" is at worst one refresh old; a stale fallback is
+      // awaited so a repaired index is seen on the next search.
+      if (cached.health.retrievalMode === "vec") {
+        this.refreshSearchHealth(db).catch(() => {});
+        return cached.health;
+      }
     }
-    const health = this.getHealth();
-    this.searchHealthCache = { health, db, at: Date.now() };
-    return health;
+    return this.refreshSearchHealth(db);
+  }
+
+  /** One refresh at a time: concurrent searches share it. */
+  private refreshSearchHealth(db: unknown): Promise<MemoryHealth> {
+    if (this.searchHealthRefresh) return this.searchHealthRefresh;
+    const generation = this.searchHealthGeneration;
+    const refresh = (async () => {
+      let health: MemoryHealth;
+      try {
+        health = this.healthFromCounts(await this.getHealthCountsOffLoop());
+      } catch (err) {
+        console.warn("[memory-search] health counts failed:", (err as Error).message);
+        health = this.getHealth();
+      }
+      // A DB swap or a vec write mid-refresh invalidated this result.
+      if (getDb() === db && generation === this.searchHealthGeneration)
+        this.searchHealthCache = { health, db, at: Date.now() };
+      return health;
+    })().finally(() => {
+      this.searchHealthRefresh = null;
+    });
+    this.searchHealthRefresh = refresh;
+    return refresh;
   }
 
   /**
@@ -1769,12 +1846,20 @@ export class SqliteMemoryStore implements MemoryStore {
    * recount on the next search, and a stale "vec" is at worst one TTL old.
    */
   private noteVecWrite(): void {
-    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.searchHealthCache = null;
+    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.dropSearchHealth();
+  }
+
+  private dropSearchHealth(): void {
+    this.searchHealthCache = null;
+    this.searchHealthGeneration++;
   }
 
   getHealth(): MemoryHealth {
+    return this.healthFromCounts(this.getHealthCounts());
+  }
+
+  private healthFromCounts(counts: MemoryHealth["counts"]): MemoryHealth {
     const schema = this.getVecTableSchema();
-    const counts = this.getHealthCounts();
     const reasons: string[] = [];
 
     if (!isSqliteVecAvailable()) reasons.push("sqlite_vec_extension_unavailable");

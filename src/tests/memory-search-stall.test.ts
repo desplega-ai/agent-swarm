@@ -4,12 +4,16 @@ import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, getDbClient, initDb } from "../be/db";
 import { SEARCH_HEALTH_TTL_MS, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
+import { memorySearchReader } from "../be/memory/search-reader";
 import type { AgentMemory } from "../types";
 
 // POST /api/memory/search stalled the API event loop for 10 to 30 s. Two causes,
 // both in the store's search path:
 //   1. search() ran the health counts (8 sync COUNT(*) scans) on every call,
-//      plus one COUNT(*) FROM memory_vec per vec query.
+//      plus one COUNT(*) FROM memory_vec per vec query. Once per window on the
+//      event loop was still a ~0.8 s stall every minute at 63k memories, so the
+//      counts now run on a read worker and an expired result is served while
+//      one refresh runs.
 //   2. a review task's recall dropped review completions after the fetch, so
 //      a window full of them widened the fetch round after round.
 // Everything here is real: the SQLite store and its vec, FTS and hybrid paths.
@@ -60,15 +64,27 @@ async function remember(
   await store.updateEmbedding(row.id, mix(cos, 4), "test");
 }
 
-/** Count the raw-handle statements the health counts and the vec count run. */
-function watchCountScans(): { health: number; vecCount: number; stop: () => void } {
+/**
+ * Count the statements the health counts and the vec count run: `health` and
+ * `vecCount` on the raw main-thread handle, `offLoop` for the one-statement
+ * count the search path sends to a read worker.
+ */
+function watchCountScans(): {
+  health: number;
+  vecCount: number;
+  offLoop: number;
+  stop: () => void;
+} {
   const db = getDb();
   const realPrepare = db.prepare;
+  const realGet = memorySearchReader.get;
   const seen = {
     health: 0,
     vecCount: 0,
+    offLoop: 0,
     stop: () => {
       db.prepare = realPrepare;
+      memorySearchReader.get = realGet;
     },
   };
   db.prepare = ((sql: string, ...rest: unknown[]) => {
@@ -77,7 +93,16 @@ function watchCountScans(): { health: number; vecCount: number; stop: () => void
     if (sql === "SELECT COUNT(*) as count FROM memory_vec") seen.vecCount++;
     return (realPrepare as (...args: unknown[]) => unknown).call(db, sql, ...rest);
   }) as typeof db.prepare;
+  memorySearchReader.get = ((sql: string, params?: never) => {
+    if (sql.includes("AS extraInVec")) seen.offLoop++;
+    return realGet(sql, params);
+  }) as typeof memorySearchReader.get;
   return seen;
+}
+
+/** Wait for the background health refresh a search started. */
+async function settleHealthRefresh(store: SqliteMemoryStore): Promise<void> {
+  await (store as unknown as { searchHealthRefresh: Promise<unknown> | null }).searchHealthRefresh;
 }
 
 beforeAll(async () => {
@@ -116,7 +141,7 @@ describe("memory search does not rescan the tables on every call", () => {
     expect(hit?.retrievalSource).toBe(vecUsable ? "vec" : "fallback");
   });
 
-  test("search computes the health counts once per window and never counts memory_vec per query", async () => {
+  test("search computes the health counts off the event loop, once per window, and never counts memory_vec per query", async () => {
     const store = new SqliteMemoryStore();
     await remember(store, healthAgent, "second-note", "manual", null, 0.8);
     const scans = watchCountScans();
@@ -125,9 +150,10 @@ describe("memory search does not rescan the tables on every call", () => {
         await store.search(queryEmbedding, healthAgent, { limit: 5 }); // vec path
         await store.search(queryEmbedding, healthAgent, { limit: 5, queryText: QUERY }); // hybrid
       }
-      expect(scans.health).toBe(1);
-      // The health counts hold the only memory_vec count: none per vec query.
-      expect(scans.vecCount).toBeLessThanOrEqual(1);
+      expect(scans.offLoop).toBe(1);
+      // Nothing scanned on the main-thread handle: not the counts, not memory_vec.
+      expect(scans.health).toBe(0);
+      expect(scans.vecCount).toBe(0);
 
       // A store write inside the window does not recount while the mode is vec.
       await remember(store, healthAgent, "third-note", "manual", null, 0.7);
@@ -135,20 +161,32 @@ describe("memory search does not rescan the tables on every call", () => {
         (c) => c.name,
       );
       expect(names).toContain("third-note");
-      expect(scans.health).toBe(1);
+      expect(scans.offLoop).toBe(1);
 
+      // Past the window the stale "vec" result is served and one refresh runs.
       setSystemTime(new Date(Date.now() + SEARCH_HEALTH_TTL_MS + 1));
       await store.search(queryEmbedding, healthAgent, { limit: 5 });
       await store.search(queryEmbedding, healthAgent, { limit: 5 });
-      expect(scans.health).toBe(2);
+      await settleHealthRefresh(store);
+      expect(scans.offLoop).toBe(2);
+      expect(scans.health).toBe(0);
 
       // The health endpoint's read stays fresh on every call.
       store.getHealth();
       store.getHealth();
-      expect(scans.health).toBe(4);
+      expect(scans.health).toBe(2);
     } finally {
       scans.stop();
     }
+  });
+
+  test("the off-loop counts equal the main-thread counts", async () => {
+    const store = new SqliteMemoryStore();
+    await remember(store, healthAgent, "counted-note", "manual", null, 0.6);
+    const offLoop = await (
+      store as unknown as { getHealthCountsOffLoop(): Promise<unknown> }
+    ).getHealthCountsOffLoop();
+    expect(offLoop).toEqual(store.getHealth().counts);
   });
 });
 
