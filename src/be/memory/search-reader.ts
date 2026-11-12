@@ -30,7 +30,9 @@ type Job = {
   resolve: (rows: unknown) => void;
   reject: (err: Error) => void;
 };
-type Slot = { worker: Worker; job: Job | null };
+/** Bun's Worker has ref/unref; the DOM lib the extension type bundle compiles against does not. */
+type RefWorker = Worker & { ref?: () => void; unref?: () => void };
+type Slot = { worker: RefWorker; job: Job | null };
 
 /** A worker died or was stopped with this read in flight; the read is safe to rerun in-process. */
 class WorkerGoneError extends Error {}
@@ -44,9 +46,9 @@ function workerSpecifier(): string {
 function spawnWorker(file: string, vecExtensionPath: string | undefined): Promise<Worker> {
   return new Promise<Worker>((resolve, reject) => {
     // Inside the executor, so a constructor that throws rejects like a failed boot.
-    const worker = new Worker(workerSpecifier());
+    const worker: RefWorker = new Worker(workerSpecifier());
     // An idle pool must not keep the API process (or a test run) alive.
-    worker.unref();
+    worker.unref?.();
     const fail = (message: string) => {
       clearTimeout(timer);
       worker.terminate();
@@ -106,7 +108,7 @@ class SearchReadPool {
       const job = this.queue.shift()!;
       slot.job = job;
       // Busy workers hold the process open, so an awaited read always settles.
-      slot.worker.ref();
+      slot.worker.ref?.();
       const request: SearchReadRequest = {
         type: "read",
         id: job.id,
@@ -124,7 +126,7 @@ class SearchReadPool {
       return;
     }
     slot.job = null;
-    slot.worker.unref();
+    slot.worker.unref?.();
     this.idle.push(slot);
     if (message.type === "result") job.resolve(message.rows);
     else job.reject(new Error(message.message));
