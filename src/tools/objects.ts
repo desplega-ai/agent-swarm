@@ -162,8 +162,12 @@ export const registerObjectReindexTool = (server: McpServer) => {
       title: "Reindex primitive objects",
       annotations: { readOnlyHint: false, idempotentHint: true },
       description:
-        "Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, so run it again while `truncated` is true (`cutBy` names the limit). agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.",
-      inputSchema: z.object({ kind: KindSchema.optional() }),
+        "Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Without `prefix` it touches every id-less file of the kind on the drive, including files other people put there: pass `prefix` (same path-prefix match as object-list; end it with `/` for one folder, or give one file's path) to limit it, and `dryRun: true` to get the same report with nothing written. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, so run it again while `truncated` is true (`cutBy` names the limit). agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.",
+      inputSchema: z.object({
+        kind: KindSchema.optional(),
+        prefix: z.string().optional(),
+        dryRun: z.boolean().optional(),
+      }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         scanned: z.number().optional(),
@@ -174,16 +178,17 @@ export const registerObjectReindexTool = (server: McpServer) => {
         conflicts: z.array(z.looseObject({ path: z.string(), reason: z.string() })).optional(),
         truncated: z.boolean().optional(),
         cutBy: z.enum(["files", "reads", "time", "bytes"]).nullable().optional(),
+        dryRun: z.boolean().optional(),
       }),
     },
-    async ({ kind }, requestInfo) => {
+    async ({ kind, prefix, dryRun }, requestInfo) => {
       const result = await refusing(requestInfo.agentId, () =>
-        reindexObjects({ agentId: requestInfo.agentId, kind }),
+        reindexObjects({ agentId: requestInfo.agentId, kind, prefix, dryRun }),
       );
       if ("error" in result) return result.error;
       const report = result.value;
       return toolOk(
-        `Scanned ${report.scanned} files: ${report.unchanged} unchanged, ${report.adopted.length} adopted, ${report.restored.length} restored, ${report.missing.length} missing, ${report.conflicts.length} skipped${report.truncated ? ` (truncated: ${report.cutBy} limit)` : ""}.`,
+        `${report.dryRun ? "Dry run, nothing written. " : ""}Scanned ${report.scanned} files: ${report.unchanged} unchanged, ${report.adopted.length} adopted, ${report.restored.length} restored, ${report.missing.length} missing, ${report.conflicts.length} skipped${report.truncated ? ` (truncated: ${report.cutBy} limit)` : ""}.`,
         { data: { yourAgentId: requestInfo.agentId, ...report } },
       );
     },
