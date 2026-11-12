@@ -538,6 +538,10 @@ class ApiClient {
     return config.apiUrl;
   }
 
+  /** A fetch with the dashboard's base URL and headers, for hosts that inject one (ObjectEmbed). */
+  fetchApi = (path: string, init: RequestInit = {}): Promise<Response> =>
+    fetch(`${this.getBaseUrl()}${path}`, { ...init, headers: this.getHeaders() });
+
   /**
    * GET a list endpoint with query params. Cmd+K search uses it: `signal`
    * aborts the request a newer keystroke made stale.

@@ -377,6 +377,19 @@ const fileProps = z.object({
   fill: z.boolean().optional(),
 });
 
+const objectEmbedProps = z.object({
+  /** The object id (`swarm.id` in the file) of a board or sheet on the swarm's shared drive. */
+  objectId: z.string().uuid(),
+  /** Height in CSS pixels (default 480). */
+  height: z.number().int().min(160).max(1200).optional(),
+  /** View only: no cell edits, the board opens in view mode. */
+  readOnly: z.boolean().optional(),
+  /** Sheet tab to open first. */
+  tab: z.string().optional(),
+  /** Sheet window to show, e.g. "B2:F20" or "Tasks!B2:F20" (a tab here hides the tab strip). */
+  range: z.string().optional(),
+});
+
 const schemaFormProps = z.object({
   /** State id — the current draft values object lands at `/ui/<id>/value`. */
   id: z.string(),
@@ -1511,6 +1524,11 @@ export const swarmCatalogSpec = {
       props: fileProps,
       description:
         'One agent-fs file, read as the VIEWER with their own agent-fs key, from the swarm\'s default drive. `path` is absolute, usually bound to a route param. Markdown renders (raw HTML shown as text), images show as `<img>` (SVG too, so scripts never run), PDFs open in the browser\'s viewer, video and audio play, CSV shows as a table, and text files (HTML included, as source) show their lines. Anything else shows Download and "Open in agent-fs". An empty `path` shows a "No file selected" state. Sizes to content; `height` fixes a scrolling box, `fill: true` grows inside a `fill`-aware parent. Not connected: a "Connect agent-fs" card.',
+    },
+    ObjectEmbed: {
+      props: objectEmbedProps,
+      description:
+        "One board (Excalidraw) or sheet (formula grid) by `objectId`, editable in place by the viewer. Create the object with `ctx.boards.create` / `ctx.sheets.create` (or the board-* / sheet-* tools) on the swarm's shared drive and put its id here. Sheet edits and TSV pastes go to the server, which recalculates formulas; a formula cell shows its result and edits as its formula. A board autosaves 1.5 s after the last edit, and when someone else saved first it offers Keep mine / Take theirs. Both views poll every 4 s, so agent writes show up. `height` 160-1200 px (default 480); `readOnly` disables edits; `tab` opens a sheet tab; `range` (e.g. `Tasks!B2:F20`) shows only that window. A missing object, or one off the shared drive, shows an error with a copy-id button.",
     },
     DateRange: {
       props: dateRangeProps,

@@ -43,6 +43,7 @@
     "Tree",
     "Files",
     "File",
+    "ObjectEmbed",
     "DateRange",
     "Timeline",
     "SchemaForm",
@@ -3231,6 +3232,36 @@
           }
         },
         "required": ["path"],
+        "additionalProperties": false
+      }
+    },
+    "ObjectEmbed": {
+      "description": "One board (Excalidraw) or sheet (formula grid) by `objectId`, editable in place by the viewer. Create the object with `ctx.boards.create` / `ctx.sheets.create` (or the board-* / sheet-* tools) on the swarm's shared drive and put its id here. Sheet edits and TSV pastes go to the server, which recalculates formulas; a formula cell shows its result and edits as its formula. A board autosaves 1.5 s after the last edit, and when someone else saved first it offers Keep mine / Take theirs. Both views poll every 4 s, so agent writes show up. `height` 160-1200 px (default 480); `readOnly` disables edits; `tab` opens a sheet tab; `range` (e.g. `Tasks!B2:F20`) shows only that window. A missing object, or one off the shared drive, shows an error with a copy-id button.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "objectId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 160,
+            "maximum": 1200
+          },
+          "readOnly": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          }
+        },
+        "required": ["objectId"],
         "additionalProperties": false
       }
     },
