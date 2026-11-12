@@ -356,6 +356,16 @@ export const PERMISSIONS = {
     description: "Delete a page the caller does not own.",
     namespace: "page",
   },
+  "objects.read": {
+    description:
+      "Read a board or sheet on the swarm's shared agent-fs drive through the object routes.",
+    namespace: "objects",
+  },
+  "objects.write": {
+    description:
+      "Save a board or edit sheet cells on the swarm's shared agent-fs drive through the object routes.",
+    namespace: "objects",
+  },
   "app.manage": {
     description: "Create, update, delete, or roll back apps, and inspect app version history.",
     namespace: "app",

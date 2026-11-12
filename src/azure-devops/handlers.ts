@@ -10,6 +10,7 @@
 
 import { findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import {
   findOrCreateUserByEmail,
   findUserByEmail,
@@ -208,6 +209,7 @@ async function recordUnmappedIdentity(
   sampleEventType: string,
   sampleContext: string,
 ): Promise<void> {
+  if (await isUnmappedIdentityDismissed("azure-devops", externalId)) return;
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${externalId}:meta`,

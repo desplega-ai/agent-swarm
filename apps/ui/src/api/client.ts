@@ -190,6 +190,7 @@ import type {
   TaskWithLogs,
   TelemetryEnableVia,
   UnmappedIdentity,
+  UnmappedIdentityRef,
   UnmappedResponse,
   UpdateUserInput,
   UpsertCredentialBindingInput,
@@ -3623,16 +3624,39 @@ class ApiClient {
     return body.job;
   }
 
-  async listUnmapped(opts?: { kind?: string; limit?: number }): Promise<UnmappedIdentity[]> {
+  async listUnmapped(opts?: {
+    kind?: string;
+    limit?: number;
+    dismissed?: boolean;
+    includeBots?: boolean;
+  }): Promise<UnmappedIdentity[]> {
     const qs = new URLSearchParams();
     if (opts?.kind) qs.set("kind", opts.kind);
     if (opts?.limit !== undefined) qs.set("limit", String(opts.limit));
+    if (opts?.dismissed) qs.set("dismissed", "true");
+    if (opts?.includeBots) qs.set("includeBots", "true");
     const q = qs.toString();
     const url = `${this.getBaseUrl()}/api/users/unmapped${q ? `?${q}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch unmapped identities: ${res.status}`);
     const body = (await res.json()) as UnmappedResponse;
     return body.unmapped;
+  }
+
+  /** `action` is `dismiss` (hide and stop recording, links nothing) or `restore` (undo). */
+  async setUnmappedDismissed(
+    action: "dismiss" | "restore",
+    identities: UnmappedIdentityRef[],
+  ): Promise<void> {
+    const res = await fetch(`${this.getBaseUrl()}/api/users/unmapped/${action}`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ identities }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to ${action} unmapped identities: ${res.status}`);
+    }
   }
 
   async resolveUnmapped(

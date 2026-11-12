@@ -21,15 +21,21 @@ const ACTOR = { kind: "system", id: "test" } as const;
 // Slack fixtures the fake client serves; each test sets what it needs.
 let threadMessages: Array<Record<string, unknown>> = [];
 const emails = new Map<string, string>();
+const userTeams = new Map<string, { team_id: string; enterprise_user?: object }>();
+const ourTeam = { ok: true, team_id: "T0OURS" } as Record<string, unknown>;
+let authTest = async (): Promise<Record<string, unknown>> => ourTeam;
 const fakeClient = {
   conversations: { replies: async () => ({ ok: true, messages: threadMessages }) },
   users: {
     info: async ({ user }: { user: string }) => ({
       ok: true,
-      user: { profile: emails.has(user) ? { email: emails.get(user), real_name: user } : {} },
+      user: {
+        ...userTeams.get(user),
+        profile: emails.has(user) ? { email: emails.get(user), real_name: user } : {},
+      },
     }),
   },
-  auth: { test: async () => ({ ok: true, team_id: "T0OURS" }) },
+  auth: { test: () => authTest() },
   chat: { postMessage: async () => ({ ok: true, ts: "9999.0099" }) },
 };
 const client = fakeClient as unknown as WebClient;
@@ -40,7 +46,8 @@ mock.module("../slack/app", () => ({
   getSlackApp: () => ({ client: fakeClient }),
 }));
 
-const { resolveSlackParticipant, resolveSlackUserId } = await import("../slack/enrich");
+const { resolveSlackParticipant, resolveSlackUserId, resetSlackTeamIdCacheForTesting } =
+  await import("../slack/enrich");
 const { buildSlackThreadSnapshot } = await import("../slack/thread-participants");
 const { instantFlush, bufferThreadMessage } = await import("../slack/thread-buffer");
 const { buildTaskThreadParticipants } = await import("../http/requested-by");
@@ -130,7 +137,6 @@ describe("resolveSlackParticipant", () => {
     const result = await resolveSlackParticipant(client, "U0GUEST", {
       ...ctx,
       userTeam: "T0OTHER",
-      ourTeamId: "T0OURS",
     });
     expect(result.trust).toBe("external");
     expect(await findUserByExternalId("slack", "U0GUEST")).toBeNull();
@@ -148,6 +154,62 @@ describe("resolveSlackParticipant", () => {
       (await findUserByExternalId("slack", "U0OURS2"))?.id,
     );
     expect(await findUserByExternalId("slack", "U0OURS2")).not.toBeNull();
+
+    // auth.test failed: a sender carrying a team cannot be shown to be ours, so the
+    // email links nothing, even an existing user. Trust still follows the email.
+    resetSlackTeamIdCacheForTesting();
+    authTest = async () => {
+      throw new Error("auth.test failed");
+    };
+    try {
+      const { user: owner } = await findOrCreateUserByEmail(
+        "owner@desplega.test",
+        { name: "Owner" },
+        ACTOR,
+      );
+      emails.set("U0NOAUTH", "owner@desplega.test");
+      expect(
+        await resolveSlackUserId(client, "U0NOAUTH", { ...ctx, userTeam: "T0OTHER" }),
+      ).toBeUndefined();
+      expect(await findUserByExternalId("slack", "U0NOAUTH")).toBeNull();
+      expect(
+        await resolveSlackParticipant(client, "U0NOAUTH", { ...ctx, userTeam: "T0OTHER" }),
+      ).toEqual({ userId: undefined, trust: "internal" });
+      // Positive control: with no team on the event, the same email still links.
+      expect((await resolveSlackParticipant(client, "U0NOAUTH", ctx)).userId).toBe(owner.id);
+    } finally {
+      authTest = async () => ourTeam;
+      resetSlackTeamIdCacheForTesting();
+    }
+
+    // Org-wide install: auth.test may name the org while senders carry a workspace id,
+    // so the sender's Enterprise Grid org decides.
+    resetSlackTeamIdCacheForTesting();
+    authTest = async () => ({
+      ok: true,
+      team_id: "E0ORG",
+      enterprise_id: "E0ORG",
+      is_enterprise_install: true,
+    });
+    try {
+      emails.set("U0GRID", "grid@desplega.test");
+      userTeams.set("U0GRID", { team_id: "T0WS2", enterprise_user: { enterprise_id: "E0ORG" } });
+      emails.set("U0GRIDGUEST", "gridguest@desplega.test");
+      userTeams.set("U0GRIDGUEST", {
+        team_id: "T0GUEST",
+        enterprise_user: { enterprise_id: "E0GUEST" },
+      });
+      const gridUser = await resolveSlackUserId(client, "U0GRID", { ...ctx, userTeam: "T0WS2" });
+      expect(gridUser).toBe((await findUserByExternalId("slack", "U0GRID"))?.id);
+      expect(gridUser).toBeDefined();
+      expect(
+        await resolveSlackUserId(client, "U0GRIDGUEST", { ...ctx, userTeam: "T0GUEST" }),
+      ).toBeUndefined();
+      expect(await findUserByExternalId("slack", "U0GRIDGUEST")).toBeNull();
+    } finally {
+      authTest = async () => ourTeam;
+      resetSlackTeamIdCacheForTesting();
+    }
   });
 });
 

@@ -17,6 +17,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
@@ -95,15 +96,18 @@ async function findLeadAgent() {
 const UNMAPPED_NAMESPACE = "integration:unmapped:gitlab";
 const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const GITLAB_WEBHOOK_ACTOR = { kind: "system", id: "webhook:gitlab" } as const;
+const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Resolve a GitLab webhook sender to a `users.id`.
  *
  * Cascade (Q17):
  *   1. Fast path — `findUserByExternalId('gitlab', user.username)`.
- *   2. If missing AND `user.email` is a real non-empty string (some GitLab
- *      installations send `email: ""` instead of omitting the field — Q17.E
- *      manual spot-check), run `findOrCreateUserByEmail` + `linkIdentity`.
+ *   2. If missing AND `user.email` is an email address, run
+ *      `findOrCreateUserByEmail` + `linkIdentity`. GitLab sends other values
+ *      for senders without a public email (`""` on some installations — Q17.E
+ *      manual spot-check — or a redaction marker such as `[REDACTED]`). Many
+ *      senders share such a value, so it never identifies one person.
  *   3. Otherwise record an unmapped tracker entry (kv) for operator triage.
  *
  * Returns `undefined` when no mapping could be established — callers pass
@@ -117,10 +121,10 @@ async function resolveGitLabSender(
   const existing = await findUserByExternalId("gitlab", user.username);
   if (existing) return existing.id;
 
-  // Inline-email cascade — only run when email is a real non-empty string.
-  // Some GitLab installations emit `email: ""` instead of omitting the field.
+  // Inline-email cascade — only run when email is an address. Empty strings and
+  // redaction markers fall through to the unmapped tracker.
   const inlineEmail = typeof user.email === "string" ? user.email.trim() : "";
-  if (inlineEmail !== "") {
+  if (EMAIL_ADDRESS_RE.test(inlineEmail)) {
     const { user: linked } = await findOrCreateUserByEmail(
       inlineEmail,
       { name: user.name },
@@ -130,7 +134,8 @@ async function resolveGitLabSender(
     return linked.id;
   }
 
-  // No mapping + no inline email → unmapped tracker.
+  // No mapping + no inline email → unmapped tracker, unless an operator dismissed it.
+  if (await isUnmappedIdentityDismissed("gitlab", user.username)) return undefined;
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${user.username}:meta`,

@@ -30,6 +30,12 @@ import attioInteractionConfig from "../../../templates/skills/attio-interaction/
 import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
   type: "text",
 };
+import boardsAndSheetsConfig from "../../../templates/skills/boards-and-sheets/config.json" with {
+  type: "text",
+};
+import boardsAndSheetsContent from "../../../templates/skills/boards-and-sheets/content.md" with {
+  type: "text",
+};
 import brainstormingConfig from "../../../templates/skills/brainstorming/config.json" with {
   type: "text",
 };
@@ -348,6 +354,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: askUserConfig, body: askUserContent },
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
+  { config: boardsAndSheetsConfig, body: boardsAndSheetsContent },
   { config: brainstormingConfig, body: brainstormingContent },
   { config: chatSdkConfig, body: chatSdkContent },
   { config: codeQualityConfig, body: codeQualityContent },

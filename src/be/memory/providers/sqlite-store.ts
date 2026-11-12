@@ -3,6 +3,7 @@ import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { isInTransaction } from "../../db-client";
 import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
@@ -17,6 +18,7 @@ import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-
 import { recencyDecay } from "../reranker";
 import { notReviewTaskCompletionSql } from "../review-recall-filter";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
+import { memorySearchReader } from "../search-reader";
 import type {
   MemoryCandidate,
   MemoryDocumentRef,
@@ -62,6 +64,10 @@ export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
   WHERE rowid > ? ORDER BY rowid LIMIT ?`;
 /** How long search reuses one health result. Stale by at most this long. */
 export const SEARCH_HEALTH_TTL_MS = 60_000;
+/** Off-loop health refreshes a search retries when writes invalidate them, before it counts in-process. */
+const SEARCH_HEALTH_MAX_REFRESHES = 3;
+/** An off-loop health refresh, for the DB and generation it started under. */
+type SearchHealthRefresh = { db: unknown; generation: number; promise: Promise<MemoryHealth> };
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
@@ -210,6 +216,13 @@ export class SqliteMemoryStore implements MemoryStore {
   private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
   private searchHealthCache: { health: MemoryHealth; db: unknown; at: number } | null = null;
+  /** The newest refresh. An older one may still run; its result is checked, not shared. */
+  private searchHealthRefresh: SearchHealthRefresh | null = null;
+  /**
+   * Bumped when the cache is dropped. A refresh that started under an older
+   * generation is neither stored nor returned to a search waiting on it.
+   */
+  private searchHealthGeneration = 0;
 
   constructor() {
     this.ensureVecTable();
@@ -476,7 +489,7 @@ export class SqliteMemoryStore implements MemoryStore {
     }
 
     const afterCount = this.getVecCount();
-    this.searchHealthCache = null;
+    this.dropSearchHealth();
     this.lastPopulate = {
       attempted,
       inserted,
@@ -672,7 +685,7 @@ export class SqliteMemoryStore implements MemoryStore {
       });
     }
 
-    const health = this.searchHealth();
+    const health = await this.searchHealth();
     if (
       isHybridSearchEnabled() &&
       options.queryText &&
@@ -812,7 +825,7 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     const missing = ids.filter((id) => !cosines.has(id));
     if (missing.length === 0) return;
-    const rows = await getDbClient().query<{ id: string; embedding: Buffer | null }>(
+    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer | null }>(
       `SELECT id, embedding FROM agent_memory WHERE id IN (${missing.map(() => "?").join(",")})`,
       missing,
     );
@@ -859,7 +872,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     try {
       const sqlLimit = armFetchLimit(limit);
-      const rows = await getDbClient().query<AgentMemoryRow & { rank: number }>(
+      const rows = await memorySearchReader.query<AgentMemoryRow & { rank: number }>(
         `SELECT m.*, bm25(memory_fts) AS rank
          FROM memory_fts
          JOIN agent_memory m ON m.id = memory_fts.memory_id
@@ -944,7 +957,7 @@ export class SqliteMemoryStore implements MemoryStore {
     conditions.push("v.k = ?");
     params.push(knnLimit);
 
-    const rows = await getDbClient().query<AgentMemoryRow & { distance: number }>(
+    const rows = await memorySearchReader.query<AgentMemoryRow & { distance: number }>(
       `SELECT m.*, v.distance
        FROM memory_vec v
        JOIN agent_memory m ON m.id = v.memory_id
@@ -1020,7 +1033,7 @@ export class SqliteMemoryStore implements MemoryStore {
     );
     if (top.length === 0) return [];
 
-    const rows = await getDbClient().query<AgentMemoryRow>(
+    const rows = await memorySearchReader.query<AgentMemoryRow>(
       `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
       top.map((hit) => hit.id),
     );
@@ -1042,7 +1055,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const db = getDbClient();
+    const db = memorySearchReader;
     const counted = await db.get<{ n: number }>(
       `SELECT COUNT(*) AS n FROM (SELECT 1 ${capped})`,
       cappedParams,
@@ -1073,7 +1086,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const rows = await getDbClient().query<{ id: string; embedding: Buffer }>(
+    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer }>(
       `SELECT id, embedding ${capped}`,
       cappedParams,
     );
@@ -1123,7 +1136,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const rows = await getDbClient().query<AgentMemoryRow>(
+    const rows = await memorySearchReader.query<AgentMemoryRow>(
       `SELECT * FROM agent_memory ${whereClause}`,
       params,
     );
@@ -1591,7 +1604,7 @@ export class SqliteMemoryStore implements MemoryStore {
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
           // The row now misses from memory_vec: search must see the fallback.
-          this.searchHealthCache = null;
+          this.invalidateSearchHealth();
         }
       }
     });
@@ -1694,6 +1707,51 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
+  /**
+   * The same eight counts as getHealthCounts(), as one statement on a read
+   * worker so the scans block that thread and not the API event loop. One
+   * statement keeps the other worker free for searches while it runs.
+   */
+  private async getHealthCountsOffLoop(): Promise<MemoryHealth["counts"]> {
+    const tableUsable = this.getVecTableSchema() !== null && isSqliteVecAvailable();
+    const valid = `embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`;
+    const row = await memorySearchReader.get<Record<keyof MemoryHealth["counts"], number>>(
+      `SELECT
+         (SELECT COUNT(*) FROM agent_memory) AS total,
+         (SELECT COUNT(*) FROM agent_memory WHERE embedding IS NOT NULL) AS withEmbedding,
+         (SELECT COUNT(*) FROM agent_memory WHERE ${valid}) AS validEmbedding,
+         (SELECT COUNT(*) FROM agent_memory
+           WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}) AS invalidEmbedding,
+         (SELECT COUNT(*) FROM agent_memory
+           WHERE ${valid} AND (expiresAt IS NULL OR expiresAt > datetime('now'))) AS searchable,
+         ${tableUsable ? "(SELECT COUNT(*) FROM memory_vec)" : "0"} AS memoryVec,
+         ${
+           tableUsable
+             ? `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})
+                - (SELECT COUNT(*) FROM memory_vec v CROSS JOIN agent_memory m ON m.id = v.memory_id
+                   WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${VECTOR_BYTES})`
+             : `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})`
+         } AS missingFromVec,
+         ${
+           tableUsable
+             ? `(SELECT COUNT(*) FROM memory_vec v LEFT JOIN agent_memory m ON m.id = v.memory_id
+                 WHERE m.id IS NULL)`
+             : "0"
+         } AS extraInVec`,
+    );
+    if (!row) throw new Error("health counts returned no row");
+    return {
+      total: row.total,
+      withEmbedding: row.withEmbedding,
+      validEmbedding: row.validEmbedding,
+      invalidEmbedding: row.invalidEmbedding,
+      searchable: row.searchable,
+      memoryVec: row.memoryVec,
+      missingFromVec: row.missingFromVec,
+      extraInVec: row.extraInVec,
+    };
+  }
+
   private getHealthCounts(): MemoryHealth["counts"] {
     const db = getDb();
     const tableExists = this.getVecTableSchema() !== null;
@@ -1747,19 +1805,76 @@ export class SqliteMemoryStore implements MemoryStore {
 
   /**
    * getHealth() for the search path. The counts scan agent_memory and
-   * memory_vec synchronously, so search reuses one result per window; the
-   * health endpoint keeps calling getHealth() for fresh counts.
+   * memory_vec (about 0.8 s at 63k memories), so search never runs them on the
+   * event loop: one read worker computes them, search reuses one result per
+   * window, and an expired "vec" result is served while a refresh runs in the
+   * background. The health endpoint keeps calling getHealth() for fresh counts.
    */
-  private searchHealth(): MemoryHealth {
+  private async searchHealth(): Promise<MemoryHealth> {
     const db = getDb();
     const cached = this.searchHealthCache;
+    const inTransaction = isInTransaction();
     // The db check drops a result that outlived a DB swap (tests reinit it).
-    if (cached && cached.db === db && Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) {
-      return cached.health;
+    if (cached && cached.db === db) {
+      if (Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) return cached.health;
+      // A stale "vec" is at worst one refresh old; a stale fallback is
+      // awaited so a repaired index is seen on the next search.
+      if (cached.health.retrievalMode === "vec" && !inTransaction) {
+        if (!this.searchHealthRefresh) this.startSearchHealthRefresh(db).promise.catch(() => {});
+        return cached.health;
+      }
     }
+    // A transaction must see its own writes, which may still roll back, and
+    // its search reads run in-process anyway: count there, share and store nothing.
+    if (inTransaction) return this.getHealth();
+    return this.currentSearchHealth();
+  }
+
+  /**
+   * A health result that no write invalidated before it returns. Searches
+   * share one refresh per DB and generation; one a write overtook is retried,
+   * for every search waiting on it.
+   */
+  private async currentSearchHealth(): Promise<MemoryHealth> {
+    for (let attempt = 0; attempt < SEARCH_HEALTH_MAX_REFRESHES; attempt++) {
+      const db = getDb();
+      const generation = this.searchHealthGeneration;
+      const inFlight = this.searchHealthRefresh;
+      const refresh =
+        inFlight && inFlight.db === db && inFlight.generation === generation
+          ? inFlight
+          : this.startSearchHealthRefresh(db);
+      const health = await refresh.promise;
+      if (getDb() === db && this.searchHealthGeneration === generation) return health;
+    }
+    // Writes kept overtaking the off-loop counts. In-process, no write can
+    // land between the count and the return.
     const health = this.getHealth();
-    this.searchHealthCache = { health, db, at: Date.now() };
+    this.searchHealthCache = { health, db: getDb(), at: Date.now() };
     return health;
+  }
+
+  private startSearchHealthRefresh(db: unknown): SearchHealthRefresh {
+    const generation = this.searchHealthGeneration;
+    const promise = (async () => {
+      let health: MemoryHealth;
+      try {
+        health = this.healthFromCounts(await this.getHealthCountsOffLoop());
+      } catch (err) {
+        console.warn("[memory-search] health counts failed:", (err as Error).message);
+        health = this.getHealth();
+      }
+      // A DB swap or a vec write mid-refresh invalidated this result.
+      if (getDb() === db && generation === this.searchHealthGeneration)
+        this.searchHealthCache = { health, db, at: Date.now() };
+      return health;
+    })().finally(() => {
+      // A newer refresh may have replaced this one: leave it in place.
+      if (this.searchHealthRefresh === entry) this.searchHealthRefresh = null;
+    });
+    const entry: SearchHealthRefresh = { db, generation, promise };
+    this.searchHealthRefresh = entry;
+    return entry;
   }
 
   /**
@@ -1768,12 +1883,30 @@ export class SqliteMemoryStore implements MemoryStore {
    * recount on the next search, and a stale "vec" is at worst one TTL old.
    */
   private noteVecWrite(): void {
-    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.searchHealthCache = null;
+    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.invalidateSearchHealth();
+  }
+
+  /**
+   * Drop now, so no refresh in flight is stored or returned, and again once
+   * the writing transaction commits: a refresh that starts before the commit
+   * reads the snapshot without this write.
+   */
+  private invalidateSearchHealth(): void {
+    this.dropSearchHealth();
+    if (isInTransaction()) getDbClient().afterCommit(() => this.dropSearchHealth());
+  }
+
+  private dropSearchHealth(): void {
+    this.searchHealthCache = null;
+    this.searchHealthGeneration++;
   }
 
   getHealth(): MemoryHealth {
+    return this.healthFromCounts(this.getHealthCounts());
+  }
+
+  private healthFromCounts(counts: MemoryHealth["counts"]): MemoryHealth {
     const schema = this.getVecTableSchema();
-    const counts = this.getHealthCounts();
     const reasons: string[] = [];
 
     if (!isSqliteVecAvailable()) reasons.push("sqlite_vec_extension_unavailable");

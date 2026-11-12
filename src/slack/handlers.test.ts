@@ -21,6 +21,7 @@ import {
   isBotMessage,
   isSwarmThreadRoot,
   type isUserAllowed,
+  LOOKUP_USER_TEAM,
   registerMessageHandler,
   type UserFilterConfig,
 } from "./handlers";
@@ -192,7 +193,8 @@ describe("checkUserAccess", () => {
 
 describe("isUserAllowed", () => {
   const usersInfo = mock(async () => ({ ok: true, user: {} }));
-  const client = { users: { info: usersInfo } } as never;
+  const authTest = mock(async () => ({ ok: true, team_id: "T_OURS" }));
+  const client = { auth: { test: authTest }, users: { info: usersInfo } } as never;
   let enrichSpy: ReturnType<typeof spyOn<typeof slackEnrichModule, "enrichSlackUserEmail">>;
   let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
 
@@ -288,12 +290,63 @@ describe("isUserAllowed", () => {
       expect(loggedLines()).toEqual([]);
     });
 
-    test("denies and logs a domain that is not allowed", async () => {
+    test("denies and logs a domain that is not allowed, or a sender from another team", async () => {
       enrichSpy.mockResolvedValue("person@evil.com");
       const allowed = await loadIsUserAllowed(env);
       expect(await allowed(client, "U_OTHER")).toBe(false);
+
+      // An allowed domain admits a sender from this team, never one from another team.
+      slackEnrichModule.resetSlackTeamIdCacheForTesting();
+      enrichSpy.mockResolvedValue("person@company.com");
+      expect(await allowed(client, "U_SAME", "T_OURS")).toBe(true);
+      expect(await allowed(client, "U_PARTNER", "T_PARTNER")).toBe(false);
+
+      // An event with no `user_team` (Work Object details) reads the team from users.info.
+      const teams: Record<string, { team_id?: string; enterprise_user?: object }> = {
+        U_SAME: { team_id: "T_OURS" },
+        U_PARTNER: { team_id: "T_PARTNER" },
+        U_GRID: { team_id: "T_WS2", enterprise_user: { enterprise_id: "E_ORG" } },
+        U_GUEST: { team_id: "T_GUEST", enterprise_user: { enterprise_id: "E_GUEST" } },
+      };
+      usersInfo.mockImplementation((async ({ user }: { user: string }) => {
+        if (!teams[user]) throw new Error("users.info failed");
+        return { ok: true, user: teams[user] };
+      }) as never);
+      try {
+        expect(await allowed(client, "U_SAME", LOOKUP_USER_TEAM)).toBe(true);
+        expect(await allowed(client, "U_PARTNER", LOOKUP_USER_TEAM)).toBe(false);
+        expect(await allowed(client, "U_GONE", LOOKUP_USER_TEAM)).toBe(false);
+
+        // auth.test failed: our team is unknown, so no team matches it.
+        slackEnrichModule.resetSlackTeamIdCacheForTesting();
+        authTest.mockImplementationOnce(async () => {
+          throw new Error("auth.test failed");
+        });
+        expect(await allowed(client, "U_SAME", LOOKUP_USER_TEAM)).toBe(false);
+
+        // Org-wide install: auth.test may name the org, and senders carry a workspace id,
+        // so the sender's org decides.
+        slackEnrichModule.resetSlackTeamIdCacheForTesting();
+        authTest.mockImplementationOnce(async () => ({
+          ok: true,
+          team_id: "E_ORG",
+          enterprise_id: "E_ORG",
+          is_enterprise_install: true,
+        }));
+        expect(await allowed(client, "U_GRID", "T_WS2")).toBe(true);
+        expect(await allowed(client, "U_GRID", LOOKUP_USER_TEAM)).toBe(true);
+        expect(await allowed(client, "U_GUEST", "T_GUEST")).toBe(false);
+      } finally {
+        usersInfo.mockImplementation(async () => ({ ok: true, user: {} }));
+        slackEnrichModule.resetSlackTeamIdCacheForTesting();
+      }
       expect(loggedLines()).toEqual([
         '[Slack] User U_OTHER email domain "evil.com" not in allowed list',
+        "[Slack] User U_PARTNER is from another Slack team, denying email-domain access",
+        "[Slack] User U_PARTNER is from another Slack team, denying email-domain access",
+        "[Slack] User U_GONE has no readable Slack team, denying email-domain access",
+        "[Slack] User U_SAME: our own Slack team is unknown, denying email-domain access",
+        "[Slack] User U_GUEST is from another Slack team, denying email-domain access",
       ]);
     });
   });

@@ -1,5 +1,6 @@
 import { failTask, findTaskByVcs, getAllAgents, getSwarmConfigs, incrKv, upsertKv } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
@@ -182,7 +183,8 @@ async function resolveGitHubSender(
   const existing = await findUserByExternalId("github", login);
   if (existing) return existing.id;
 
-  // No mapping → unmapped tracker.
+  // No mapping → unmapped tracker, unless an operator dismissed this login.
+  if (await isUnmappedIdentityDismissed("github", login)) return undefined;
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${login}:meta`,

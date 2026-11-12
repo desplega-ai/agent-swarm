@@ -1,4 +1,5 @@
 import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
 import {
   AppDefinitionSchema,
@@ -353,30 +354,52 @@ export async function getAppRow(
   return entry.value as AppRow;
 }
 
+/** Rows one `listAppRows` statement scans. A full-model scan was one 0.5 s+ sync stall. */
+const LIST_SCAN_WINDOW = 2000;
+const LIST_ROW_CAP = 100000;
+
 /**
  * `equals` pre-filters rows in SQL on top-level fields so a filtered list
  * does not decode the whole model. The match is looser than `===` (JSON
  * `true` equals `1`); callers re-check the returned rows.
+ *
+ * The scan runs in key windows with a yield between them: one statement over
+ * a six-figure model blocks the event loop for every other request.
  */
 export async function listAppRows(
   appId: string,
   model: string,
   equals: Array<{ column: string; value: string | number | boolean }> = [],
 ): Promise<AppRow[]> {
-  const entries = await listKv(appsNamespace(appId), {
-    prefix: `${model}/row/`,
-    limit: 100000,
-    offset: 0,
-    jsonFieldEquals: equals
-      .filter((filter) => !/["\\]/.test(filter.column))
-      .map((filter) => ({ field: filter.column, value: filter.value })),
-  });
-  return entries
-    .map((entry) => entry.value)
-    .filter(
-      (value): value is AppRow =>
-        typeof value === "object" && value !== null && !Array.isArray(value),
-    );
+  const namespace = appsNamespace(appId);
+  const prefix = `${model}/row/`;
+  const upper = kvPrefixUpperBound(prefix)!;
+  const jsonFieldEquals = equals
+    .filter((filter) => !/["\\]/.test(filter.column))
+    .map((filter) => ({ field: filter.column, value: filter.value }));
+  const rows: AppRow[] = [];
+  let afterKey = prefix;
+  while (rows.length < LIST_ROW_CAP) {
+    const through = await kvKeyAfter(namespace, upper, afterKey, LIST_SCAN_WINDOW - 1);
+    const entries = await listKv(namespace, {
+      prefix,
+      limit: LIST_ROW_CAP - rows.length,
+      offset: 0,
+      jsonFieldEquals,
+      keyAfter: afterKey,
+      keyThrough: through ?? undefined,
+    });
+    for (const { value } of entries) {
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        rows.push(value as AppRow);
+      }
+    }
+    if (through === null) break;
+    afterKey = through;
+    // Inside a transaction a timer would stall every DB caller; only yield outside one.
+    if (!isInTransaction()) await yieldToEventLoop();
+  }
+  return rows;
 }
 
 const MIGRATION_KV_BATCH_SIZE = 1000;

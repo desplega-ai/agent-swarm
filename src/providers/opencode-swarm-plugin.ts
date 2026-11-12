@@ -11,6 +11,13 @@
  */
 
 import type { Plugin } from "@opencode/plugin";
+import {
+  canonicalArgs,
+  canonicalToolName,
+  rawArgsFromCanonical,
+  runNativePost,
+  runNativePre,
+} from "../hooks/native-tool-hooks";
 import { renderGoalReminder } from "../prompts/goal-reminder";
 import {
   apiHeaders,
@@ -19,6 +26,7 @@ import {
   fetchTaskDetails,
   fireAndForget,
   isTaskCancelled,
+  nativeHookTarget,
   type SwarmHooksConfig,
 } from "./pi-mono-extension";
 
@@ -36,6 +44,11 @@ export interface OpencodeSwarmPluginOptions {
    * agent-loop step, so this sees every primary call.
    */
   onContext?: (event: OpencodeRequestContext) => void;
+  /**
+   * Names of the MCP servers in the session's config. OpenCode keys their tools
+   * `<server>_<tool>`; any other tool is a built-in and goes to native-tool extensions.
+   */
+  mcpServers?: readonly string[];
 }
 
 /** The parts of OpenCode's `context` hook event the request measurement reads. */
@@ -69,10 +82,26 @@ function applyOpencodeShellEnv(
   }
 }
 
+/** True for an OpenCode built-in tool: not keyed `<server>_<tool>` for any configured MCP server. */
+export function isOpencodeBuiltinTool(name: string, mcpServers: readonly string[]): boolean {
+  return !mcpServers.some((server) => name.startsWith(`${server}_`));
+}
+
 export function createOpencodeSwarmPlugin(
   config: SwarmHooksConfig,
   options: OpencodeSwarmPluginOptions = {},
 ): Plugin.Plugin {
+  const mcpServers = options.mcpServers ?? [];
+  /** Built-in calls in flight, so the post report carries a real duration. */
+  const nativeStartedAt = new Map<string, number>();
+  const nativeCall = (event: { tool: string; id: string; input: unknown }) => ({
+    harness: "opencode" as const,
+    tool: canonicalToolName(event.tool),
+    nativeTool: event.tool,
+    args: canonicalArgs(event.input),
+    rawArgs: event.input,
+    toolCallId: event.id,
+  });
   return {
     id: "agent-swarm",
     async setup(ctx) {
@@ -107,9 +136,29 @@ export function createOpencodeSwarmPlugin(
               "EXIT NOW - do not make any more tool calls.",
           );
         }
+
+        // Extensions with toolSources "native": last, so the guards above win. `event.input` is
+        // writable, which is how a rewrite lands; a throw is how a block lands.
+        if (isOpencodeBuiltinTool(event.tool, mcpServers)) {
+          const decision = await runNativePre(nativeHookTarget(config), nativeCall(event));
+          if (decision.action === "block") throw new Error(decision.reason);
+          if (decision.action === "modify") {
+            event.input = rawArgsFromCanonical(decision.args, event.input);
+          }
+          nativeStartedAt.set(event.id, Date.now());
+        }
       });
 
-      await ctx.tool.hook("execute.after", () => {
+      await ctx.tool.hook("execute.after", (event) => {
+        if (isOpencodeBuiltinTool(event.tool, mcpServers)) {
+          const startedAt = nativeStartedAt.get(event.id);
+          nativeStartedAt.delete(event.id);
+          void runNativePost(nativeHookTarget(config), nativeCall(event), {
+            result: event.status === "completed" ? event.result : event.error,
+            isError: event.status === "error",
+            durationMs: startedAt === undefined ? 0 : Date.now() - startedAt,
+          });
+        }
         if (config.isLead || !config.taskId) return;
         fireAndForget(`${config.apiUrl}/api/agents/${config.agentId}/activity`, {
           method: "PUT",

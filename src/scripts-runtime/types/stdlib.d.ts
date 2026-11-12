@@ -248,7 +248,16 @@ declare module "swarm-sdk" {
     truncated: boolean;
     /** Which limit cut this call short; null when the pass finished. */
     cutBy: "files" | "reads" | "time" | "bytes" | null;
+    /** True when nothing was written: `adopted` and `restored` list what a real run would change. */
+    dryRun: boolean;
   }
+
+  /** `prefix`: only paths that start with it (as in `list`); without it every id-less file on the drive gets an id. `dryRun`: report, write nothing. */
+  export type PrimitiveReindexArgs = {
+    kind?: PrimitiveObjectKind;
+    prefix?: string;
+    dryRun?: boolean;
+  };
 
   /**
    * Primitive objects: agent-fs files on your default drive with a stable id.
@@ -273,9 +282,7 @@ declare module "swarm-sdk" {
       offset?: number;
     }): Promise<{ message: string; objects: PrimitiveObject[]; total: number }>;
     /** Rebuild the index from the drive. Ids survive; rows whose file is gone are reported, not deleted. */
-    reindex(args?: {
-      kind?: PrimitiveObjectKind;
-    }): Promise<{ message: string } & PrimitiveReindexReport>;
+    reindex(args?: PrimitiveReindexArgs): Promise<{ message: string } & PrimitiveReindexReport>;
   }
 
   /** A spreadsheet cell value. A string starting with `=` is a formula; null clears the cell. */
@@ -584,7 +591,7 @@ declare module "swarm-sdk" {
       limit?: number;
       offset?: number;
     }): Promise<unknown>;
-    objects_reindex(args?: { kind?: PrimitiveObjectKind }): Promise<unknown>;
+    objects_reindex(args?: PrimitiveReindexArgs): Promise<unknown>;
     // --- sheets (prefer ctx.sheets.*, which unwraps and throws) ---
     sheets_create(args: SheetCreateArgs): Promise<unknown>;
     sheets_get(args: SheetRef): Promise<unknown>;
