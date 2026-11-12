@@ -51,6 +51,9 @@ src/utils/pr-body-leaks.ts  # PR body leak rule corpus
 # Migrations: the runner and each SQL file are checked against a scratch DB.
 src/be/migrations/  # migration runner and SQL files
 
+# Escape hatch: races and budgets that need injected readers and limits no route exposes.
+src/tests/primitives-object-webhooks.test.ts  # interleaved applyFileChange races, reindex byte/time budgets and replica ensure races need injected readers, gates and limits; the HTTP paths are in scripts/e2e/scenarios/knowledge-objects.ts
+
 # Dashboard: stays on until Playwright is required and fills in (plan section 4).
 apps/ui/  # dashboard units, until the Playwright delete PR
 

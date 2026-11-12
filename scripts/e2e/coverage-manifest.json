@@ -398,7 +398,7 @@
       "scenarios": ["knowledge-boards"]
     },
     "primitive-objects": {
-      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key",
+      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; the file.changed receiver refuses unsigned, forged and oversized deliveries",
       "scenarios": ["knowledge-objects"]
     },
     "prompt-template-override": {
