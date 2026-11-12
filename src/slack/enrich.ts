@@ -142,8 +142,8 @@ export interface SlackParticipantResolution {
  *      from another Slack team is never linked by email.
  *   3. No email: recorded in the unmapped tracker, trust `unknown`.
  *
- * Trust: `users.metadata.audience` wins; then another Slack team (`userTeam`
- * differs from `ourTeamId`) is external; then the email domain decides, and
+ * Trust: `users.metadata.audience` wins; then another Slack team (see
+ * `isOurSlackTeam`) is external; then the email domain decides, and
  * no email is `unknown`. With no company domains configured, linked users are
  * internal and nobody is created.
  */
@@ -154,22 +154,23 @@ export async function resolveSlackParticipant(
     sampleEventType: string;
     sampleContext: string;
     userTeam?: string;
-    ourTeamId?: string;
   },
 ): Promise<SlackParticipantResolution> {
   const domains = getCompanyEmailDomains();
-  const foreignTeam =
-    !!eventContext.userTeam &&
-    !!eventContext.ourTeamId &&
-    eventContext.userTeam !== eventContext.ourTeamId;
+  const sameTeam = eventContext.userTeam
+    ? await isOurSlackTeam(client, eventContext.userTeam, slackUserId)
+    : undefined;
+  const foreignTeam = sameTeam === false;
 
   let user = await findUserByExternalId("slack", slackUserId);
   const email = user?.email || (await enrichSlackUserEmail(client, slackUserId));
 
   // Another team's profile email is set by that team, not verified as owned by
   // this sender, so it never links to an existing user. An operator can link
-  // the alias by hand.
-  if (!user && email && !foreignTeam) {
+  // the alias by hand. With our own team unknown (`auth.test` failed), a sender
+  // that carries a team is not linked either; trust below still reads the email.
+  const linkable = !eventContext.userTeam || sameTeam === true;
+  if (!user && email && linkable) {
     if (isCompanyEmail(email, domains)) {
       // Pull the cached name back out for the user-row hints. The kv read is
       // cheap (single primary-key lookup) and avoids a second `users.info`.
@@ -232,26 +233,81 @@ export async function resolveSlackUserId(
   // email must not get a member row.
   eventContext: { sampleEventType: string; sampleContext: string; userTeam: string | undefined },
 ): Promise<string | undefined> {
-  const ourTeamId = eventContext.userTeam ? await getOurSlackTeamId(client) : undefined;
-  return (await resolveSlackParticipant(client, slackUserId, { ...eventContext, ourTeamId }))
-    .userId;
+  return (await resolveSlackParticipant(client, slackUserId, eventContext)).userId;
 }
 
-/** Our own Slack team id (`auth.test`), cached per process. */
-let cachedTeamId: string | undefined;
-export async function getOurSlackTeamId(client: WebClient): Promise<string | undefined> {
-  if (cachedTeamId) return cachedTeamId;
+interface OurSlackTeam {
+  teamId?: string;
+  enterpriseId?: string;
+  /** Installed on the whole Enterprise Grid org, not one workspace. */
+  orgInstall: boolean;
+}
+
+/** Our own Slack team (`auth.test`), cached per process once it names a team. */
+let cachedTeam: OurSlackTeam | undefined;
+async function getOurSlackTeam(client: WebClient): Promise<OurSlackTeam | undefined> {
+  if (cachedTeam) return cachedTeam;
   try {
-    cachedTeamId = ((await client.auth.test()).team_id as string | undefined) ?? undefined;
+    const result = await client.auth.test();
+    const teamId = result.team_id || undefined;
+    const enterpriseId = result.enterprise_id || undefined;
+    // Slack does not document `team_id` for an org-wide install; it may be absent or
+    // the enterprise id. Either way a sender's `user_team` is a workspace id.
+    const orgInstall =
+      result.is_enterprise_install === true ||
+      (!!enterpriseId && (!teamId || teamId === enterpriseId));
+    if (teamId || enterpriseId) cachedTeam = { teamId, enterpriseId, orgInstall };
   } catch (error) {
     console.error("[Slack] auth.test failed while reading the team id:", error);
   }
-  return cachedTeamId;
+  return cachedTeam;
 }
 
-/** Reset the team-id cache between tests. */
+/** Reset the team cache between tests. */
 export function resetSlackTeamIdCacheForTesting(): void {
-  cachedTeamId = undefined;
+  cachedTeam = undefined;
+}
+
+/**
+ * A Slack user's workspace (`users.info` `user.team_id`) and Enterprise Grid org, or
+ * `undefined` when the lookup fails.
+ * shortcut: uncached, as it runs only for events without `user_team` and org-wide
+ * installs; cache it next to the email if `users.info` rate limits show up.
+ */
+export async function getSlackUserTeam(
+  client: WebClient,
+  slackUserId: string,
+): Promise<{ teamId?: string; enterpriseId?: string } | undefined> {
+  try {
+    const { user } = await client.users.info({ user: slackUserId });
+    if (!user) return undefined;
+    return {
+      teamId: user.team_id || undefined,
+      enterpriseId: user.enterprise_user?.enterprise_id || undefined,
+    };
+  } catch (error) {
+    console.error(`[Slack] users.info failed while reading the team of ${slackUserId}:`, error);
+    return undefined;
+  }
+}
+
+/**
+ * Whether a sender on Slack team `userTeam` is on our Slack team: `undefined` when
+ * our own team is unknown (`auth.test` failed). A workspace install compares team
+ * ids. An org-wide install compares the sender's Enterprise Grid org, and a sender
+ * whose org cannot be read is not ours.
+ */
+export async function isOurSlackTeam(
+  client: WebClient,
+  userTeam: string,
+  slackUserId: string,
+): Promise<boolean | undefined> {
+  const ours = await getOurSlackTeam(client);
+  if (!ours) return undefined;
+  if (userTeam === ours.teamId) return true;
+  if (!ours.orgInstall) return false;
+  const sender = await getSlackUserTeam(client, slackUserId);
+  return !!sender?.enterpriseId && sender.enterpriseId === ours.enterpriseId;
 }
 
 /**
