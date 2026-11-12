@@ -65,6 +65,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
