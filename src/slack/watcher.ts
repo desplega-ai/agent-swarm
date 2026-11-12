@@ -33,6 +33,7 @@ import {
   updateToFinal,
   updateTreeMessage,
 } from "./responses";
+import { startSessionReplyMirror, stopSessionReplyMirror } from "./session-mirror";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
 
@@ -705,6 +706,7 @@ export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()
   }
 
   startSlackRenderV2Events();
+  startSessionReplyMirror();
   const watcherTick = async () => {
     // Prevent overlapping processing cycles
     if (isProcessing || !getSlackApp()) return;
@@ -892,6 +894,7 @@ export function stopTaskWatcher(): void {
     watcherInterval = null;
     isProcessing = false;
     stopSlackRenderV2Events();
+    stopSessionReplyMirror();
     console.log("[Slack] Task watcher stopped");
   }
 }
