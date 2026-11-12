@@ -355,6 +355,19 @@ export const platformbFs: Scenario = {
         [401],
         "invite without a key",
       );
+
+      // --- invite: an agent session token is refused before any agent-fs call.
+      response = await ctx.api("POST", `/api/agents/${workerId}/token`, { body: {} });
+      expectStatus(response, [200], "mint a worker token for the invite check");
+      const workerToken = asString(asRecord(response.json).plaintext, "Worker token");
+      cleanup.add("revoke the invite worker token", async () => {
+        await ctx.api("DELETE", `/api/agents/${workerId}/token`);
+      });
+      response = await ctx.api("POST", "/api/fs/members/invite", {
+        apiKey: workerToken,
+        body: { email: `e2e-${ctx.nonce}@example.invalid`, role: "admin" },
+      });
+      expectStatus(response, [403], "invite with a worker token");
     });
   },
 };
