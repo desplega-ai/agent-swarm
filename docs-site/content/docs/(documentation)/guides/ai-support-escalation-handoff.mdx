@@ -1,0 +1,93 @@
+---
+title: Escalating a customer support issue to engineering with AI agents
+description: Agent Swarm can be configured to assemble a source-linked escalation packet for one unresolved support ticket, with a named person owning the handoff.
+agent:
+  when: "Someone wants support to escalate one unresolved customer ticket to engineering with enough context for an owner to investigate"
+---
+
+Agent Swarm can be configured so agents assemble a source-linked escalation packet for one unresolved customer ticket. A named person then validates that packet, assigns the engineering owner and confirms receipt. It is assembled from documented parts, not shipped as a prebuilt support-escalation product, and it needs custom integrations and configuration work. What changes is what the engineer receives: a document stating the reported symptoms, the evidence behind them, the steps support already tried and the open questions, with a link on each line.
+
+Escalation usually arrives as a sentence. A customer writes that the export is broken, support forwards the ticket number, and the engineer rebuilds the case from a support thread and a log file. The impact needed to size it is the part support knows and the ticket rarely records.
+
+## When a helpdesk or a manual handoff fits better
+
+Most escalations need neither an agent nor a workflow.
+
+**Your helpdesk's own routing and escalation rules.** When the ticket and the fix live in one tool, its own escalation rules are the cheaper answer. A rule that moves an aging ticket to a second-line queue does the work with no model in the path.
+
+**A manual handoff.** Escalation volume may be low, the case may be urgent enough that a support lead can walk it over, or the material may be too sensitive to put in front of an agent. In each case a person spends a few minutes and the handoff lands with its context intact.
+
+Agent Swarm fits a narrower shape: the context sits in several systems and each handoff needs a recorded human acceptance. Ticket history lives in the helpdesk, the product behaviour in documentation, the related defect may already exist in the engineering tracker, and the error signal sits in monitoring. When those are separate, the escalation is assembly work, and the gathering is the part worth automating.
+
+## An illustrative workflow
+
+What follows is illustrative: documented pieces pointed at a support escalation. No customer ran it, no result was measured, and the product ships no support-escalation feature.
+
+<Mermaid title="Illustrative support escalation flow: one flagged ticket, a source-linked packet, human validation, an assigned engineering owner who confirms receipt." chart={`flowchart LR
+  A["Support owner flags<br/>one ticket"] --> B["Gather authorized sources<br/>(history, docs, issue refs)"]
+  B --> C["Agent writes packet<br/>with a source per line"]
+  C --> G{{"human-in-the-loop<br/>support owner validates"}}
+  G -- "approve" --> H["Assign the<br/>engineering owner"]
+  H --> I{{"human-in-the-loop<br/>owner confirms receipt"}}
+  I -- "confirmed" --> R["Escalation closes<br/>with a named owner"]
+  G -- "reject" --> S["Return to support<br/>with the reasons"]
+  I -- "no answer" --> F["Fallback owner<br/>stays open to support"]
+`} />
+
+**1. A support owner flags the ticket.** Someone on support decides this ticket needs engineering, a judgement the workflow should not make.
+
+**2. Configured agents gather authorized sources.** The history of that one ticket, the documentation covering the behaviour the customer reports, and any matching references in the engineering issue tracker. Scripts reach each system through [script connections](/docs/guides/script-connections), which bind the credential at the connection so no raw secret enters script source.
+
+**3. The packet is written with a source on each line.** A deterministic collection step emits JSON, so the fetching runs the same way every time, and a Researcher agent turns that JSON into prose. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents the split. The packet states reported symptoms, reproduction evidence or that none was captured, the steps support already tried, customer impact as reported, and the unknowns.
+
+**4. A person validates the packet.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) holds the run, posts the packet to Slack, and continues only when support answers. The support owner corrects what the agent got wrong and approves the version engineering reads.
+
+**5. A person assigns the engineering owner, and that owner confirms receipt.** Until the owner confirms, the escalation stays with support: visible, open and unresolved.
+
+## Missing, conflicting and duplicate evidence
+
+**Missing reproduction steps stay missing.** A ticket with no steps to reproduce, no request id and no log excerpt gets those fields marked as not captured, with a note on what support asked for. The agent does not infer a reproduction from the symptom or fill an empty log section with a plausible error.
+
+**Conflicting accounts are shown side by side.** The customer describes an error at sign-in, the logs show a successful authentication and a failure in a later request, and the help article says the flow works as designed. Picking one would remove the signal the engineer needs. The packet quotes all three with links and dates and leaves the reconciliation to the support owner, who knows which record the team treats as true.
+
+**Possible duplicates are candidates, never merges.** When the gathered references include an issue that may describe the same defect, the packet links it and says why it might match. Whether to merge or keep them apart is a person's call, because two reports that read alike can have different causes. An automatic merge hides one customer's case behind another's.
+
+## Privacy, redaction and permissions
+
+An escalation packet travels further than the ticket, so what it carries matters as much as what it says.
+
+**Choosing a ticket does not restrict access on its own.** An agent whose tools and credentials open the whole helpdesk and the whole tracker can read past the ticket. Scoping the tools is the control: keep the ones that reach other systems out of the tools and connections the agents running this workflow have registered. The [AI operations governance guide](/docs/guides/ai-operations-governance) treats that split as part of the workflow's written record.
+
+**Personal data and secrets leave the packet before it reaches engineering.** Contact details and payment identifiers are redacted or left out, along with anything a customer pasted that looks like a credential. The engineer needs the behaviour that broke, which requires no customer identity.
+
+**Least privilege applies to readers too.** The packet is a document, so a reader sees only what the workflow released and never the helpdesk itself. Support reads the packet it produced, the engineering owner reads the sources it names, and helpdesk access stays with the people who already had it.
+
+## What stays human-owned
+
+Four calls stay with people, however this workflow is assembled.
+
+- **Severity and priority.** Whether an issue is a blocker, a degradation or a cosmetic defect is a call with commercial weight. The agent records the reported impact and leaves the rating to whoever owns it.
+- **Production actions.** The workflow has no path to a restart, a data fix, a deploy or a configuration change.
+- **Every external reply.** A person approves any statement that reaches the customer, including the acknowledgement that the issue is with engineering and any estimate of a fix. The agent drafts nothing the customer sees without that approval.
+- **Owner assignment and acceptance.** Which engineer takes the escalation, and whether they have taken it, are human acts recorded in the workflow.
+
+The agent does not diagnose the root cause. It can point at the log line, the failing request and the matching issue; the diagnosis is the work the escalation exists to start. Nothing here promises resolution, and the packet says what is known rather than what is likely.
+
+### When no owner is available
+
+A week comes when the obvious owner is on leave and the queue has no takers. The workflow needs a defined answer before that week arrives: a named fallback person, or the on-call rotation the team already runs, written into the workflow.
+
+Until someone accepts, the escalation stays open and visible to support, which can see it has not been picked up. It never closes on a timeout or because the gate went unanswered. An escalation that quietly disappears is worse than one never filed, because the customer has already been told it was with engineering.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a support escalation is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node with approve and reject branches, a timeout and a fallback, used here for validation and for receipt.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a helpdesk with no built-in integration is reached through a custom connection, with the raw secret kept out of script source.
+- [Linear](/docs/integrations/linear), [Jira](/docs/integrations/jira), [GitHub](/docs/integrations/github), [Sentry](/docs/integrations/sentry) and [Slack](/docs/integrations/slack): the engineering issue references, the error events and the channel where the handoff is announced.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow and the approval thresholds that gate the irreversible steps.
+- [Team collaboration](/docs/features/team-collaboration): shared context across the two teams that inherit the case, so the packet, its sources and the acceptance sit in one record.
+
+No helpdesk integration is documented: Zendesk and Intercom are not among the shipped integrations, so a helpdesk is reached through a custom script connection. When the helpdesk exposes no API, records arrive as exports.
