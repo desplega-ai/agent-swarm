@@ -1017,6 +1017,44 @@
       "exempt": "timestamp"
     }
   },
+  "deferred_event_waits": {
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "repo": {
+      "exempt": "GitHub owner/name, validated against a fixed pattern at defer time"
+    },
+    "headSha": {
+      "exempt": "git commit sha read from GitHub"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "firedBy": {
+      "exempt": "enum or fixed-format value"
+    },
+    "childTaskId": {
+      "exempt": "identifier"
+    },
+    "resolvedAt": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "deferred_task_wait_members": {
     "scheduleId": {
       "exempt": "identifier"

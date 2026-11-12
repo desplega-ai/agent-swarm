@@ -561,6 +561,10 @@
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
       "scenarios": ["core-task-tools"]
     },
+    "task-defer-wake-pr-merged": {
+      "description": "defer-task wakeOn pr.merged: refused with GitHub off, already-merged and unreadable PRs rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires",
+      "scenarios": ["defer-wake-pr-merged"]
+    },
     "task-delegation": {
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
