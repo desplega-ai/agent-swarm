@@ -31,33 +31,41 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
+// One test per bundled entry. Each entry runs a full TypeScript program (~0.5-2.5s locally, more on
+// a loaded CI runner), so a single test looping over the whole catalog spent a shared 15s budget
+// that grew with every new extension and timed out on slow shards. Add new names here.
+const BUNDLED_ENTRIES = [
+  "comms-adherence-gate",
+  "deploy-awareness",
+  "github-sender-allowlist",
+  "notify-on-complete",
+  "require-ticket-ref",
+  "require-verification-note",
+  "slack-reply-gate",
+  "sql-admin-only",
+  "task-digest",
+];
+
 describe("predefined extension catalog", () => {
-  test(
-    "every bundled entry passes the manifest schema and bundle validation",
-    async () => {
-      const catalog = getExtensionCatalog();
-      expect(Object.keys(catalog).sort()).toEqual([
-        "comms-adherence-gate",
-        "deploy-awareness",
-        "github-sender-allowlist",
-        "notify-on-complete",
-        "require-ticket-ref",
-        "require-verification-note",
-        "slack-reply-gate",
-        "sql-admin-only",
-        "task-digest",
-      ]);
-      for (const [name, entry] of Object.entries(catalog)) {
-        expect(entry.manifest.name).toBe(name);
-        expect(ExtensionManifestSchema.safeParse(entry.manifest).success).toBe(true);
-        const result = await validateBundle({ manifest: entry.manifest, files: entry.files });
+  for (const name of BUNDLED_ENTRIES) {
+    test(
+      `bundled entry ${name} passes the manifest schema and bundle validation`,
+      async () => {
+        const catalog = getExtensionCatalog();
+        // Fails every entry's test when a bundled template is added or removed without updating the list.
+        expect(Object.keys(catalog).sort()).toEqual(BUNDLED_ENTRIES);
+        const entry = catalog[name];
+        expect(entry).toBeDefined();
+        expect(entry!.manifest.name).toBe(name);
+        expect(ExtensionManifestSchema.safeParse(entry!.manifest).success).toBe(true);
+        const result = await validateBundle({ manifest: entry!.manifest, files: entry!.files });
         expect(result).toMatchObject({ ok: true });
-      }
-      expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
-      expect(getCatalogEntry("toString")).toBeNull();
-    },
-    { timeout: 15_000 },
-  );
+        expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
+        expect(getCatalogEntry("toString")).toBeNull();
+      },
+      { timeout: 15_000 },
+    );
+  }
 
   test("the generator reads YAML and JSON templates and their referenced files", async () => {
     const dir = await templatesDir({
