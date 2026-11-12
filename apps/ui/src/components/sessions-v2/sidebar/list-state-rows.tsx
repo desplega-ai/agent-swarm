@@ -1,17 +1,20 @@
 /**
  * The rows a sidebar list adds around its sessions: "Show 10 more" and
  * "View all N" (SPEC R6), the centered empty state (R5), the loading
- * placeholder, and the group rows of My groups: "New group" and the name
- * field of a new group. An empty or loading line carries an id, so the row
+ * placeholder, and the group rows of My groups: "New group", the name
+ * field of a new group, and "Show N hidden". An empty or loading line carries an id, so the row
  * it sits under can point at it (`aria-describedby`).
  */
 
 import {
+  Activity,
   AlarmClock,
   Archive,
   ArrowRight,
   ChevronDown,
   CircleAlert,
+  Eye,
+  EyeOff,
   FolderPlus,
   Hash,
   Inbox,
@@ -29,6 +32,7 @@ import type { EmptyKind } from "./tree-rows";
 
 const EMPTY: Record<EmptyKind, { icon: LucideIcon; title: string; hint?: ReactNode }> = {
   inbox: { icon: Inbox, title: "Inbox clear.", hint: "Nothing waits on you." },
+  working: { icon: Activity, title: "Nothing running." },
   later: {
     icon: AlarmClock,
     title: "Nothing snoozed.",
@@ -175,6 +179,38 @@ export function AddGroupRow({
         <FolderPlus aria-hidden className="size-3.5" />
       </span>
       New group
+    </TreeRow>
+  );
+}
+
+/** "Show N hidden" after the groups: shows the hidden groups in place, or hides them again. */
+export function HiddenGroupsRow({
+  id,
+  cursor,
+  count,
+  open,
+  onClick,
+}: {
+  id: string;
+  cursor: boolean;
+  count: number;
+  open: boolean;
+  onClick: (event: MouseEvent) => void;
+}) {
+  const Icon = open ? EyeOff : Eye;
+  return (
+    <TreeRow
+      id={id}
+      level={0}
+      cursor={cursor}
+      aria-expanded={open}
+      onClick={onClick}
+      className="mt-1 h-7 text-data font-medium text-muted-foreground hover:text-foreground"
+    >
+      <span className="grid size-4 shrink-0 place-items-center">
+        <Icon aria-hidden className="size-3.5" />
+      </span>
+      {open ? `Hide ${count} hidden` : `Show ${count} hidden`}
     </TreeRow>
   );
 }

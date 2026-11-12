@@ -8316,7 +8316,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8360,7 +8360,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8376,13 +8376,13 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
                     };
                 };
-                /** @description Invalid asset key for a key favorite */
+                /** @description Invalid asset key for a key or hidden-key favorite */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20228,6 +20228,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -20295,6 +20296,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -20425,6 +20427,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -20548,6 +20551,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -20671,6 +20675,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -20806,6 +20811,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -21009,6 +21015,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             parentTaskId?: string;
                             requestedDelayMs?: number;
                             /** Format: date-time */
@@ -23027,8 +23034,9 @@ export interface paths {
                     contextKeyPrefix?: string;
                     keyPrefix?: string;
                     groupKey?: string;
+                    ids?: string;
                     noGroup?: "true" | "false";
-                    triage?: "inbox" | "later" | "done" | "unread";
+                    triage?: "inbox" | "working" | "later" | "done" | "unread";
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
@@ -23197,6 +23205,13 @@ export interface paths {
                                 running: number;
                                 needsYou: number;
                             };
+                            /** @description Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox. */
+                            working: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
                             later: {
                                 total: number;
                                 unread: number;
@@ -23253,7 +23268,7 @@ export interface paths {
         put?: never;
         /**
          * Triage every session of one sidebar list
-         * @description The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.
+         * @description The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.
          */
         post: {
             parameters: {
@@ -23268,9 +23283,10 @@ export interface paths {
                         /** @enum {string} */
                         action: "done" | "inbox" | "read" | "unread";
                         /** @enum {string} */
-                        triage?: "inbox" | "later" | "done";
+                        triage?: "inbox" | "working" | "later" | "done";
                         noGroup?: boolean;
                         groupKey?: string;
+                        keyPrefix?: string;
                         /**
                          * @description Sessions v2 view, for a user viewer with tree scope. mine (default): roots the user started from a human channel (not workflow, schedule, or system) plus sessions shared with the user. all: every tree session. Lists only: access is unchanged.
                          * @enum {string}
@@ -23278,6 +23294,7 @@ export interface paths {
                         show?: "mine" | "all";
                         hideSource?: string[];
                         showSource?: string[];
+                        exceptIds?: string[];
                     };
                 };
             };
@@ -25991,6 +26008,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -26056,6 +26074,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                updatedByAgentId?: string;
                                 parentTaskId?: string;
                                 requestedDelayMs?: number;
                                 /** Format: date-time */
@@ -30156,6 +30175,7 @@ export interface paths {
                             dir?: string;
                             vcsRepo?: string;
                             createdByAgentId?: string;
+                            updatedByAgentId?: string;
                             createdAt: string;
                             lastUpdatedAt: string;
                             createdBy?: string;
@@ -32341,7 +32361,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
@@ -32926,6 +32946,14 @@ export interface components {
             /** @description Confirmed invocations across all harnesses, at most one per runner session */
             invocationCount: number;
             lastInvokedAt: string | null;
+            /** @default null */
+            createdByAgentId: string | null;
+            /** @default null */
+            updatedByAgentId: string | null;
+            /** @default null */
+            createdBy: string | null;
+            /** @default null */
+            updatedBy: string | null;
             createdAt: string;
             lastUpdatedAt: string;
             lastFetchedAt: string | null;
@@ -33257,6 +33285,7 @@ export interface components {
             dir?: string;
             vcsRepo?: string;
             createdByAgentId?: string;
+            updatedByAgentId?: string;
             createdAt: string;
             lastUpdatedAt: string;
             createdBy?: string;
@@ -36986,6 +37015,12 @@ export interface operations {
                              */
                             executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
+                            /** @default null */
+                            updatedByAgentId: string | null;
+                            /** @default null */
+                            createdBy: string | null;
+                            /** @default null */
+                            updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
                         }[];
@@ -37066,6 +37101,12 @@ export interface operations {
                              */
                             executor: "native" | "quickjs" | null;
                             createdByAgentId: string | null;
+                            /** @default null */
+                            updatedByAgentId: string | null;
+                            /** @default null */
+                            createdBy: string | null;
+                            /** @default null */
+                            updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
                             signature: {

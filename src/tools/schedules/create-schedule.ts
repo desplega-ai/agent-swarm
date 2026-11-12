@@ -326,6 +326,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           nextRunAt = calculateNextRun(tempSchedule, new Date());
         }
 
+        // Not the audit task: a schedule fires its tasks as requested by created_by.
         const createdBy =
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
           undefined;

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { resolveHttpAuditUserId } from "@/be/audit-user";
+import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
 import { getDbClient } from "@/be/db";
 import {
@@ -2384,7 +2384,7 @@ export async function handleScriptConnections(
         label,
         flow: "generic",
         ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
-        userId: await resolveHttpAuditUserId(req, agentId),
+        userId: await resolveHttpRequesterUserId(req, agentId),
       });
       authorizeUrlRoute.respond(res, 200, {
         authorizeUrl: result.url,

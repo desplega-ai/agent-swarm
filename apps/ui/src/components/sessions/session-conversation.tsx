@@ -309,6 +309,8 @@ export function SessionConversation({
             placeholder={placeholder}
             routeLabel={routeLabel}
             value={value}
+            // Uncontrolled: the draft persists per session (`lib/composer-drafts.ts`).
+            draftKey={`session:${rootTaskId}`}
             onValueChange={(next) => {
               composer.current.hasText = next.trim().length > 0;
               reportTyping();

@@ -725,7 +725,12 @@ describe("the Inbox holds ungrouped sessions and auto-Done", () => {
     expect(await ids({ noGroup: true })).not.toContain(quiet.id);
     const tree = await getSessionTree(actor(), NOW);
     expect(tree.done.total).toBe(2);
-    expect(tree.inbox.total).toBe(6);
+    // The running session, with nothing to answer, lists under Working, not the Inbox.
+    expect(tree.inbox.total).toBe(5);
+    expect(tree.working.total).toBe(1);
+    expect(await ids({ triage: "working" })).toEqual([running.id]);
+    expect(await ids({ triage: "inbox" })).not.toContain(running.id);
+    expect(await ids({ triage: "inbox" })).toContain(approval.id);
 
     // New activity brings it back to the Inbox, as unread.
     await task("shared/", { parentTaskId: quiet.id }, HALF_DAY_AGO);
@@ -848,7 +853,10 @@ describe("Done holds until the session needs the user", () => {
       createdByUserId: owner.id,
     });
     expect(await readState(queued.id)).toBe("unread");
-    expect((await ids({ triage: "inbox" })).sort()).toEqual([steered.id, queued.id].sort());
+    // Both leave Done. The steered root is still in progress with nothing to answer, so it
+    // lists under Working; the queued one's latest task finished, so it is in the Inbox.
+    expect(await ids({ triage: "inbox" })).toEqual([queued.id]);
+    expect(await ids({ triage: "working" })).toEqual([steered.id]);
   });
 
   test("agent, system, cancelled and earlier steering keep it Done", async () => {

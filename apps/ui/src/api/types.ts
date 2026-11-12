@@ -1024,7 +1024,7 @@ export interface SessionPerson {
 }
 
 /** `triage` filter on `GET /api/sessions`. Inbox excludes Later and Done. */
-export type SessionTriageFilter = "inbox" | "later" | "done" | "unread";
+export type SessionTriageFilter = "inbox" | "working" | "later" | "done" | "unread";
 
 /** `status` filter on `GET /api/sessions`. `needs` is "Needs you". */
 export type SessionStatusFilter = "running" | "failed" | "needs";
@@ -1048,6 +1048,8 @@ export interface SessionTreeResponse {
   labels?: Record<string, string>;
   groups: SessionTreeGroup[];
   inbox: SessionSectionCounts;
+  /** Inbox sessions with a task running and nothing to answer. Missing on servers before Working. */
+  working?: SessionSectionCounts;
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
@@ -1123,7 +1125,14 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+export type FavoriteItemType =
+  | "page"
+  | "workflow"
+  | "schedule"
+  | "agent-fs-path"
+  | "key"
+  | "session"
+  | "hidden-key";
 
 export interface UserFavorite {
   id: string;

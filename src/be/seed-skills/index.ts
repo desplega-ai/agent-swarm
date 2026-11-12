@@ -702,6 +702,9 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         [skill.name, "swarm", ""],
       );
 
+      // Seed writes carry no agent and no person on purpose: the audit columns
+      // stay NULL (and an update resets them) so a seeded row is never
+      // attributed to whoever booted the API.
       if (existing) {
         await updateSkill(existing.id, {
           name: skill.name,
@@ -711,6 +714,8 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
           systemDefault: skill.systemDefault,
           userInvocable: skill.userInvocable,
           isComplex: skill.files.length > 0,
+          updatedBy: null,
+          updatedByAgentId: null,
         });
         await syncSeededSkillFiles(existing.id, skill.files);
         return;

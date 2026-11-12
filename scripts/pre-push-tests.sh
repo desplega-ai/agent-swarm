@@ -58,6 +58,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/app-row-tools.test.ts \
     src/tests/apps-rbac.test.ts \
     src/tests/apps-spike2.test.ts \
+    src/tests/audit-agent-person.test.ts \
     src/tests/apps-sync-engine.test.ts \
     src/tests/connection-embedded-auth.test.ts \
     src/tests/heartbeat-jev-gate-credentials.test.ts \

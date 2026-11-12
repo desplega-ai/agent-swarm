@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   countAllPages,
   countPagesByAgent,
@@ -631,7 +631,7 @@ export async function handlePages(
       const key = parsed.body.key
         ? await authorizeAssetKeyWrite(
             parsed.body.key,
-            await resolveHttpAuditUserId(req, myAgentId),
+            await resolveHttpRequesterUserId(req, myAgentId),
           )
         : undefined;
       const page = await createPage({
@@ -878,7 +878,7 @@ export async function handlePages(
       try {
         key = await authorizeAssetKeyWrite(
           parsed.body.key,
-          await resolveHttpAuditUserId(req, myAgentId),
+          await resolveHttpRequesterUserId(req, myAgentId),
         );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {

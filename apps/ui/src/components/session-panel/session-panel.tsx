@@ -257,6 +257,7 @@ function NewSession({
   const mayCreate = useCan("task.create.own");
   const { userId, composerProps } = useStartSession({
     contextKey,
+    draftKey: "session-panel:new",
     buildTask: (typed) => withContextFooter(typed, contextFooter),
     onStarted: (created) => onStarted(created.id),
   });

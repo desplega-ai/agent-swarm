@@ -62,6 +62,7 @@ describe("createToolRegistrar with no inputSchema", () => {
       sessionId: "test-session-123",
       agentId: "agent-abc",
       sourceTaskId: "task-xyz",
+      auditSourceTaskId: "task-xyz",
       contextKey: undefined,
       // External headers cannot forge the server-private script origin.
       callOrigin: "mcp",

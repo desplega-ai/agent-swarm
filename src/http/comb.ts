@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import { getCombConfig } from "../comb/config";
 import {
   REVIEW_BATCH_MAX,
@@ -120,7 +120,7 @@ export async function handleComb(
   try {
     const result = await sendReviewBatch({
       ...parsed.body,
-      requestedByUserId: await resolveHttpAuditUserId(req, myAgentId),
+      requestedByUserId: await resolveHttpRequesterUserId(req, myAgentId),
     });
     reviewBatchRoute.respond(res, result.taskId === null ? 200 : 201, result);
   } catch (error) {

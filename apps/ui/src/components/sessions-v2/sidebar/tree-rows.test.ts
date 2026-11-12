@@ -7,7 +7,9 @@ import type {
   SessionTreeResponse,
 } from "../../../api/types";
 import { buildSessionGroupTree } from "../../../lib/session-groups";
+import { sidebarListParams } from "../../../lib/sessions-v2";
 import {
+  type BuildTreeRowsOptions,
   buildTreeRows,
   foldId,
   foldIds,
@@ -21,6 +23,7 @@ import {
   openByDefault,
   sessionRange,
   type TreeRow,
+  wholeListOn,
   wholeListTotal,
 } from "./tree-rows";
 
@@ -62,7 +65,7 @@ function build(
     open?: Record<string, boolean>;
     expanded?: string[];
     lists?: Record<string, ListState>;
-  } = {},
+  } & Pick<BuildTreeRowsOptions, "starredGroups" | "hiddenGroups" | "showHidden" | "starred"> = {},
 ) {
   return buildTreeRows({
     tree: t,
@@ -70,6 +73,10 @@ function build(
     isOpen: (id) => options.open?.[id] ?? openByDefault(id, ME),
     expanded: new Set(options.expanded ?? []),
     lists: new Map(Object.entries(options.lists ?? {})),
+    starredGroups: options.starredGroups,
+    hiddenGroups: options.hiddenGroups,
+    showHidden: options.showHidden,
+    starred: options.starred,
   });
 }
 const keys = (rows: { key: string }[]) => rows.map((row) => row.key);
@@ -255,6 +262,7 @@ describe("buildTreeRows", () => {
         "personal/lena/notes/",
         "shared/a/",
         "shared/a/b/",
+        "working",
       ].sort(),
     );
   });
@@ -311,6 +319,34 @@ describe("source sections (sources Phase 5)", () => {
     expect(containers).toEqual(["shared/slack/c0eng00001/"]);
     // My groups stay writable.
     expect(rows.find((row) => row.key === "group:shared/a/")).toMatchObject({ readOnly: false });
+  });
+
+  test("an open DM is one session list: its threads fold in, no thread rows", () => {
+    const dm = "shared/slack/d0dm000001/";
+    const threaded = tree([
+      group(dm, 15),
+      group(`${dm}thread:1.1/`, 2),
+      group(`${dm}thread:1.2/`, 3),
+    ]);
+    const open = { inbox: false, later: false, "source:slack": true, [dm]: true };
+    // 20 loaded of 20: the whole subtree, threads included.
+    const { rows, containers } = build(threaded, {
+      open,
+      lists: { [dm]: { data: page(20), failed: false } },
+    });
+    const slack = rows.slice(rows.findIndex((row) => row.key === "source:slack"));
+    expect(slack[1]).toMatchObject({ key: `group:${dm}`, counts: counts(20) });
+    expect(slack.slice(2, 14).map((row) => row.type)).toEqual([
+      ...Array(10).fill("session"),
+      "more",
+      "all",
+    ]);
+    expect(slack[13]).toMatchObject({ type: "all", container: dm, total: 20 });
+    expect(rows.some((row) => row.key.includes("thread:"))).toBe(false);
+    expect(containers).toEqual([dm]);
+    // The DM list loads by prefix (its threads too); a user group keeps its exact group.
+    expect(sidebarListParams(dm)).toMatchObject({ keyPrefix: dm });
+    expect(sidebarListParams("shared/a/")).toMatchObject({ groupKey: "shared/a/" });
   });
 
   test("a source header is a cursor stop that folds its section", () => {
@@ -416,6 +452,15 @@ describe("list selection", () => {
     // No View all row: the list fits in 10.
     expect(wholeListTotal(rows, "inbox")).toBeNull();
   });
+
+  test("wholeListOn: Select all 12 with all 10 loaded rows unchecked still holds the 2 unloaded", () => {
+    expect(wholeListOn(0, 12, 10)).toBe(true);
+    expect(wholeListOn(9, 12, 1)).toBe(true);
+    // Every session unchecked, or nothing past the loaded rows: the selection ends.
+    expect(wholeListOn(0, 12, 12)).toBe(false);
+    expect(wholeListOn(0, null, 10)).toBe(false);
+    expect(wholeListOn(1, null, 9)).toBe(true);
+  });
 });
 
 describe("resource sections", () => {
@@ -479,5 +524,115 @@ describe("groupStarKey", () => {
     expect(groupStarKey(groupRow("shared/slack/c1/", false))).toBe("shared/slack/c1/");
     expect(groupStarKey(groupRow("shared/slack/c1/thread:1/", true))).toBeNull();
     expect(groupStarKey({ type: "add", key: "add:group", level: 1 } as TreeRow)).toBeNull();
+  });
+});
+
+describe("sidebar stars, hidden groups, source paging, and Working", () => {
+  const closed = { inbox: false, later: false };
+  const groupKeys = (rows: TreeRow[]) =>
+    rows.flatMap((row) => (row.type === "group" ? [row.node.key] : []));
+  const at = (minute: number) => `2026-10-21T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  const dated = (key: string, minute: number): SessionTreeGroup => ({
+    ...group(key, 1),
+    lastActivityAt: at(minute),
+  });
+
+  test("starred groups come first in My groups, the rest stay newest first", () => {
+    const t = tree([dated("shared/a/", 3), dated("shared/b/", 2), dated("shared/c/", 1)]);
+    expect(groupKeys(build(t, { open: closed }).rows)).toEqual([
+      "shared/a/",
+      "shared/b/",
+      "shared/c/",
+    ]);
+    const { rows } = build(t, { open: closed, starredGroups: new Set(["shared/c/"]) });
+    expect(groupKeys(rows)).toEqual(["shared/c/", "shared/a/", "shared/b/"]);
+  });
+
+  test("starred groups come first inside a source section too", () => {
+    const t = tree([dated("shared/slack/c01/", 5), dated("shared/slack/c02/", 1)]);
+    const { rows } = build(t, {
+      open: { ...closed, "source:slack": true },
+      starredGroups: new Set(["shared/slack/c02/"]),
+    });
+    expect(groupKeys(rows)).toEqual(["shared/slack/c02/", "shared/slack/c01/"]);
+  });
+
+  test("a hidden group leaves the tree; Show N hidden brings it back dimmed", () => {
+    const t = tree([dated("shared/a/", 2), dated("shared/b/", 1)]);
+    const hiddenGroups = new Set(["shared/a/", "shared/gone/"]);
+    const hidden = build(t, { open: closed, hiddenGroups }).rows;
+    expect(groupKeys(hidden)).toEqual(["shared/b/"]);
+    // Only hidden groups that still exist count.
+    expect(hidden.find((row) => row.type === "hidden")).toMatchObject({ count: 1, open: false });
+
+    const shown = build(t, { open: closed, hiddenGroups, showHidden: true }).rows;
+    expect(groupKeys(shown)).toEqual(["shared/a/", "shared/b/"]);
+    expect(shown.find((row) => row.key === "group:shared/a/")).toMatchObject({ hidden: true });
+    expect(shown.find((row) => row.type === "hidden")).toMatchObject({ count: 1, open: true });
+    expect(isNavRow(shown.find((row) => row.type === "hidden")!)).toBe(true);
+  });
+
+  test("a source section shows its 10 newest groups, then Show 10 more, then the rest", () => {
+    const t = tree(Array.from({ length: 25 }, (_, i) => dated(`shared/slack/c${100 + i}/`, i)));
+    const open = { ...closed, "source:slack": true };
+    const newest = Array.from({ length: 25 }, (_, i) => `shared/slack/c${124 - i}/`);
+
+    const first = build(t, { open }).rows;
+    expect(groupKeys(first)).toEqual(newest.slice(0, 10));
+    expect(first.find((row) => row.type === "more")).toMatchObject({
+      container: "groups:source:slack",
+      count: 10,
+    });
+
+    const second = build(t, { open, expanded: ["groups:source:slack"] }).rows;
+    expect(groupKeys(second)).toEqual(newest.slice(0, 20));
+    expect(second.find((row) => row.type === "more")).toMatchObject({
+      container: "groups:source:slack:all",
+      count: 5,
+    });
+
+    const all = build(t, {
+      open,
+      expanded: ["groups:source:slack", "groups:source:slack:all"],
+    }).rows;
+    expect(groupKeys(all)).toEqual(newest);
+    expect(all.some((row) => row.type === "more")).toBe(false);
+  });
+
+  test("a source group whose sessions are all Done still lists them (the server counts them)", () => {
+    // The server counts a source group's Done sessions (item 5): total > 0 loads its list.
+    const key = "shared/slack/c0done/";
+    const t = tree([group(key, 2)]);
+    const { rows, containers } = build(t, {
+      open: { ...closed, "source:slack": true, [key]: true },
+      lists: { [key]: { data: page(2), failed: false } },
+    });
+    expect(containers).toEqual([key]);
+    expect(rows.filter((row) => row.type === "session")).toHaveLength(2);
+    expect(rows.some((row) => row.key === `empty:${key}`)).toBe(false);
+  });
+
+  test("Working sits right under the Inbox, and hides while empty", () => {
+    const empty = build(tree([], { inbox: counts(1) })).rows;
+    expect(empty.some((row) => row.key === "box:working")).toBe(false);
+
+    const { rows, containers } = build(tree([], { inbox: counts(1), working: counts(2) }));
+    const boxes = rows.flatMap((row) => (row.type === "box" ? [row.id] : []));
+    expect(boxes.slice(0, 2)).toEqual(["inbox", "working"]);
+    expect(containers).toContain("working");
+    expect(rows.find((row) => row.key === "box:working")).toMatchObject({ open: true });
+  });
+
+  test("starred sessions list under Starred after the Inbox", () => {
+    const { rows } = build(tree([], { inbox: counts(0) }), {
+      open: closed,
+      starred: { data: page(2), failed: false },
+    });
+    const at = rows.findIndex((row) => row.key === "section:starred");
+    expect(at).toBe(1);
+    expect(rows.slice(at + 1, at + 3).map((row) => row.key)).toEqual([
+      "s:starred:s0",
+      "s:starred:s1",
+    ]);
   });
 });

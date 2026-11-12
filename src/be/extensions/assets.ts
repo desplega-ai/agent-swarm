@@ -541,7 +541,7 @@ const scheduleAdapter: Adapter<SchedulePlan> = {
     });
     return schedule.id;
   },
-  async update(plan, id, _agentId, actor) {
+  async update(plan, id, agentId, actor) {
     const live = await getScheduledTaskById(id);
     if (!live) return;
     const spec = plan.spec;
@@ -557,7 +557,8 @@ const scheduleAdapter: Adapter<SchedulePlan> = {
       scriptName: spec.scriptName,
       scriptArgs: spec.scriptArgs,
       ...(live.enabled && timingChanged ? { nextRunAt: calculateNextRun(timingOf(spec)) } : {}),
-      ...(actor ? { updatedBy: actor } : {}),
+      updatedBy: actor,
+      updatedByAgentId: agentId,
     });
   },
   async remove(row) {
@@ -607,7 +608,7 @@ const workflowAdapter: Adapter<WorkflowPlan> = {
     });
     return workflow.id;
   },
-  async update(plan, id, _agentId, actor) {
+  async update(plan, id, agentId, actor) {
     await updateWorkflow(id, {
       description: plan.spec.description ?? "",
       definition: plan.spec.definition,
@@ -615,7 +616,8 @@ const workflowAdapter: Adapter<WorkflowPlan> = {
       cooldown: plan.spec.cooldown ?? null,
       input: plan.spec.input ?? null,
       triggerSchema: plan.spec.triggerSchema ?? null,
-      ...(actor ? { updatedBy: actor } : {}),
+      updatedBy: actor,
+      updatedByAgentId: agentId,
     });
   },
   async remove(row) {
@@ -650,7 +652,7 @@ const skillAdapter: Adapter<SkillPlan> = {
     }));
     return { id: skill.id, hash: skillHash(liveSkillSpec(skill), files) };
   },
-  async create(plan, agentId) {
+  async create(plan, agentId, actor) {
     const { spec } = plan;
     const skill = await createSkill({
       ...spec,
@@ -666,13 +668,15 @@ const skillAdapter: Adapter<SkillPlan> = {
       type: "personal",
       ownerAgentId: agentId,
       isEnabled: false,
+      createdByAgentId: agentId,
+      createdBy: actor,
     });
     await upsertSkillFiles(skill.id, plan.files);
     return skill.id;
   },
-  async update(plan, id) {
+  async update(plan, id, agentId, actor) {
     // The full spec, so a field the new version drops is cleared, not kept.
-    await updateSkill(id, plan.spec);
+    await updateSkill(id, { ...plan.spec, updatedBy: actor, updatedByAgentId: agentId });
     const wanted = new Set(plan.files.map((file) => file.path));
     for (const file of await getSkillFiles(id)) {
       if (!wanted.has(file.path)) await deleteSkillFile(id, file.path);

@@ -2547,7 +2547,9 @@
               "workflow",
               "schedule",
               "agent-fs-path",
-              "key"
+              "key",
+              "session",
+              "hidden-key"
             ]
           },
           "itemId": {
@@ -4905,6 +4907,34 @@
               "null"
             ]
           },
+          "createdByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "createdAt": {
             "type": "string"
           },
@@ -6062,6 +6092,9 @@
             "minLength": 1
           },
           "createdByAgentId": {
+            "type": "string"
+          },
+          "updatedByAgentId": {
             "type": "string"
           },
           "createdAt": {
@@ -24792,7 +24825,9 @@
                 "workflow",
                 "schedule",
                 "agent-fs-path",
-                "key"
+                "key",
+                "session",
+                "hidden-key"
               ]
             },
             "required": false,
@@ -24872,7 +24907,9 @@
                       "workflow",
                       "schedule",
                       "agent-fs-path",
-                      "key"
+                      "key",
+                      "session",
+                      "hidden-key"
                     ]
                   },
                   "itemId": {
@@ -24910,7 +24947,9 @@
                         "workflow",
                         "schedule",
                         "agent-fs-path",
-                        "key"
+                        "key",
+                        "session",
+                        "hidden-key"
                       ]
                     },
                     "itemId": {
@@ -24938,7 +24977,7 @@
             }
           },
           "400": {
-            "description": "Invalid asset key for a key favorite",
+            "description": "Invalid asset key for a key or hidden-key favorite",
             "content": {
               "application/json": {
                 "schema": {
@@ -46420,6 +46459,9 @@
                     "createdByAgentId": {
                       "type": "string"
                     },
+                    "updatedByAgentId": {
+                      "type": "string"
+                    },
                     "parentTaskId": {
                       "type": "string"
                     },
@@ -46788,6 +46830,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -46981,6 +47026,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -47219,6 +47267,9 @@
                           "format": "date-time"
                         },
                         "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "updatedByAgentId": {
                           "type": "string"
                         },
                         "parentTaskId": {
@@ -47472,6 +47523,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -47854,6 +47908,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -48267,6 +48324,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -58467,6 +58527,14 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "ids",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "enum": [
                 "true",
@@ -58482,6 +58550,7 @@
               "type": "string",
               "enum": [
                 "inbox",
+                "working",
                 "later",
                 "done",
                 "unread"
@@ -59047,6 +59116,30 @@
                         "needsYou"
                       ]
                     },
+                    "working": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ],
+                      "description": "Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox."
+                    },
                     "later": {
                       "type": "object",
                       "properties": {
@@ -59139,6 +59232,7 @@
                   "required": [
                     "groups",
                     "inbox",
+                    "working",
                     "later",
                     "done",
                     "noGroup",
@@ -59164,7 +59258,7 @@
     "/api/session-triage": {
       "post": {
         "summary": "Triage every session of one sidebar list",
-        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.",
         "tags": [
           "Sessions"
         ],
@@ -59192,6 +59286,7 @@
                     "type": "string",
                     "enum": [
                       "inbox",
+                      "working",
                       "later",
                       "done"
                     ]
@@ -59200,6 +59295,9 @@
                     "type": "boolean"
                   },
                   "groupKey": {
+                    "type": "string"
+                  },
+                  "keyPrefix": {
                     "type": "string"
                   },
                   "show": {
@@ -59225,6 +59323,14 @@
                       "minLength": 1
                     },
                     "maxItems": 32
+                  },
+                  "exceptIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 500
                   }
                 },
                 "required": [
@@ -63361,6 +63467,27 @@
                               "null"
                             ]
                           },
+                          "updatedByAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "createdBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "updatedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -63547,6 +63674,27 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "updatedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "createdBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "updatedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
                         },
                         "createdAt": {
                           "type": "string"
@@ -65576,6 +65724,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -65761,6 +65912,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -72707,6 +72861,9 @@
                             "minLength": 1
                           },
                           "createdByAgentId": {
+                            "type": "string"
+                          },
+                          "updatedByAgentId": {
                             "type": "string"
                           },
                           "createdAt": {

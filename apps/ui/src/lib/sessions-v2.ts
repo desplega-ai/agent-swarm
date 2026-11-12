@@ -10,7 +10,7 @@ import type {
   SessionSectionCounts,
   SessionTreeResponse,
 } from "../api/types";
-import { groupKeyOf } from "./session-groups";
+import { groupKeyOf, sourceOfGroupKey } from "./session-groups";
 
 /**
  * The first API that serves `GET /api/session-tree`, the session moves, and
@@ -54,7 +54,7 @@ function isSessionOrNewTab(tab: string): boolean {
 }
 
 /** The flat sidebar sections that `?view=` can open. A group key opens a group. */
-export const SESSION_SECTIONS = ["inbox", "later", "done", "nogroup"] as const;
+export const SESSION_SECTIONS = ["inbox", "working", "later", "done", "nogroup"] as const;
 export type SessionSection = (typeof SESSION_SECTIONS)[number];
 
 /** `?tabs=` as a list: trimmed, no blanks, no repeats, in URL order. */
@@ -244,9 +244,11 @@ export const SIDEBAR_LIST_STEP = 10;
 
 /** The list filters of a sidebar container: a section, or a group key. */
 interface SidebarListFilter {
-  triage?: "inbox" | "later" | "done";
+  triage?: "inbox" | "working" | "later" | "done";
   noGroup?: boolean;
   groupKey?: string;
+  /** A source group: the group and its nested threads. */
+  keyPrefix?: string;
 }
 
 /**
@@ -258,10 +260,17 @@ export function sidebarListParams(
   container: string,
 ): SidebarListFilter & { scope: "tree"; limit: number } {
   const base = { scope: "tree" as const, limit: SIDEBAR_LIST_LIMIT };
-  if (container === "inbox" || container === "later" || container === "done") {
+  if (
+    container === "inbox" ||
+    container === "working" ||
+    container === "later" ||
+    container === "done"
+  ) {
     return { ...base, triage: container };
   }
   if (container === "nogroup") return { ...base, noGroup: true };
+  // A source group (a channel, a DM) lists its threads' sessions too: one list, one sort.
+  if (sourceOfGroupKey(container)) return { ...base, keyPrefix: container };
   return { ...base, groupKey: container };
 }
 

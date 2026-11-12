@@ -25,8 +25,9 @@ for (const width of [1280, 390]) {
       await dialog.getByRole("button", { name: "Advanced settings" }).click();
       await expect(dialog.getByLabel("Task type", { exact: true })).toBeVisible();
       await dialog.getByRole("button", { name: "Start as a session" }).click();
-      const composer = page.getByPlaceholder("What's the goal?");
-      await expect(composer).toHaveValue(prompt);
+      const composer = page.getByRole("textbox", { name: "What's the goal?" });
+      // The box is a rich-text editor: one paragraph per line.
+      await expect(composer.locator("p")).toHaveText(prompt.split("\n"));
       await expect(page).not.toHaveURL(/seed=/);
       await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeVisible();
       expect(creates).toEqual([]);
@@ -87,7 +88,7 @@ test("failed task creation keeps the draft for retry", async ({ page, seed }) =>
   await dialog.getByRole("textbox", { name: "Task description" }).fill("Keep this task draft");
   await dialog.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Task creation unavailable");
-  await expect(dialog.getByRole("textbox", { name: "Task description" })).toHaveValue(
+  await expect(dialog.getByRole("textbox", { name: "Task description" })).toHaveText(
     "Keep this task draft",
   );
   await expect(dialog.getByRole("button", { name: "Create task", exact: true })).toBeEnabled();

@@ -155,19 +155,36 @@ export type Stub = {
   stop: () => void;
 };
 
+/** agent-fs answers a PUT /raw with a JSON content type 415 (packages/server/src/routes/files.ts). */
+export function agentFsRawJsonRejection(request: Request): Response | undefined {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (request.method !== "PUT" || !contentType.toLowerCase().startsWith("application/json")) {
+    return undefined;
+  }
+  return Response.json(
+    {
+      error: "VALIDATION_ERROR",
+      message:
+        "PUT /raw expects a binary body; use POST /ops with op=write for JSON-encoded content",
+    },
+    { status: 415 },
+  );
+}
+
 /**
  * A loopback HTTP stub the SUT can reach. NODE_ENV=test lets the API's outbound guards talk
  * to loopback, so connections, MCP servers and script `fetch` can target this server.
  */
 export function startStub(
-  handler: (request: Request, body: string) => Response | Promise<Response>,
+  handler: (request: Request, body: string, bytes: Uint8Array) => Response | Promise<Response>,
 ): Stub {
   const seen: Stub["seen"] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      const body = await request.text();
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      const body = new TextDecoder().decode(bytes);
       const url = new URL(request.url);
       seen.push({
         method: request.method,
@@ -175,7 +192,7 @@ export function startStub(
         headers: Object.fromEntries(request.headers.entries()),
         body,
       });
-      return handler(request, body);
+      return handler(request, body, bytes);
     },
   });
   const port = server.port ?? 0;

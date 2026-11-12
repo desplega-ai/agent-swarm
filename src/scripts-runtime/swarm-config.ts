@@ -7,6 +7,8 @@ export class SwarmConfig {
   readonly mcpBaseUrl: RedactedValue<string>;
   /** Per-boot runtime identity of the invoking worker; system context, never script input. */
   readonly runtimeInstanceId: RedactedValue<string> | undefined;
+  /** Task the run acts for; system context, sent as `X-Audit-Source-Task-Id`. */
+  readonly auditSourceTaskId: RedactedValue<string> | undefined;
   /** Per-process extension bridge secret; present only for in-process extension SDKs. */
   readonly extensionToken: RedactedValue<string> | undefined;
 
@@ -29,6 +31,12 @@ export class SwarmConfig {
       ? Redacted.make(payload.system.runtimeInstanceId.value, {
           type: "system",
           isSecret: payload.system.runtimeInstanceId.isSecret,
+        })
+      : undefined;
+    this.auditSourceTaskId = payload.system.auditSourceTaskId
+      ? Redacted.make(payload.system.auditSourceTaskId.value, {
+          type: "system",
+          isSecret: payload.system.auditSourceTaskId.isSecret,
         })
       : undefined;
     this.extensionToken = payload.system.extensionToken

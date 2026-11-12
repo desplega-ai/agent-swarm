@@ -187,6 +187,8 @@ describe("kv-storage helpers", () => {
       )
     ).map(keyOf);
 
+    // Count batch yields only, not the DB client's elapsed-time slice yields.
+    const clock = spyOn(performance, "now").mockReturnValue(0);
     const immediate = spyOn(globalThis, "setImmediate");
     let removed: number;
     let yields: number;
@@ -195,6 +197,7 @@ describe("kv-storage helpers", () => {
       yields = immediate.mock.calls.length;
     } finally {
       immediate.mockRestore();
+      clock.mockRestore();
     }
 
     const after = new Set(

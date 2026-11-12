@@ -9,6 +9,9 @@ const ENV_KEYS = [
   "EVALS_DB_SYNC_URL",
   "EVALS_DB_AUTH_TOKEN",
   "EVALS_MAX_CONCURRENT_RUNS",
+  "EVALS_ALLOW_OPEN_API",
+  "EVALS_MODEL_CATALOG_REFRESH",
+  "NODE_ENV",
 ] as const;
 
 const saved: Record<string, string | undefined> = {};
@@ -31,6 +34,9 @@ beforeEach(() => {
   resetActiveRunsForTests();
   for (const key of ENV_KEYS) delete process.env[key];
   process.env.EVALS_DB_PATH = ":memory:";
+  // Keep the suite offline when a test switches NODE_ENV away from "test".
+  process.env.NODE_ENV = "test";
+  process.env.EVALS_MODEL_CATALOG_REFRESH = "off";
 });
 
 afterEach(() => {
@@ -62,6 +68,43 @@ describe("evals API auth and run cap", () => {
     try {
       const res = await fetch(`${baseUrl(server)}/api/runs`);
       expect(res.status).toBe(200);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("NODE_ENV=production refuses to start when EVALS_API_KEY is unset", async () => {
+    process.env.NODE_ENV = "production";
+    await expect(startServer(0)).rejects.toThrow("EVALS_API_KEY is unset or empty");
+  });
+
+  test("NODE_ENV=production refuses to start when EVALS_API_KEY is empty", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.EVALS_API_KEY = "";
+    await expect(startServer(0)).rejects.toThrow("EVALS_API_KEY is unset or empty");
+  });
+
+  test("NODE_ENV=production with EVALS_API_KEY set gates /api/* on the bearer", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.EVALS_API_KEY = "example-test-master-key";
+    const server = await startServer(0);
+    try {
+      expect((await fetch(`${baseUrl(server)}/api/runs`)).status).toBe(401);
+      const authenticated = await fetch(`${baseUrl(server)}/api/runs`, {
+        headers: { Authorization: "Bearer example-test-master-key" },
+      });
+      expect(authenticated.status).toBe(200);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("NODE_ENV=production without a key starts open only with EVALS_ALLOW_OPEN_API=1", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.EVALS_ALLOW_OPEN_API = "1";
+    const server = await startServer(0);
+    try {
+      expect((await fetch(`${baseUrl(server)}/api/runs`)).status).toBe(200);
     } finally {
       server.stop(true);
     }

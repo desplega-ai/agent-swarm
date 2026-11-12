@@ -512,6 +512,20 @@ function warnIfApiOpen(): void {
   console.warn("WARNING: EVALS_API_KEY is unset; /api/* is open. Set it before deployment.");
 }
 
+/**
+ * The production image sets NODE_ENV=production. There an unset or empty key would leave
+ * every `/api/*` route open, so refuse to start unless EVALS_ALLOW_OPEN_API=1 opts in.
+ */
+function assertApiKeyConfigured(): void {
+  if (process.env.EVALS_API_KEY) return;
+  if (process.env.NODE_ENV !== "production") return;
+  if (process.env.EVALS_ALLOW_OPEN_API === "1") return;
+  throw new Error(
+    "EVALS_API_KEY is unset or empty with NODE_ENV=production; refusing to serve an open /api/*. " +
+      "Set EVALS_API_KEY, or set EVALS_ALLOW_OPEN_API=1 to run without auth.",
+  );
+}
+
 export async function startServer(
   port = Number(process.env.EVALS_PORT ?? 4801),
   opts: {
@@ -520,6 +534,7 @@ export async function startServer(
     claimAutoResumableRuns?: typeof claimAutoResumableRuns;
   } = {},
 ) {
+  assertApiKeyConfigured();
   await initDb();
   const db = getDb();
   await initHarnessConfigs(db);

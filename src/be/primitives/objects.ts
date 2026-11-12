@@ -124,7 +124,7 @@ function kindFor(kind: string): PrimitiveKind {
   return def;
 }
 
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   try {
     return normalizeStoredKey(path);
   } catch (error) {

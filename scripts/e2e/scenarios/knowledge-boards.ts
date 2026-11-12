@@ -1,6 +1,7 @@
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  agentFsRawJsonRejection,
   callToolErr,
   callToolOk,
   expectRunOk,
@@ -39,7 +40,7 @@ const sortedKeys = (value: unknown) => Object.keys(asRecord(value)).sort();
  */
 export const knowledgeBoards: Scenario = {
   name: "knowledge-boards",
-  order: 595,
+  order: 597,
   async run(ctx) {
     const ownKey = `af_boards_${ctx.nonce}`;
     const org = `org-b-${ctx.nonce}`;
@@ -56,6 +57,8 @@ export const knowledgeBoards: Scenario = {
       const raw = url.pathname.match(/^\/orgs\/[^/]+\/drives\/[^/]+\/files\/(.+)\/raw$/);
       if (!raw) return new Response("not found", { status: 404 });
       const path = decodeURIComponent(raw[1] ?? "");
+      const rejected = agentFsRawJsonRejection(request);
+      if (rejected) return rejected;
       if (request.method === "GET") {
         const current = files.get(path);
         return current

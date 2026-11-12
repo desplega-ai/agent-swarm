@@ -9,6 +9,7 @@ import {
   ensureSlackRenderV2Activation,
   getAgentById,
   getResolvableDeferralOutcomes,
+  getSlackDelegationActivatedAt,
   getSlackMessageByChannelTs,
   getSlackOutcomeMessage,
   getSlackRenderV2ActivatedAt,
@@ -1175,6 +1176,24 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
     task.taskType !== "reroute-decision" &&
     task.createdAt >= delegationActivatedAt
   );
+}
+
+/**
+ * True when the delegation pass posts `task`'s own child result card, the
+ * same rules `processSlackThread` applies, so other Slack writers (the
+ * Sessions mirror) leave that card to it and the thread gets one.
+ */
+export async function slackDelegationOwnsChildCard(task: AgentTask): Promise<boolean> {
+  if (!isSlackRenderV2Enabled() || !isSlackDelegationEnabled()) return false;
+  if (!task.slackChannelId || !task.slackThreadTs) return false;
+  const delegationActivatedAt = await getSlackDelegationActivatedAt();
+  if (!delegationActivatedAt || !isChildCardCandidate(task, delegationActivatedAt)) return false;
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const ownerAsk = tasks.find(
+    (ask) =>
+      ask.source === "slack" && buildAskClosure(ask, tasks).some((member) => member.id === task.id),
+  );
+  return !!ownerAsk && ownerAsk.createdAt >= delegationActivatedAt;
 }
 
 async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {

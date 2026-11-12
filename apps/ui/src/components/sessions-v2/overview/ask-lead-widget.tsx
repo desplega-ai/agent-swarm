@@ -47,6 +47,7 @@ export function AskLeadWidget({
   const attached = attach ? file : null;
   const start = useStartSession({
     key: groupKey,
+    draftKey: `ask-lead:${groupKey}`,
     onStarted: (created) => onOpen(created.id),
     buildTask: (typed) => askLeadTask(typed, attached),
   });
