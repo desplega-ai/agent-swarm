@@ -399,6 +399,31 @@ export const knowledgeSheetsXlsx: Scenario = {
           "refused exports write nothing",
         );
 
+        // an export keeps a formula's string literals, so the file recalculates to the same text
+        const lit = await call("sheet-create", {
+          path: `lit-${ctx.nonce}.sheet.json`,
+          tabs: [{ name: "Data", rows: [['=IF(TRUE,"IFS(","SORT(")', '=IFS(TRUE,"SORT(")']] }],
+        });
+        await call("sheet-export-xlsx", {
+          id: asString(asRecord(lit.object).id, "literal sheet id"),
+          targetPath: `lit-${ctx.nonce}.xlsx`,
+        });
+        const litAgain = await call("sheet-import-xlsx", {
+          sourcePath: `lit-${ctx.nonce}.xlsx`,
+          path: `lit-again-${ctx.nonce}.sheet.json`,
+        });
+        expect(
+          JSON.stringify(
+            (
+              await call("sheet-get-range", {
+                id: asString(asRecord(litAgain.object).id, "re-imported literal sheet id"),
+                range: "Data!A1:B1",
+              })
+            ).values,
+          ) === `[["IFS(","SORT("]]`,
+          "an export keeps string literals that spell a function prefix",
+        );
+
         // a hand-edited file: a cell with only a format exports, a tab name Excel forbids is refused
         const handEdited = async (name: string, tabs: unknown[]) => {
           const path = `hand-${name}-${ctx.nonce}.sheet.json`;

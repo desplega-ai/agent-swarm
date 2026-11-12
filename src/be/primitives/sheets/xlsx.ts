@@ -320,7 +320,7 @@ export async function parseXlsx(
 /** Build an xlsx from a workbook's tabs. Formulas keep their cached result. */
 export async function buildXlsx(
   tabs: SheetTab[],
-): Promise<{ bytes: Uint8Array; dropped: string[] }> {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; dropped: string[] }> {
   const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   const dropped = new Set<string>();
