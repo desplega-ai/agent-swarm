@@ -71,9 +71,34 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 2. Biome, read-only, on changed files in the CI lint scope (`src/`, `apps/evals/`, `apps/ui/`, `packages/ui-e2e/`, `packages/model-routing/`)
 3. `bun run lint:slop`: the anti-slop Oxlint rules over the whole lint scope (about 5 s)
 4. `bun check` on the root project, plus `apps/ui` (`bun check -b`) when it changed
-5. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+5. Drift: each generator below runs only when its inputs changed, and the step fails when regenerating changes a checked-in output. Output that is current but not yet committed passes with a reminder; CI checks the pushed tree.
+6. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+7. E2E Contract, scoped by `scripts/e2e/scope.ts` (below). `bun run check:local --skip-e2e` skips it.
 
-"Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure. It does not scan for secrets; the prek pre-push hooks own that.
+| Drift generator | Runs when the change touches | Same filter as CI? |
+|---|---|---|
+| `build:script-types` + `build:extension-types` | `src/tools/`, `src/be/scripts/`, `src/scripts-runtime/`, `src/extensions/`, `src/types.ts`, the two bundlers | Narrower: CI runs it for all of `src/`. The generators take about a minute, so CI keeps catching the rare transitive reorder |
+| `docs:openapi` | `src/http/`, `src/types.ts`, the generator, `openapi.json`, `docs-site/content/docs/api-reference/`, `package.json` | Yes |
+| `build:pi-skills` | `plugin/commands/`, `plugin/pi-skills/`, `plugin/build-pi-skills.ts` | Yes |
+| `build:skill-md` + `build:seed-skill-files` | `templates/skills/`, `src/be/seed-skills/`, the two generators | Subset of the Seeded Skills Check inputs |
+| `build:extension-catalog` + `build:extension-schema` | `templates/extensions/`, `src/extensions/`, `src/types.ts`, the two generators | Yes |
+
+E2E scoping (`bun scripts/e2e/scope.ts <changed files>` prints the decision and its reasons):
+
+| The change touches | Local E2E run |
+|---|---|
+| Nothing the SUT or a non-strict run loads: docs, runbooks, `apps/ui/` sources, unit tests, `packages/ui-e2e/`, `scripts/e2e/*.md`, `coverage-manifest.json` | Skipped |
+| A scenario file | Its scenarios |
+| A scenario helper | Every scenario file that imports it, directly or through another helper |
+| A route file in `src/http/` | Scenarios whose sources name one of its route groups (`/api/<group>`) |
+| A tool file in `src/tools/` | Scenarios that name one of its tools |
+| A workflow executor | The engine that owns node types in `coverage-manifest.json`, through its route groups and tools |
+| `templates/skills/`, `templates/ai-toolbox.manifest.json` | Scenarios that reach `/api/skills` or a `skill-*` tool |
+| Anything else (`src/be/`, `src/types.ts`, shared utilities, the runner, `package.json`, `bun.lock`), or a mapped file no scenario reaches | The full suite |
+
+Selected scenarios bring their `needs`. Every scoped run still boots the whole API, so a boot failure shows up. The local run is never `--strict`: coverage and the manifest stay with CI's merged strict run.
+
+"Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure and prints the wall time of every step that ran. It does not scan for secrets; the prek pre-push hooks own that.
 
 In Claude Code, the repo's `.claude/settings.json` also runs `biome format --write` on each edited file in that scope (`scripts/claude-format-on-edit.sh`). The hook always exits 0, so it never blocks an edit.
 
