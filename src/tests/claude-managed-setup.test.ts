@@ -336,7 +336,7 @@ describe("resolveClaudeManagedSetupConfig", () => {
     expect(result.mcpBaseUrl).toBe("https://example.com");
     expect(result.apiKey).toBe("key123");
     expect(result.apiUrl).toBe("https://example.com");
-    expect(result.agentModel).toBe("claude-sonnet-5");
+    expect(result.agentModel).toBe("claude-sonnet-5-5");
     expect(promptSecret).not.toHaveBeenCalled();
   });
 

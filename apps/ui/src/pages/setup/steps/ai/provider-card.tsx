@@ -3,7 +3,7 @@ import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
-import { type AiCardId, type AiCardProps, CARD_HARNESSES, harnessNames } from "./model";
+import { type AiCardId, type AiCardProps, harnessNames } from "./model";
 import { WaitingPanel } from "./waiting";
 
 /**
@@ -25,10 +25,18 @@ export function ProviderCard({
   dialContext,
   reportSaved,
   autoSwitching,
+  harnesses,
   children,
 }: Pick<
   AiCardProps,
-  "open" | "onOpenChange" | "rollup" | "agents" | "dialContext" | "reportSaved" | "autoSwitching"
+  | "open"
+  | "onOpenChange"
+  | "rollup"
+  | "agents"
+  | "dialContext"
+  | "reportSaved"
+  | "autoSwitching"
+  | "harnesses"
 > & {
   card: AiCardId;
   icon: ReactNode;
@@ -37,7 +45,6 @@ export function ProviderCard({
   saved: boolean;
   children: ReactNode;
 }) {
-  const harnesses = CARD_HARNESSES[card];
   useEffect(() => reportSaved(card, saved), [reportSaved, card, saved]);
   const runsHarness =
     rollup.workers > 0 ||
@@ -67,7 +74,7 @@ export function ProviderCard({
     <StatusIcon
       tone="warning"
       focusable={false}
-      label={`Saved. No worker runs ${harnessNames(card)} yet.`}
+      label={`Saved. No worker runs ${harnessNames(card, "or", harnesses)} yet.`}
     />
   ) : saved ? (
     <StatusIcon
@@ -103,7 +110,7 @@ export function ProviderCard({
         </output>
       ) : saved && noWorker ? (
         <HarnessSwitch
-          harnessPhrase={harnessNames(card)}
+          harnessPhrase={harnessNames(card, "or", harnesses)}
           targets={harnesses}
           agents={agents}
           dialContext={dialContext}

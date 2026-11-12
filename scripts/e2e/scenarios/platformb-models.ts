@@ -1,3 +1,8 @@
+import {
+  type HarnessCatalogModel,
+  harnessCatalogSection,
+  harnessModelIds,
+} from "@desplega/model-catalog";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -67,6 +72,41 @@ function expectRefreshShape(result: Record<string, unknown>, label: string): Ref
     expect(typeof result.error === "string", `${label}: an error answer carries no error text`);
   }
   return { status, json: result };
+}
+
+type CatalogModels = Record<string, HarnessCatalogModel>;
+
+/**
+ * The shipped tier defaults are what onboarding proposes per agent: the step 4
+ * dial reads `GET /api/models-catalog/tiers`. Every catalog id among them must
+ * be listed by the served catalog and run on its harness. claude tiers are CLI
+ * shortnames, which already resolve to the newest model. Freshness against the
+ * bundled snapshot lives in apps/ui/src/lib/model-catalog-drift.test.ts (this
+ * runner stays black-box).
+ */
+function expectTierDefaultsCurrent(
+  tiers: Record<string, unknown>[],
+  served: Record<string, unknown>,
+): void {
+  for (const row of tiers) {
+    const harness = String(row.provider);
+    const value = String(row.defaultValue);
+    const label = `Tier default ${harness}/${String(row.tier)} (${value})`;
+    const section = harnessCatalogSection(harness);
+    if (section && harness !== "claude") {
+      const listed = harnessModelIds(
+        harness,
+        asRecord(asRecord(served[section]).models) as CatalogModels,
+      );
+      expect(listed.includes(value), `${label} is not a ${section} model that runs on ${harness}`);
+    } else if (value.startsWith("openrouter/")) {
+      const models = asRecord(asRecord(served.openrouter).models);
+      expect(
+        models[value.slice("openrouter/".length)] !== undefined,
+        `${label} is not listed by OpenRouter`,
+      );
+    }
+  }
 }
 
 async function readCatalog(ctx: ScenarioContext): Promise<Record<string, unknown>> {
@@ -476,6 +516,7 @@ export const platformbModels: Scenario = {
           );
         }
       }
+      expectTierDefaultsCurrent(tiers, providers);
 
       // Overlay: the lead or the operator writes, a worker does not.
       const overlayModel = `e2e-overlay-${ctx.nonce}`;
