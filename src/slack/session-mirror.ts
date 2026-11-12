@@ -8,6 +8,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getSlackApp } from "./app";
 import { getChannelExternality } from "./external-channel";
+import { slackDelegationOwnsChildCard } from "./render-v2";
 import { sendTaskResponse } from "./responses";
 
 /**
@@ -161,7 +162,8 @@ export async function mirrorSessionPrompt(task: AgentTask): Promise<void> {
 /**
  * Posts the outcome card of a person's Sessions follow-up, the card a
  * Slack-sourced task gets. Skipped when the agent already replied in the
- * thread (`slackReplySent`), so the thread gets the answer once.
+ * thread (`slackReplySent`) or the delegation renderer posts the task's
+ * child card, so the thread gets the answer once.
  */
 export async function mirrorSessionReply(taskId: string): Promise<void> {
   try {
@@ -170,6 +172,7 @@ export async function mirrorSessionReply(taskId: string): Promise<void> {
     if (!task || !isPersonSessionFollowUp(task) || task.slackReplySent) return;
     const app = getSlackApp();
     if (!app) return;
+    if (await slackDelegationOwnsChildCard(task)) return;
     if (!(await isInternalChannel(app.client, task.slackChannelId as string))) return;
     if (!(await claimOnce(`reply:${task.id}`))) return;
     if (!(await sendTaskResponse(task))) {
@@ -184,8 +187,10 @@ export async function mirrorSessionReply(taskId: string): Promise<void> {
 // shortcut: event-driven, so a restart between the terminal commit and the post drops
 // that one reply; move to a slack_relay_obligations-style row if that matters.
 const onTerminal = (payload: unknown) => {
-  const taskId = (payload as { taskId?: unknown } | null)?.taskId;
-  if (typeof taskId === "string") void mirrorSessionReply(taskId);
+  const event = payload as { taskId?: unknown; previousStatus?: unknown } | null;
+  // A draft that ends before promotion (withdrawn, or its uploads failed) was never sent.
+  if (event?.previousStatus === "draft") return;
+  if (typeof event?.taskId === "string") void mirrorSessionReply(event.taskId);
 };
 
 let subscribed = false;

@@ -484,6 +484,8 @@
         "slack-mention",
         "slack-follow-up",
         "slack-session-mirror",
+        "slack-session-mirror-render-v2",
+        "slack-session-mirror-delegation",
         "slack-failed-task",
         "slack-assistant-file-share",
         "slack-reaction-override",
