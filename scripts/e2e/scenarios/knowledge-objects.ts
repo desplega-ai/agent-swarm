@@ -117,8 +117,10 @@ export const knowledgeObjects: Scenario = {
           return Response.json({ ...hook, secret: WEBHOOK_SECRET });
         }
         if (op.op !== "glob") return new Response("unsupported op", { status: 400 });
+        // Honor the glob: reindex scans every kind, and each must see only its own files.
+        const suffix = String(op.pattern).replace("**/*", "");
         const matches = [...files.keys()]
-          .filter((path) => path.endsWith(".excalidraw"))
+          .filter((path) => path.endsWith(suffix))
           .map((path) => ({ path: `/${path}`, size: 1 }));
         return Response.json({ matches });
       }

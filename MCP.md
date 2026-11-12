@@ -178,6 +178,14 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [object-get](#object-get)
   - [object-list](#object-list)
   - [object-reindex](#object-reindex)
+  - [sheet-create](#sheet-create)
+  - [sheet-get](#sheet-get)
+  - [sheet-list](#sheet-list)
+  - [sheet-get-range](#sheet-get-range)
+  - [sheet-set-range](#sheet-set-range)
+  - [sheet-append-rows](#sheet-append-rows)
+  - [sheet-clear-range](#sheet-clear-range)
+  - [sheet-add-tab](#sheet-add-tab)
   - [board-create](#board-create)
   - [board-get](#board-get)
   - [board-list](#board-list)
@@ -2159,7 +2167,7 @@ Decode a room snapshot value that the caller already holds.
 
 ## Primitives Tools
 
-*Primitives capability: object-* and board-* tools over agent-fs files (src/be/primitives/).*
+*Primitives capability: object-*, sheet-* and board-* tools over agent-fs files (src/be/primitives/).*
 
 Capability: `primitives` — **disabled by default**; add `primitives` to `CAPABILITIES` to enable.
 
@@ -2167,11 +2175,11 @@ Capability: `primitives` — **disabled by default**; add `primitives` to `CAPAB
 
 **Create primitive object**
 
-Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.
+Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path. Kind `sheet` writes an empty `swarm-sheet/1` workbook and needs a `.sheet.json` path (edit it with the sheet-* tools).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). |
+| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). `sheet`: a spreadsheet (.sheet.json). |
 | `path` | `string` | Yes | - | Drive path, e.g. /boards/roadmap.excalidraw. |
 | `title` | `string` | No | - | - |
 
@@ -2209,6 +2217,105 @@ Rebuild the object index from the files on your default agent-fs drive. Keeps ea
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `kind` | `unknown` | No | - | - |
+
+### sheet-create
+
+**Create sheet**
+
+Create a spreadsheet (`swarm-sheet/1`, a `.sheet.json` file) on your default agent-fs drive, as your own agent-fs identity. Create-only: refuses when the path exists. Optional `tabs` name the tabs (default one tab `Sheet1`) and may seed each with `rows` from A1. Formulas recompute with a spreadsheet engine; limits: 20 tabs, 50,000 cells, 5 MiB.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | `string` | Yes | - | Drive path ending in `.sheet.json`, e.g. /qa/tracker.sheet.json. |
+| `title` | `string` | No | - | - |
+| `tabs` | `array` | No | - | Tabs to create, each with an optional `rows` grid written from A1. |
+
+### sheet-get
+
+**Get sheet**
+
+Get a sheet's object, current agent-fs `version` and its tabs (name, used rows and columns, frozen rows). Read cells with sheet-get-range.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+
+### sheet-list
+
+**List sheets**
+
+List sheets on your default agent-fs drive, newest first. Filter by path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### sheet-get-range
+
+**Read sheet range**
+
+Read cached values from a range (at most 10,000 cells). Formula cells return their computed value; an error cell returns its error text such as `#DIV/0!`; spilled cells (SEQUENCE, UNIQUE, ...) are included. `formulas: true` also returns the formulas.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+| `formulas` | `boolean` | No | - | Also return `formulas[][]`: the formula text where a cell has one, else the value. |
+
+### sheet-set-range
+
+**Write sheet range**
+
+Write a rectangle of `values` and recompute every formula. A string starting with `=` is a formula; start with `'=` to store literal text that begins with `=`; other strings stay text even when they look like numbers, so send numbers as numbers; null clears the cell. A single-cell `range` is the top-left corner; a larger `range` must match the values' size. Retries on a concurrent write: other cells merge, the same cell is last writer wins.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+| `values` | `array` | Yes | - | Rows of cell values, all the same length (at most 10,000 cells). |
+
+### sheet-append-rows
+
+**Append sheet rows**
+
+Append rows below the last used row of a tab, starting at column A. Same value rules as sheet-set-range; null skips a cell. Returns the range written.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `tab` | `string` | Yes | - | Tab name. |
+| `rows` | `array` | Yes | - | Rows to append (at most 10,000 cells). |
+
+### sheet-clear-range
+
+**Clear sheet range**
+
+Clear the contents of a range and recompute dependents. A whole-column or whole-row range is capped to the used range. Spilled cells go when their anchor is cleared.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+
+### sheet-add-tab
+
+**Add sheet tab**
+
+Add an empty tab (1-31 characters, none of `[]:*?/\`), at the end or after the tab named `after`. A sheet holds at most 20 tabs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `name` | `string` | Yes | - | New tab name. |
+| `after` | `string` | No | - | Insert after this tab; default: at the end. |
 
 ### board-create
 

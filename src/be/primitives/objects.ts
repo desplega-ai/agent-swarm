@@ -3,6 +3,7 @@ import { buildAgentFsLiveUrl } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { agentFsClientFor } from "../agent-fs-identity";
 import { getDbClient } from "../db";
+import { emptySheet } from "./sheets/format";
 
 /**
  * Primitive objects: agent-fs files that back a primitive, each with a stable
@@ -45,6 +46,18 @@ export const PRIMITIVE_KINDS: Readonly<Record<string, PrimitiveKind>> = {
       return typeof id === "string" && id.length > 0 ? id : undefined;
     },
     withId: (json, id) => ({ ...json, swarm: { ...swarmBlock(json), id, kind: "board" } }),
+  },
+  // A `swarm-sheet/1` workbook (src/be/primitives/sheets/format.ts).
+  sheet: {
+    suffix: ".sheet.json",
+    glob: "**/*.sheet.json",
+    contentType: "application/json",
+    empty: (id, title) => emptySheet(id, title),
+    readId: (json) => {
+      const id = swarmBlock(json).id;
+      return typeof id === "string" && id.length > 0 ? id : undefined;
+    },
+    withId: (json, id) => ({ ...json, swarm: { ...swarmBlock(json), id, kind: "sheet" } }),
   },
 };
 

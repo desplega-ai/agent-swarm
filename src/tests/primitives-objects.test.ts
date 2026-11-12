@@ -145,7 +145,7 @@ describe("primitive objects", () => {
     await expect(createObject({ agentId, kind: "board", path: "b.json" })).rejects.toThrow(
       "must end with '.excalidraw'",
     );
-    await expect(createObject({ agentId, kind: "sheet", path: "b.excalidraw" })).rejects.toThrow(
+    await expect(createObject({ agentId, kind: "gantt", path: "b.excalidraw" })).rejects.toThrow(
       "unknown kind",
     );
     await expect(createObject({ agentId, kind: "board", path: "../x.excalidraw" })).rejects.toThrow(
