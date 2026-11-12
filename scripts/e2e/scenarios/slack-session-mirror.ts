@@ -105,7 +105,13 @@ async function cancelTask(ctx: ScenarioContext, taskId: string, reason: string):
  * linked to Alice's Slack account for the avatar.
  */
 async function startMirroredSession(ctx: ScenarioContext, label: string) {
-  await registerLead(ctx, `e2e-lead-${label}-${ctx.nonce}`);
+  // Reuse a live lead: an extra one sorts ahead in lead routing and takes later
+  // scenarios' asks away from the leads they registered.
+  const liveLeads =
+    ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM agents WHERE isLead = 1 AND status != 'offline'",
+    )?.n ?? 0;
+  if (liveLeads === 0) await registerLead(ctx, `e2e-lead-${label}-${ctx.nonce}`);
   const { ts: threadTs } = await ask(ctx, `${label} root ${ctx.nonce}`);
   ctx.markThread(label, CHANNEL, threadTs);
   await waitForEyes(ctx, threadTs);
@@ -139,6 +145,36 @@ async function startMirroredSession(ctx: ScenarioContext, label: string) {
   return { leadId, threadTs, rootTaskId, userId };
 }
 
+/**
+ * Drops the Slack link of the person this file created. Later scenarios in the
+ * same process (Chat SDK commands) resolve Alice to a user only when one is linked.
+ */
+async function unlinkMirrorPerson(ctx: ScenarioContext): Promise<void> {
+  const alice = ctx.slack.user("alice");
+  const row = ctx.db.get<{ userId: string }>(
+    `SELECT e.userId FROM user_external_ids e JOIN users u ON u.id = e.userId
+      WHERE e.kind = 'slack' AND e.externalId = ? AND u.name LIKE 'Mirror Alice %'`,
+    [alice.id],
+  );
+  if (!row) return;
+  expectStatus(
+    await ctx.api("DELETE", `/api/users/${row.userId}/identities/slack/${alice.id}`),
+    [200, 204],
+    "unlink the Sessions person from Alice",
+  );
+}
+
+/** Runs a scenario body, then unlinks the person it created even when the body fails. */
+function withMirrorPerson(body: (ctx: ScenarioContext) => Promise<void>) {
+  return async (ctx: ScenarioContext): Promise<void> => {
+    try {
+      await body(ctx);
+    } finally {
+      await unlinkMirrorPerson(ctx);
+    }
+  };
+}
+
 /** One completed follow-up in the current renderer mode gets exactly one reply card. */
 async function expectOneReplyCard(ctx: ScenarioContext, label: string): Promise<void> {
   const { leadId, threadTs, rootTaskId, userId } = await startMirroredSession(ctx, label);
@@ -166,7 +202,7 @@ function slackTaskCount(ctx: ScenarioContext): number {
 export const slackSessionMirror: Scenario = {
   name: "slack-session-mirror",
   order: 92,
-  async run(ctx) {
+  run: withMirrorPerson(async (ctx) => {
     // Legacy renderer: the e2e server starts with SLACK_RENDER_V2=false.
     const { leadId, threadTs, rootTaskId, userId } = await startMirroredSession(
       ctx,
@@ -324,7 +360,7 @@ export const slackSessionMirror: Scenario = {
     } finally {
       await setMirrorMode(ctx, "both");
     }
-  },
+  }),
 };
 
 /** Render v2 with delegation off: the mirror still owns the follow-up's reply card. */
@@ -332,10 +368,10 @@ export const slackSessionMirrorRenderV2: Scenario = {
   name: "slack-session-mirror-render-v2",
   // Shard 2 (130-140) runs with SLACK_RENDER_V2 on and delegation off.
   order: 139.5,
-  async run(ctx) {
+  run: withMirrorPerson(async (ctx) => {
     await enableSlackRenderV2Only(ctx);
     await expectOneReplyCard(ctx, "session-mirror-v2");
-  },
+  }),
 };
 
 /**
@@ -346,7 +382,7 @@ export const slackSessionMirrorRenderV2: Scenario = {
 export const slackSessionMirrorDelegation: Scenario = {
   name: "slack-session-mirror-delegation",
   order: 145,
-  async run(ctx) {
+  run: withMirrorPerson(async (ctx) => {
     await enableSlackDelegation(ctx);
     await expectOneReplyCard(ctx, "session-mirror-delegation");
 
@@ -381,5 +417,5 @@ export const slackSessionMirrorDelegation: Scenario = {
       threadMessages(ctx, threadTs, "delegation agent reply").length === 1,
       "The agent's slack-reply did not land exactly once",
     );
-  },
+  }),
 };
