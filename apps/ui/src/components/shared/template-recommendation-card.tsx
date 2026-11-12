@@ -3,8 +3,9 @@
  * top recommendation derived from `/status`. Used by the empty states on
  * `/templates`, `/tasks`, `/workflows` and the home "First steps" section.
  *
- * The parent decides when to show the card. Its action opens the recommended
- * template's detail page, unless the parent supplies an explicit target.
+ * The card is presentational — the parent decides when to show it. Click
+ * routes to the recommended template's detail page by default; pass
+ * `actionHref` to override the destination.
  */
 
 import { ArrowRight, Sparkles } from "lucide-react";
@@ -33,7 +34,7 @@ export interface TemplateRecommendationCardProps {
    * you", "Try this", "Recommended"). Defaults to "Recommended template".
    */
   eyebrow?: string;
-  /** Override the action target (defaults to `/templates/<recommended-template-id>`). */
+  /** Override the action target (defaults to the recommended template's detail page). */
   actionHref?: string;
   /** Override the action label (defaults to "Browse templates"). */
   actionLabel?: string;
@@ -43,7 +44,11 @@ export interface TemplateRecommendationCardProps {
 
 /**
  * Reads `/status` from the shared context. If `/status` is unavailable
- * (loading, errored, or older API returned 404), renders nothing.
+ * (loading, errored, or older API returned 404), renders nothing — empty
+ * states stay generic.
+ *
+ * TODO(taras): Refactor this to be actually useful,
+ * redirecting to templates is useless
  */
 export function TemplateRecommendationCard({
   eyebrow = "Recommended template",
@@ -58,7 +63,7 @@ export function TemplateRecommendationCard({
     <RecommendationCardInner
       rec={rec}
       eyebrow={eyebrow}
-      actionHref={actionHref ?? `/templates/${rec.templateId}`}
+      actionHref={actionHref}
       actionLabel={actionLabel}
       compact={compact}
       detectedCount={detectedFromStatus(status).size}
@@ -76,13 +81,14 @@ function RecommendationCardInner({
 }: {
   rec: Recommendation;
   eyebrow: string;
-  actionHref: string;
+  actionHref?: string;
   actionLabel: string;
   compact: boolean;
   detectedCount: number;
 }) {
   const navigate = useNavigate();
   const label = TEMPLATE_LABELS[rec.templateId];
+  const href = actionHref ?? `/templates/${rec.templateId}`;
   return (
     <Card className="max-w-xl mx-auto w-full">
       <CardContent className="p-5 flex flex-col gap-3">
@@ -107,7 +113,7 @@ function RecommendationCardInner({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => navigate(actionHref)}
+            onClick={() => navigate(href)}
             data-template-id={rec.templateId}
           >
             {actionLabel}

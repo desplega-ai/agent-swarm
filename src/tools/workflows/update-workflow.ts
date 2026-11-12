@@ -19,6 +19,11 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
+import {
+  agentMaySetServerRefInput,
+  serverRefInputDeniedMessage,
+  serverRefInputKeys,
+} from "@/workflows/input";
 import { workflowModelErrors } from "@/workflows/model-validation";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 import { snapshotAndUpdateWorkflow } from "@/workflows/version";
@@ -143,11 +148,29 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           }
         }
 
+        // New ref input, or a new definition over stored ref input, decides
+        // where server-resolved values go: both need config.read.secrets.
+        const refKeys =
+          input !== undefined || definition
+            ? serverRefInputKeys(input !== undefined ? input : existing.input, existing.params)
+            : [];
+        if (
+          refKeys.length > 0 &&
+          !(requestInfo.agentId && (await agentMaySetServerRefInput(requestInfo.agentId)))
+        ) {
+          return toolErr(serverRefInputDeniedMessage(refKeys));
+        }
+
         const updatedBy =
-          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??
           undefined;
         const assetKey =
-          key === undefined ? undefined : await authorizeAssetKeyWrite(key, updatedBy);
+          key === undefined
+            ? undefined
+            : await authorizeAssetKeyWrite(
+                key,
+                await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId),
+              );
         // Snapshot + update in one transaction: concurrent full updates would
         // otherwise allocate the same version number, and the loser would
         // fail (or worse, commit with no history row).

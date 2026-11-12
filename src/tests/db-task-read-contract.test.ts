@@ -103,6 +103,7 @@ type:UpsertAssetKeyMappingInput
 type:WorkflowFilters
 type:WorkflowRunListOptions
 type:WorkflowRunPage
+value:AgentDeletedError
 value:AssetKeyMovesBlockedError
 value:EXTENSION_AGENT_ROLE
 value:ExtensionAgentAssignmentError
@@ -467,6 +468,7 @@ value:insertTaskAttachment
 value:installMcpServer
 value:installSkill
 value:installSystemDefaultSkillsForAgent
+value:isAgentDeleted
 value:isAgentEligibleForTask
 value:isExtensionAgent
 value:isLinearTrackerContextKey
@@ -575,6 +577,7 @@ value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setScriptRunFollowUpGuard
+value:setSkillUpdatedBy
 value:setSlackMessageTracking
 value:setTaskTitleIfUnset
 value:setUserFavorite

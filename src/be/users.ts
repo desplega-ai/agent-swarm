@@ -960,6 +960,25 @@ export async function revokeAgentTokens(agentId: string): Promise<number> {
 }
 
 /**
+ * Revoke every session token that authenticates as `agentId` (agent, runtime,
+ * task and script-run kinds, plus their children). Controller tokens name a
+ * controller, not the agent, and stay. Joins the caller's transaction.
+ */
+export async function revokeAllAgentSessionTokens(agentId: string): Promise<number> {
+  return await getDbClient().transaction(async (client) => {
+    const rows = await client.query<{ id: string }>(
+      "SELECT id FROM session_tokens WHERE agentId = ? AND controllerId IS NULL AND revokedAt IS NULL",
+      [agentId],
+    );
+    await revokeTokensWithChildren(
+      client,
+      rows.map((row) => row.id),
+    );
+    return rows.length;
+  });
+}
+
+/**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
  * best-effort unless `touch` is false.

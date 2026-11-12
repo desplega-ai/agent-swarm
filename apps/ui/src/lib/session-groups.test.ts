@@ -20,6 +20,7 @@ import {
   resourceOfGroupKey,
   restoreKey,
   sessionSourceOf,
+  sidebarGroupKey,
   sourceGroupLabel,
   sourceOfGroupKey,
 } from "./session-groups";
@@ -385,6 +386,13 @@ describe("source sections (sources Phase 5)", () => {
     expect(sourceGroupLabel("shared/telegram/-1002/")).toBe("-1002");
     expect(sourceGroupLabel("shared/discord/123456/")).toBe("123456");
     expect(sourceGroupLabel("shared/slack/c1/thread:1.2/")).toBe("Thread · 1.2");
+  });
+
+  test("sidebarGroupKey: a source thread reveals at its channel, any other key at itself", () => {
+    expect(sidebarGroupKey("shared/slack/c1/thread:1.2/")).toBe("shared/slack/c1/");
+    expect(sidebarGroupKey("shared/discord/9/thread:7/")).toBe("shared/discord/9/");
+    expect(sidebarGroupKey("shared/slack/c1/")).toBe("shared/slack/c1/");
+    expect(sidebarGroupKey("shared/thread:t1/")).toBe("shared/thread:t1/");
   });
 
   test("flat rows, cards, toasts, and crumbs name a source group by its label (sources Phase 6)", () => {

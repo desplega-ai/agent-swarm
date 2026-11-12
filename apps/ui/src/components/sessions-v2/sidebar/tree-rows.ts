@@ -15,6 +15,7 @@ import {
   type SessionGroupTree,
   type SessionResourceKind,
   type SessionSource,
+  sourceOfGroupKey,
   sourceSectionLabel,
 } from "../../../lib/session-groups";
 import {
@@ -23,7 +24,7 @@ import {
   SIDEBAR_LIST_STEP,
 } from "../../../lib/sessions-v2";
 
-/** A list in the sidebar: a section (`inbox`, `later`, `done`, `nogroup`) or a group key. */
+/** A list in the sidebar: a section (`inbox`, `working`, `later`, `done`, `nogroup`) or a group key. */
 export type ContainerId = string;
 
 /**
@@ -57,6 +58,8 @@ export type TreeRow =
       readOnly?: boolean;
       /** A search match: the name is the whole path, and the row does not fold. */
       searchMatch?: boolean;
+      /** A hidden group, shown while "Show N hidden" is on: the row is dimmed. */
+      hidden?: boolean;
     })
   | (RowBase & {
       /**
@@ -108,12 +111,14 @@ export type TreeRow =
   | (RowBase & { type: "loading"; parentKey: string })
   /** "New group" at the end of My groups. */
   | (RowBase & { type: "add" })
+  /** "Show N hidden" / "Hide N hidden" after the groups: shows or hides the hidden groups. */
+  | (RowBase & { type: "hidden"; count: number; open: boolean })
   /** The inline name field of a new group under `parent` (`shared/` or a group key). */
   | (RowBase & { type: "create"; parent: string });
 
 export type NavRow = Extract<
   TreeRow,
-  { type: "box" | "group" | "source" | "owner" | "session" | "more" | "all" | "add" }
+  { type: "box" | "group" | "source" | "owner" | "session" | "more" | "all" | "add" | "hidden" }
 >;
 
 const NAV_TYPES = new Set<TreeRow["type"]>([
@@ -125,6 +130,7 @@ const NAV_TYPES = new Set<TreeRow["type"]>([
   "more",
   "all",
   "add",
+  "hidden",
 ]);
 
 /** Rows the keyboard cursor stops on. */
@@ -225,18 +231,27 @@ export function wholeListTotal(rows: TreeRow[], container: ContainerId): number 
 }
 
 /**
- * Open until folded: the Inbox, Later (the mockup default), and other
- * people's groups. Sources and their groups start folded.
+ * "Select all N" stays on while it still stands for a session: a loaded row
+ * still checked, or, past the loaded rows, a list `total` larger than the
+ * unchecked rows. Unchecking every loaded row of a longer list keeps it on.
+ */
+export function wholeListOn(selected: number, total: number | null, except: number): boolean {
+  return selected > 0 || (total !== null && total > except);
+}
+
+/**
+ * Open until folded: the Inbox, Working, Later (the mockup default), and
+ * other people's groups. Sources and their groups start folded.
  */
 export function openByDefault(id: string, me: string | null): boolean {
-  if (id === "inbox" || id === "later") return true;
+  if (id === "inbox" || id === "working" || id === "later") return true;
   const owner = personalOwner(id);
   return owner !== null && owner !== me;
 }
 
 /** Every fold id the tree can show: the sections, each group, each source, and each owner. */
 export function foldIds(groups: SessionGroupTree): Set<string> {
-  const ids = new Set<string>(["inbox", "later", "done", "nogroup"]);
+  const ids = new Set<string>(["inbox", "working", "later", "done", "nogroup"]);
   const walk = (node: GroupNode) => {
     ids.add(node.key);
     for (const child of node.children) walk(child);
@@ -264,7 +279,7 @@ export interface ListState {
   stale?: boolean;
 }
 
-interface BuildTreeRowsInput {
+export interface BuildTreeRowsOptions {
   tree: SessionTreeResponse;
   groups: SessionGroupTree;
   isOpen: (id: string) => boolean;
@@ -276,11 +291,30 @@ interface BuildTreeRowsInput {
   creating?: string | null;
   /** Groups that live only in this browser (plan D8): their empty state invites a move. */
   localGroups?: ReadonlySet<string>;
+  /** Starred group keys: each list of groups puts them first. */
+  starredGroups?: ReadonlySet<string>;
+  /** Hidden group keys: left out, with their subgroups, unless `showHidden`. */
+  hiddenGroups?: ReadonlySet<string>;
+  /** "Show N hidden" is on: hidden groups show in place, dimmed. */
+  showHidden?: boolean;
+  /** The starred sessions (`GET /api/sessions?ids=`), listed under Starred after the Inbox. */
+  starred?: ListState;
 }
 
+/** The list id of the "Show N more" rows over a source section's groups, or a source group's subgroups. */
+export const groupListId = (parentKey: string) => `groups:${parentKey}`;
+
+/** Container ids of group lists (`groupListId`): no sessions load for them. */
+export function isGroupListId(container: ContainerId): boolean {
+  return container.startsWith("groups:");
+}
+
+/** The session list of the Starred section. */
+export const STARRED_CONTAINER = "starred";
+
 /**
- * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, then the
- * groups (My groups, Shared with me, one section per source, No group), then
+ * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, Working,
+ * Starred, then the groups (My groups, Shared with me, one section per source, No group), then
  * Later and Done, so ongoing work sits right under the Inbox. `containers` names the lists to
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
@@ -293,7 +327,11 @@ export function buildTreeRows({
   lists,
   creating = null,
   localGroups,
-}: BuildTreeRowsInput): {
+  starredGroups,
+  hiddenGroups,
+  showHidden = false,
+  starred,
+}: BuildTreeRowsOptions): {
   rows: TreeRow[];
   containers: ContainerId[];
 } {
@@ -349,7 +387,69 @@ export function buildTreeRows({
     rows.push({ type: "box", key, level: 0, id, counts, open });
     if (open) fill(id, key, counts.total, 1, flat, id);
   };
+  /**
+   * One list of sibling groups as the rows show it: hidden groups out (unless
+   * `showHidden`), then starred groups first. The sort is stable, so each
+   * part keeps the newest-first order of `buildSessionGroupTree`.
+   */
+  const arrange = (nodes: GroupNode[]): GroupNode[] => {
+    const shown = showHidden ? nodes : nodes.filter((node) => !hiddenGroups?.has(node.key));
+    if (!starredGroups?.size) return shown;
+    const starredFirst = (node: GroupNode) => (starredGroups.has(node.key) ? 0 : 1);
+    return [...shown].sort((a, b) => starredFirst(a) - starredFirst(b));
+  };
+
+  /**
+   * The groups of a source section, or a source group's subgroups (its
+   * threads): newest first, 10, then "Show 10 more", then "Show N more" for
+   * the rest, like a session list. `listId` names the list (`groupListId`).
+   */
+  const sourceGroupList = (
+    nodes: GroupNode[],
+    listId: string,
+    level: number,
+    each: (node: GroupNode) => void,
+  ) => {
+    const all = expanded.has(`${listId}:all`);
+    const limit = all
+      ? nodes.length
+      : expanded.has(listId)
+        ? SIDEBAR_LIST_LIMIT
+        : SIDEBAR_LIST_STEP;
+    for (const node of nodes.slice(0, limit)) each(node);
+    if (nodes.length <= limit) return;
+    const first = limit === SIDEBAR_LIST_STEP;
+    const container = first ? listId : `${listId}:all`;
+    const count = first ? Math.min(SIDEBAR_LIST_STEP, nodes.length - limit) : nodes.length - limit;
+    // Past 20 the next click shows the rest: a group list has no "View all" tab.
+    rows.push({ type: "more", key: `more:${container}`, level, container, count });
+  };
+
   box("inbox", tree.inbox, true);
+  // Working: running sessions with nothing to answer, out of the Inbox. Hidden while empty.
+  if (tree.working && tree.working.total > 0) box("working", tree.working, true);
+
+  // Starred sessions, in any read state and from any list (the star is per user).
+  const starredSessions = starred?.data?.sessions ?? [];
+  if (starredSessions.length > 0) {
+    rows.push({
+      type: "section",
+      key: "section:starred",
+      level: 0,
+      label: "Starred",
+      count: starredSessions.length,
+    });
+    for (const session of starredSessions) {
+      rows.push({
+        type: "session",
+        key: `s:${STARRED_CONTAINER}:${session.root.id}`,
+        level: 0,
+        container: STARRED_CONTAINER,
+        session,
+        flat: true,
+      });
+    }
+  }
 
   // My groups. A folded group shows its whole subtree in its counts, an open
   // one its own sessions only (they list under it, after its subgroups).
@@ -364,26 +464,36 @@ export function buildTreeRows({
   const groupNode = (node: GroupNode, level: number, readOnly = false) => {
     const open = isOpen(node.key);
     const key = `group:${node.key}`;
+    // A source group (a channel, a DM) lists its threads' sessions with its own: one list.
+    const whole = sourceOfGroupKey(node.key) !== null;
     rows.push({
       type: "group",
       key,
       level,
       node,
       open,
-      counts: open ? node.own : node.subtree,
+      counts: open && !whole ? node.own : node.subtree,
       sharedWithMe: false,
       readOnly,
+      ...(hiddenGroups?.has(node.key) ? { hidden: true } : {}),
     });
     if (creating === node.key) {
       rows.push({ type: "create", key: `create:${node.key}`, level: level + 1, parent: node.key });
     }
     if (!open) return;
-    for (const child of node.children) groupNode(child, level + 1, readOnly);
+    if (whole) return fill(node.key, key, node.subtree.total, level + 1, false, "group");
+    const children = arrange(node.children);
+    // A resource's subgroups (an app's actions) page like its sessions.
+    if (readOnly) {
+      sourceGroupList(children, groupListId(node.key), level + 1, (child) =>
+        groupNode(child, level + 1, readOnly),
+      );
+    } else for (const child of children) groupNode(child, level + 1, readOnly);
     const emptyKind =
       node.children.length > 0 ? null : localGroups?.has(node.key) ? "fresh" : "group";
     fill(node.key, key, node.own.total, level + 1, false, emptyKind);
   };
-  for (const node of groups.myGroups) groupNode(node, 0);
+  for (const node of arrange(groups.myGroups)) groupNode(node, 0);
   // The name field of a new top-level group, else "New group" (after the
   // first-run invite when there are no groups yet). "New group" is a row the
   // keys reach, so the invite holds text only.
@@ -416,7 +526,7 @@ export function buildTreeRows({
         counts: open ? null : owner.subtree,
       });
       if (!open) continue;
-      for (const node of owner.groups) {
+      for (const node of arrange(owner.groups)) {
         const groupOpen = isOpen(node.key);
         const key = `group:${node.key}`;
         rows.push({
@@ -427,6 +537,7 @@ export function buildTreeRows({
           open: groupOpen,
           counts: node.own,
           sharedWithMe: true,
+          ...(hiddenGroups?.has(node.key) ? { hidden: true } : {}),
         });
         if (groupOpen) fill(node.key, key, node.own.total, 2, false, "group");
       }
@@ -445,7 +556,14 @@ export function buildTreeRows({
       open,
       counts: section.counts,
     });
-    if (open) for (const node of section.nodes) groupNode(node, 1, true);
+    if (open) {
+      sourceGroupList(
+        arrange(section.nodes),
+        groupListId(sourceFoldId(section.source)),
+        1,
+        (node) => groupNode(node, 1, true),
+      );
+    }
   }
 
   // One section per resource kind (Pages, Workflows, ...), like a source: folded, read-only.
@@ -460,7 +578,16 @@ export function buildTreeRows({
       open,
       counts: section.counts,
     });
-    if (open) for (const node of section.nodes) groupNode(node, 1, true);
+    if (open) for (const node of arrange(section.nodes)) groupNode(node, 1, true);
+  }
+
+  // "Show N hidden": the hidden groups that still exist, at any depth.
+  if (hiddenGroups?.size) {
+    const known = foldIds(groups);
+    const count = [...hiddenGroups].filter((key) => known.has(key)).length;
+    if (count > 0) {
+      rows.push({ type: "hidden", key: "hidden:groups", level: 0, count, open: showHidden });
+    }
   }
 
   box("nogroup", tree.noGroup, false);

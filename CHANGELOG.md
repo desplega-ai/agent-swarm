@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-12
+
+### Added
+- Primitives: an object pointer table and `ctx.objects` over agent-fs (#2994), kept in sync through agent-fs `file.changed` webhooks (#3037).
+- Primitives: a sheet kind with a formula engine worker and `sheet-*` tools (#3014).
+- Primitives: `ctx.boards` and `board-*` tools over Excalidraw element JSON (#3013).
+- Scripts: generic `ctx` namespaces over SDK tool groups (#2993).
+- Agents: operator-only delete and restore through `agent_history` (#3023).
+- UI: Claude pre-tool updates show as progress lines and finished reasoning as Thought (#3011).
+- E2E: the contract suite runs as 3 parallel shards plus a strict merge (#3006), reports to the results tracker with coverage (#3027), comments the changed API lines no scenario runs (#3007), uses a 1 s Slack tick with one flaky rerun and a quarantine file (#3004), and gates new unit tests outside an allowlist with CLI scenarios in the strict gate (#3032).
+
+### Changed
+- agent-fs pins bumped 0.18.24 -> 0.18.25.
+- Dependencies: harness bump 2026-11-11 (#3045); agent-browser 0.42.0 (#3003).
+- CI: Playwright is a required Merge Gate job with 4 shards and dashboard coverage (#3036).
+- Tests: 87 API unit test files the e2e contract suite already covers were removed (#3042).
+- UI: the dead `/chat` page was removed (#3029).
+- Docs: the runtime is called a harness, with harness vs provider defined (#3041, #3040); new guides for operations shift handoff (#3020), supplier security evidence review (#3022), customer commitment tracking (#3000) and delivery delay handoff (#3002); HITL gates wording (#3001); TLA+ specs synced (#3005); seeded skill patches (#2998); the `create-workflow` `input` reference names the `config.read.secrets` requirement.
+
+### Fixed
+- Security: workflow env and secret input requires `config.read.secrets` (#3046); the swarm API key is compared in constant time (#3015); GitLab and Azure DevOps webhook credentials compare without throwing (#3012); native script children run as `nobody` when the API runs as root (#3033).
+- Scrubber: Convex deploy keys and URL forms of known secrets are redacted (#3043), including URL-encoded secrets containing `%` (#3044).
+- Workflows: a join holds while a branch is pending its retry (#3019); retry outputs are validated against the node schema (#2999).
+- Heartbeat: the reboot sweep leaves workflow-step recovery to the engine (#3008) and does not claim a superseded task failed when no resume is created (#3009).
+- Tasks: the task-started event is emitted only after commit (#3010).
+- Slack: direct reads skip file downloads by default (#2997).
+- UI: OpenCode Go is listed on the AI providers page and opencode accepts `OPENCODE_API_KEY` (#3039); stale late clipboard copies are ignored (#3021); stale MiddleTruncation resize callbacks are cancelled (#3024); issue #3016 addressed (#3035).
+- Tests: `use-url-search-state` tests wait for the outcome instead of a fixed sleep (#3026).
+
 ## [2.11.0] - 2026-11-11
 
 ### Added

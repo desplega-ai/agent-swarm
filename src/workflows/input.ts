@@ -1,4 +1,6 @@
-import { getSwarmConfigs } from "../be/db";
+import { renderAutomationTokens } from "../be/automation-preflight";
+import { getAgentById, getSwarmConfigs } from "../be/db";
+import { can } from "../rbac/can";
 import { isSensitiveKey } from "../utils/secret-scrubber";
 
 /**
@@ -51,6 +53,39 @@ export async function resolveInputValue(value: string): Promise<string> {
 
   // Literal
   return value;
+}
+
+/**
+ * Input keys whose value `resolveInputValue` reads with the API server's own
+ * authority: `${ENV_VAR}` (server process env) or `secret.NAME` (global secrets).
+ * Writers may store these only with `config.read.secrets`. The run renders
+ * `params` into input before resolving it, so a key counts when its stored or
+ * its param-rendered value is a ref.
+ */
+export function serverRefInputKeys(
+  input: Record<string, unknown> | null | undefined,
+  params?: Record<string, unknown> | null,
+): string[] {
+  if (!input) return [];
+  const rendered = params ? renderAutomationTokens(input, params) : input;
+  const isRef = (v: unknown) =>
+    typeof v === "string" && (/^\$\{(.+)\}$/.test(v) || v.startsWith("secret."));
+  return Object.keys(input).filter((k) => isRef(input[k]) || isRef(rendered[k]));
+}
+
+export function serverRefInputDeniedMessage(keys: string[]): string {
+  return `Input ${keys.map((k) => `"${k}"`).join(", ")} references an env var or swarm secret (\${VAR} / secret.NAME); setting it requires config.read.secrets.`;
+}
+
+/** Whether an agent may store `${ENV_VAR}` / `secret.NAME` workflow input (same gate as get-config). */
+export async function agentMaySetServerRefInput(agentId: string): Promise<boolean> {
+  const agent = await getAgentById(agentId);
+  return can({
+    principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
+    verb: "config.read.secrets",
+    resource: { kind: "none" },
+    source: "mcp",
+  }).allow;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { resolveHttpAuditUserId } from "../be/audit-user";
+import { resolveHttpRequesterUserId } from "../be/audit-user";
 import { findUserById } from "../be/users";
 import { can } from "../rbac";
 import { agentFirstPrincipal } from "./request-principal";
@@ -31,7 +31,7 @@ export async function resolveTaskRequester(
   trustedUserId?: string | null,
 ): Promise<string | undefined> {
   const trusted =
-    trustedUserId === undefined ? await resolveHttpAuditUserId(req, myAgentId) : trustedUserId;
+    trustedUserId === undefined ? await resolveHttpRequesterUserId(req, myAgentId) : trustedUserId;
   if (trusted) return trusted;
   if (process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "false" || !bodyUserId) return undefined;
   // A worker on the shared key is not the operator: its X-Agent-ID names it, so the body

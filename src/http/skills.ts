@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { resolveHttpAuditActor, resolveHttpAuditUserId } from "../be/audit-user";
 import {
   createSkill,
   deleteSkill,
@@ -12,6 +13,7 @@ import {
   listSkillFileManifest,
   listSkills,
   searchSkills,
+  setSkillUpdatedBy,
   uninstallSkill,
   updateSkill,
   upsertSkillFile,
@@ -664,6 +666,8 @@ export async function handleSkills(
         sourcePath: parsed.body.sourcePath,
         sourceBranch: branch,
         isComplex: parsed.body.isComplex ?? false,
+        createdByAgentId: myAgentId ?? null,
+        createdBy: await resolveHttpAuditUserId(req, myAgentId),
       });
 
       installRemoteRoute.respond(res, 201, { skill });
@@ -687,6 +691,9 @@ export async function handleSkills(
 
     let updated = 0;
     const errors: string[] = [];
+    // A content change is attributed to the caller; a lastFetchedAt-only
+    // touch is a fetch, not an edit, and leaves the audit pair alone.
+    const actor = await resolveHttpAuditActor(req, myAgentId);
 
     for (const skill of remoteSkills) {
       if (skill.isComplex || !skill.sourceRepo) continue;
@@ -717,6 +724,8 @@ export async function handleSkills(
             userInvocable: pm.userInvocable,
             sourceHash: newHash,
             lastFetchedAt: now,
+            updatedBy: actor.userId,
+            updatedByAgentId: actor.agentId,
           });
           updated++;
         } else {
@@ -866,6 +875,7 @@ export async function handleSkills(
 
     try {
       const files = await upsertSkillFiles(parsed.params.id, parsed.body.files);
+      await setSkillUpdatedBy(parsed.params.id, await resolveHttpAuditActor(req, myAgentId));
       const updatedSkill = await getSkillById(parsed.params.id);
       bulkUpsertSkillFilesRoute.respond(res, 200, {
         files,
@@ -922,6 +932,7 @@ export async function handleSkills(
         path: decodeSkillFilePath(pathSegments),
         ...parsed.body,
       });
+      await setSkillUpdatedBy(parsed.params.id, await resolveHttpAuditActor(req, myAgentId));
       const updatedSkill = await getSkillById(parsed.params.id);
       upsertSkillFileRoute.respond(res, 200, { file, skill: updatedSkill });
     } catch (err) {
@@ -951,6 +962,7 @@ export async function handleSkills(
         jsonError(res, "Skill file not found", 404);
         return true;
       }
+      await setSkillUpdatedBy(parsed.params.id, await resolveHttpAuditActor(req, myAgentId));
       const updatedSkill = await getSkillById(parsed.params.id);
       deleteSkillFileRoute.respond(res, 200, { success: true, skill: updatedSkill });
     } catch (err) {
@@ -995,6 +1007,8 @@ export async function handleSkills(
         disableModelInvocation: pm.disableModelInvocation,
         userInvocable: pm.userInvocable,
         systemDefault: parsed.body.systemDefault,
+        createdByAgentId: myAgentId ?? null,
+        createdBy: await resolveHttpAuditUserId(req, myAgentId),
       });
       createSkillRoute.respond(res, 201, { skill });
     } catch (err) {
@@ -1062,6 +1076,9 @@ export async function handleSkills(
       updates.disableModelInvocation = pm.disableModelInvocation;
       updates.userInvocable = pm.userInvocable;
     }
+    const actor = await resolveHttpAuditActor(req, myAgentId);
+    updates.updatedBy = actor.userId;
+    updates.updatedByAgentId = actor.agentId;
 
     const skill = await updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
     if (!skill) {

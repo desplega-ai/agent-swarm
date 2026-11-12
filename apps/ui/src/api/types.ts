@@ -35,7 +35,6 @@ export type AgentTaskSource =
   | "comb"
   | "chat";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
-export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 /** Mirrors `ModelSource` in `src/be/model-tier-resolution.ts` (backend). */
 export type ModelSource =
@@ -1025,7 +1024,7 @@ export interface SessionPerson {
 }
 
 /** `triage` filter on `GET /api/sessions`. Inbox excludes Later and Done. */
-export type SessionTriageFilter = "inbox" | "later" | "done" | "unread";
+export type SessionTriageFilter = "inbox" | "working" | "later" | "done" | "unread";
 
 /** `status` filter on `GET /api/sessions`. `needs` is "Needs you". */
 export type SessionStatusFilter = "running" | "failed" | "needs";
@@ -1049,6 +1048,8 @@ export interface SessionTreeResponse {
   labels?: Record<string, string>;
   groups: SessionTreeGroup[];
   inbox: SessionSectionCounts;
+  /** Inbox sessions with a task running and nothing to answer. Missing on servers before Working. */
+  working?: SessionSectionCounts;
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
@@ -1124,7 +1125,14 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+export type FavoriteItemType =
+  | "page"
+  | "workflow"
+  | "schedule"
+  | "agent-fs-path"
+  | "key"
+  | "session"
+  | "hidden-key";
 
 export interface UserFavorite {
   id: string;
@@ -1362,27 +1370,6 @@ export interface SessionLogsResponse {
   logs: SessionLog[];
 }
 
-export interface Channel {
-  id: string;
-  name: string;
-  description?: string;
-  type: ChannelType;
-  createdBy?: string;
-  participants: string[];
-  createdAt: string;
-}
-
-export interface ChannelMessage {
-  id: string;
-  channelId: string;
-  agentId?: string | null;
-  agentName?: string;
-  content: string;
-  replyToId?: string;
-  mentions: string[];
-  createdAt: string;
-}
-
 export interface DashboardStats {
   agents: {
     total: number;
@@ -1423,14 +1410,6 @@ export interface TasksResponse {
 
 export interface LogsResponse {
   logs: AgentLog[];
-}
-
-export interface ChannelsResponse {
-  channels: Channel[];
-}
-
-export interface MessagesResponse {
-  messages: ChannelMessage[];
 }
 
 /**

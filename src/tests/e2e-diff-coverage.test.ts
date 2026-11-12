@@ -86,6 +86,8 @@ describe("e2e diff coverage", () => {
   test("scope: API source only, minus worker code, tests and exemptions", () => {
     const exempt = ["src/scripts-runtime/eval-harness.ts", "src/legacy/"];
     expect(inScope("src/http/a.ts", exempt)).toBe(true);
+    expect(inScope("src/cli.tsx", exempt)).toBe(true);
+    expect(inScope("src/commands/onboard/presets.ts", exempt)).toBe(true);
     for (const path of [
       "src/commands/worker.ts",
       "src/providers/x.ts",

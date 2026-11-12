@@ -30,6 +30,9 @@ type ScriptEmbeddingCandidateRow = ScriptEmbeddingRow & {
   fsMode: "none" | "workspace-rw";
   executor: "native" | "quickjs" | null;
   createdByAgentId: string | null;
+  updatedByAgentId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -73,6 +76,9 @@ function rowToScript(row: ScriptEmbeddingCandidateRow): ScriptRecord {
     fsMode: row.fsMode,
     executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
+    updatedByAgentId: row.updatedByAgentId ?? null,
+    createdBy: row.created_by ?? null,
+    updatedBy: row.updated_by ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

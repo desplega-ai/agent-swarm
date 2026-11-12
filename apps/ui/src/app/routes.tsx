@@ -57,7 +57,6 @@ const AgentDetailPage = lazyRoute(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
 const TaskLineagePage = lazyRoute(() => import("@/pages/tasks/[id]/lineage/page"));
-const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
 const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
 const UsageContent = lazyRoute(() =>
@@ -311,15 +310,6 @@ export const appRoutes: RouteObject[] = [
           </LinkPreviewScope>
         ),
       },
-      {
-        path: "chat",
-        element: <ChatPage />,
-        handle: nav(
-          { title: "Chat", icon: MessagesSquare, keywords: ["channels"] },
-          { searchOptOut: "channels are few and listed in the chat sidebar" },
-        ),
-      },
-      { path: "chat/:channelId", element: <ChatPage /> },
       {
         path: "schedules",
         element: <SchedulesPage />,

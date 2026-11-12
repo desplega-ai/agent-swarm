@@ -177,7 +177,7 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
       <Card>
         <CardContent className="p-4">
           <DefinitionList>
-            <InfoRow label="Harness provider">
+            <InfoRow label="Harness">
               {agent.harnessProvider ?? <span className="text-muted-foreground">—</span>}
             </InfoRow>
             <InfoRow label="Presence">

@@ -351,6 +351,7 @@ declare module "swarm-extension" {
     agentId: string | undefined;
     runtimeInstanceId: string | undefined;
     sourceTaskId: string | undefined;
+    auditSourceTaskId: string | undefined;
     contextKey: string | undefined;
     callOrigin: "mcp" | "native" | "extension" | "script-sdk";
     harness?: string | undefined;

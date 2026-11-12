@@ -342,6 +342,90 @@ A stock Excalidraw save drops that field. `ctx.objects.reindex()` then keeps the
 id of the row at the same path and writes it back. Durable workflow runs get
 `ctx.objects` too.
 
+The index follows agent-fs edits, deletes and moves on its own when the swarm
+can register an agent-fs `file.changed` webhook on the drive. That needs the
+API's agent-fs service key, a `PUBLIC_MCP_BASE_URL` (or `MCP_BASE_URL`) that
+agent-fs accepts (public https, or a host in its `AGENT_FS_WEBHOOK_ALLOWED_HOSTS`)
+and an agent-fs with webhooks. Registration is best-effort:
+without it, object tools work as before and `reindex()` catches the index up.
+`reindex()` re-reads only files whose version changed, at most 50 per call; run
+it again while `truncated` is true. A deleted file hides its object from
+`list()` until the file comes back.
+
+### Sheets
+
+`ctx.sheets` reads and writes spreadsheets (`swarm-sheet/1`, a `.sheet.json`
+file on your default drive). Every method calls a `sheet-*` MCP tool as your own
+agent-fs identity, returns the payload without `success`, and throws on a refusal.
+Formulas recompute on every write; a read returns the cached result.
+
+```ts
+export default async function (_args, ctx) {
+  const { object } = await ctx.sheets.create({ path: "qa/tracker.sheet.json" });
+  await ctx.sheets.setRange({
+    id: object.id,
+    range: "Sheet1!B2:C3",
+    values: [[1, "=B2*2"], [2, "=B3*2"]],
+  });
+  const { values } = await ctx.sheets.getRange({ id: object.id, range: "B2:C3" });
+  return values; // [[1, 2], [2, 4]]
+}
+```
+
+A string starting with `=` is a formula; start with `'=` for literal text that
+begins with `=`. Other strings stay text, so send numbers as numbers. A
+single-cell `range` is the top-left corner of the `values`; a larger one must
+match their size. Limits: 20 tabs, 50,000 cells, 5 MiB, 10,000 cells per range
+call. Durable workflow runs get `ctx.sheets` too.
+
+`ctx.sheets.importXlsx` turns an `.xlsx` on the drive into a new sheet, and
+`ctx.sheets.exportXlsx` writes a sheet to a new `.xlsx`. Both return `dropped`,
+the features the other side cannot hold (styles, charts, comments, frozen panes,
+and so on). An import refuses a file over 5 MiB, 20 tabs or 50,000 cells, and
+creates nothing when it refuses. An export refuses an existing `targetPath`
+unless `overwrite: true`.
+
+```ts
+export default async function (_args, ctx) {
+  const { object, dropped } = await ctx.sheets.importXlsx({
+    sourcePath: "in/budget.xlsx",
+    path: "out/budget.sheet.json",
+  });
+  const { path } = await ctx.sheets.exportXlsx({
+    id: object.id,
+    targetPath: "out/budget-copy.xlsx",
+  });
+  return { dropped, path };
+}
+```
+
+### Boards
+
+`ctx.boards` edits boards as Excalidraw element JSON through the `board-*` tools.
+Arrows name a shape `key` from the same call or an existing element id, and bind
+on both ends. Shapes without `x`/`y` are laid out below the existing content.
+
+```ts
+export default async function (_args, ctx) {
+  const { object, added } = await ctx.boards.create({
+    path: "/boards/flow.excalidraw",
+    shapes: [
+      { key: "req", type: "rectangle", label: "Request", color: "blue" },
+      { key: "lead", type: "diamond", label: "Lead" },
+    ],
+    arrows: [{ from: "req", to: "lead", label: "send-task" }],
+  });
+  await ctx.boards.updateElements({ id: object.id, patches: [{ elementId: added.lead, label: "Lead routes" }] });
+  const { elements } = await ctx.boards.get({ id: object.id });
+  return { link: object.link, elements: elements.length };
+}
+```
+
+Every write sends the file version as `If-Match`. On a concurrent change it
+re-reads and re-applies, up to three times, and each touched element gets a new
+`version` so an open editor repaints it. Label sizes are Excalifont estimates;
+the editor re-measures them on open.
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:
@@ -349,7 +433,7 @@ Scripts launched through `launch-script-run` receive a different context:
 - `ctx.run` — the durable run's `id`, `agentId`, and `args`
 - `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, and
   `ctx.step.swarmScript(label, config)` — replay-safe, journaled steps
-- `ctx.swarm`, `ctx.stdlib`, `ctx.logger`, and `ctx.objects`
+- `ctx.swarm`, `ctx.stdlib`, `ctx.logger`, `ctx.objects`, and `ctx.sheets`
 
 Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, or
 `ctx.swarm.config`. When a durable workflow needs a registered connection or

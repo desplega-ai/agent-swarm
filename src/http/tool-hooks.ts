@@ -86,11 +86,13 @@ export async function handleToolHooks(
 
   // Scrub at entry: handlers, extension_runs rows and logs only ever see the scrubbed body.
   const body = scrubObject(parsed.body);
+  const sourceTaskId = header(req, "x-source-task-id");
   const requestInfo: RequestInfo = {
     sessionId: undefined,
     agentId: myAgentId,
     runtimeInstanceId: header(req, "x-runtime-instance-id"),
-    sourceTaskId: header(req, "x-source-task-id"),
+    sourceTaskId,
+    auditSourceTaskId: sourceTaskId ?? header(req, "x-audit-source-task-id"),
     contextKey: header(req, "x-context-key"),
     callOrigin: "native",
     harness: body.harness,

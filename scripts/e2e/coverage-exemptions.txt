@@ -4,3 +4,4 @@
 src/scripts-runtime/eval-harness.ts  Runs in the script sandbox subprocess; only the API process is instrumented.
 src/scripts-runtime/extract-args-schema.ts  Runs as its own `bun run` subprocess at script upsert; not instrumented.
 src/http/all-routes.ts  Imported by the OpenAPI and RBAC scripts only; the API never loads it.
+src/be/primitives/sheets/engine-worker.ts  Runs in a Bun Worker thread; only the API main thread is instrumented. Covered by src/tests/primitives-sheets.test.ts and every sheet scenario through the host.

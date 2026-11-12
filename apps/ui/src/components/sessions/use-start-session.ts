@@ -15,6 +15,7 @@ import { api } from "@/api/client";
 import { SESSION_TREE_KEY } from "@/api/hooks/use-session-tree";
 import type { AgentTask } from "@/api/types";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useComposerDraft } from "@/lib/composer-drafts";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
@@ -34,10 +35,11 @@ export interface StartSessionOptions {
   /** Turns what the user typed into the task text, e.g. to append page context. */
   buildTask?: (typed: string) => string;
   /**
-   * The draft text, held by the caller so it outlives this composer (the
-   * sessions v2 New session tab moves between panes). Default: local state.
+   * The draft's key in the composer drafts store (`lib/composer-drafts.ts`):
+   * the text survives a reload and a remount (the sessions v2 New session tab
+   * moves between panes). Default: local state.
    */
-  draftState?: [string, (value: string) => void];
+  draftKey?: string;
 }
 
 export type StartSessionComposerProps = Pick<
@@ -60,7 +62,7 @@ export function useStartSession({
   contextKey,
   key,
   buildTask,
-  draftState,
+  draftKey,
 }: StartSessionOptions): {
   userId: string | null;
   draft: string;
@@ -73,8 +75,7 @@ export function useStartSession({
 } {
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
-  const localDraft = useState("");
-  const [draft, setDraft] = draftState ?? localDraft;
+  const { text: draft, setText: setDraft, clear: clearDraft } = useComposerDraft(draftKey);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
@@ -118,7 +119,7 @@ export function useStartSession({
       setAttachmentError(uploadError);
       if (uploadError) toast.error(uploadError);
       if (!uploadError) setAttachments([]);
-      setDraft("");
+      clearDraft();
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       // A session that starts in a group changes the tree counts (sessions v2).
       queryClient.invalidateQueries({ queryKey: SESSION_TREE_KEY });

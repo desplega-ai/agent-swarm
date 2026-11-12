@@ -45,6 +45,69 @@
       "exempt": "identifier"
     }
   },
+  "agent_fs_object_webhooks": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "orgId": {
+      "exempt": "identifier"
+    },
+    "driveId": {
+      "exempt": "identifier"
+    },
+    "subscriptionId": {
+      "exempt": "identifier"
+    },
+    "url": {
+      "exempt": "receiver URL built from MCP_BASE_URL and the row id; must match what agent-fs stores"
+    },
+    "secretCiphertext": {
+      "exempt": "ciphertext"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastError": "scrubbed",
+    "claimedAt": {
+      "exempt": "timestamp"
+    },
+    "attemptedAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "agent_history": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agent_id": {
+      "exempt": "identifier"
+    },
+    "event": {
+      "exempt": "enum or fixed-format value"
+    },
+    "actor_ref": {
+      "exempt": "identifier"
+    },
+    "reason": "scrubbed",
+    "snapshot_json": {
+      "exempt": "byte-exact agents-row snapshot; restore reinserts it"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    }
+  },
   "agent_log": {
     "id": {
       "exempt": "identifier"
@@ -1948,6 +2011,9 @@
     },
     "updated_by": {
       "exempt": "identifier"
+    },
+    "deletedAt": {
+      "exempt": "timestamp"
     }
   },
   "principal_roles": {
@@ -2244,6 +2310,9 @@
     },
     "modelGroup": {
       "exempt": "enum or fixed-format value"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "script_apis": {
@@ -2618,6 +2687,9 @@
     },
     "key": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "seed_state": {
@@ -2992,6 +3064,12 @@
     },
     "lastInvokedAt": {
       "exempt": "timestamp"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "slack_inbound_receipts": {
@@ -3916,6 +3994,9 @@
     },
     "requires": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "updatedByAgentId": {
+      "exempt": "identifier"
     }
   },
   "runtime_controllers": {

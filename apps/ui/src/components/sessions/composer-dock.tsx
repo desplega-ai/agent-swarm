@@ -10,6 +10,12 @@
  * The send button's tooltip shows these keys. On a touch device with a soft
  * keyboard (no hardware Enter key), plain Enter inserts a newline instead, the
  * send button submits there, and the tooltip shows no keys.
+ *
+ * The text box is a Tiptap editor in its own chunk (`composer-editor.tsx`):
+ * `@` and `/` picks become chips, sent as markdown links, and a paste is
+ * smart (a long text becomes a `.txt` file, a spreadsheet copy a markdown
+ * table, a URL over a selection a link). A plain textarea stands in while the
+ * chunk loads. `value` stays a plain string either way.
  */
 
 import { ArrowBigUp, ArrowUp, CornerDownLeft, Eye, FileText, Paperclip, X } from "lucide-react";
@@ -17,18 +23,24 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
 } from "react";
+import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useObjectUrl } from "@/hooks/use-object-url";
 import { CHAT_COLUMN } from "@/lib/chat-width";
+import { isLongPaste, pastedFileName } from "@/lib/composer-paste";
 import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
+
+const ComposerEditor = lazy(() => import("@/components/sessions/composer-editor"));
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -327,6 +339,19 @@ export function ComposerDock({
     handleIncomingFiles(Array.from(e.clipboardData.files));
   };
 
+  const onPasteFiles = (files: File[]) => {
+    if (!canAttach) return false;
+    handleIncomingFiles(files);
+    return true;
+  };
+
+  // A long paste (a log, a stack trace) is attached as a file instead of flooding the box.
+  const onPasteLongText = (text: string) => {
+    if (!canAttach || !isLongPaste(text)) return false;
+    handleIncomingFiles([new File([text], pastedFileName(attachments), { type: "text/plain" })]);
+    return true;
+  };
+
   const removeAttachment = (index: number) => {
     if (!onAttachmentsChange) return;
     onAttachmentsChange(attachments.filter((_, i) => i !== index));
@@ -358,6 +383,32 @@ export function ComposerDock({
     setIsDragActive(false);
     handleIncomingFiles(Array.from(e.dataTransfer.files ?? []));
   };
+
+  const inputClass = cn(
+    "max-h-[220px] px-4 text-base md:text-[15px] leading-snug",
+    folded ? "min-h-11 py-2.5" : "min-h-14 pt-3.5 pb-1.5",
+  );
+
+  // The text box while the editor chunk loads, or when it cannot.
+  const plainInput = (
+    <Textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      onPaste={onPaste}
+      placeholder={placeholder}
+      aria-label={inputLabel}
+      disabled={disabled || isPending}
+      rows={1}
+      className={cn(
+        // `dark:` too: the Textarea's own dark fill would draw a band in the card.
+        "field-sizing-content border-0 shadow-none bg-transparent dark:bg-transparent",
+        "focus-visible:ring-0 focus-visible:border-0 resize-none",
+        inputClass,
+      )}
+    />
+  );
 
   const routeLine = (
     <div
@@ -416,25 +467,25 @@ export function ComposerDock({
             <span className="text-xs font-medium text-primary">Drop files to attach</span>
           </div>
         ) : null}
-        <Textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={placeholder}
-          aria-label={inputLabel}
-          disabled={disabled || isPending}
-          rows={1}
-          className={cn(
-            // `dark:` too: the Textarea's own dark fill would draw a band in the card.
-            "field-sizing-content border-0 shadow-none bg-transparent dark:bg-transparent",
-            "focus-visible:ring-0 focus-visible:border-0",
-            "max-h-[220px] resize-none px-4 text-base md:text-[15px]",
-            folded ? "min-h-11 py-2.5" : "min-h-14 pt-3.5 pb-1.5",
-            "leading-snug",
-          )}
-        />
+        {/* A chunk that fails to load (an older deploy) leaves the plain textarea. */}
+        <ErrorBoundary fallback={plainInput}>
+          <Suspense fallback={plainInput}>
+            <ComposerEditor
+              value={value}
+              onChange={onChange}
+              onSubmitKey={() => {
+                if (canSubmit) onSubmit();
+              }}
+              onPasteFiles={onPasteFiles}
+              onPasteLongText={onPasteLongText}
+              placeholder={placeholder}
+              ariaLabel={inputLabel}
+              disabled={disabled || isPending}
+              autoFocus={autoFocus}
+              className={inputClass}
+            />
+          </Suspense>
+        </ErrorBoundary>
         {onAttachmentsChange ? (
           <input
             ref={fileInputRef}

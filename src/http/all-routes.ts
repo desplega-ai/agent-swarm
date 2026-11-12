@@ -9,6 +9,7 @@
  * registration order).
  */
 import "./active-sessions";
+import "./agent-lifecycle";
 import "./agents";
 import "./approval-requests";
 import "./apps";
@@ -40,6 +41,7 @@ import "./metrics";
 import "./model-groups";
 import "./model-profiles";
 import "./models-catalog";
+import "./object-webhooks";
 import "./oauth-locks";
 import "./oauth-callback";
 import "./oauth-generic";

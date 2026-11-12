@@ -27,6 +27,7 @@ import { itemFromDetail, userName } from "@/lib/sessions-v2";
 import { useCan } from "@/lib/use-can";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "../group-crumb-icon";
+import { SessionStar } from "../group-tab-star";
 import { PeoplePill } from "./people-pill";
 import { focusQuietly } from "./quiet-focus";
 import { SessionMetaLine } from "./session-meta-line";
@@ -205,6 +206,7 @@ export function SessionHeader({
               renaming={renaming}
               onRenamingChange={onRenamingChange}
             />
+            <SessionStar rootTaskId={detail.root.id} />
           </div>
           <SessionMetaLine
             detail={detail}

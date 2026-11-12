@@ -25,6 +25,7 @@ import { useStatusContext } from "@/app/status-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import type { UserFunction } from "@/lib/company-profile";
 import { reportedUserFunction } from "../../../../../src/utils/company-profile";
+import { randomUUID } from "../../lib/uuid";
 
 export type NotificationEventAction = "view" | "submit" | "dismiss";
 
@@ -92,7 +93,7 @@ export function useNotificationEvents() {
   ): Promise<void> {
     if (!currentUser.userId) return Promise.reject(new Error("Pick who you are first."));
     return submitFeedback.mutateAsync({
-      submission_id: crypto.randomUUID(),
+      submission_id: randomUUID(),
       ...extra,
       user_id: currentUser.userId,
       // The caller may pass a name newer than the last /status poll (the org-name popup).

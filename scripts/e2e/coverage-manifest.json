@@ -93,6 +93,32 @@
   "routes": [],
   "mcpTools": [],
   "nodeTypes": [],
+  "cliCommands": [
+    {
+      "command": "worker",
+      "reason": "worker command: it runs the agent harness, which the contract suite never starts; the nightly harness legs (bun run e2e --harness, LOCAL_TESTING.md Black-box E2E) spawn it"
+    },
+    {
+      "command": "lead",
+      "reason": "worker command: it runs the agent harness, which the contract suite never starts; the nightly harness legs (bun run e2e --harness, LOCAL_TESTING.md Black-box E2E) spawn it"
+    },
+    {
+      "command": "claude",
+      "reason": "worker command: launches the Claude CLI against a real model; the nightly harness legs run the worker that starts it"
+    },
+    {
+      "command": "hook",
+      "reason": "worker command: Claude Code hook events on stdin, fired by the harness the nightly legs spawn"
+    },
+    {
+      "command": "codex-hook",
+      "reason": "worker command: Codex hook events on stdin, fired by the harness the nightly legs spawn"
+    },
+    {
+      "command": "session-summary-stdin",
+      "reason": "worker command: internal session-summary helper the worker runtime calls; nightly harness legs"
+    }
+  ],
   "stateSurfaces": [
     {
       "name": "task-statuses",
@@ -210,6 +236,10 @@
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
       "scenarios": ["core-agent-access"]
     },
+    "agent-lifecycle": {
+      "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
+      "scenarios": ["core-agent-lifecycle"]
+    },
     "agent-fs-public-edge": {
       "description": "public share/site pages through the agent-fs proxy and the Comb review-batch gate",
       "scenarios": ["knowledge-agentfs-edges"]
@@ -241,6 +271,15 @@
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
       "scenarios": ["knowledge-assets"]
+    },
+    "audit-attribution": {
+      "description": "create, cross-actor update and no-person update record the writing agent and person on scripts, skills, workflows and schedules over HTTP, MCP and a script run's ctx.swarm calls",
+      "scenarios": [
+        "audit-attribution-workflows",
+        "audit-attribution-schedules",
+        "audit-attribution-scripts",
+        "audit-attribution-skills"
+      ]
     },
     "budget-refusal": {
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
@@ -363,8 +402,12 @@
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
       "scenarios": ["knowledge-pages"]
     },
+    "primitive-boards": {
+      "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
+      "scenarios": ["knowledge-boards"]
+    },
     "primitive-objects": {
-      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key",
+      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; the file.changed receiver refuses unsigned, forged and oversized deliveries",
       "scenarios": ["knowledge-objects"]
     },
     "prompt-template-override": {
@@ -427,6 +470,18 @@
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
       "scenarios": ["core-sessions", "core-use-case-group"]
     },
+    "sheets": {
+      "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
+      "scenarios": [
+        "knowledge-sheets",
+        "knowledge-sheets-edges",
+        "knowledge-sheets-limits",
+        "knowledge-sheets-scripts",
+        "knowledge-sheets-values",
+        "knowledge-sheets-xlsx",
+        "knowledge-sheets-xlsx-scripts"
+      ]
+    },
     "skills-lifecycle": {
       "description": "create, bundle files, install/uninstall, publish approval, update, delete, system-managed locks",
       "scenarios": ["knowledge-skills"]
@@ -445,10 +500,13 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
+        "slack-session-mirror",
+        "slack-session-mirror-render-v2",
+        "slack-session-mirror-delegation",
         "slack-failed-task",
         "slack-assistant-file-share",
         "slack-reaction-override",
@@ -548,8 +606,8 @@
       "scenarios": ["workflow-approvals"]
     },
     "workflow-definitions": {
-      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types over HTTP and MCP",
-      "scenarios": ["workflow-definitions"]
+      "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
+      "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
       "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
@@ -576,6 +634,21 @@
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
+    },
+    "cli": {
+      "description": "Operator CLI commands as a black box: exit code, output and written files",
+      "scenarios": [
+        "cli-help",
+        "cli-onboard",
+        "cli-connect",
+        "cli-worker-token",
+        "cli-x",
+        "cli-e2b",
+        "cli-provider-setup",
+        "cli-database-commands",
+        "cli-api",
+        "cli-controller"
+      ]
     }
   }
 }

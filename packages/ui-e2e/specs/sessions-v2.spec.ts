@@ -173,13 +173,13 @@ test.describe("desktop", () => {
     await clean.assertClean();
   });
 
-  test("the pane crumb of a session in a shared Slack thread opens the thread group", async ({
+  test("the pane crumb of a session in a shared Slack thread opens its channel", async ({
     page,
     api,
     seed,
     clean,
   }) => {
-    // Two owned roots in one Slack thread nest as a thread group under the channel.
+    // Two owned roots in one Slack thread: the server nests them as a thread group.
     const run = randomUUID().slice(0, 8);
     const prefix = `e2e v2 thread ${run}`;
     const key = `shared/slack/c0e2e${run}/thread:1729000000.${run}/`;
@@ -200,17 +200,18 @@ test.describe("desktop", () => {
     );
     await page.goto(`/sessions/${roots[0]!.id}`);
     const tree = page.getByRole("tree", { name: "Sessions" });
-    // The thread group takes the text of its oldest root, and the folded Slack section hides it.
-    const threadGroup = tree.getByRole("treeitem", { name: new RegExp(`^${prefix}`), level: 3 });
-    await expect(threadGroup).toBeHidden();
+    // The thread's sessions list in their channel, and the folded Slack section hides them.
+    // Unread session rows start with "Unread.", so this name is not anchored.
+    const rows = tree.getByRole("treeitem", { name: new RegExp(prefix), level: 3 });
+    await expect(rows).toHaveCount(0);
 
     await page
       .getByRole("tabpanel", { name: `${prefix} a` })
       .getByRole("button", { name: new RegExp(`^Slack › ${prefix}`) })
       .click();
-    await expect(threadGroup).toHaveAttribute("aria-expanded", "true");
-    // Unread session rows start with "Unread.", so this name is not anchored.
-    await expect(tree.getByRole("treeitem", { name: new RegExp(prefix), level: 4 })).toHaveCount(2);
+    // The crumb opens the channel: both thread sessions are rows of its one list, no thread row.
+    await expect(rows).toHaveCount(2);
+    await expect(tree.getByRole("treeitem", { name: new RegExp(prefix), level: 4 })).toHaveCount(0);
     await clean.assertClean();
   });
 

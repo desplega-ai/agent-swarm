@@ -24,6 +24,14 @@ import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppRowTools } from "./tools/app-rows";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
+import {
+  registerBoardAddElementsTool,
+  registerBoardCreateTool,
+  registerBoardGetTool,
+  registerBoardListTool,
+  registerBoardRemoveElementsTool,
+  registerBoardUpdateElementsTool,
+} from "./tools/boards";
 import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerChatOpenDmTool } from "./tools/chat-open-dm";
@@ -150,6 +158,18 @@ import { registerScriptRunsTools } from "./tools/script-runs";
 import { registerScriptSearchTool } from "./tools/script-search";
 import { registerScriptUpsertTool } from "./tools/script-upsert";
 import { registerSendTaskTool } from "./tools/send-task";
+import {
+  registerSheetAddTabTool,
+  registerSheetAppendRowsTool,
+  registerSheetClearRangeTool,
+  registerSheetCreateTool,
+  registerSheetExportXlsxTool,
+  registerSheetGetRangeTool,
+  registerSheetGetTool,
+  registerSheetImportXlsxTool,
+  registerSheetListTool,
+  registerSheetSetRangeTool,
+} from "./tools/sheets";
 // Skills capability
 import {
   registerSkillCreateTool,
@@ -693,12 +713,28 @@ export async function createServer(
     registerRoomDecodeTool(server);
   }
 
-  // Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).
+  // Primitives capability: object-*, sheet-* and board-* tools over agent-fs files (src/be/primitives/).
   if (hasCapability("primitives")) {
     registerObjectCreateTool(server);
     registerObjectGetTool(server);
     registerObjectListTool(server);
     registerObjectReindexTool(server);
+    registerSheetCreateTool(server);
+    registerSheetGetTool(server);
+    registerSheetListTool(server);
+    registerSheetGetRangeTool(server);
+    registerSheetSetRangeTool(server);
+    registerSheetAppendRowsTool(server);
+    registerSheetClearRangeTool(server);
+    registerSheetAddTabTool(server);
+    registerSheetImportXlsxTool(server);
+    registerSheetExportXlsxTool(server);
+    registerBoardCreateTool(server);
+    registerBoardGetTool(server);
+    registerBoardListTool(server);
+    registerBoardAddElementsTool(server);
+    registerBoardUpdateElementsTool(server);
+    registerBoardRemoveElementsTool(server);
   }
 
   // Slack capability - Slack integration tools (no-op if Slack is not configured)

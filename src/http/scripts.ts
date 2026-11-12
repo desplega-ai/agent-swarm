@@ -762,6 +762,10 @@ export async function handleScripts(
     const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
       req.headers["x-runtime-instance-id"],
     );
+    // Forwarded to the run's `ctx.swarm` calls so their writes resolve the same
+    // audit person. Not trusted as-is: every resolver re-checks that the task
+    // belongs to the calling agent.
+    const sourceTaskId = ((h) => (Array.isArray(h) ? h[0] : h))(req.headers["x-source-task-id"]);
 
     // Inline source is saved as a scratch script and recorded on the run row:
     // refuse an embedded secret before it executes or persists.
@@ -820,6 +824,7 @@ export async function handleScripts(
         executor,
         agentId: agent.id,
         runtimeInstanceId,
+        sourceTaskId,
         egressSecrets: credentials.egressSecrets,
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
@@ -884,6 +889,7 @@ export async function handleScripts(
         isScratch: true,
         typeChecked: false,
         changeReason: "Auto-saved successful inline run",
+        createdBy: await resolveHttpAuditUserId(req, agent.id),
       });
       autoSaved = { slug, reason: "successful_inline_run" };
     }
@@ -993,6 +999,9 @@ export async function handleScripts(
       fsMode: script.fsMode,
       executor: script.executor,
       createdByAgentId: script.createdByAgentId,
+      updatedByAgentId: script.updatedByAgentId,
+      createdBy: script.createdBy,
+      updatedBy: script.updatedBy,
       createdAt: script.createdAt,
       updatedAt: script.updatedAt,
     }));

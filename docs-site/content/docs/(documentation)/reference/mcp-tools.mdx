@@ -68,16 +68,41 @@ See the [Rooms API reference](/docs/api-reference/rooms) for request schemas.
 
 ## Primitive objects
 
-The `primitives` capability (off by default; scripts always reach it through the SDK bridge) exposes four tools over agent-fs files on the caller's default drive. Every call runs as the caller's own agent-scoped `AGENT_FS_API_KEY`.
+The `primitives` capability (off by default; scripts always reach it through the SDK bridge) exposes tools over agent-fs files on the caller's default drive. Every call runs as the caller's own agent-scoped `AGENT_FS_API_KEY`.
 
 | Tool | Purpose |
 |------|---------|
 | `object-create` | Create a file create-only and give it a stable id. Kind `board` writes an empty `.excalidraw` scene. |
 | `object-get` | Read one object by `id` or `path`, optionally with its content. |
-| `object-list` | List objects by `kind` and path `prefix`. |
-| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. |
+| `object-list` | List objects by `kind` and path `prefix`. Hides objects whose file agent-fs reported deleted. |
+| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, and `cutBy` names the limit that stopped it. |
+| `sheet-create` | Create a spreadsheet (`swarm-sheet/1`, a `.sheet.json` file), optionally with named tabs seeded from A1. |
+| `sheet-get` | A sheet's object, agent-fs `version` and tabs (used rows and columns, frozen rows). |
+| `sheet-list` | List sheets by path `prefix`. |
+| `sheet-get-range` | Read cached values (and optionally formulas) from an A1 range. Spilled cells are included. |
+| `sheet-set-range` | Write a rectangle of values and recompute every formula. `=...` is a formula. |
+| `sheet-append-rows` | Append rows below the last used row of a tab. |
+| `sheet-clear-range` | Clear a range and recompute dependents. |
+| `sheet-add-tab` | Add an empty tab, at the end or after a named tab. |
+| `sheet-import-xlsx` | Import an `.xlsx` from the drive as a new sheet. Returns `dropped`, the features a sheet cannot hold. Limits: 5 MiB, 20 tabs, 50,000 cells. |
+| `sheet-export-xlsx` | Export a sheet to a new `.xlsx` on the drive (`overwrite` replaces an existing file). Returns `dropped`. |
 
-Scripts use `ctx.objects.create/get/list/reindex`.
+Scripts use `ctx.objects.create/get/list/reindex` and `ctx.sheets.create/get/list/getRange/setRange/appendRows/clearRange/addTab/importXlsx/exportXlsx`.
+
+Sheet limits: 20 tabs, 50,000 non-empty cells per workbook, 5 MiB per file, 10,000 cells per range call. Formulas run in one worker with a 10 s timeout per call. A write that hits an agent-fs version conflict re-reads and re-applies up to three times (edits to different cells merge, the same cell is last writer wins), then refuses with "concurrent writers".
+
+Boards are `.excalidraw` objects edited as raw element JSON. Writes guard on the agent-fs file version and re-apply up to three times on a concurrent change.
+
+| Tool | Purpose |
+|------|---------|
+| `board-create` | Create a board, optionally with shapes and arrows bound on both ends. |
+| `board-get` | Read a board's live elements as summaries, or `detail: "full"` for raw elements. |
+| `board-list` | List boards by path `prefix`. |
+| `board-add-elements` | Add rectangles, ellipses, diamonds, text and bound arrows. Shapes without x/y are laid out below existing content. |
+| `board-update-elements` | Patch label, position, size or color. Labels and bound arrows follow, and each touched element gets a new version. |
+| `board-remove-elements` | Set `isDeleted` on elements. A shape takes its label with it and unbinds its arrows. |
+
+Scripts use `ctx.boards.create/get/list/addElements/updateElements/removeElements`.
 
 ## Core Tools
 
@@ -681,7 +706,7 @@ Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event
 | `definition` | object | Yes | DAG definition with `nodes` array |
 | `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `event`. Manual start is `trigger-workflow`, not a `triggers` entry. A webhook trigger accepts `filter` (`headers` and `body` allowlists) and `preset` (`github`, `gitlab`, or `standard-webhooks`). `events` and `eventHeader` remain a deprecated alias. |
 | `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds, from? }`; `from: "start"` counts only from run starts |
-| `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
+| `input` | object | No | Workflow-level input values (env vars, secrets, or literals). Env var and secret references require `config.read.secrets` (the lead agent). |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
 
 ### get-workflow

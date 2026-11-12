@@ -34,6 +34,9 @@ const RESET_MS = 1500;
 export function useCopyToClipboard<K extends string = string>(): UseCopyToClipboardResult<K> {
   const [copiedKey, setCopiedKey] = useState<K | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only the most recently started copy may update state; older writes that
+  // resolve late are ignored so they cannot overwrite a newer action.
+  const latest = useRef(0);
 
   useEffect(
     () => () => {
@@ -43,10 +46,12 @@ export function useCopyToClipboard<K extends string = string>(): UseCopyToClipbo
   );
 
   const copy = useCallback(async (value: string, key?: K) => {
+    const id = ++latest.current;
     try {
       if (typeof navigator === "undefined" || !navigator.clipboard) return false;
       await navigator.clipboard.writeText(value);
       const k = (key ?? ("default" as K)) as K;
+      if (id !== latest.current) return true;
       setCopiedKey(k);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {

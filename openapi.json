@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.11.0",
+    "version": "2.12.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -669,6 +669,296 @@
           }
         }
       },
+      "AgentHistoryEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "deleted",
+              "restored"
+            ]
+          },
+          "actorRef": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "event",
+          "actorRef",
+          "reason",
+          "snapshot",
+          "createdAt"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "isLead": {
+            "type": "boolean",
+            "default": false
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "busy",
+              "offline",
+              "waiting_for_credentials"
+            ]
+          },
+          "runtimePoolId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeProvisionAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "runtimeProvisionRetryAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "claudeMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "soulMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "identityMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "setupScript": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "toolsMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "heartbeatMd": {
+            "type": "string",
+            "maxLength": 262144
+          },
+          "maxTasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "emptyPollCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx"
+            ]
+          },
+          "harnessProvider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              "pi",
+              "devin",
+              "claude-managed",
+              "opencode",
+              "acp",
+              "dsh",
+              "amp",
+              "cursor",
+              "grok",
+              "fx",
+              null
+            ]
+          },
+          "credentialMissing": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "credStatus": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentCredStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatar": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "lucide"
+                    ]
+                  },
+                  "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "icon"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
+              }
+            ]
+          },
+          "slackIcon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentSlackIcon"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
       "AgentCredStatus": {
         "type": "object",
         "properties": {
@@ -1181,256 +1471,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "Agent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "isLead": {
-            "type": "boolean",
-            "default": false
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "idle",
-              "busy",
-              "offline",
-              "waiting_for_credentials"
-            ]
-          },
-          "runtimePoolId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "runtimeProvisionAttempts": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "runtimeProvisionRetryAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "description": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string",
-            "maxLength": 100
-          },
-          "capabilities": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": []
-          },
-          "claudeMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "soulMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "identityMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "setupScript": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "toolsMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "heartbeatMd": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "maxTasks": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100
-          },
-          "emptyPollCount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "lastActivityAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "provider": {
-            "type": "string",
-            "enum": [
-              "claude",
-              "codex",
-              "pi",
-              "devin",
-              "claude-managed",
-              "opencode",
-              "acp",
-              "dsh",
-              "amp",
-              "cursor",
-              "grok",
-              "fx"
-            ]
-          },
-          "harnessProvider": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "claude",
-              "codex",
-              "pi",
-              "devin",
-              "claude-managed",
-              "opencode",
-              "acp",
-              "dsh",
-              "amp",
-              "cursor",
-              "grok",
-              "fx",
-              null
-            ]
-          },
-          "credentialMissing": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "type": "string"
-            }
-          },
-          "credStatus": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AgentCredStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatar": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "lucide"
-                    ]
-                  },
-                  "icon": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "pattern": "^[a-z0-9-]+$"
-                  },
-                  "color": {
-                    "type": "string",
-                    "pattern": "^#[0-9a-fA-F]{6}$"
-                  }
-                },
-                "required": [
-                  "type",
-                  "icon"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "url"
-                    ]
-                  },
-                  "url": {
-                    "type": "string",
-                    "maxLength": 2048,
-                    "format": "uri"
-                  }
-                },
-                "required": [
-                  "type",
-                  "url"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "agent-fs"
-                    ]
-                  },
-                  "path": {
-                    "type": "string",
-                    "minLength": 2,
-                    "maxLength": 1024
-                  },
-                  "orgId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "driveId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "type",
-                  "path"
-                ]
-              }
-            ]
-          },
-          "slackIcon": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AgentSlackIcon"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "lastUpdatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "status",
-          "createdAt",
-          "lastUpdatedAt"
         ]
       },
       "ProfileCheckResult": {
@@ -2507,7 +2547,9 @@
               "workflow",
               "schedule",
               "agent-fs-path",
-              "key"
+              "key",
+              "session",
+              "hidden-key"
             ]
           },
           "itemId": {
@@ -4865,6 +4907,34 @@
               "null"
             ]
           },
+          "createdByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedByAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "updatedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "createdAt": {
             "type": "string"
           },
@@ -6022,6 +6092,9 @@
             "minLength": 1
           },
           "createdByAgentId": {
+            "type": "string"
+          },
+          "updatedByAgentId": {
             "type": "string"
           },
           "createdAt": {
@@ -7758,6 +7831,342 @@
           },
           "403": {
             "description": "Can only recover orphaned tasks for the calling agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/delete": {
+      "post": {
+        "summary": "Delete an agent into agent_history",
+        "description": "Appends the agent row to `agent_history`, revokes its session tokens, and deletes the row. Refused with 409 while the agent is the lead, an extension identity, not offline, pool-bound, holds open tasks or enabled schedules, or owns skills, MCP servers or inboxes.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "$ref": "#/components/schemas/AgentHistoryEvent"
+                    }
+                  },
+                  "required": [
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A blocker refuses the delete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "blockers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "code",
+                    "blockers"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/restore": {
+      "post": {
+        "summary": "Restore a deleted agent from agent_history",
+        "description": "Reinserts the latest deleted snapshot under the same id. Rows a cascading foreign key removed on delete do not come back.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2000
+                  },
+                  "newName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "$ref": "#/components/schemas/Agent"
+                    },
+                    "event": {
+                      "$ref": "#/components/schemas/AgentHistoryEvent"
+                    }
+                  },
+                  "required": [
+                    "agent",
+                    "event"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No deleted agent with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The agent exists, or its name is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "blockers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "code",
+                    "blockers"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-history": {
+      "get": {
+        "summary": "List agent delete and restore events",
+        "description": "Newest first, at most 500. Filter by `agentId`.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentHistoryEvent"
+                      }
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
             "content": {
               "application/json": {
                 "schema": {
@@ -11825,6 +12234,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "An operator deleted this agent id (`agent_deleted`); the worker must stop",
             "content": {
               "application/json": {
                 "schema": {
@@ -24406,7 +24825,9 @@
                 "workflow",
                 "schedule",
                 "agent-fs-path",
-                "key"
+                "key",
+                "session",
+                "hidden-key"
               ]
             },
             "required": false,
@@ -24486,7 +24907,9 @@
                       "workflow",
                       "schedule",
                       "agent-fs-path",
-                      "key"
+                      "key",
+                      "session",
+                      "hidden-key"
                     ]
                   },
                   "itemId": {
@@ -24524,7 +24947,9 @@
                         "workflow",
                         "schedule",
                         "agent-fs-path",
-                        "key"
+                        "key",
+                        "session",
+                        "hidden-key"
                       ]
                     },
                     "itemId": {
@@ -24552,7 +24977,7 @@
             }
           },
           "400": {
-            "description": "Invalid asset key for a key favorite",
+            "description": "Invalid asset key for a key or hidden-key favorite",
             "content": {
               "application/json": {
                 "schema": {
@@ -33235,6 +33660,103 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/agent-fs-webhook/{id}": {
+      "post": {
+        "summary": "Receive agent-fs file.changed events that keep primitive objects in sync",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Receiver id the swarm registered with agent-fs"
+            },
+            "required": true,
+            "description": "Receiver id the swarm registered with agent-fs",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event applied or ignored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "updated",
+                        "tombstoned",
+                        "restored",
+                        "moved",
+                        "ignored"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "path"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not a valid event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown receiver, missing headers or invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 64 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent-fs could not be read; agent-fs retries the delivery",
             "content": {
               "application/json": {
                 "schema": {
@@ -45937,6 +46459,9 @@
                     "createdByAgentId": {
                       "type": "string"
                     },
+                    "updatedByAgentId": {
+                      "type": "string"
+                    },
                     "parentTaskId": {
                       "type": "string"
                     },
@@ -46305,6 +46830,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -46498,6 +47026,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -46736,6 +47267,9 @@
                           "format": "date-time"
                         },
                         "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "updatedByAgentId": {
                           "type": "string"
                         },
                         "parentTaskId": {
@@ -46989,6 +47523,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -47371,6 +47908,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -47784,6 +48324,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "updatedByAgentId": {
                       "type": "string"
                     },
                     "parentTaskId": {
@@ -57721,6 +58264,16 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "An operator deleted this agent id (`agent_deleted`); restore it first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -57974,6 +58527,14 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "ids",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "enum": [
                 "true",
@@ -57989,6 +58550,7 @@
               "type": "string",
               "enum": [
                 "inbox",
+                "working",
                 "later",
                 "done",
                 "unread"
@@ -58554,6 +59116,30 @@
                         "needsYou"
                       ]
                     },
+                    "working": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ],
+                      "description": "Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox."
+                    },
                     "later": {
                       "type": "object",
                       "properties": {
@@ -58646,6 +59232,7 @@
                   "required": [
                     "groups",
                     "inbox",
+                    "working",
                     "later",
                     "done",
                     "noGroup",
@@ -58671,7 +59258,7 @@
     "/api/session-triage": {
       "post": {
         "summary": "Triage every session of one sidebar list",
-        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.",
         "tags": [
           "Sessions"
         ],
@@ -58699,6 +59286,7 @@
                     "type": "string",
                     "enum": [
                       "inbox",
+                      "working",
                       "later",
                       "done"
                     ]
@@ -58707,6 +59295,9 @@
                     "type": "boolean"
                   },
                   "groupKey": {
+                    "type": "string"
+                  },
+                  "keyPrefix": {
                     "type": "string"
                   },
                   "show": {
@@ -58732,6 +59323,14 @@
                       "minLength": 1
                     },
                     "maxItems": 32
+                  },
+                  "exceptIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 500
                   }
                 },
                 "required": [
@@ -62868,6 +63467,27 @@
                               "null"
                             ]
                           },
+                          "updatedByAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "createdBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
+                          "updatedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "default": null
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -63054,6 +63674,27 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "updatedByAgentId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "createdBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
+                        },
+                        "updatedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "default": null
                         },
                         "createdAt": {
                           "type": "string"
@@ -65083,6 +65724,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "updatedByAgentId": {
+                                "type": "string"
+                              },
                               "parentTaskId": {
                                 "type": "string"
                               },
@@ -65268,6 +65912,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "updatedByAgentId": {
                                 "type": "string"
                               },
                               "parentTaskId": {
@@ -72216,6 +72863,9 @@
                           "createdByAgentId": {
                             "type": "string"
                           },
+                          "updatedByAgentId": {
+                            "type": "string"
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -72698,6 +73348,16 @@
           },
           "400": {
             "description": "Invalid definition, or a malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -73236,6 +73896,16 @@
               }
             }
           },
+          "403": {
+            "description": "Env var or secret input requires config.read.secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow not found",
             "content": {
@@ -73320,6 +73990,16 @@
           },
           "400": {
             "description": "Invalid patch or resulting definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -73501,6 +74181,16 @@
           },
           "400": {
             "description": "Invalid patch or resulting definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {

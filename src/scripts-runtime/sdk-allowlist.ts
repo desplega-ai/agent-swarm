@@ -40,6 +40,25 @@ export const SDK_TOOL_NAME_MAP = {
   objects_list: "object-list",
   objects_reindex: "object-reindex",
 
+  // ── sheets (also ctx.sheets, see SDK_NAMESPACES) ──
+  sheets_create: "sheet-create",
+  sheets_get: "sheet-get",
+  sheets_list: "sheet-list",
+  sheets_getRange: "sheet-get-range",
+  sheets_setRange: "sheet-set-range",
+  sheets_appendRows: "sheet-append-rows",
+  sheets_clearRange: "sheet-clear-range",
+  sheets_addTab: "sheet-add-tab",
+  sheets_importXlsx: "sheet-import-xlsx",
+  sheets_exportXlsx: "sheet-export-xlsx",
+  // ── boards (also ctx.boards, see SDK_NAMESPACES) ──
+  boards_create: "board-create",
+  boards_get: "board-get",
+  boards_list: "board-list",
+  boards_addElements: "board-add-elements",
+  boards_updateElements: "board-update-elements",
+  boards_removeElements: "board-remove-elements",
+
   // ── repos ──
   repo_list: "get-repos",
   repo_update: "update-repo",
@@ -251,6 +270,19 @@ export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
  */
 export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
   objects: ["create", "get", "list", "reindex"],
+  sheets: [
+    "create",
+    "get",
+    "list",
+    "getRange",
+    "setRange",
+    "appendRows",
+    "clearRange",
+    "addTab",
+    "importXlsx",
+    "exportXlsx",
+  ],
+  boards: ["create", "get", "list", "addElements", "updateElements", "removeElements"],
 });
 
 /** ctx keys a namespace may never shadow. */

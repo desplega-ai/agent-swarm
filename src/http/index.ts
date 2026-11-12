@@ -77,6 +77,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
+import { handleAgentLifecycle } from "./agent-lifecycle";
 import { handleAgentFsProxy } from "./agentfs-proxy";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
@@ -123,6 +124,7 @@ import { handleModelsCatalog } from "./models-catalog";
 import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
 import { handleOAuthLocks } from "./oauth-locks";
+import { handleObjectWebhooks } from "./object-webhooks";
 import { handleOnboarding } from "./onboarding";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
@@ -373,6 +375,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
         () => handleTrackers(req, res, pathSegments),
         () => handleWebhooks(req, res, pathSegments),
+        () => handleObjectWebhooks(req, res, pathSegments),
+        () => handleAgentLifecycle(req, res, pathSegments, queryParams, myAgentId),
         () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
         () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
         () => handleContext(req, res, pathSegments, queryParams, myAgentId),
@@ -866,6 +870,17 @@ httpServer
       .catch((err: unknown) => {
         console.warn(
           "[agent-fs] Failed to set the org swarm URL:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      });
+
+    // Re-check the agent-fs file.changed webhook of every drive that holds
+    // objects. Not awaited and never throws: object-reindex is the fallback.
+    void import("../be/primitives/object-webhooks")
+      .then(({ ensureObjectWebhooksForKnownDrives }) => ensureObjectWebhooksForKnownDrives())
+      .catch((err: unknown) => {
+        console.warn(
+          "[objects] agent-fs webhook boot check failed:",
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         );
       });

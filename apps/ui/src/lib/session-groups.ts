@@ -358,6 +358,11 @@ function isThreadGroupKey(key: string): boolean {
   return sourceOfGroupKey(key) !== null && /\/thread:[^/]+\/$/.test(key);
 }
 
+/** The group row the sidebar shows for `key`: a source thread's sessions list in its channel. */
+export function sidebarGroupKey(key: string): string {
+  return isThreadGroupKey(key) ? key.replace(/thread:[^/]+\/$/, "") : key;
+}
+
 /**
  * The name of a source group: its label from the tree (`#eng`, `DM · Lena`,
  * a Telegram chat title), else a name from its id: `#<ID>` for a Slack

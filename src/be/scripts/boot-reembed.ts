@@ -28,6 +28,9 @@ export type ScriptRow = {
   fsMode: "none" | "workspace-rw";
   executor: "native" | "quickjs" | null;
   createdByAgentId: string | null;
+  updatedByAgentId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +43,9 @@ export function toScriptRecord(row: ScriptRow) {
     typeChecked: row.typeChecked === 1,
     executor: row.executor ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
+    updatedByAgentId: row.updatedByAgentId ?? null,
+    createdBy: row.created_by ?? null,
+    updatedBy: row.updated_by ?? null,
   };
 }
 

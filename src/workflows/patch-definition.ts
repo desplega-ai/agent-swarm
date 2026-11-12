@@ -2,13 +2,14 @@ import { getDbClient, getWorkflow, updateWorkflow } from "../be/db";
 import type { Workflow, WorkflowDefinition, WorkflowPatch } from "../types";
 import { applyDefinitionPatch, definitionNodeIds, validateDefinition } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
+import { serverRefInputDeniedMessage, serverRefInputKeys } from "./input";
 import { workflowModelErrors } from "./model-validation";
 import { snapshotWorkflow } from "./version";
 
 export type PatchWorkflowDefinitionResult =
   | { ok: true; workflow: Workflow; version: number | null; definition: WorkflowDefinition }
   | { ok: false; reason: "not_found" }
-  | { ok: false; reason: "patch" | "invalid"; errors: string[] };
+  | { ok: false; reason: "patch" | "invalid" | "forbidden"; errors: string[] };
 
 /**
  * Read a workflow, merge a node patch into its definition, snapshot the
@@ -36,11 +37,25 @@ export async function patchWorkflowDefinition(options: {
   /** HTTP handlers keep updating when the snapshot fails; tools surface it. */
   snapshotOptional?: boolean;
   updates?: Omit<Parameters<typeof updateWorkflow>[1], "definition">;
+  /**
+   * False when the caller lacks `config.read.secrets`. A workflow whose input
+   * holds `${ENV_VAR}` / `secret.NAME` references, stored or rendered from its
+   * (new) params, then refuses the patch, since a node or params edit decides
+   * where those resolved values go.
+   */
+  serverRefInputAllowed?: boolean;
 }): Promise<PatchWorkflowDefinitionResult> {
   const { id, patch, registry, snapshotAgentId, snapshotOptional, updates } = options;
   return await getDbClient().transaction(async (): Promise<PatchWorkflowDefinitionResult> => {
     const existing = await getWorkflow(id);
     if (!existing) return { ok: false, reason: "not_found" };
+
+    if (options.serverRefInputAllowed === false) {
+      const refKeys = serverRefInputKeys(existing.input, updates?.params ?? existing.params);
+      if (refKeys.length > 0) {
+        return { ok: false, reason: "forbidden", errors: [serverRefInputDeniedMessage(refKeys)] };
+      }
+    }
 
     const patchResult = applyDefinitionPatch(existing.definition, patch);
     if (patchResult.errors.length > 0) {
@@ -71,7 +86,14 @@ export async function patchWorkflowDefinition(options: {
       version = (await snapshotWorkflow(id, snapshotAgentId)).version;
     }
 
-    const workflow = await updateWorkflow(id, { ...updates, definition: patchResult.definition });
+    // Every caller is a user-intent write: record the pair for this write
+    // (person null = unknown), never a previous writer's person.
+    const workflow = await updateWorkflow(id, {
+      ...updates,
+      definition: patchResult.definition,
+      updatedBy: updates?.updatedBy ?? null,
+      updatedByAgentId: snapshotAgentId ?? null,
+    });
     if (!workflow) return { ok: false, reason: "not_found" };
 
     return { ok: true, workflow, version, definition: patchResult.definition };

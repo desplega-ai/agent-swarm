@@ -6,8 +6,9 @@ HTTP and MCP. No Docker, no model, no access to `src/`. The runner sees exactly 
 operator sees: the API, the keys, and a read-only handle on the database file.
 
 The suite is the reliability contract of the swarm. `--strict` fails when any route
-operation, MCP tool or workflow node type the server exposes is neither covered by a
-scenario nor excluded with a reason in `coverage-manifest.json`. CI runs strict.
+operation, MCP tool or workflow node type the server exposes, or any command the CLI lists,
+is neither covered by a scenario nor excluded with a reason in `coverage-manifest.json`.
+CI runs strict.
 
 ```bash
 bun run e2e                       # every scenario, coverage report, no gate
@@ -47,6 +48,7 @@ This file is the authoring guide.
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
 | `coverage-sut.ts` | `--coverage` only: the API entry under `bun test`, so Bun writes lcov when the process stops. |
+| `cli.ts`, `coverage-cli.ts` | `runCli(args, options)`: the CLI as a child (`bun run src/cli.tsx`) with a temp HOME and working directory, and the command universe from `cli help`. Under `--coverage` the child is the CLI entry under `bun test`, like the API. |
 | `diff-coverage.ts`, `coverage-exemptions.txt` | The changed-lines comment: lcov union against `git diff`, and the paths it skips, each with a reason. |
 | `harness.ts` | Optional real-worker legs (`--harness`), credentials required. |
 | `scenarios/` | One file per scenario (or per tight family). `registry.ts` discovers them. |
@@ -163,6 +165,7 @@ on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut()` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
+| `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
 
 ### Mocked edges
@@ -204,7 +207,11 @@ After the scenarios, `coverage.ts`:
    list is a new engine state and fails strict until it is declared.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
-6. Rolls `engines` up: each named engine (script, workflow, task) sums its route groups, tool
+6. Runs `bun run src/cli.tsx help` for the CLI command universe and counts the commands
+   scenarios ran through `runCli` (scenarios/cli.ts). A new command needs a scenario or a
+   `cliCommands` exclusion; worker commands (`worker`, `lead`, `hook` and the like) are excluded
+   because the nightly harness legs spawn them.
+7. Rolls `engines` up: each named engine (script, workflow, task) sums its route groups, tool
    patterns, node types and state surfaces into one covered/total figure. Strict requires
    100% for every engine, so "how covered is the script engine?" has one answer in the report.
 
@@ -232,9 +239,11 @@ no scenario runs. It is a comment only: nothing blocks.
    `git diff -U0 <base>...HEAD -- src/`. A changed line counts only when lcov lists it as
    executable. A file no process loaded counts its changed code lines in full, unless it holds
    types only; the comment marks it `(not loaded)`.
-3. Scope: API files under `src/`. Worker code (`src/commands/`, `src/providers/`, `src/hooks/`,
-   `src/prompts/`, `src/claude.ts`, `src/cli.tsx`), tests, `.d.ts` and the paths in
-   `coverage-exemptions.txt` drop out. Nothing outside `src/` counts.
+3. Scope: API and CLI files under `src/`. CLI children write lcov next to the API's, so
+   `src/cli.tsx` and the operator commands (`onboard`, `setup`, `controller`, `codex-login`,
+   `claude-managed-setup`, `worker-token`, `x`, `e2b`) count. Worker code (the rest of
+   `src/commands/`, `src/providers/`, `src/hooks/`, `src/prompts/`, `src/claude.ts`), tests,
+   `.d.ts` and the paths in `coverage-exemptions.txt` drop out. Nothing outside `src/` counts.
 
 Locally: `bun run e2e --coverage`, then `bun scripts/e2e/diff-coverage.ts` (default base
 `origin/main`, comment in `e2e-coverage-comment.md`). Use `--only <name>` to check the
@@ -242,6 +251,20 @@ scenario you wrote reaches the lines you changed.
 
 An exemption needs a reason a reviewer can verify, like the code that runs in a subprocess the
 runner does not instrument. Prefer a scenario.
+
+### Results tracker
+
+The E2E Tracker Report job reports each run to the swarm's results tracker with
+`scripts/e2e/tracker-ingest.ts`: one `suite: "contract"` payload per shard (scenario, status
+`pass`/`fail`/`flaky`/`skip`, duration, retries), and on the first one a `coverage` block (whole-run
+lines, per-file lines, and on a PR the changed-lines result above). It uses the secrets
+`ui-e2e.yml` uses (`UI_E2E_INGEST_URL`, `UI_E2E_INGEST_BEARER`) and never fails the gate: a missing
+secret, a fork PR or a tracker outage logs a warning and the job goes on. It is a separate job
+that reads the shard results as artifacts, so the secrets never reach a runner that ran PR code. A
+merge group can hold a fork PR, so there it runs the script from the group's base (`main`). The
+queue's runs report as `main`, which is what the coverage-on-main trend reads. Dry run, which writes the payloads and
+posts nothing: `bun scripts/e2e/tracker-ingest.ts --dry-run --out /tmp/payloads` with the
+`GITHUB_REPOSITORY`, `TRACKER_SHA` and `TRACKER_REF` variables set.
 
 ## Benchmarks
 

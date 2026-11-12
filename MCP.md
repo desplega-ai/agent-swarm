@@ -178,6 +178,22 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [object-get](#object-get)
   - [object-list](#object-list)
   - [object-reindex](#object-reindex)
+  - [sheet-create](#sheet-create)
+  - [sheet-get](#sheet-get)
+  - [sheet-list](#sheet-list)
+  - [sheet-get-range](#sheet-get-range)
+  - [sheet-set-range](#sheet-set-range)
+  - [sheet-append-rows](#sheet-append-rows)
+  - [sheet-clear-range](#sheet-clear-range)
+  - [sheet-add-tab](#sheet-add-tab)
+  - [sheet-import-xlsx](#sheet-import-xlsx)
+  - [sheet-export-xlsx](#sheet-export-xlsx)
+  - [board-create](#board-create)
+  - [board-get](#board-get)
+  - [board-list](#board-list)
+  - [board-add-elements](#board-add-elements)
+  - [board-update-elements](#board-update-elements)
+  - [board-remove-elements](#board-remove-elements)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -1440,7 +1456,7 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `definition` | `unknown` | Yes | - | The workflow definition with nodes (each node has id, type, config, and optional next/retry/validation) |
 | `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
 | `cooldown` | `unknown` | No | - | Optional cooldown configuration to prevent re-triggering too frequently |
-| `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
+| `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals). Env var and secret references require config.read.secrets (the lead agent). |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
 | `vcsRepo` | `string` | No | - | Default VCS repo for all agent-task nodes (e.g. org/repo) |
 | `triggerSchema` | `object` | No | - | Optional JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. |
@@ -2153,7 +2169,7 @@ Decode a room snapshot value that the caller already holds.
 
 ## Primitives Tools
 
-*Primitives capability: object-* tools over agent-fs files (src/be/primitives/objects.ts).*
+*Primitives capability: object-*, sheet-* and board-* tools over agent-fs files (src/be/primitives/).*
 
 Capability: `primitives` — **disabled by default**; add `primitives` to `CAPABILITIES` to enable.
 
@@ -2161,11 +2177,11 @@ Capability: `primitives` — **disabled by default**; add `primitives` to `CAPAB
 
 **Create primitive object**
 
-Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path.
+Create a primitive object file on your default agent-fs drive, as your own agent-fs identity, and give it a stable id. Create-only: refuses when the path exists (use object-reindex to adopt an existing file). Kind `board` writes an empty Excalidraw scene and needs a `.excalidraw` path. Kind `sheet` writes an empty `swarm-sheet/1` workbook and needs a `.sheet.json` path (edit it with the sheet-* tools).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). |
+| `kind` | `unknown` | Yes | - | Object kind. `board`: an Excalidraw scene (.excalidraw). `sheet`: a spreadsheet (.sheet.json). |
 | `path` | `string` | Yes | - | Drive path, e.g. /boards/roadmap.excalidraw. |
 | `title` | `string` | No | - | - |
 
@@ -2185,7 +2201,7 @@ Get a primitive object on your default agent-fs drive by `id` or `path`. `missin
 
 **List primitive objects**
 
-List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
+List primitive objects on your default agent-fs drive, newest first. Hides objects whose file agent-fs reported deleted. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2198,11 +2214,203 @@ List primitive objects on your default agent-fs drive, newest first. Filter by `
 
 **Reindex primitive objects**
 
-Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.
+Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, so run it again while `truncated` is true (`cutBy` names the limit). agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `kind` | `unknown` | No | - | - |
+
+### sheet-create
+
+**Create sheet**
+
+Create a spreadsheet (`swarm-sheet/1`, a `.sheet.json` file) on your default agent-fs drive, as your own agent-fs identity. Create-only: refuses when the path exists. Optional `tabs` name the tabs (default one tab `Sheet1`) and may seed each with `rows` from A1. Formulas recompute with a spreadsheet engine; limits: 20 tabs, 50,000 cells, 5 MiB.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | `string` | Yes | - | Drive path ending in `.sheet.json`, e.g. /qa/tracker.sheet.json. |
+| `title` | `string` | No | - | - |
+| `tabs` | `array` | No | - | Tabs to create, each with an optional `rows` grid written from A1. |
+
+### sheet-get
+
+**Get sheet**
+
+Get a sheet's object, current agent-fs `version` and its tabs (name, used rows and columns, frozen rows). Read cells with sheet-get-range.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+
+### sheet-list
+
+**List sheets**
+
+List sheets on your default agent-fs drive, newest first. Filter by path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### sheet-get-range
+
+**Read sheet range**
+
+Read cached values from a range (at most 10,000 cells). Formula cells return their computed value; an error cell returns its error text such as `#DIV/0!`; spilled cells (SEQUENCE, UNIQUE, ...) are included. `formulas: true` also returns the formulas.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+| `formulas` | `boolean` | No | - | Also return `formulas[][]`: the formula text where a cell has one, else the value. |
+
+### sheet-set-range
+
+**Write sheet range**
+
+Write a rectangle of `values` and recompute every formula. A string starting with `=` is a formula; start with `'=` to store literal text that begins with `=`; other strings stay text even when they look like numbers, so send numbers as numbers; null clears the cell. A single-cell `range` is the top-left corner; a larger `range` must match the values' size. Retries on a concurrent write: other cells merge, the same cell is last writer wins.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+| `values` | `array` | Yes | - | Rows of cell values, all the same length (at most 10,000 cells). |
+
+### sheet-append-rows
+
+**Append sheet rows**
+
+Append rows below the last used row of a tab, starting at column A. Same value rules as sheet-set-range; null skips a cell. Returns the range written.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `tab` | `string` | Yes | - | Tab name. |
+| `rows` | `array` | Yes | - | Rows to append (at most 10,000 cells). |
+
+### sheet-clear-range
+
+**Clear sheet range**
+
+Clear the contents of a range and recompute dependents. A whole-column or whole-row range is capped to the used range. Spilled cells go when their anchor is cleared.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `range` | `string` | Yes | - | A1 range such as `Tasks!B2:C3`, `A1:C10` (first tab), `'My tab'!A:A` (whole column, capped to the used range) or `B2`. |
+
+### sheet-add-tab
+
+**Add sheet tab**
+
+Add an empty tab (1-31 characters, none of `[]:*?/\`), at the end or after the tab named `after`. A sheet holds at most 20 tabs.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `name` | `string` | Yes | - | New tab name. |
+| `after` | `string` | No | - | Insert after this tab; default: at the end. |
+
+### sheet-import-xlsx
+
+**Import xlsx as sheet**
+
+Import an `.xlsx` file from your default agent-fs drive as a new sheet, as your own agent-fs identity. Create-only: refuses when the sheet path exists. Keeps tabs, values, formulas (recomputed), number formats, column widths and merges. `dropped` lists what the file had that a sheet cannot hold (styles, charts, comments, frozen panes, and so on). Limits: 5 MiB file, 20 tabs, 50,000 cells; nothing is created when a limit refuses.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourcePath` | `string` | Yes | - | Drive path of the `.xlsx` file to import. |
+| `path` | `string` | Yes | - | Drive path for the new sheet, ending in `.sheet.json`. |
+| `title` | `string` | No | - | - |
+
+### sheet-export-xlsx
+
+**Export sheet as xlsx**
+
+Export a sheet to an `.xlsx` file on your default agent-fs drive. Writes formulas with their cached values, number formats, column widths and merges. `dropped` lists what the file cannot carry (frozen panes, spilled array cells). Create-only: refuses when `targetPath` exists unless `overwrite` is true.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `targetPath` | `string` | Yes | - | Drive path for the new file, ending in `.xlsx`. |
+| `overwrite` | `boolean` | No | - | Replace `targetPath` when it exists. |
+
+### board-create
+
+**Create board**
+
+Create an Excalidraw board (`.excalidraw`) on your default agent-fs drive, as your own agent-fs identity, optionally with shapes and bound arrows. Create-only: refuses when the path exists. `added` maps each shape key (or `shapes[i]`) and `arrows[i]` to its element id.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | `string` | Yes | - | Drive path ending in .excalidraw. |
+| `title` | `string` | No | - | - |
+| `shapes` | `array` | No | - | - |
+| `arrows` | `array` | No | - | - |
+| `layout` | `unknown` | No | - | How shapes without x/y are placed, below existing content. Default `row`. |
+
+### board-get
+
+**Get board**
+
+Read a board by `id` or `path`. `detail: summary` (default) lists live elements as id, type, text, x, y, width, height and boundTo (arrow: [from, to]; shape: its arrow ids); a shape's label folds into its text. `detail: full` returns the raw Excalidraw elements.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `detail` | `summary \| full` | No | - | - |
+
+### board-list
+
+**List boards**
+
+List boards on your default agent-fs drive, newest first. Filter by path `prefix`. Pagination via limit (max 200) and offset.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `prefix` | `string` | No | - | - |
+| `limit` | `number` | No | - | - |
+| `offset` | `number` | No | - | - |
+
+### board-add-elements
+
+**Add board elements**
+
+Add shapes (rectangle, ellipse, diamond, text) and arrows to a board. Arrows bind both ends to shapes, named by a `key` from this call or an existing element id. Shapes without x/y are laid out below existing content. Writes with the file version and re-applies on a concurrent change (3 retries).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `shapes` | `array` | No | - | - |
+| `arrows` | `array` | No | - | - |
+| `layout` | `unknown` | No | - | How shapes without x/y are placed, below existing content. Default `row`. |
+
+### board-update-elements
+
+**Update board elements**
+
+Patch board elements by id: label (empty string removes a shape's label), x, y, width, height, color. Bound labels and arrows follow; arrows themselves take only label and color. Each touched element gets a new version, so an open editor repaints it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `patches` | `array` | No | - | - |
+
+### board-remove-elements
+
+**Remove board elements**
+
+Remove board elements by id (sets `isDeleted: true`, the Excalidraw convention). A shape's label goes with it and its arrows are unbound; a removed arrow leaves its shapes. Refuses unknown ids before writing.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `elementIds` | `array` | Yes | - | - |
 
 ## Slack Tools
 

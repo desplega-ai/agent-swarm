@@ -1,0 +1,92 @@
+---
+title: 'Reviewing inconsistent product listings across sales channels with AI agents'
+description: "Agent Swarm compares approved catalog records with authorized channel listings and hands a catalog owner a source-linked list of differences. People decide."
+agent:
+  when: "Someone wants operations and commercial teams to find and resolve product listings that disagree with the approved catalog record"
+---
+
+Agent Swarm can collect the approved catalog records and the channel listings a team authorizes, run deterministic comparisons on the fields the team specifies, and hand a catalog owner a source-linked list of differences, while changes to prices, availability and public listings stay with people. The legwork it removes is finding each product on each channel and getting the difference to the person who owns the answer.
+
+The scope is product attributes and channel listings before a customer orders. Reservations, shipments, invoices, support policies and sales pipeline records are separate handoffs with separate owners.
+
+## When another tool fits better
+
+Two kinds of tool already handle a good share of this work.
+
+**Product information management software, or a channel manager that syndicates from one master record.** If a system already holds the approved record and a feed manager pushes it to every channel, a mismatch is usually a failed sync, and the tool that owns the feed reports it. Putting an agent workflow over that path turns a task the feed already does into a queue someone has to work.
+
+**Simple rules or feed validation, when the fields and channels are few and stable.** A handful of attributes across two channels, compared the same way each week, fits a validation script or a spreadsheet check. Wrapping it in a workflow only adds machinery around a rule that works.
+
+Agent Swarm is the better fit when a difference spans several systems and several owners. The approved record lives with one team and the listings with another, while the person who can say whether a product may be sold in a given market sits outside both. Collecting that evidence and routing it to whoever decides is the work, and [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) describes where it belongs.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in catalog-management feature or a customer result. It needs source permissions, configuration and possibly custom integrations that your team sets up and tests.
+
+<Mermaid title="Illustrative catalog discrepancy flow, from approved records and channel listings to a human decision." chart={`flowchart LR
+  A["Approved catalog record<br/>+ channel listings"] --> B["Match stable identifiers<br/>(SKU, GTIN)"]
+  B --> C["Deterministic comparison<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked differences"]
+  D --> G{{"human-in-the-loop<br/>catalog owner"}}
+  G -- "approve" --> R["Owner corrects in<br/>the owning system"]
+  G -- "reject" --> S["Archive or escalate"]
+  B -- "unmatched" --> D
+`} />
+
+**1. The team selects what is in scope.** Approved catalog records for one category or one brand inside it, plus the channel listings that should carry them.
+
+**2. Stable identifiers decide the pairing.** A `swarm-script` matches on SKU, GTIN or another identifier both sides carry, and reports items with no counterpart as unmatched. It does not guess a match from a similar title.
+
+**3. The comparison runs in code.** Specified fields (title, price, unit, variant, availability, regional restriction) are compared by a deterministic step that emits JSON, so the same inputs produce the same differences and no model performs the comparison. A script connects to the catalog and the channels using [script connections](/docs/guides/script-connections), and its credentials come from the [credential broker](/docs/guides/scripts-credential-broker), keeping the secret out of the script's code.
+
+**4. An agent assembles the differences.** Each item carries the approved value, the listed value, a link to each source, and when the value was read. The [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) playbook walks through that gather-then-assemble pattern.
+
+**5. A person verifies.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) stops the run and waits, posting a summary that links to the full list, and the run continues only once a person answers. On approve, the correction happens in the system that holds the record. On reject, the item is archived with a reason or escalated to someone who can settle it.
+
+The two questions, answered.
+
+**How can AI agents help teams review inconsistent product listings across sales channels?** By collecting the evidence from both sides and running the field comparison, then showing each difference with the record behind it rather than a conclusion.
+
+**How can operations identify marketplace catalog discrepancies before customers order?** By re-running the comparison on the team's cadence and handing each difference to a named catalog owner. A periodic check cannot guarantee detection before an order: a listing that changes between runs can reach a customer first, so the cadence narrows that window without closing it.
+
+## Discrepancy examples
+
+The rows below are illustrative. No company or channel is named, and none of them comes from a customer case.
+
+| Discrepancy | What the deterministic check compares | Evidence attached | Question, and to whom |
+| --- | --- | --- | --- |
+| Different units | Package size, weight or measure unit on the listing against the record's unit, including the metric and imperial conversion the record defines | Both values, the unit on each, the conversion applied, when each was read | "Which unit does the record intend?" to the catalog owner. "Was this listing built from an older record?" to the channel owner |
+| Variant mismatch | The variants offered on the listing (size, colour) against the variants the approved record carries | Both variant lists, the variants on one side only | "Is this variant approved for sale?" to the catalog owner. "Who maintains variants on this channel?" to the channel owner |
+| Regional restriction | The market a listing is served to against the regions the record permits | The listing's market, the permitted regions, the named restriction | "Is this market in scope for the product?" to the catalog owner. "Who can withdraw the listing?" to the channel owner |
+| Stale data | The last change on the approved record against the value the listing still shows, both timestamped | Both timestamps, both values, the field that changed | "Did this channel miss the update?" to the channel owner. "Was the change meant for all markets?" to the catalog owner |
+| Missing listing | Approved products with no listing in a channel, and listings with no approved record behind them | The unmatched identifiers on each side, the last check date, the products affected | "Is this product meant to be sold here?" to the catalog owner. "Does the listing belong to a retired product?" to the channel owner |
+
+## Conflicting records, access limits and escalation
+
+**Which source is the approved record.** Name the system that owns the approved record and the person who owns it before the first run. When two sources disagree, say the catalog and a regional price list, both values go into the report with their links, and the owner decides between them. An agent that silently picks the newer value has made a commercial decision.
+
+**Access limits.** Listing access should be read-only, and a missing connection is reported by name: the record that is out of reach and the owner who can grant access. The workflow never fills a gap by having someone paste a listing into a chat, and never substitutes an estimated value. Who may read which source, and which fields the comparison covers, belong in the workflow's [governance](/docs/guides/ai-operations-governance) record.
+
+**When the owner goes quiet.** Give the gate a timeout and a fallback, following the [HITL gates](/docs/playbooks/patterns/hitl-gates) guidance on blocking approvals. A shape that works: nudge the owner before the deadline, name a backup owner, then hold the item openly with its reason so it stays visible on the aged list. Define the reject path as carefully as the approve path, and never let silence move a case forward.
+
+## What stays human-owned
+
+Four calls stay human in this workflow.
+
+- **Price changes.** The agent reports that a price differs. It does not set, match or overwrite a price on any channel.
+- **Availability changes.** Whether a product is in stock, discontinued or on backorder on a listing is a person's call in the owning system.
+- **Publishing, unpublishing or editing a public listing.** The workflow never publishes, withdraws or rewrites a public listing.
+- **The call on which record is correct.** When the approved record and a listing disagree, a named catalog owner decides which one is wrong and where the correction belongs.
+
+The agent reads and reports. A named catalog owner corrects the value in the system that owns the record. Gate the irreversible steps, let the reversible ones run: reading a listing is reversible, changing a public price is not.
+
+## Building blocks
+
+Every piece here already exists in agent-swarm and has its own docs page. Pointing it at a catalog is the part that has to be designed.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): how `swarm-script` and `script-run` gather deterministic JSON input, and how a Researcher agent turns it into a readable report.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the `human-in-the-loop` node that stops the run, its approve and reject paths, its timeout and fallback behaviour and the message it posts.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a script reaches an outside system while its secret stays in the broker, not in the script.
+- [AI operations governance](/docs/guides/ai-operations-governance): role permissions, an owner named on every workflow, approval thresholds and which source counts as authoritative.
+- [Team collaboration](/docs/features/team-collaboration): the context a case keeps when it passes to another person or team.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): how to choose between a vertical AI product, deterministic workflow automation and a shared agent platform.

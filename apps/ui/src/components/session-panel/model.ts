@@ -1,4 +1,5 @@
 import { promptTitle } from "../../lib/prompt-display";
+import { randomUUID } from "../../lib/uuid";
 
 /**
  * Session panel — pure helpers for context keys, the page-context footer, and
@@ -18,7 +19,7 @@ export function contextKeyPrefix(pageKey: string): string {
 
 /** A new, per-session context key: exactly one extra part under the page key. */
 export function newSessionContextKey(pageKey: string): string {
-  return `${pageKey}:${crypto.randomUUID()}`;
+  return `${pageKey}:${randomUUID()}`;
 }
 
 const FOOTER_HEADING = "Page context";

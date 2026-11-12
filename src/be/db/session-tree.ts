@@ -58,7 +58,7 @@ export interface SessionFilters {
   /** Match shared and viewer-personal namespace roots and direct leaves. */
   noGroup?: boolean;
   /** Filter by chain-wide read state or the Inbox section. */
-  triage?: "inbox" | "later" | "done" | "unread";
+  triage?: "inbox" | "working" | "later" | "done" | "unread";
   /** Filter by latest chain status or pending human attention. */
   status?: "running" | "failed" | "needs";
   /** Match a requester anywhere in the chain or an active share recipient. */
@@ -78,6 +78,10 @@ export interface SessionFilters {
   includeScheduleRuns?: boolean;
   /** Match exactly this root (one session's summary, e.g. its read state). */
   rootId?: string;
+  /** Match any of these roots (the sidebar's starred sessions). */
+  rootIds?: string[];
+  /** Leave these roots out (a whole-list triage with some rows unchecked). */
+  exceptRootIds?: string[];
 }
 
 type SqlFragment = { sql: string; params: (string | number | null)[] };
@@ -322,6 +326,19 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
     sql: scheduleRuns ? `(${fragment.sql} OR r.scheduleId IS NOT NULL)` : fragment.sql,
   });
   if (opts.rootId) add({ sql: "r.id = ?", params: [opts.rootId] });
+  if (opts.rootIds) {
+    add(
+      opts.rootIds.length
+        ? { sql: `r.id IN (${opts.rootIds.map(() => "?").join(",")})`, params: opts.rootIds }
+        : { sql: "0", params: [] },
+    );
+  }
+  if (opts.exceptRootIds?.length) {
+    add({
+      sql: `r.id NOT IN (${opts.exceptRootIds.map(() => "?").join(",")})`,
+      params: opts.exceptRootIds,
+    });
+  }
   const sources = opts.source?.filter(Boolean) ?? [];
   if (sources.length)
     add({ sql: `r.source IN (${sources.map(() => "?").join(",")})`, params: sources });
@@ -382,7 +399,9 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   }
   if (opts.groupKey) add(groupCondition(normalizeAssetKey(opts.groupKey)));
   if (opts.noGroup) add(noGroupCondition(opts.viewer?.userId));
-  if (opts.triage === "inbox") add(inboxScopeCondition(opts.viewer?.userId));
+  if (opts.triage === "inbox" || opts.triage === "working") {
+    add(inboxScopeCondition(opts.viewer?.userId));
+  }
   if (opts.triage === "later" || opts.triage === "done") {
     const marked: SqlFragment = {
       sql: `r.id IN (SELECT itemId FROM inbox_item_state
@@ -400,7 +419,15 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
   return { sql: conditions.length ? conditions.join(" AND ") : "1", params };
 }
 
+/**
+ * A group list leaves out the viewer's Later and Done sessions: they list in
+ * Later and Done. A source group (`shared/slack/...`) keeps them. It mirrors
+ * an outside conversation, read-only, and most of its sessions are Done, so
+ * leaving them out left its rows empty with no way to open them.
+ */
 function excludesTriaged(opts: SessionFilters): boolean {
+  // The sidebar lists a source group with its nested threads by `keyPrefix`: same rule.
+  if (sourceOfKey(opts.groupKey ?? opts.keyPrefix ?? "")) return false;
   return !!(
     opts.viewer?.userId &&
     (opts.groupKey || opts.keyPrefix || opts.keyPrefixes?.length || opts.noGroup)
@@ -413,6 +440,8 @@ function hasSessionChainFilter(opts: SessionFilters): boolean {
 
 const terminalSql = TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(",");
 const runningSql = `latestStatus NOT IN (${terminalSql})`;
+/** Running with nothing for the person to answer: the Working section, not the Inbox. */
+const workingSql = `(${runningSql} AND needsYou = 0)`;
 const openTaskSql = `chain.status NOT IN (${terminalSql})`;
 
 /**
@@ -452,9 +481,13 @@ function summaryRowFilters(opts: SessionFilters): SqlFragment {
   else if (opts.triage === "later" || opts.triage === "done") {
     filters.push("readState = ?");
     params.push(opts.triage);
-  } else if (opts.triage === "inbox" || excludesTriaged(opts)) {
+  } else if (opts.triage === "inbox" || opts.triage === "working" || excludesTriaged(opts)) {
     filters.push("(readState IS NULL OR readState IN ('read','unread'))");
   }
+  // Working: Inbox sessions with a task still running and nothing for the
+  // person to answer. They leave the Inbox until they finish or ask.
+  if (opts.triage === "inbox") filters.push(`NOT (${workingSql})`);
+  if (opts.triage === "working") filters.push(workingSql);
   if (opts.status === "running") filters.push(runningSql);
   if (opts.status === "failed") filters.push("latestStatus = 'failed'");
   if (opts.status === "needs") filters.push("needsYou = 1");
@@ -690,6 +723,8 @@ export interface SessionTreeGroup extends SessionSectionCounts {
 export interface SessionTree {
   groups: SessionTreeGroup[];
   inbox: SessionSectionCounts;
+  /** Inbox sessions with a task running and nothing for the person to answer. */
+  working: SessionSectionCounts;
   later: SessionSectionCounts;
   done: SessionSectionCounts;
   noGroup: SessionSectionCounts;
@@ -789,6 +824,7 @@ export async function getSessionTree(
   const result: SessionTree = {
     groups: [],
     inbox: counts(),
+    working: counts(),
     later: counts(),
     done: counts(),
     noGroup: counts(),
@@ -848,11 +884,14 @@ export async function getSessionTree(
     }
     if (row.readState === "later" || row.readState === "done") {
       if (sectionVisible) add(result[row.readState], row);
+      // A source group lists its Later and Done sessions too (`excludesTriaged`).
+      if (group && sourceOfKey(key)) add(group, row);
     } else {
       // A session filed into a group shows under it only (`inboxScopeCondition`).
       const viewer = actor.kind === "user" ? actor.userId : null;
       const inInbox = noGroup || sourceOfKey(key) || inResourceScope(row.key, viewer);
-      if (sectionVisible && inInbox) add(result.inbox, row);
+      const working = !isTerminalTaskStatus(row.latestStatus) && !row.needsYou;
+      if (sectionVisible && inInbox) add(working ? result.working : result.inbox, row);
       if (noGroup) add(result.noGroup, row);
       else if (group) add(group, row);
     }
@@ -898,7 +937,15 @@ export async function triageSessionList(
   userId: string,
   filters: Pick<
     SessionFilters,
-    "triage" | "noGroup" | "groupKey" | "mine" | "hideSource" | "showSource" | "now"
+    | "triage"
+    | "noGroup"
+    | "groupKey"
+    | "keyPrefix"
+    | "mine"
+    | "hideSource"
+    | "showSource"
+    | "now"
+    | "exceptRootIds"
   >,
   action: SessionListTriage,
   readAll?: boolean,

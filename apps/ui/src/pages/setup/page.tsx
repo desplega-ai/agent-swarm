@@ -67,7 +67,8 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   },
   ai: {
     title: "Choose your AI providers",
-    description: "One verified provider is enough to start.",
+    description:
+      "Each card is a harness, the runtime your agents use. Add the key or login it needs. One verified key is enough to start.",
   },
   agents: {
     title: "Pick a model for each agent",

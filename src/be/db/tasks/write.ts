@@ -540,6 +540,7 @@ export async function completeTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.completed", {
             taskId: id,
+            previousStatus: oldTask.status,
             output: scrubbedOutput,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
@@ -641,6 +642,7 @@ export async function failTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.failed", {
             taskId: id,
+            previousStatus: oldTask.status,
             failureReason: scrubbedReason,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
@@ -779,6 +781,7 @@ export async function cancelTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.cancelled", {
             taskId: id,
+            previousStatus: oldTask.status,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
             workflowRunStepId: row.workflowRunStepId,

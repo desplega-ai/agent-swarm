@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { resolveHttpAuditUserId } from "../../be/audit-user";
+import { resolveHttpRequesterUserId } from "../../be/audit-user";
 import { ensureHttpPermission } from "../config";
 
 /**
@@ -37,5 +37,5 @@ export async function ensureTrackerAuthorizeAdmin(
     agentId,
   );
   if (!allowed) return null;
-  return { userId: await resolveHttpAuditUserId(req, agentId) };
+  return { userId: await resolveHttpRequesterUserId(req, agentId) };
 }

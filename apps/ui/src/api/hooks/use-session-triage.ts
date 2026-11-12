@@ -171,13 +171,23 @@ const LIST_ACTION_DONE: Record<SessionListAction, string> = {
 export function useSessionListTriage() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: ({ container, action }: { container: string; action: SessionListAction }) => {
-      const { triage, noGroup, groupKey } = sidebarListParams(container);
+    mutationFn: ({
+      container,
+      action,
+      exceptIds,
+    }: {
+      container: string;
+      action: SessionListAction;
+      exceptIds?: readonly string[];
+    }) => {
+      const { triage, noGroup, groupKey, keyPrefix } = sidebarListParams(container);
       return api.triageSessionList({
         action,
-        ...(triage === "inbox" || triage === "later" || triage === "done" ? { triage } : {}),
+        ...(exceptIds?.length ? { exceptIds: [...exceptIds] } : {}),
+        ...(triage ? { triage } : {}),
         ...(noGroup ? { noGroup } : {}),
         ...(groupKey ? { groupKey } : {}),
+        ...(keyPrefix ? { keyPrefix } : {}),
         ...(getSessionsShow() === "all" ? { show: "all" as const } : {}),
         showSource: [...getSessionsShownSources()],
       });
@@ -199,7 +209,9 @@ export function useSessionListTriage() {
   return useMemo(
     () => ({
       isPending,
-      run: (container: string, action: SessionListAction) => mutate({ container, action }),
+      /** `exceptIds`: rows unchecked after "Select all N" stay as they are. */
+      run: (container: string, action: SessionListAction, exceptIds?: readonly string[]) =>
+        mutate({ container, action, exceptIds }),
     }),
     [mutate, isPending],
   );

@@ -45,11 +45,11 @@ Five cases take the exception path rather than a best guess.
 
 ## How it maps to documented mechanics
 
-Four pieces ship with agent-swarm and need no custom code.
+agent-fs folders, swarm-script nodes and the human-in-the-loop node ship with agent-swarm. The script that fetches each source is custom code your team writes.
 
-- **agent-fs per-customer directories** give each account a persistent folder with durable shared account context and append-only notes, and every later session reads it before acting ([Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)).
+- **agent-fs per-customer directories** give each account a persistent folder with durable shared account context and append-only notes, which any later session can read before acting ([Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)).
 - **Accumulated account notes and human review** are the documented shape of per-account work, where a report is drafted from the folder and a person signs off before it leaves ([Proactive Customer Support](/docs/playbooks/proactive-customer-support)).
-- **swarm-script nodes** call each source over HTTP or SQL and return one JSON payload, so collection stays deterministic and the model is not doing arithmetic ([Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)).
+- **swarm-script nodes** run your source scripts, which call each source over HTTP or SQL and return one JSON payload, so collection stays deterministic and the model is not doing arithmetic ([Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)).
 - **The human-in-the-loop workflow node** pauses the run, posts the request and resumes on approve or ends on reject ([HITL Gates](/docs/playbooks/patterns/hitl-gates)). Agents can also ask a person directly with the `request-human-input` tool, which is a different mechanism from the workflow node.
 
 Applying these patterns to contract obligations is an adaptation your team builds. Any connector to a project tool, a ticketing system or a contract repository is custom work, and it needs its own permissions and its own testing.

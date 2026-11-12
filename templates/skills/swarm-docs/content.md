@@ -65,10 +65,18 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
+- [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
+- [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
+- [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
+- [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
+- [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-operations-shift-handoff). Reference.
+- [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
 - [Worker Recovery: What Happens to Running Work When a Worker Stops](https://docs.agent-swarm.dev/docs/guides/worker-recovery-decision). Reference.
+- [Deleting and Restoring Agents](https://docs.agent-swarm.dev/docs/guides/agent-deletion). Reference.
 - [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless). When: Someone wants to run Agent Swarm under rootless Podman.
 - [Published Artifacts](https://docs.agent-swarm.dev/docs/guides/published-artifacts). Reference.
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.
@@ -79,7 +87,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Evals Harness](https://docs.agent-swarm.dev/docs/guides/evals-harness). Reference.
 - [Personalization & Status](https://docs.agent-swarm.dev/docs/guides/personalization). Reference.
 - [Secrets Encryption](https://docs.agent-swarm.dev/docs/guides/secrets-encryption). When: Someone asks how swarm secrets are stored, encrypted or backed up.
-- [Harness Configuration](https://docs.agent-swarm.dev/docs/guides/harness-configuration). When: Someone wants agents to run on a different AI provider or coding CLI.
+- [Harness Configuration](https://docs.agent-swarm.dev/docs/guides/harness-configuration). When: Someone wants agents to run on a different harness or coding CLI.
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
@@ -115,6 +123,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Runtime pools (beta)](https://docs.agent-swarm.dev/docs/guides/runtime-pools). Reference.
 - [boxd runtime provider](https://docs.agent-swarm.dev/docs/guides/boxd-runtime-provider). Reference.
 - [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-delivery-delay-handoff). Reference.
+- [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-service-capacity-planning). Reference.
 - [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/guides/support-knowledge-conflict-review). Reference.
 
 ## Other docs
