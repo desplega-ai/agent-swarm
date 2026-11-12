@@ -423,8 +423,8 @@
       "scenarios": ["realtime-rooms", "knowledge-rooms"]
     },
     "repo-registry": {
-      "description": "Register, update, gate allowMerge, list and delete repo records over HTTP and MCP",
-      "scenarios": ["platformb-repos"]
+      "description": "Register, update, gate allowMerge and the mergePolicy record, list and delete repo records over HTTP and MCP",
+      "scenarios": ["platformb-repos", "platformb-repo-merge-policy"]
     },
     "runtime-pools-flag-off": {
       "description": "Runtime pools, controllers and the worker socket under MULTI_RUNTIME_ENABLED=false",

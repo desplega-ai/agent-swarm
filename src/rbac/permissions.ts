@@ -167,7 +167,7 @@ export const PERMISSIONS = {
   },
   "repo.merge-policy.write": {
     description:
-      "Change a repo's allowMerge guideline, which tells agents whether they may merge a PR themselves.",
+      "Change a repo's merge policy (the allowMerge guideline or the mergePolicy record), which tells agents whether they may merge a PR themselves and which PRs the swarm may auto-merge.",
     namespace: "repo",
   },
   "integration.kapso.manage": {
