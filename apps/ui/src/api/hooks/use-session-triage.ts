@@ -180,13 +180,14 @@ export function useSessionListTriage() {
       action: SessionListAction;
       exceptIds?: readonly string[];
     }) => {
-      const { triage, noGroup, groupKey } = sidebarListParams(container);
+      const { triage, noGroup, groupKey, keyPrefix } = sidebarListParams(container);
       return api.triageSessionList({
         action,
         ...(exceptIds?.length ? { exceptIds: [...exceptIds] } : {}),
         ...(triage ? { triage } : {}),
         ...(noGroup ? { noGroup } : {}),
         ...(groupKey ? { groupKey } : {}),
+        ...(keyPrefix ? { keyPrefix } : {}),
         ...(getSessionsShow() === "all" ? { show: "all" as const } : {}),
         showSource: [...getSessionsShownSources()],
       });

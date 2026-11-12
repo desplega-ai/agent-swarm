@@ -7,6 +7,7 @@ import type {
   SessionTreeResponse,
 } from "../../../api/types";
 import { buildSessionGroupTree } from "../../../lib/session-groups";
+import { sidebarListParams } from "../../../lib/sessions-v2";
 import {
   type BuildTreeRowsOptions,
   buildTreeRows,
@@ -320,6 +321,34 @@ describe("source sections (sources Phase 5)", () => {
     expect(rows.find((row) => row.key === "group:shared/a/")).toMatchObject({ readOnly: false });
   });
 
+  test("an open DM is one session list: its threads fold in, no thread rows", () => {
+    const dm = "shared/slack/d0dm000001/";
+    const threaded = tree([
+      group(dm, 15),
+      group(`${dm}thread:1.1/`, 2),
+      group(`${dm}thread:1.2/`, 3),
+    ]);
+    const open = { inbox: false, later: false, "source:slack": true, [dm]: true };
+    // 20 loaded of 20: the whole subtree, threads included.
+    const { rows, containers } = build(threaded, {
+      open,
+      lists: { [dm]: { data: page(20), failed: false } },
+    });
+    const slack = rows.slice(rows.findIndex((row) => row.key === "source:slack"));
+    expect(slack[1]).toMatchObject({ key: `group:${dm}`, counts: counts(20) });
+    expect(slack.slice(2, 14).map((row) => row.type)).toEqual([
+      ...Array(10).fill("session"),
+      "more",
+      "all",
+    ]);
+    expect(slack[13]).toMatchObject({ type: "all", container: dm, total: 20 });
+    expect(rows.some((row) => row.key.includes("thread:"))).toBe(false);
+    expect(containers).toEqual([dm]);
+    // The DM list loads by prefix (its threads too); a user group keeps its exact group.
+    expect(sidebarListParams(dm)).toMatchObject({ keyPrefix: dm });
+    expect(sidebarListParams("shared/a/")).toMatchObject({ groupKey: "shared/a/" });
+  });
+
   test("a source header is a cursor stop that folds its section", () => {
     const { rows } = build(t, { open: { inbox: false, later: false } });
     const source = rows.find((row) => row.key === "source:telegram");
@@ -568,20 +597,6 @@ describe("sidebar stars, hidden groups, source paging, and Working", () => {
     }).rows;
     expect(groupKeys(all)).toEqual(newest);
     expect(all.some((row) => row.type === "more")).toBe(false);
-  });
-
-  test("a source group pages its threads the same way", () => {
-    const channel = "shared/slack/c0dm/";
-    const threads = Array.from({ length: 12 }, (_, i) =>
-      dated(`${channel}thread:17000000${i}.1/`, i),
-    );
-    const t = tree([dated(channel, 0), ...threads]);
-    const { rows } = build(t, { open: { ...closed, "source:slack": true, [channel]: true } });
-    expect(groupKeys(rows).filter((key) => key.includes("thread:"))).toHaveLength(10);
-    expect(rows.find((row) => row.type === "more")).toMatchObject({
-      container: `groups:${channel}`,
-      count: 2,
-    });
   });
 
   test("a source group whose sessions are all Done still lists them (the server counts them)", () => {

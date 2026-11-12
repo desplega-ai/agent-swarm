@@ -73,7 +73,7 @@ function listHolds(params: SessionListParams | undefined, state: SessionReadStat
     case "working":
       return state === "read" || state === "unread";
   }
-  if (params?.groupKey && sourceOfGroupKey(params.groupKey)) return true;
+  if (sourceOfGroupKey(params?.groupKey ?? params?.keyPrefix ?? "")) return true;
   if (params?.groupKey || params?.keyPrefix || params?.noGroup) {
     return state === "read" || state === "unread";
   }

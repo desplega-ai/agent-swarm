@@ -426,7 +426,8 @@ export function sessionRootFilter(opts: SessionFilters = {}): SqlFragment {
  * leaving them out left its rows empty with no way to open them.
  */
 function excludesTriaged(opts: SessionFilters): boolean {
-  if (opts.groupKey && sourceOfKey(opts.groupKey)) return false;
+  // The sidebar lists a source group with its nested threads by `keyPrefix`: same rule.
+  if (sourceOfKey(opts.groupKey ?? opts.keyPrefix ?? "")) return false;
   return !!(
     opts.viewer?.userId &&
     (opts.groupKey || opts.keyPrefix || opts.keyPrefixes?.length || opts.noGroup)
@@ -939,6 +940,7 @@ export async function triageSessionList(
     | "triage"
     | "noGroup"
     | "groupKey"
+    | "keyPrefix"
     | "mine"
     | "hideSource"
     | "showSource"

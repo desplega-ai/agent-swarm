@@ -438,6 +438,65 @@ async function moves(ctx: ScenarioContext, owner: string, rootId: string, childI
   expect(hasRoot(list, rootId), "noGroup=true omits a reset session");
 }
 
+/**
+ * A source group (a Slack DM) with a nested thread: `keyPrefix` lists the DM and
+ * its thread as one list, with Done sessions, and "Select all N" triages that list.
+ */
+async function sourceGroupList(ctx: ScenarioContext, workerId: string, owner: string) {
+  const dm = `shared/slack/d0core${ctx.nonce.toLowerCase().replace(/[^a-z0-9]/g, "")}/`;
+  const create = (key: string, i: number) =>
+    createAssignedTask(ctx, workerId, `Source root ${i} ${mark(ctx)}`, {
+      key,
+      source: "slack",
+      requestedByUserId: owner,
+    });
+  const direct = await create(dm, 0);
+  const threaded = [await create(`${dm}thread:1.2/`, 1), await create(`${dm}thread:1.2/`, 2)];
+  const ids = [direct, ...threaded];
+  const done = await ctx.api("PATCH", "/api/inbox-state", {
+    ...as(owner),
+    body: { userId: owner, itemType: "to_read", itemId: direct, status: "done" },
+  });
+  expectStatus(done, [200], "mark the direct DM session done");
+
+  const tree = (query: string) =>
+    listSessions(ctx, as(owner), `?scope=tree&showSource=slack&${query}`);
+  let list = await tree(`groupKey=${encodeURIComponent(dm)}`);
+  expect(
+    list.total === 1 && hasRoot(list, direct),
+    `groupKey lists ${String(list.total)}, not the DM's own session`,
+  );
+  list = await tree(`keyPrefix=${encodeURIComponent(dm)}`);
+  expect(
+    list.total === 3 && ids.every((id) => hasRoot(list, id)),
+    `keyPrefix lists ${String(list.total)} of the DM and its thread, Done included`,
+  );
+
+  const response = await ctx.api("POST", "/api/session-triage", {
+    ...as(owner),
+    body: { action: "done", keyPrefix: dm, showSource: ["slack"] },
+  });
+  expectStatus(response, [200], "triage a source group with its threads");
+  list = await listSessions(
+    ctx,
+    as(owner),
+    `?q=${mark(ctx)}&triage=done&showSource=slack&scope=tree`,
+  );
+  expect(
+    threaded.every((id) => hasRoot(list, id)),
+    "Select all N missed the thread sessions",
+  );
+  expectStatus(
+    await ctx.api("POST", "/api/session-triage", {
+      ...as(owner),
+      body: { action: "done", keyPrefix: "shared/core/" },
+    }),
+    [400],
+    "keyPrefix triage outside a source group",
+  );
+  for (const id of ids) await cancelQuietly(ctx, id);
+}
+
 export const coreSessions: Scenario = {
   name: "core-sessions",
   order: 240,
@@ -449,6 +508,7 @@ export const coreSessions: Scenario = {
     const { rootId, childId } = await ownershipAndSharing(ctx, workerId, owner, reader, stranger);
     await triage(ctx, owner, rootId);
     await moves(ctx, owner, rootId, childId);
+    await sourceGroupList(ctx, workerId, owner);
     for (const id of [childId, rootId]) await cancelQuietly(ctx, id);
     const writerSteers = ctx.db.query<{ id: string }>(
       "SELECT id FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",

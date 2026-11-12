@@ -36,6 +36,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { modKeyLabel } from "@/lib/approval-shortcuts";
+import { sourceOfGroupKey } from "@/lib/session-groups";
 import type { SessionSection } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { GROUP_STAR_LABELS } from "../group-tab-star";
@@ -183,7 +184,11 @@ export function containerFacts(row: ContainerRow, ownerName?: string) {
     searchMatch,
     hasChildren:
       row.type === "owner" ||
-      (row.type === "group" && row.node.children.length > 0 && !searchMatch),
+      // A source group lists its threads' sessions, not subgroups (`buildTreeRows`).
+      (row.type === "group" &&
+        row.node.children.length > 0 &&
+        !searchMatch &&
+        !sourceOfGroupKey(row.node.key)),
     plain,
     onlyYou,
     label: [name, onlyYou && "Only you", row.counts && countsLabel(row.counts, plain)]
