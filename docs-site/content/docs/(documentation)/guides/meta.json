@@ -9,6 +9,7 @@
     "customer-billing-dispute-review",
     "ai-support-escalation-handoff",
     "marketplace-catalog-discrepancy-review",
+    "ai-inventory-exception-handoff",
     "ai-operations-shift-handoff",
     "supplier-security-evidence-review",
     "deployment",

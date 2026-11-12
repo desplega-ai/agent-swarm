@@ -68,6 +68,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
+- [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
 - [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-operations-shift-handoff). Reference.
 - [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
