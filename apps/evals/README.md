@@ -106,7 +106,8 @@ When `EVALS_API_KEY` is set, every `/api/*` endpoint requires `Authorization: Be
 Static UI assets and `/health` stay public. Browser users open the URL, paste the same key once,
 and the UI stores it in `localStorage`; a 401 clears the stored key and shows the prompt again.
 When `EVALS_API_KEY` is unset, the server logs a warning and leaves `/api/*` open for local dev
-and tests.
+and tests. With `NODE_ENV=production` (set by the image), `serve` refuses to start without a
+non-empty key unless `EVALS_ALLOW_OPEN_API=1` is set.
 
 `POST /api/runs` and `POST /api/runs/:id/resume` are also guarded by
 `EVALS_MAX_CONCURRENT_RUNS` (default `1`). The cap counts runs actively executing inside the
@@ -161,7 +162,7 @@ Required Dokploy env/secrets:
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `EVALS_API_KEY` | yes | Static master key for every `/api/*` route. Leave unset only for local dev/tests. |
+| `EVALS_API_KEY` | yes | Static master key for every `/api/*` route. Leave unset only for local dev/tests; with `NODE_ENV=production` the server will not start without it. |
 | `EVALS_PORT` | no | Serve port; defaults to `4801`. |
 | `EVALS_MAX_CONCURRENT_RUNS` | no | Max active runs in the service process; defaults to `1`. |
 | `EVALS_DB_SYNC_URL` | yes | Turso remote primary sync URL for the embedded replica. |
@@ -319,7 +320,8 @@ The DB of record is the Turso database `swarm-evals-local`, accessed through a *
 | `EVAL_JUDGE_MODEL` | default judge model |
 | `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN` | Turso embedded replica (DB of record — see [Database](#database)) |
 | `EVALS_DB_PATH` | plain local DB file instead (offline/dev escape hatch) |
-| `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
+| `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests, and `serve` refuses to start under `NODE_ENV=production` |
+| `EVALS_ALLOW_OPEN_API` | `1` lets `serve` start without `EVALS_API_KEY` under `NODE_ENV=production` (open `/api/*`) |
 | `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
 | `EVALS_CODEX_BILLING` | `subscription` if the `OPENAI_API_KEY` given to codex workers fronts a flat plan; default metered (counts toward the run's cost cap) |
