@@ -10,6 +10,15 @@ export function getExternalEventAdapter(source: string): ExternalEventAdapter | 
   return EXTERNAL_EVENT_ADAPTERS.find((adapter) => adapter.source === source);
 }
 
+/**
+ * Bus names the webhook ingest owns. The workflow-events API emits caller-chosen names on the
+ * same bus, so it must refuse these: a forged provider event could wake an adapter that
+ * trusts the event (no `confirm`), or drive confirm reads with server credentials.
+ */
+export function isReservedProviderEvent(name: string): boolean {
+  return EXTERNAL_EVENT_ADAPTERS.some((adapter) => name.startsWith(adapter.busPrefix));
+}
+
 /** Every shared event name some adapter serves, deduplicated. */
 export const EXTERNAL_EVENT_NAMES: [string, ...string[]] = [
   ...new Set(EXTERNAL_EVENT_ADAPTERS.flatMap((adapter) => adapter.events)),

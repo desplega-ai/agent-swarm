@@ -73409,6 +73409,16 @@
               }
             }
           },
+          "403": {
+            "description": "Event name is reserved for provider webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow run not found",
             "content": {
@@ -73484,6 +73494,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Event name is reserved for provider webhooks",
             "content": {
               "application/json": {
                 "schema": {

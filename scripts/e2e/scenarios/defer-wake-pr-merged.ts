@@ -186,8 +186,28 @@ export const deferWakePrMerged: Scenario = {
           "An unconfirmed merged event woke the waiter",
         );
 
-        // Positive: GitHub now confirms the merge, the same event wakes it.
+        // A caller cannot forge the provider event through the workflow-events API, even when
+        // GitHub would confirm it: only the webhook ingest feeds provider names to the waits.
         ctx.llm.setGithubPull(repo, 2, { merged: true });
+        for (const path of [
+          "/api/workflow-events",
+          `/api/workflow-runs/${crypto.randomUUID()}/events`,
+        ]) {
+          const forged = await ctx.api("POST", path, {
+            body: {
+              name: "github.pull_request.closed",
+              payload: { repo, number: 2, merged: true },
+            },
+          });
+          expectStatus(forged, [403], `forged provider event via ${path}`);
+        }
+        await Bun.sleep(500);
+        expect(
+          waitRow(ctx, scheduleId)?.status === "pending" && !wakeTask(ctx, waiter),
+          "A forged provider event woke the waiter",
+        );
+
+        // Positive: GitHub confirms the merge, the real webhook wakes it.
         await closedMerged(2);
         expect(
           await pollUntil(() => waitRow(ctx, scheduleId)?.status === "fired", 15_000),
@@ -195,7 +215,9 @@ export const deferWakePrMerged: Scenario = {
         );
         const woke = wakeTask(ctx, waiter);
         expect(
-          woke?.task.includes(`Wake-up cause: vcs.pr.merged on github (repo=${repo.toLowerCase()}, number=2)`),
+          woke?.task.includes(
+            `Wake-up cause: vcs.pr.merged on github (repo=${repo.toLowerCase()}, number=2)`,
+          ),
           `Wake-up task is wrong: ${JSON.stringify(woke)}`,
         );
         expect(
