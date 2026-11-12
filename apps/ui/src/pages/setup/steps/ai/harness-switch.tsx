@@ -116,7 +116,10 @@ export function HarnessSwitch({
   dialContext: DialContext;
 }) {
   const queryClient = useQueryClient();
-  const [target, setTarget] = useState<ProviderName>(targets[0]);
+  const [picked, setTarget] = useState<ProviderName>(targets[0]);
+  // The card's targets can change while the list stays mounted (Run agents on
+  // Codex -> Pi-Mono): a pick outside the new targets falls back to the first.
+  const target = targets.includes(picked) ? picked : targets[0];
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
 
