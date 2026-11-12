@@ -1017,6 +1017,47 @@
       "exempt": "timestamp"
     }
   },
+  "deferred_event_waits": {
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "provider id, matched against a registered adapter at defer time"
+    },
+    "event": {
+      "exempt": "enum or fixed-format value"
+    },
+    "matchKey": {
+      "exempt": "canonical form of match values the adapter validated at defer time"
+    },
+    "matchJson": {
+      "exempt": "match values the adapter validated at defer time (fixed format, no free text)"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "firedBy": {
+      "exempt": "enum or fixed-format value"
+    },
+    "childTaskId": {
+      "exempt": "identifier"
+    },
+    "resolvedAt": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "deferred_task_wait_members": {
     "scheduleId": {
       "exempt": "identifier"

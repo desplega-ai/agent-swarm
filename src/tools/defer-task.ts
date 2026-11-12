@@ -11,13 +11,83 @@ import {
   getUserById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
-import { reconcileDeferredTaskWaits } from "@/scheduler/deferred-task-waits";
+import {
+  describeEventWait,
+  type EventMatch,
+  EXTERNAL_EVENT_ADAPTERS,
+  EXTERNAL_EVENT_NAMES,
+  EXTERNAL_EVENTS_DOC,
+  type ExternalEventAdapter,
+  getExternalEventAdapter,
+  matchKeyOf,
+} from "@/event-waits";
+import {
+  MAX_PENDING_EVENT_WAITS_PER_AGENT,
+  reconcileDeferredEventWaits,
+  reconcileDeferredTaskWaits,
+} from "@/scheduler/deferred-task-waits";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
 import { ensure } from "../utils/business-use";
+import { getCurrentRequestAuth } from "../utils/request-auth-context";
+
+const isExternalEvent = (event: string) => EXTERNAL_EVENT_NAMES.includes(event);
+
+/**
+ * Resolve and vet an external-event wait before any write: the adapter exists and
+ * serves the event, its integration is on, the match parses, and the event has not
+ * already happened (a read, when the adapter can confirm). Returns a user-facing error otherwise.
+ */
+async function admitExternalWait(
+  event: string,
+  source: string,
+  rawMatch: unknown,
+): Promise<{ adapter: ExternalEventAdapter; match: EventMatch } | { error: string }> {
+  const adapter = getExternalEventAdapter(source);
+  if (!adapter?.events.includes(event)) {
+    const served = EXTERNAL_EVENT_ADAPTERS.filter((a) => a.events.includes(event)).map(
+      (a) => a.source,
+    );
+    return {
+      error: `Source "${source}" does not serve ${event}; use one of: ${served.join(", ")}.`,
+    };
+  }
+  let match: EventMatch;
+  try {
+    match = adapter.parseMatch(event, rawMatch);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Invalid match." };
+  }
+  const target = describeEventWait(source, event, match);
+  // A confirm read may use server-held credentials: refuse the ACP task tokens that
+  // /api/github/installation-token also refuses.
+  const auth = getCurrentRequestAuth();
+  if (adapter.readsWithServerCredentials && auth?.kind === "agent" && auth.tokenKind === "task") {
+    return {
+      error: "A task-scoped token cannot defer on an external event; defer on a timer instead.",
+    };
+  }
+  if (!adapter.isEnabled()) {
+    return {
+      error: `The ${source} integration is off, so no event can wake you; defer on a timer instead.`,
+    };
+  }
+  if (adapter.confirm) {
+    try {
+      if (await adapter.confirm(event, match)) {
+        return { error: `${target} already happened; read its result instead of deferring.` };
+      }
+    } catch (error) {
+      return {
+        error: `Could not read ${target} from ${source} (${error instanceof Error ? error.message : "unknown error"}); defer on a timer instead.`,
+      };
+    }
+  }
+  return { adapter, match };
+}
 
 /** Thrown inside the transaction to abort and roll back the schedule INSERT. */
 class DeferAbortedError extends Error {}
@@ -161,7 +231,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
+        'Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. Or provide wakeOn {event, source, match} to wake on an external event, e.g. {event: "vcs.pr.merged", source: "github", match: {repo, number}}. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.',
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -177,21 +247,40 @@ export const registerDeferTaskTool = (server: McpServer) => {
           .describe("Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future."),
         wakeOn: z
           .object({
-            event: z.enum(["task.completed", "task.failed", "settled"]),
+            event: z.enum(["task.completed", "task.failed", "settled", ...EXTERNAL_EVENT_NAMES]),
             taskId: z.string().min(1).optional(),
             taskIds: z.array(z.string().min(1)).min(1).optional(),
             mode: z.enum(["all", "any"]).optional(),
+            source: z.string().min(1).optional(),
+            match: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
           })
           .strict()
-          .refine((wake) => (wake.taskId !== undefined) !== (wake.taskIds !== undefined), {
-            message: "Provide exactly one of wakeOn.taskId or wakeOn.taskIds.",
-          })
+          .refine(
+            (wake) =>
+              isExternalEvent(wake.event) ||
+              (wake.taskId !== undefined) !== (wake.taskIds !== undefined),
+            { message: "Provide exactly one of wakeOn.taskId or wakeOn.taskIds." },
+          )
+          .refine(
+            (wake) =>
+              isExternalEvent(wake.event)
+                ? wake.source !== undefined &&
+                  wake.match !== undefined &&
+                  wake.taskId === undefined &&
+                  wake.taskIds === undefined &&
+                  wake.mode === undefined
+                : wake.source === undefined && wake.match === undefined,
+            {
+              message:
+                "External events (e.g. vcs.pr.merged) take source and match only; task events take no source or match.",
+            },
+          )
           .refine((wake) => !wake.taskIds || new Set(wake.taskIds).size === wake.taskIds.length, {
             message: "wakeOn.taskIds must not contain duplicates.",
           })
           .optional()
           .describe(
-            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling, except a workflow step superseded by its queued retry, which counts as failed. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does.",
+            `Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, cancelled, or skipped. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling, except a workflow step superseded by its queued retry, which counts as failed. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. External events: ${EXTERNAL_EVENTS_DOC}. They are rejected when the event already happened, the provider cannot be read, or its integration is off; an agent holds at most ${MAX_PENDING_EVENT_WAITS_PER_AGENT} pending external waits. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does.`,
           ),
         summary: z
           .string()
@@ -281,9 +370,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       const watchedTaskIds = wakeOn?.taskIds ?? (wakeOn?.taskId ? [wakeOn.taskId] : []);
       const wakeMode = wakeOn?.mode ?? "all";
-      const wakeDescription = wakeOn
-        ? `on ${wakeOn.event} for ${wakeMode} of tasks ${watchedTaskIds.join(", ")}, or by ${nextRunAt}`
-        : `at ${nextRunAt}`;
+      const eventWait = wakeOn && isExternalEvent(wakeOn.event) ? wakeOn : undefined;
+      const wakeDescription = eventWait
+        ? `on ${eventWait.event} from ${eventWait.source}, or by ${nextRunAt}`
+        : wakeOn
+          ? `on ${wakeOn.event} for ${wakeMode} of tasks ${watchedTaskIds.join(", ")}, or by ${nextRunAt}`
+          : `at ${nextRunAt}`;
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
       // Not the audit task: the wake-up task is requested by the schedule's created_by.
@@ -305,8 +397,29 @@ export const registerDeferTaskTool = (server: McpServer) => {
         task.requestedByUserId,
       );
 
+      // Read the provider before the transaction: no network call under the write lock.
+      let admitted: { adapter: ExternalEventAdapter; match: EventMatch } | undefined;
+      if (eventWait) {
+        const result = await admitExternalWait(eventWait.event, eventWait.source!, eventWait.match);
+        if ("error" in result) return toolErr(result.error);
+        admitted = result;
+      }
+
       try {
         const committed = await getDbClient().transaction(async () => {
+          if (admitted) {
+            const pending = await getDbClient().get<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM deferred_event_waits w
+               JOIN scheduled_tasks s ON s.id = w.scheduleId
+               WHERE w.status = 'pending' AND s.enabled = 1 AND s.targetAgentId = ?`,
+              [agent.id],
+            );
+            if ((pending?.n ?? 0) >= MAX_PENDING_EVENT_WAITS_PER_AGENT) {
+              throw new DeferAbortedError(
+                `You already hold ${MAX_PENDING_EVENT_WAITS_PER_AGENT} pending external event waits; wait for one to fire.`,
+              );
+            }
+          }
           // The transaction's write lock makes admission atomic with the INSERT.
           if (watchedTaskIds.length) {
             const existing = await getDbClient().get<{ scheduleId: string; parentTaskId: string }>(
@@ -367,7 +480,31 @@ export const registerDeferTaskTool = (server: McpServer) => {
             createdBy,
           });
 
-          if (wakeOn) {
+          if (admitted && eventWait) {
+            const matchKey = matchKeyOf(admitted.match);
+            await getDbClient().run(
+              "INSERT INTO deferred_event_waits (scheduleId, source, event, matchKey, matchJson, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [
+                schedule.id,
+                admitted.adapter.source,
+                eventWait.event,
+                matchKey,
+                JSON.stringify(admitted.match),
+                createdBy ?? null,
+                createdBy ?? null,
+              ],
+            );
+            // The event may land between the read above and this commit; recheck after it.
+            getDbClient().afterCommit(() => {
+              void reconcileDeferredEventWaits({
+                source: admitted.adapter.source,
+                event: eventWait.event,
+                matchKey,
+              }).catch((err) => {
+                console.error("[defer-task] external event wake reconciliation failed:", err);
+              });
+            });
+          } else if (wakeOn) {
             await getDbClient().run(
               "INSERT INTO deferred_task_waits (scheduleId, eventName, mode, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
               [schedule.id, wakeOn.event, wakeMode, createdBy ?? null, createdBy ?? null],
@@ -398,7 +535,11 @@ export const registerDeferTaskTool = (server: McpServer) => {
                 nextRunAt,
                 requesterTz,
                 isFallbackTz,
-                wakeOn ? renderWaitingOn(watchedAgentNames, watchedTaskIds.length) : undefined,
+                admitted && eventWait
+                  ? describeEventWait(admitted.adapter.source, eventWait.event, admitted.match)
+                  : wakeOn
+                    ? renderWaitingOn(watchedAgentNames, watchedTaskIds.length)
+                    : undefined,
               );
           const completed = await completeTask(taskId, terminalOutput, {
             addTags: ["deferred"],
