@@ -1,0 +1,110 @@
+---
+title: 'Reviewing customer billing disputes with AI agents'
+description: "Agent Swarm gathers the records behind a disputed charge, runs deterministic comparisons and hands finance a source-linked review packet. People decide."
+agent:
+  when: "Someone wants finance and account teams to prepare evidence for a customer who disputes a charge"
+---
+
+Agent Swarm can be configured to gather the permitted invoice, agreement, service-usage and customer correspondence records for a disputed charge, run deterministic comparisons across them, and hand finance and the account owner a source-linked review packet. Validating that evidence, deciding the resolution and approving any customer message stay with people. The work it removes is the assembly: finding one charge's records across systems and naming what still conflicts.
+
+The scope is one case: a customer disputing a charge already billed. A failed payment, a supplier invoice mismatch, a partner payout or a renewal decision is a different handoff with a different owner.
+
+## When another tool fits better
+
+**Your billing or subscription platform's own credit and adjustment workflow.** If the dispute is routine and the records sit in the platform that issued the invoice, its credit flow closes it. A case one person settles inside one tool needs no agent workflow in front of it.
+
+**A dedicated dispute-management or chargeback product.** If the dispute is a card-network chargeback at volume, a product built for that process fits better. It brings the timeline, document requirements and representment screens the networks expect.
+
+Agent Swarm fits cross-system disputes: invoice in the billing platform, terms in a signed agreement, usage in a metering system, objection in an email thread. The person who settles it needs all four. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in dispute-resolution feature or a customer result. It needs integrations, permissions and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative billing dispute flow, from a logged dispute to a human decision on the resolution." chart={`flowchart LR
+  A["Dispute logged<br/>(customer says the<br/>charge is wrong)"] --> B["Gather permitted records<br/>(invoice, agreement,<br/>usage, email)"]
+  B --> C["Deterministic comparison<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>finance owner and<br/>account owner"}}
+  G -- "approve" --> R["Owner decides resolution<br/>and approves customer reply"]
+  G -- "reject" --> S["Archive, return<br/>or escalate"]
+`} />
+
+**1. A dispute is logged.** A customer writes that a charge is wrong, or the account owner records the objection from a call. The workflow starts from that objection in the customer's words.
+
+**2. The swarm gathers the permitted records.** Configured connections pull the invoice lines, the agreement, the usage records for the billing period, and the correspondence the team allows. Scripts reach them through [script connections](/docs/guides/script-connections), with credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret enters script source.
+
+**3. Deterministic steps do the comparison.** A `swarm-script` node compares billed quantity against metered usage, the applied rate and plan terms against the agreement, and billing dates against usage dates, then emits JSON. The arithmetic runs the same way every time. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split.
+
+**4. An agent assembles the packet.** The Researcher turns the JSON and the source records into one document, with a source link and a date on every line.
+
+**5. A person clears the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow and resumes only on a human response. On approve, the account owner decides the resolution and approves any reply to the customer. On reject, the packet is archived, returned or escalated.
+
+Two questions it answers plainly.
+
+**How can AI agents help finance and account teams investigate a customer billing dispute?** By doing the collection and the comparison where one charge's records sit in different systems, and presenting facts with their sources rather than a verdict.
+
+**How can teams assemble evidence to review a disputed usage charge?** A deterministic step puts billed quantity, metered usage and the contracted rate side by side and emits the differences. An agent writes one packet from that output, which a finance owner and the account owner validate before anyone replies.
+
+## What the review packet contains
+
+Each item arrives with the date of the record it rests on.
+
+- **The customer's stated objection in their words**, with its source message and date.
+- **The invoice lines in dispute**, with the invoice date, billing period and amount billed.
+- **The agreement or order-form terms that apply**, with their effective date: rate, plan, overage rule, committed quantity.
+- **The usage records for the billing period**, with the export date and the granularity available.
+- **A correspondence timeline** for this charge, in order.
+- **Conflicting facts side by side**, both with sources. The packet does not choose between them.
+- **Missing records, named, with who can supply them.** A record the swarm cannot read is a gap, never an estimate.
+- **One accountable owner** who validates the packet and decides, plus the backup named for when they do not answer.
+
+## Illustrative example: a disputed usage charge
+
+This scenario is fictional. It names no company or customer, and nothing in it is a measured result.
+
+A customer says an overage line on a monthly invoice is wrong, because the usage came from a test environment. The packet does not decide whether that is true. It puts the records that bear on the claim in one place.
+
+| Objection | What the check compares | Evidence attached | Question, and to whom |
+| --- | --- | --- | --- |
+| The overage came from test traffic, not production | Daily metered usage against the plan's included quantity | The usage export with its date, the billed overage, the plan terms | "Was this production?" to the account owner. "Does the agreement exclude test usage?" to finance |
+| The rate is not the agreed one | The invoice rate against the agreement rate | Both rates, the document each came from, its effective date | "Is this the agreed rate for the period?" to finance |
+
+The packet also records that the usage export carries no environment tag, the record that would settle the first question, and names who can supply one. That gap is why the packet goes to a person rather than a conclusion.
+
+## Sensitive data, stale records and escalation
+
+**Permitted access only.** The workflow reads what it was granted and nothing else. Least privilege applies per connection, and each access is recorded in the workflow's [AI operations governance](/docs/guides/ai-operations-governance) entry: who may read which record, and who grants it.
+
+**No records pasted into chat.** A record the swarm cannot reach is named with the owner who can grant access, never obtained by asking someone to paste it into a thread.
+
+**Stale or incomplete records are flagged, not filled.** When a usage export stops before the period ends, or a contract has no effective date, the packet states the record, its last-updated date and the gap. It does not carry a value forward or estimate one.
+
+**Conflicting sources are both reported.** When the metering export and the invoice disagree, or two agreement versions state different rates, the packet shows both with dates and links. People decide which governs.
+
+**Escalation when the gate is not cleared.** The gate carries a timeout and a fallback path, as [HITL gates](/docs/playbooks/patterns/hitl-gates) recommends: a reminder, a named backup owner, then an explicit hold so the dispute stays on the open list. It must never proceed on silence.
+
+## What stays human-owned
+
+Five decisions stay with people in every version of this workflow.
+
+- **Validating the evidence.** Whether the packet is complete enough to act on, and whether a record is the right one, is a person's judgement. The agent presents sources; it does not certify them.
+- **Deciding the resolution.** A credit, a correction to a future invoice, an upheld charge or a partial adjustment is a commercial decision. The packet informs it and does not recommend it.
+- **Approving and sending customer communication.** The agent never messages the customer. A person writes or approves the reply.
+- **Changes to billing and financial records.** The agent does not edit the invoice, the ledger or the subscription. Someone who can, inside the owning system, does.
+- **Refunds and payments.** The agent never issues a refund and never moves money. The workflow has no path to a payment instruction, and ends at a decision a person recorded.
+
+Gate the irreversible steps, as the HITL guide states. Gathering records and writing the packet are reversible. A refund and a customer message are not.
+
+## Building blocks
+
+Each piece ships in agent-swarm and is documented. Pointing them at a billing dispute is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection emitting JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): reaching the billing system, metered usage and the mailbox with the raw secret out of script source.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow, approval thresholds and source-of-truth rules.
+- [Team collaboration](/docs/features/team-collaboration): shared context across the finance and account people who inherit a case.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): choosing between the platform's adjustment flow, a dispute product and a shared agent platform.
+
+Two related exceptions use the same shape with a different owner: [customer renewal review](/docs/guides/customer-renewal-review), where a disputed charge feeds a commercial decision, and [supplier invoice discrepancies](/docs/guides/ai-invoice-discrepancy-review), where the counterparty is a supplier.
