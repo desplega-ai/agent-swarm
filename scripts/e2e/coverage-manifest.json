@@ -542,6 +542,7 @@
         "slack-http-command",
         "slack-http-interactivity",
         "slack-http-signature-retry",
+        "slack-http-cross-team-identity",
         "slack-http-restart-redelivery"
       ]
     },
