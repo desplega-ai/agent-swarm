@@ -35,6 +35,7 @@
     "metrics",
     "models",
     "oauth",
+    "objects",
     "onboarding",
     "pages",
     "poll",

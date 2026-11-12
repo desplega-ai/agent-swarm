@@ -281,6 +281,8 @@ Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` d
 
 Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
 
+The entrypoint also sets a system `init.templateDir` whose `pre-push` shim reaches clones outside the registered clone path (for example a `mktemp -d` checkout). The shim runs prek only when prek is installed, the checkout has a `prek.toml` or `.pre-commit-config.yaml`, and `origin` is an auto-cloned repo registered with hooks enabled. Otherwise it exits 0. `install-repo-hooks.sh` replaces the shim with prek's own hook.
+
 ### Run
 
 ```bash

@@ -43,18 +43,28 @@ function isScenario(value: unknown): value is Scenario {
  * in a specific sequence — see the ordering comments in slack-delegation-flag-off-repro.ts and
  * slack-delegation-child-result.ts.
  */
-export async function loadScenarios(): Promise<Scenario[]> {
-  const files = (await readdir(SCENARIOS_DIR))
+/** Scenario file names (not helpers) in this directory, sorted. */
+export async function scenarioFiles(): Promise<string[]> {
+  return (await readdir(SCENARIOS_DIR))
     .filter((file) => file.endsWith(".ts") && !NON_SCENARIO_FILES.has(file))
     .sort();
+}
+
+/** The Scenario objects one scenario file exports. */
+export async function scenariosIn(file: string): Promise<Scenario[]> {
+  const module = (await import(join(SCENARIOS_DIR, file))) as Record<string, unknown>;
+  return Object.values(module).filter(isScenario);
+}
+
+export async function loadScenarios(): Promise<Scenario[]> {
+  const files = await scenarioFiles();
 
   const scenarios: Scenario[] = [];
   const nameOwners = new Map<string, string>();
   const orderOwners = new Map<number, string>();
 
   for (const file of files) {
-    const module = (await import(join(SCENARIOS_DIR, file))) as Record<string, unknown>;
-    const found = Object.values(module).filter(isScenario);
+    const found = await scenariosIn(file);
     if (found.length === 0) {
       throw new Error(
         `${file} exports no Scenario. If it's a shared helper module, add it to ` +

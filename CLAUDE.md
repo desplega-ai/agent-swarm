@@ -82,7 +82,7 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run lint:slop` | Anti-slop Oxlint rule subset (`oxlint.config.ts`, vendored plugin in `tools/oxlint/anti-slop/`) |
-| `bun run check:local` | Agent check loop: frozen install, Biome + `bun check` + affected tests on your change |
+| `bun run check:local` | Agent check loop on your change: frozen install, Biome, `bun check`, drift of the generators whose inputs changed, affected tests, scoped E2E Contract (`--skip-e2e` skips it) |
 | `bun run tsc:check` | Type check with Bun's built-in `bun check` (`tsc:check:tsc` runs tsc 5, the CI authority) |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
 | `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
@@ -337,7 +337,7 @@ Hard rules:
 
 Mirror what `.github/workflows/merge-gate.yml` runs. Full job-by-job breakdown, drift checks, lockfile rules, and "why CI fails" list: [runbooks/ci.md](./runbooks/ci.md).
 
-Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, and the tests affected by your change (the pre-push hook's scoping). Run it before every push. Secrets scanning stays with the prek hooks.
+Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, the drift generators whose inputs changed, the tests affected by your change (the pre-push hook's scoping), and the E2E Contract scenarios your change reaches (`scripts/e2e/scope.ts`; the full suite when it cannot scope the diff). It prints the wall time of each step. Run it before every push. Secrets scanning stays with the prek hooks.
 
 Before opening the PR, mirror the rest of the gate (run from repo root):
 

@@ -405,6 +405,8 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# pre-push shim the entrypoint puts in init.templateDir, so ad-hoc clones get prek hooks too.
+COPY --chmod=755 scripts/prek-template-pre-push.sh /usr/local/lib/agent-swarm/prek-template-pre-push
 # GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
 COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
 COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper
@@ -830,6 +832,8 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# pre-push shim the entrypoint puts in init.templateDir, so ad-hoc clones get prek hooks too.
+COPY --chmod=755 scripts/prek-template-pre-push.sh /usr/local/lib/agent-swarm/prek-template-pre-push
 # GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
 COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
 COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper

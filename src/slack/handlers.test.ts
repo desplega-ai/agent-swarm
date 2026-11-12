@@ -192,7 +192,8 @@ describe("checkUserAccess", () => {
 
 describe("isUserAllowed", () => {
   const usersInfo = mock(async () => ({ ok: true, user: {} }));
-  const client = { users: { info: usersInfo } } as never;
+  const authTest = mock(async () => ({ ok: true, team_id: "T_OURS" }));
+  const client = { auth: { test: authTest }, users: { info: usersInfo } } as never;
   let enrichSpy: ReturnType<typeof spyOn<typeof slackEnrichModule, "enrichSlackUserEmail">>;
   let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
 
@@ -288,12 +289,19 @@ describe("isUserAllowed", () => {
       expect(loggedLines()).toEqual([]);
     });
 
-    test("denies and logs a domain that is not allowed", async () => {
+    test("denies and logs a domain that is not allowed, or a sender from another team", async () => {
       enrichSpy.mockResolvedValue("person@evil.com");
       const allowed = await loadIsUserAllowed(env);
       expect(await allowed(client, "U_OTHER")).toBe(false);
+
+      // An allowed domain admits a sender from this team, never one from another team.
+      slackEnrichModule.resetSlackTeamIdCacheForTesting();
+      enrichSpy.mockResolvedValue("person@company.com");
+      expect(await allowed(client, "U_SAME", "T_OURS")).toBe(true);
+      expect(await allowed(client, "U_PARTNER", "T_PARTNER")).toBe(false);
       expect(loggedLines()).toEqual([
         '[Slack] User U_OTHER email domain "evil.com" not in allowed list',
+        "[Slack] User U_PARTNER is from another Slack team, denying email-domain access",
       ]);
     });
   });

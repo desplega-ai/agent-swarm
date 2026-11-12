@@ -51,6 +51,7 @@ This file is the authoring guide.
 | `cli.ts`, `coverage-cli.ts` | `runCli(args, options)`: the CLI as a child (`bun run src/cli.tsx`) with a temp HOME and working directory, and the command universe from `cli help`. Under `--coverage` the child is the CLI entry under `bun test`, like the API. |
 | `diff-coverage.ts`, `coverage-exemptions.txt` | The changed-lines comment: lcov union against `git diff`, and the paths it skips, each with a reason. |
 | `harness.ts` | Optional real-worker legs (`--harness`), credentials required. |
+| `scope.ts` | `bun run check:local`'s E2E step: maps the changed files to the scenarios that reach them, or asks for the full run ([ci.md](../../runbooks/ci.md#the-local-check-loop)). |
 | `scenarios/` | One file per scenario (or per tight family). `registry.ts` discovers them. |
 
 ## Writing a scenario
