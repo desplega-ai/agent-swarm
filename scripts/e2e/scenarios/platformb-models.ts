@@ -1,3 +1,10 @@
+import {
+  type HarnessCatalogModel,
+  harnessCatalogSection,
+  harnessModelIds,
+  modelFamilyKey,
+} from "@desplega/model-catalog";
+import snapshot from "../../../src/be/modelsdev-cache.json";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -67,6 +74,48 @@ function expectRefreshShape(result: Record<string, unknown>, label: string): Ref
     expect(typeof result.error === "string", `${label}: an error answer carries no error text`);
   }
   return { status, json: result };
+}
+
+type CatalogModels = Record<string, HarnessCatalogModel>;
+
+/**
+ * The shipped tier defaults are what onboarding proposes per agent: the step 4
+ * dial reads `GET /api/models-catalog/tiers`. Every catalog id among them must
+ * be listed by the served catalog and run on its harness. A codex or
+ * claude-managed id must also be the newest model of its family in the
+ * committed snapshot, so a snapshot refresh that adds a model fails here until
+ * `DEFAULT_MODEL_TIER_MAP` moves (the served catalog can be newer after a live
+ * refresh, so freshness reads the snapshot). claude tiers are CLI shortnames,
+ * which already resolve to the newest model.
+ */
+function expectTierDefaultsCurrent(
+  tiers: Record<string, unknown>[],
+  served: Record<string, unknown>,
+): void {
+  const sections = snapshot as unknown as Record<string, { models: CatalogModels } | undefined>;
+  for (const row of tiers) {
+    const harness = String(row.provider);
+    const value = String(row.defaultValue);
+    const label = `Tier default ${harness}/${String(row.tier)} (${value})`;
+    const section = harnessCatalogSection(harness);
+    if (section && harness !== "claude") {
+      const listed = harnessModelIds(
+        harness,
+        asRecord(asRecord(served[section]).models) as CatalogModels,
+      );
+      expect(listed.includes(value), `${label} is not a ${section} model that runs on ${harness}`);
+      const newest = harnessModelIds(harness, sections[section]?.models).find(
+        (id) => modelFamilyKey(id) === modelFamilyKey(value),
+      );
+      expect(newest === value, `${label} is older than ${newest} in the bundled catalog`);
+    } else if (value.startsWith("openrouter/")) {
+      const models = asRecord(asRecord(served.openrouter).models);
+      expect(
+        models[value.slice("openrouter/".length)] !== undefined,
+        `${label} is not listed by OpenRouter`,
+      );
+    }
+  }
 }
 
 async function readCatalog(ctx: ScenarioContext): Promise<Record<string, unknown>> {
@@ -476,6 +525,7 @@ export const platformbModels: Scenario = {
           );
         }
       }
+      expectTierDefaultsCurrent(tiers, providers);
 
       // Overlay: the lead or the operator writes, a worker does not.
       const overlayModel = `e2e-overlay-${ctx.nonce}`;

@@ -86,6 +86,7 @@ async function mount(
   tiers: readonly ModelTierPreview[] | null,
   targets: string[] = ["codex"],
   agents: AgentWithTasks[] = [agent],
+  chatgpt = false,
 ) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -99,7 +100,7 @@ async function mount(
             harnessPhrase="Codex"
             targets={targets as never}
             agents={agents}
-            dialContext={{ openrouter: false, catalog: null, tiers }}
+            dialContext={{ openrouter: false, catalog: null, tiers, chatgpt }}
           />
         </TooltipProvider>
       </QueryClientProvider>,
@@ -196,7 +197,7 @@ describe("HarnessSwitch", () => {
       {
         id: "agent-1",
         harnessProvider: "codex",
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         allowCustomModel: false,
         reasoningEffort: "high",
       },
@@ -242,6 +243,31 @@ describe("HarnessSwitch", () => {
     await switchAgent(view.container);
     expect(runtimeCalls).toEqual([]);
     expect(harnessCalls).toEqual([["agent-1", "codex"]]);
+    await view.unmount();
+  });
+
+  test("pi on the ChatGPT subscription gets the subscription's Optimal model", async () => {
+    // No model yet: pi would fall back to its OpenRouter tier default, which has no key.
+    const view = await mount(tierRows(), ["pi"], [agent], true);
+    await switchAgent(view.container);
+    expect(runtimeCalls).toEqual([
+      {
+        id: "agent-1",
+        harnessProvider: "pi",
+        model: "openai-codex/gpt-6.1-sol",
+        allowCustomModel: false,
+        reasoningEffort: "high",
+      },
+    ]);
+    expect(harnessCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("pi off the subscription keeps changing only the harness", async () => {
+    const view = await mount(tierRows(), ["pi"], [agent]);
+    await switchAgent(view.container);
+    expect(runtimeCalls).toEqual([]);
+    expect(harnessCalls).toEqual([["agent-1", "pi"]]);
     await view.unmount();
   });
 });
