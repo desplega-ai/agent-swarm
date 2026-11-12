@@ -78,8 +78,9 @@ describe("isSenderAllowed", () => {
     expect(isSenderAllowed(["alice@a.com"], "a.com,b.com")).toBe(true);
   });
 
-  test("allows if any sender in array matches", () => {
-    expect(isSenderAllowed(["alice@evil.com", "bob@b.com"], "a.com,b.com")).toBe(true);
+  test("checks only the first sender in an array", () => {
+    expect(isSenderAllowed(["alice@evil.com", "bob@b.com"], "a.com,b.com")).toBe(false);
+    expect(isSenderAllowed(["bob@b.com", "alice@evil.com"], "a.com,b.com")).toBe(true);
   });
 
   test("rejects when no sender matches", () => {
@@ -139,6 +140,6 @@ describe("isSenderAllowed", () => {
     expect(isSenderAllowed("t@gmail.com", filter)).toBe(true);
     expect(isSenderAllowed("anyone@desplega.ai", filter)).toBe(true);
     expect(isSenderAllowed("other@gmail.com", filter)).toBe(false);
-    expect(isSenderAllowed(["other@gmail.com", "Taras <t@gmail.com>"], filter)).toBe(true);
+    expect(isSenderAllowed(["Taras <t@gmail.com>", "other@gmail.com"], filter)).toBe(true);
   });
 });
