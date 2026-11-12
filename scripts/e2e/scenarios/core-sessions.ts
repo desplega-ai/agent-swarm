@@ -246,13 +246,25 @@ async function ownershipAndSharing(
   return { rootId, childId };
 }
 
+/** Both open lists: the Inbox, and Working (a task still running, nothing to answer). */
+const OPEN_LISTS = ["inbox", "working"] as const;
+
 /** Sidebar triage: done, back to inbox, read, unread. */
 async function triage(ctx: ScenarioContext, owner: string, rootId: string) {
   const query = `?q=${mark(ctx)}`;
+  const inOpenList = async () => {
+    for (const list of OPEN_LISTS) {
+      if (hasRoot(await listSessions(ctx, as(owner), `${query}&triage=${list}`), rootId)) {
+        return true;
+      }
+    }
+    return false;
+  };
   let tree = asRecord((await ctx.api("GET", "/api/session-tree", as(owner))).json);
-  const inboxBefore = asRecord(tree.inbox).total as number;
-  expect(inboxBefore >= 1, "The session tree inbox does not count the new session");
-  for (const bucket of ["inbox", "later", "done", "noGroup"]) {
+  const openBefore = OPEN_LISTS.reduce((sum, list) => sum + Number(asRecord(tree[list]).total), 0);
+  expect(openBefore >= 1, "The session tree inbox does not count the new session");
+  expect(await inOpenList(), "The new session is in neither the inbox nor working");
+  for (const bucket of ["inbox", "working", "later", "done", "noGroup"]) {
     expect(typeof asRecord(tree[bucket]).total === "number", `session-tree lacks ${bucket}`);
   }
   expect(Array.isArray(tree.sources) && Array.isArray(tree.groups), "session-tree lacks sources");
@@ -262,32 +274,41 @@ async function triage(ctx: ScenarioContext, owner: string, rootId: string) {
     "session-tree with source filters",
   );
 
-  let response = await ctx.api("POST", "/api/session-triage", {
-    ...as(owner),
-    body: { action: "done", triage: "inbox" },
-  });
-  expectStatus(response, [200], "mark the inbox done");
-  expect(Number(asRecord(response.json).updated) >= 1, "Triage updated nothing");
+  // "Select all N" with this session unchecked leaves it where it is.
+  let response: Awaited<ReturnType<typeof ctx.api>> | undefined;
+  for (const list of OPEN_LISTS) {
+    response = await ctx.api("POST", "/api/session-triage", {
+      ...as(owner),
+      body: { action: "done", triage: list, exceptIds: [rootId] },
+    });
+    expectStatus(response, [200], `mark ${list} done except one session`);
+  }
+  expect(await inOpenList(), "exceptIds did not keep the session open");
+
+  let updated = 0;
+  for (const list of OPEN_LISTS) {
+    response = await ctx.api("POST", "/api/session-triage", {
+      ...as(owner),
+      body: { action: "done", triage: list },
+    });
+    expectStatus(response, [200], `mark ${list} done`);
+    updated += Number(asRecord(response.json).updated);
+  }
+  expect(updated >= 1, "Triage updated nothing");
   expect(
     hasRoot(await listSessions(ctx, as(owner), `${query}&triage=done`), rootId),
     "The session is not in the done list",
   );
-  expect(
-    !hasRoot(await listSessions(ctx, as(owner), `${query}&triage=inbox`), rootId),
-    "The session is still in the inbox",
-  );
+  expect(!(await inOpenList()), "The session is still in the inbox");
   tree = asRecord((await ctx.api("GET", "/api/session-tree", as(owner))).json);
-  expect(asRecord(tree.done).total === inboxBefore, "session-tree done bucket did not move");
+  expect(asRecord(tree.done).total === openBefore, "session-tree done bucket did not move");
 
   response = await ctx.api("POST", "/api/session-triage", {
     ...as(owner),
     body: { action: "inbox", triage: "done" },
   });
   expectStatus(response, [200], "move done back to the inbox");
-  expect(
-    hasRoot(await listSessions(ctx, as(owner), `${query}&triage=inbox`), rootId),
-    "The session did not return to the inbox",
-  );
+  expect(await inOpenList(), "The session did not return to the inbox");
   for (const action of ["read", "unread"]) {
     response = await ctx.api("POST", "/api/session-triage", {
       ...as(owner),
