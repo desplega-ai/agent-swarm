@@ -436,24 +436,72 @@ export const platformUsersLifecycle: Scenario = {
       "GET",
       "/api/users/unmapped?kind=github&dismissed=true&limit=1000",
     );
-    const savedA = asRecords(dismissedView.json, "unmapped").find(
-      (r) => r.externalId === dismissA,
-    );
+    const savedA = asRecords(dismissedView.json, "unmapped").find((r) => r.externalId === dismissA);
     expect(
       savedA?.count === 4 && typeof savedA.dismissedAt === "string",
       `the dismissed view keeps the count and the dismiss time: ${JSON.stringify(savedA)}`,
     );
     expect(
-      ctx.db.get("SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?", [
-        dismissA,
-      ]) === null,
+      ctx.db.get(
+        "SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?",
+        [dismissA],
+      ) === null,
       "dismiss links the identity to no user",
+    );
+
+    // A repeat dismiss (a stale tab, a second admin) keeps the first snapshot.
+    expectStatus(await dismiss("dismiss", [dismissA]), [200], "repeat dismiss");
+    const dismissedRows = async () =>
+      asRecords(
+        (await ctx.api("GET", "/api/users/unmapped?kind=github&dismissed=true&limit=1000")).json,
+        "unmapped",
+      );
+    const repeatA = (await dismissedRows()).find((r) => r.externalId === dismissA);
+    expect(
+      repeatA?.count === 4 && repeatA.dismissedAt === savedA?.dismissedAt,
+      `a repeat dismiss keeps the original snapshot: ${JSON.stringify(repeatA)}`,
     );
 
     const restored = await dismiss("restore", [dismissA]);
     expectStatus(restored, [200], "undo a dismissal");
     expect(asRecord(restored.json).restored === 1, `undo restores one, got ${restored.text}`);
     expect((await githubIds()).includes(dismissA), "undo returns the identity to the queue");
+    const restoredA = (await ctx.api("GET", "/api/users/unmapped?kind=github&limit=1000"))
+      .json as Record<string, unknown>;
+    expect(
+      asRecords(restoredA, "unmapped").find((r) => r.externalId === dismissA)?.count === 4,
+      "undo after a repeat dismiss brings back the original count",
+    );
+
+    // Duplicate bulk entries and two admins dismissing one row at once.
+    const dupe = `plat-dis3-${ctx.nonce}`;
+    const raced = `plat-dis4-${ctx.nonce}`;
+    await seedUnmapped(ctx, "github", dupe, 3, "2026-10-30T13:00:00.000Z");
+    await seedUnmapped(ctx, "github", raced, 5, "2026-10-30T14:00:00.000Z");
+    const dupeRes = await dismiss("dismiss", [dupe, dupe]);
+    expectStatus(dupeRes, [200], "bulk dismiss with a duplicate entry");
+    expect(asRecord(dupeRes.json).dismissed === 1, `duplicates count once, got ${dupeRes.text}`);
+    const racedRes = await Promise.all([dismiss("dismiss", [raced]), dismiss("dismiss", [raced])]);
+    for (const r of racedRes) expectStatus(r, [200], "concurrent dismiss");
+    const counts = new Map(
+      (await dismissedRows()).map((r) => [String(r.externalId), r.count] as const),
+    );
+    expect(
+      counts.get(dupe) === 3 && counts.get(raced) === 5,
+      `duplicate and concurrent dismisses keep the snapshot: ${JSON.stringify([...counts])}`,
+    );
+    const undoBoth = await dismiss("restore", [dupe, raced, dupe]);
+    expect(asRecord(undoBoth.json).restored === 2, `undo restores both, got ${undoBoth.text}`);
+    const back = new Map(
+      asRecords(
+        (await ctx.api("GET", "/api/users/unmapped?kind=github&limit=1000")).json,
+        "unmapped",
+      ).map((r) => [String(r.externalId), r.count] as const),
+    );
+    expect(
+      back.get(dupe) === 3 && back.get(raced) === 5,
+      `undo returns both with their counts: ${JSON.stringify([back.get(dupe), back.get(raced)])}`,
+    );
     expect(
       !asRecords(
         (await ctx.api("GET", "/api/users/unmapped?kind=github&dismissed=true&limit=1000")).json,
@@ -465,7 +513,7 @@ export const platformUsersLifecycle: Scenario = {
     expect(asRecord(again.json).restored === 0, "undo of a live identity restores nothing");
     // Leave nothing behind for the next scenario that reads the queue.
     expectStatus(await dismiss("restore", [dismissB]), [200], "undo the second dismissal");
-    for (const id of [dismissA, dismissB]) {
+    for (const id of [dismissA, dismissB, dupe, raced]) {
       const key = encodeURIComponent(id);
       await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${key}:meta`);
       await ctx.api("DELETE", `/api/kv/_/integration:unmapped:github/${key}:count`);

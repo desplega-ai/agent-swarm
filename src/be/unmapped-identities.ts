@@ -49,7 +49,13 @@ export async function isUnmappedIdentityDismissed(
   return (await getKv(dismissedNamespace(kind), externalId)) !== null;
 }
 
-/** Move an identity from the triage queue to the ignore list. */
+/**
+ * Move an identity from the triage queue to the ignore list. Idempotent: a
+ * repeat dismiss (a stale tab, a duplicate bulk entry, a second admin) keeps
+ * the first dismissal's time, actor and snapshot. Tracker rows a raced
+ * sighting re-created since then fold into that snapshot instead of
+ * replacing it, so Undo always has the original row to put back.
+ */
 export async function dismissUnmappedIdentity(
   kind: string,
   externalId: string,
@@ -59,14 +65,19 @@ export async function dismissUnmappedIdentity(
   await getDbClient().transaction(async () => {
     const meta = await getKv(ns, `${externalId}:meta`);
     const count = await getKv(ns, `${externalId}:count`);
+    const prior = (await getKv(dismissedNamespace(kind), externalId))?.value as
+      | Partial<DismissedUnmapped>
+      | null
+      | undefined;
+    if (prior && !meta && !count) return;
     await upsertKv({
       namespace: dismissedNamespace(kind),
       key: externalId,
       value: {
-        dismissedAt: new Date().toISOString(),
-        dismissedBy,
-        meta: meta?.value ?? null,
-        count: Number(count?.value ?? 0),
+        dismissedAt: prior?.dismissedAt ?? new Date().toISOString(),
+        dismissedBy: prior?.dismissedBy ?? dismissedBy,
+        meta: meta?.value ?? prior?.meta ?? null,
+        count: Number(prior?.count ?? 0) + Number(count?.value ?? 0),
       } satisfies DismissedUnmapped,
       valueType: "json",
     });

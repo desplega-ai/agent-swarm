@@ -948,6 +948,15 @@ async function collectDismissedForKind(kind: string, limit: number) {
   });
 }
 
+/** A bulk body can name one identity twice; act on it once. */
+function uniqueIdentities<T extends { kind: string; externalId: string }>(identities: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const identity of identities) {
+    seen.set(`${identity.kind}\u0000${identity.externalId}`, identity);
+  }
+  return [...seen.values()];
+}
+
 const DEFAULT_CONNECTOR_CONNECT_URL = "https://mcp.agent-swarm.dev/connections";
 
 /**
@@ -1151,10 +1160,11 @@ export async function handleUsers(
     if (!parsed) return true;
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
-    for (const { kind, externalId } of parsed.body.identities) {
+    const identities = uniqueIdentities(parsed.body.identities);
+    for (const { kind, externalId } of identities) {
       await dismissUnmappedIdentity(kind, externalId, `${actor.kind}:${actor.id}`);
     }
-    dismissUnmapped.respond(res, 200, { dismissed: parsed.body.identities.length });
+    dismissUnmapped.respond(res, 200, { dismissed: identities.length });
     return true;
   }
 
@@ -1163,7 +1173,7 @@ export async function handleUsers(
     if (!parsed) return true;
     if (!getOperatorActor(req, res)) return true;
     let restored = 0;
-    for (const { kind, externalId } of parsed.body.identities) {
+    for (const { kind, externalId } of uniqueIdentities(parsed.body.identities)) {
       if (await restoreUnmappedIdentity(kind, externalId)) restored++;
     }
     restoreUnmapped.respond(res, 200, { restored });
