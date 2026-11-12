@@ -1,3 +1,4 @@
+import { fetchCliUniverse } from "./cli";
 import type { ApiClient, HttpCall } from "./http";
 import { asRecord, expectStatus } from "./http";
 import type { ScenarioResult } from "./report";
@@ -61,6 +62,8 @@ export type Coverage = {
   };
   mcpTools: SurfaceCoverage;
   nodeTypes: SurfaceCoverage;
+  /** Commands `cli help` lists, against the ones a scenario ran (not just `--help`). */
+  cliCommands: SurfaceCoverage;
   stateSurfaces: StateSurfaceCoverage[];
   flows: FlowStatus[];
   /** Scenarios no flow names. Every scenario must belong to a flow so the flow list stays complete. */
@@ -106,6 +109,7 @@ export type CoverageManifest = {
   routes: Array<{ operation: string; reason: string }>;
   mcpTools: Array<{ name: string; reason: string }>;
   nodeTypes: Array<{ type: string; reason: string }>;
+  cliCommands: Array<{ command: string; reason: string }>;
   stateSurfaces: StateSurfaceSpec[];
   flows: Record<string, { description: string; scenarios: string[] }>;
 };
@@ -115,6 +119,7 @@ export const EMPTY_MANIFEST: CoverageManifest = {
   routes: [],
   mcpTools: [],
   nodeTypes: [],
+  cliCommands: [],
   stateSurfaces: [],
   flows: {},
 };
@@ -127,6 +132,7 @@ export function emptyCoverage(): Coverage {
     routes: { ...empty, byGroup: {}, unknown: [] },
     mcpTools: { ...empty },
     nodeTypes: { ...empty },
+    cliCommands: { ...empty },
     stateSurfaces: [],
     flows: [],
     scenariosWithoutFlow: [],
@@ -239,6 +245,8 @@ export type CoverageInputs = {
   calledTools: ReadonlySet<string>;
   /** Node types the engine executed during the run (distinct workflow_run_steps.nodeType). */
   observedNodeTypes: ReadonlySet<string>;
+  /** CLI commands a scenario ran through `runCli` (help-only runs excluded). */
+  calledCommands: ReadonlySet<string>;
   scenarios: readonly ScenarioResult[];
   /** Every scenario the registry knows, selected or not. */
   knownScenarios: ReadonlySet<string>;
@@ -248,10 +256,11 @@ export type CoverageInputs = {
 };
 
 /**
- * What the server exposes: route operations (`METHOD /template`) and workflow node types.
- * Plain data, so a shard can ship it to the merge job, which has no API to ask.
+ * What the server exposes: route operations (`METHOD /template`) and workflow node types,
+ * plus the commands the CLI lists. Plain data, so a shard can ship it to the merge job,
+ * which has no API to ask.
  */
-export type CoverageUniverse = { routes: string[]; nodeTypes: string[] };
+export type CoverageUniverse = { routes: string[]; nodeTypes: string[]; cliCommands: string[] };
 
 export async function fetchUniverse(api: ApiClient): Promise<CoverageUniverse> {
   const response = await api("GET", "/openapi.json");
@@ -265,6 +274,7 @@ export async function fetchUniverse(api: ApiClient): Promise<CoverageUniverse> {
     nodeTypes: (asRecord(executorTypes.json).executorTypes as unknown[]).map((entry) =>
       String(asRecord(entry).type),
     ),
+    cliCommands: await fetchCliUniverse(),
   };
 }
 
@@ -284,6 +294,7 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
     };
   });
   const nodeTypeUniverse = new Set(universe.nodeTypes);
+  const cliUniverse = new Set(universe.cliCommands);
 
   const coveredKeys = new Set<string>();
   const unknown = new Set<string>();
@@ -307,6 +318,7 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
   const excludedRoutes = new Set(inputs.manifest.routes.map((entry) => entry.operation));
   const excludedTools = new Set(inputs.manifest.mcpTools.map((entry) => entry.name));
   const excludedNodeTypes = new Set(inputs.manifest.nodeTypes.map((entry) => entry.type));
+  const excludedCommands = new Set(inputs.manifest.cliCommands.map((entry) => entry.command));
 
   const byGroup: Record<string, { total: number; covered: number }> = {};
   for (const operation of operations) {
@@ -327,6 +339,9 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
     ...[...excludedNodeTypes]
       .filter((type) => inputs.observedNodeTypes.has(type))
       .map((type) => `node type ${type}`),
+    ...[...excludedCommands]
+      .filter((command) => inputs.calledCommands.has(command))
+      .map((command) => `cli command ${command}`),
   ].sort();
   const deadExclusions: string[] = [
     ...[...excludedRoutes].filter((key) => !routeUniverse.has(key)).map((key) => `route ${key}`),
@@ -336,6 +351,9 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
     ...[...excludedNodeTypes]
       .filter((type) => !nodeTypeUniverse.has(type))
       .map((type) => `node type ${type}`),
+    ...[...excludedCommands]
+      .filter((command) => !cliUniverse.has(command))
+      .map((command) => `cli command ${command}`),
   ].sort();
 
   const byName = new Map(inputs.scenarios.map((scenario) => [scenario.name, scenario]));
@@ -455,6 +473,7 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
     },
     mcpTools: surface(inputs.toolUniverse, inputs.calledTools, excludedTools),
     nodeTypes: surface(nodeTypeUniverse, inputs.observedNodeTypes, excludedNodeTypes),
+    cliCommands: surface(cliUniverse, inputs.calledCommands, excludedCommands),
     stateSurfaces,
     flows,
     scenariosWithoutFlow,
@@ -486,6 +505,11 @@ export function strictFailures(coverage: Coverage): string[] {
   if (coverage.nodeTypes.uncovered.length > 0) {
     failures.push(
       `${coverage.nodeTypes.uncovered.length} workflow node type(s) never executed:\n${list(coverage.nodeTypes.uncovered)}`,
+    );
+  }
+  if (coverage.cliCommands.uncovered.length > 0) {
+    failures.push(
+      `${coverage.cliCommands.uncovered.length} CLI command(s) have no scenario and no exclusion (runCli in scripts/e2e/cli.ts):\n${list(coverage.cliCommands.uncovered)}`,
     );
   }
   for (const engine of coverage.engines) {
@@ -545,6 +569,9 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
     routes: Array.isArray(raw.routes) ? raw.routes.map(asRecord).map(routeEntry) : [],
     mcpTools: Array.isArray(raw.mcpTools) ? raw.mcpTools.map(asRecord).map(toolEntry) : [],
     nodeTypes: Array.isArray(raw.nodeTypes) ? raw.nodeTypes.map(asRecord).map(nodeEntry) : [],
+    cliCommands: Array.isArray(raw.cliCommands)
+      ? raw.cliCommands.map(asRecord).map(commandEntry)
+      : [],
     stateSurfaces: Array.isArray(raw.stateSurfaces)
       ? raw.stateSurfaces.map(asRecord).map(stateSurfaceEntry)
       : [],
@@ -579,6 +606,7 @@ export async function loadManifest(path: string): Promise<CoverageManifest> {
     ...manifest.routes.map((entry) => `route ${entry.operation}`),
     ...manifest.mcpTools.map((entry) => `mcp tool ${entry.name}`),
     ...manifest.nodeTypes.map((entry) => `node type ${entry.type}`),
+    ...manifest.cliCommands.map((entry) => `cli command ${entry.command}`),
   ]);
   if (duplicates.length > 0) {
     throw new Error(`coverage-manifest lists duplicates: ${duplicates.join(", ")}`);
@@ -616,6 +644,16 @@ function nodeEntry(entry: Record<string, unknown>) {
     throw new Error(`coverage-manifest nodeTypes entry needs a type: ${JSON.stringify(entry)}`);
   }
   return { type, reason: reasonOf(entry, `node type ${type}`) };
+}
+
+function commandEntry(entry: Record<string, unknown>) {
+  const command = entry.command;
+  if (typeof command !== "string" || !/^[a-z][a-z0-9-]*$/.test(command)) {
+    throw new Error(
+      `coverage-manifest cliCommands entry needs a command name: ${JSON.stringify(entry)}`,
+    );
+  }
+  return { command, reason: reasonOf(entry, `cli command ${command}`) };
 }
 
 function engineEntry(entry: Record<string, unknown>): EngineSpec {

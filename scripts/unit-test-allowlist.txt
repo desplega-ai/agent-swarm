@@ -1,0 +1,63 @@
+# Rule 1, no new unit tests. Read by scripts/check-unit-test-allowlist.ts.
+#
+# A new unit test file, or a new test( call in an old one, may import only the code
+# listed here. Everything else gets an e2e scenario in scripts/e2e/scenarios/ instead.
+#
+# One entry per line: `<path>  # <reason>`. The reason is required (10+ characters).
+# - A path ending in `/` allows every file under that directory.
+# - Any other path is one file, matched with or without its extension.
+# - A test file path (any name `bun test` runs, such as `.test.ts` or `.spec.ts`) exempts
+#   that test file as a whole.
+# Add an escape-hatch line only with a reason a reviewer can check.
+
+# Worker runtime: runs inside the harness, which the contract e2e suite does not start.
+src/commands/runner.ts  # worker runtime, covered by unit tests and the nightly harness legs
+src/commands/worker.ts  # worker runtime, covered by unit tests and the nightly harness legs
+src/commands/lead.ts  # worker runtime, covered by unit tests and the nightly harness legs
+src/commands/hook.ts  # worker runtime, covered by unit tests and the nightly harness legs
+src/commands/claude-md-session.ts  # worker session file, runs only inside the harness
+src/commands/codex-session-runner.ts  # worker session file, runs only inside the harness
+src/commands/resume-session.ts  # worker session file, runs only inside the harness
+src/commands/attachments-section.ts  # worker runtime helper imported by the runner
+src/commands/context-preamble.ts  # worker runtime helper imported by the runner
+src/commands/credential-outcome-report.ts  # worker runtime helper imported by the runner
+src/commands/credential-refresh.ts  # worker runtime helper imported by the runner
+src/commands/credential-wait.ts  # worker runtime helper imported by the runner
+src/commands/entrypoint-api-readiness.ts  # worker runtime helper run by the container entrypoint
+src/commands/identity-refresh.ts  # worker runtime helper imported by the runner
+src/commands/profile-sync.ts  # worker runtime helper imported by the runner
+src/commands/profile-sync-audit.ts  # worker runtime helper imported by the runner
+src/commands/provider-credentials.ts  # worker runtime helper imported by the runner
+src/commands/provider-error-class.ts  # worker runtime helper imported by the runner
+src/commands/push-delivery.ts  # worker runtime helper imported by the runner
+src/commands/rate-limit-outcome.ts  # worker runtime helper imported by the runner
+src/commands/seat-mismatch-report.ts  # worker runtime helper imported by the runner
+src/commands/templates.ts  # runner trigger prompt templates, worker runtime
+src/providers/  # harness adapters, worker runtime
+src/hooks/  # harness hooks, worker runtime
+src/prompts/  # prompt-template registry, worker runtime
+src/claude.ts  # Claude CLI launcher, worker runtime
+
+# Tooling and packages.
+packages/  # workspace packages with their own unit suites
+scripts/  # repo tooling and CI checks, not the API
+tools/  # lint plugins and dev tooling, not the API
+
+# Rule corpora: many cases over few lines, which a scenario cannot enumerate.
+src/utils/secret-scrubber.ts  # secret-scrubber rule corpus
+src/utils/secret-rules.generated.ts  # generated secret rules, checked by the corpus
+src/utils/pr-body-leaks.ts  # PR body leak rule corpus
+
+# Migrations: the runner and each SQL file are checked against a scratch DB.
+src/be/migrations/  # migration runner and SQL files
+
+# Dashboard: stays on until Playwright is required and fills in (plan section 4).
+apps/ui/  # dashboard units, until the Playwright delete PR
+
+# Other apps with their own runners, which the contract e2e suite never loads.
+apps/evals/  # eval harness, its own package and test job
+apps/templates-ui/  # templates site, its own package
+
+# Escape hatches for single test files.
+src/tests/agent-history.test.ts  # agent_history append-only triggers, full-row restore equality, extension and lead blockers, and revocation of every token kind need direct DB and token-mint access the black-box suite does not have; the HTTP surface is in core-agent-lifecycle
+src/tests/sheet-engine.test.ts  # engine timeout kill and queue bounds need an injected 1 ms timeout and a filled queue, unreachable black-box

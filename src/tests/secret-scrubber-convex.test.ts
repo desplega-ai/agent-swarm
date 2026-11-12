@@ -115,10 +115,54 @@ describe("known values in URL forms", () => {
     expect(scrubSecrets(`v ${stored}`)).toBe("v [REDACTED:CONVEX_TEST_DEPLOY_KEY]");
   });
 
-  test("an invalid percent sequence keeps the raw value only", () => {
+  test("an invalid percent sequence still redacts the raw value", () => {
     const stored = `acme-${randomToken(16)}%ZZ`;
     process.env.CONVEX_TEST_DEPLOY_KEY = stored;
     refreshSecretScrubberCache();
     expect(scrubSecrets(`v ${stored}`)).toBe("v [REDACTED:CONVEX_TEST_DEPLOY_KEY]");
   });
+
+  // A literal `%` in the stored value: decoding throws (`%se`) or yields a
+  // different string (`%41`, `%7C`), so the URL-encoded form (`%25...`) must
+  // come from the stored value itself.
+  const percentValues: Array<[string, () => string]> = [
+    ["an invalid sequence", () => `acme-${randomToken(12)}%secret${randomToken(12)}`],
+    ["a valid sequence (%41)", () => `pre-${randomToken(12)}%41fix${randomToken(12)}`],
+    ["a literal %7C", () => `abcd-${randomToken(12)}%7Cefgh${randomToken(12)}`],
+  ];
+  for (const [label, build] of percentValues) {
+    describe(`a stored value with ${label} is redacted URL-encoded`, () => {
+      test("env cache (scrubSecrets)", () => {
+        const stored = build();
+        const encoded = encodeURIComponent(stored);
+        expect(encoded).toContain("%25");
+        process.env.CONVEX_TEST_DEPLOY_KEY = stored;
+        refreshSecretScrubberCache();
+        expect(scrubSecrets(`u=${encoded}`)).toBe("u=[REDACTED:CONVEX_TEST_DEPLOY_KEY]");
+        expect(scrubSecrets(`v ${stored}`)).toBe("v [REDACTED:CONVEX_TEST_DEPLOY_KEY]");
+      });
+
+      test("registerVolatileSecret", () => {
+        const stored = build();
+        registerVolatileSecret(stored, "VOLATILE_PCT_SECRET");
+        expect(scrubSecrets(`u=${encodeURIComponent(stored)}`)).toBe(
+          "u=[REDACTED:VOLATILE_PCT_SECRET]",
+        );
+      });
+
+      test("createValueScrubber", () => {
+        const stored = build();
+        const scrub = createValueScrubber([{ value: stored, name: "RUN_SECRET" }]);
+        expect(scrub.text(`u=${encodeURIComponent(stored)}`)).toBe("u=[REDACTED:RUN_SECRET]");
+      });
+
+      test("redactWithEnv", () => {
+        const stored = build();
+        const out = redactWithEnv(`u=${encodeURIComponent(stored)}`, {
+          CONVEX_DEPLOY_KEY: stored,
+        });
+        expect(out).toBe("u=[REDACTED:CONVEX_DEPLOY_KEY]");
+      });
+    });
+  }
 });

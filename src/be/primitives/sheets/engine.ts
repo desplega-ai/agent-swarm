@@ -1,4 +1,5 @@
 import { ObjectsError } from "../objects";
+import { refOf } from "./a1";
 import type { EngineMessage, EnginePatch, EngineRequest } from "./engine-worker";
 import type { SheetCell, SheetTab } from "./format";
 
@@ -18,6 +19,44 @@ export const MAX_ENGINE_CALLS_PER_CALLER = 2;
 function workerSpecifier(): string {
   if (import.meta.url.includes("/$bunfs/")) return "./be/primitives/sheets/engine-worker.ts";
   return new URL("./engine-worker.ts", import.meta.url).href;
+}
+
+/**
+ * Cells the workbook holds once `patches` land, before any new spill. Cached spill cells
+ * count too, so the figure never undercounts what the stored file already holds.
+ */
+function cellsAfter(tabs: SheetTab[], patches: EnginePatch[]): number {
+  const refs = new Map(tabs.map((tab) => [tab.name, new Set(Object.keys(tab.cells))]));
+  for (const patch of patches) {
+    const tab = refs.get(patch.tab);
+    if (!tab) continue; // the worker refuses an unknown tab
+    const ref = refOf(patch.row, patch.col);
+    if (patch.input === "") tab.delete(ref);
+    else tab.add(ref);
+  }
+  let total = 0;
+  for (const tab of refs.values()) total += tab.size;
+  return total;
+}
+
+const ARRAY_SIZE =
+  /\b(?:SEQUENCE|RANDARRAY|MAKEARRAY)\(\s*(\d+(?:\.\d+)?)\s*(?:,\s*(\d+(?:\.\d+)?)\s*[,)])?/gi;
+
+/**
+ * Cells that array formulas in `patches` ask for with literal sizes, such as `=SEQUENCE(1000000)`.
+ * shortcut: literal sizes only; a computed size (`=SEQUENCE(A1)`) is still caught after
+ * evaluation by the worker's cell cap and the timeout. Upgrade to a formula AST walk if
+ * computed-size spills show up in practice.
+ */
+function literalSpill(patches: EnginePatch[]): number {
+  let total = 0;
+  for (const { input } of patches) {
+    if (!input.startsWith("=")) continue;
+    for (const match of input.matchAll(ARRAY_SIZE)) {
+      total += Math.ceil(Number(match[1])) * Math.ceil(Number(match[2] ?? 1));
+    }
+  }
+  return total;
 }
 
 export type RecalcResult = { cells: Array<Record<string, SheetCell>>; changed: string[] };
@@ -75,10 +114,14 @@ export class SheetEngine {
         new ObjectsError("sheet engine is busy with other recalculations; retry in a few seconds"),
       );
     }
-    const cells = tabs.reduce((n, tab) => n + Object.keys(tab.cells).length, 0);
-    if (cells > options.maxCells) {
+    const cells = cellsAfter(tabs, patches);
+    const spill = literalSpill(patches);
+    if (cells + spill > options.maxCells) {
+      const spilled = spill > 0 ? ` (${spill} of them spilled by array formulas)` : "";
       return Promise.reject(
-        new ObjectsError(`the workbook has ${cells} cells; the limit is ${options.maxCells}`),
+        new ObjectsError(
+          `the workbook would exceed ${options.maxCells} cells: this write leaves ${cells + spill}${spilled}`,
+        ),
       );
     }
     this.pending.set(caller, mine + 1);
