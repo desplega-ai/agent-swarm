@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { toast } from "sonner";
 import { api } from "../client";
 import type { FavoriteItemType } from "../types";
@@ -18,6 +19,9 @@ const ENTITY_QUERY_KEYS: Record<FavoriteItemType, string[]> = {
   "agent-fs-path": [],
   // Starred Sessions groups: read from the favorites list only.
   key: [],
+  // Starred sessions and hidden Sessions groups: read from the favorites list only.
+  session: [],
+  "hidden-key": [],
 };
 
 /**
@@ -122,27 +126,69 @@ export function useFavoriteToggle(itemType: FavoriteItemType) {
 }
 
 /**
- * The star of a Sessions group (a `key` favorite). Every star reads one
- * shared list of `key` favorites. While a toggle is in flight the star shows
- * the new state, and a failed toggle toasts. `null` (no group) reads nothing.
+ * One flag of one item in the favorites list: a Sessions group star (`key`),
+ * a session star (`session`), or a hidden group (`hidden-key`). Every flag of
+ * a type reads one shared list. While a toggle is in flight the flag shows
+ * the new state, and a failed toggle toasts. `null` (no item) reads nothing.
  */
-export function useKeyFavorite(groupKey: string | null) {
-  const list = useFavorites("key", undefined, { enabled: groupKey !== null });
-  const toggle = useFavoriteToggle("key");
-  const pending = toggle.isPending && toggle.variables?.itemId === groupKey;
+export function useItemFavorite(
+  itemType: "key" | "session" | "hidden-key",
+  itemId: string | null,
+  failure: { on: string; off: string } = { on: "Could not star.", off: "Could not unstar." },
+) {
+  const list = useFavorites(itemType, undefined, { enabled: itemId !== null });
+  const toggle = useFavoriteToggle(itemType);
+  const pending = toggle.isPending && toggle.variables?.itemId === itemId;
   const favorite = pending
     ? Boolean(toggle.variables?.favorite)
-    : groupKey !== null && (list.data?.favoriteIds.includes(groupKey) ?? false);
+    : itemId !== null && (list.data?.favoriteIds.includes(itemId) ?? false);
   return {
     favorite,
-    disabled: groupKey === null || !list.data,
+    disabled: itemId === null || !list.data,
     toggle: () => {
-      if (groupKey === null) return;
+      if (itemId === null) return;
       const next = !favorite;
       toggle.mutate(
-        { itemId: groupKey, favorite: next },
-        { onError: () => toast.error(next ? "Could not star." : "Could not unstar.") },
+        { itemId, favorite: next },
+        { onError: () => toast.error(next ? failure.on : failure.off) },
       );
     },
   };
+}
+
+/** The star of a Sessions group (a `key` favorite). */
+export function useKeyFavorite(groupKey: string | null) {
+  return useItemFavorite("key", groupKey);
+}
+
+/** The star of one session (a `session` favorite, by root task id). */
+export function useSessionFavorite(rootTaskId: string | null) {
+  return useItemFavorite("session", rootTaskId);
+}
+
+const HIDE_FAILURE = { on: "Could not hide the group.", off: "Could not show the group." };
+
+/** Whether a Sessions group is hidden from the sidebar (a `hidden-key` row). */
+export function useHiddenGroup(groupKey: string | null) {
+  return useItemFavorite("hidden-key", groupKey, HIDE_FAILURE);
+}
+
+/**
+ * The ids of one favorites list as a set, for the sidebar rows: starred
+ * groups (`key`), starred sessions (`session`), hidden groups (`hidden-key`).
+ * Empty while the list loads. An in-flight toggle shows its new state.
+ */
+export function useFavoriteIdSet(itemType: "key" | "session" | "hidden-key"): ReadonlySet<string> {
+  const list = useFavorites(itemType);
+  const toggle = useFavoriteToggle(itemType);
+  const ids = list.data?.favoriteIds;
+  const variables = toggle.isPending ? toggle.variables : undefined;
+  return useMemo(() => {
+    const set = new Set(ids ?? []);
+    if (variables) {
+      if (variables.favorite) set.add(variables.itemId);
+      else set.delete(variables.itemId);
+    }
+    return set;
+  }, [ids, variables]);
 }

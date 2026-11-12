@@ -1431,6 +1431,8 @@ export const FavoriteItemTypeSchema = z.enum([
   "schedule",
   "agent-fs-path",
   "key",
+  "session",
+  "hidden-key",
 ]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 

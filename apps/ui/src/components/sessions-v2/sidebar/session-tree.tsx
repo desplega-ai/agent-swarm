@@ -34,6 +34,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { useFavoriteIdSet } from "@/api/hooks/use-favorites";
 import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { useSessionListTriage } from "@/api/hooks/use-session-triage";
 import { useUsers } from "@/api/hooks/use-users";
@@ -57,7 +58,14 @@ import { type SessionsCommandsApi, useSessionsCommands } from "../use-sessions-c
 import { BulkBar, type WholeListOffer } from "./bulk-bar";
 import { FilterMenu } from "./filter-menu";
 import { GroupNode, SECTION_META } from "./group-node";
-import { AddGroupRow, CreateGroupRow, EmptyRow, LoadingRow, PagingRow } from "./list-state-rows";
+import {
+  AddGroupRow,
+  CreateGroupRow,
+  EmptyRow,
+  HiddenGroupsRow,
+  LoadingRow,
+  PagingRow,
+} from "./list-state-rows";
 import type { RowMenuActions, RowMenuState } from "./row-menu";
 import { SourceHeader, segmentsOf, TreeSection } from "./section-header";
 import { SessionDragPreview, SessionRow } from "./session-row";
@@ -159,6 +167,11 @@ export function SessionTree({
   /** The group whose name is an input. */
   const [renaming, setRenaming] = useState<string | null>(null);
   const searching = query.trim() !== "";
+  /** "Show N hidden": hidden groups show in place, dimmed, until it is turned off. */
+  const [showHidden, setShowHidden] = useState(false);
+  const starredGroups = useFavoriteIdSet("key");
+  const hiddenGroups = useFavoriteIdSet("hidden-key");
+  const starredSessionIds = useFavoriteIdSet("session");
   const { rows: treeRows, updating } = useTreeRows({
     me,
     myGroups,
@@ -166,6 +179,10 @@ export function SessionTree({
     expanded,
     creating,
     paused: searching,
+    starredGroups,
+    hiddenGroups,
+    showHidden,
+    starredSessionIds,
   });
   useEffect(() => {
     if (groups) prune(groups);
@@ -248,6 +265,7 @@ export function SessionTree({
           label: listLabel(offerList),
           total: offerTotal,
           on: selection.wholeList === offerList,
+          except: selection.wholeList === offerList ? selection.wholeExcept.size : 0,
           onSelect: () => {
             selection.selectWholeList();
             if (!phone) focusTree();
@@ -265,11 +283,13 @@ export function SessionTree({
     );
   /** Done on the whole list, or back to the Inbox from Done (the `e` toggle). */
   const wholeDone = (container: ContainerId) => {
-    listTriage.run(container, container === "done" ? "inbox" : "done");
+    listTriage.run(container, container === "done" ? "inbox" : "done", [...selection.wholeExcept]);
     selection.clear();
   };
   const wholeRead = (container: ContainerId) => {
-    listTriage.run(container, listUnread(container) ? "read" : "unread");
+    listTriage.run(container, listUnread(container) ? "read" : "unread", [
+      ...selection.wholeExcept,
+    ]);
     selection.clear();
   };
   const drag = useRowDrag({
@@ -340,6 +360,7 @@ export function SessionTree({
       else setExpanded((prev) => new Set(prev).add(row.container));
     } else if (row.type === "all") setView(row.container);
     else if (row.type === "add") edits.startCreate("shared/");
+    else if (row.type === "hidden") setShowHidden((on) => !on);
     else if (row.type === "group" && row.searchMatch) edits.revealGroup(row.node.key);
     else toggleRow(row);
   };
@@ -671,6 +692,17 @@ export function SessionTree({
             key={row.key}
             id={domId(row.key)}
             cursor={row.key === cursorRow?.key}
+            onClick={(event) => onRowClick(row.key, event)}
+          />
+        );
+      case "hidden":
+        return (
+          <HiddenGroupsRow
+            key={row.key}
+            id={domId(row.key)}
+            cursor={row.key === cursorRow?.key}
+            count={row.count}
+            open={row.open}
             onClick={(event) => onRowClick(row.key, event)}
           />
         );

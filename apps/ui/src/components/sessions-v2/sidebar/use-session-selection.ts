@@ -23,8 +23,10 @@ import {
  *
  * A list's checkbox (and Cmd+A) selects the loaded rows of one list. Then
  * "Select all N" (`selectWholeList`) stands for every session of that list,
- * loaded or not: the bulk bar acts on the server by list. Any other change
- * to the selection ends it.
+ * loaded or not: the bulk bar acts on the server by list. Unchecking a row
+ * of that list keeps it on and leaves the row out (`wholeExcept`), as in
+ * Gmail; checking it again puts it back. Any other change to the selection
+ * ends it.
  */
 export function useSessionSelection(rows: TreeRow[]) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
@@ -32,6 +34,8 @@ export function useSessionSelection(rows: TreeRow[]) {
   const [list, setList] = useState<ContainerId | null>(null);
   /** "Select all N" is on for `list`. */
   const [wholeList, setWholeList] = useState(false);
+  /** While "Select all N" is on: the rows of `list` unchecked since. */
+  const [except, setExcept] = useState<ReadonlySet<string>>(() => new Set());
   const visible = useMemo(() => {
     const found = new Map<string, SessionListItem>();
     for (const row of rows) {
@@ -43,9 +47,15 @@ export function useSessionSelection(rows: TreeRow[]) {
   }, [rows]);
   /** The loaded session ids of each list, in row order. */
   const byList = useMemo(() => listSessionIds(rows), [rows]);
+  // While "Select all N" is on, every loaded row of its list is selected
+  // (rows "Show 10 more" or a poll loads too), except the unchecked ones.
+  const wholeIds = wholeList && list ? byList.get(list) : undefined;
   const selected = useMemo(
-    () => new Set([...picked].filter((id) => visible.has(id))),
-    [picked, visible],
+    () =>
+      wholeIds
+        ? new Set(wholeIds.filter((id) => !except.has(id)))
+        : new Set([...picked].filter((id) => visible.has(id))),
+    [wholeIds, except, picked, visible],
   );
 
   // The row key a Shift+click range starts at.
@@ -58,19 +68,29 @@ export function useSessionSelection(rows: TreeRow[]) {
     setPicked(next);
     setList(nextList);
     setWholeList(false);
+    setExcept(new Set());
   };
   const clear = useCallback(() => {
     anchor.current = null;
     setPicked(new Set());
     setList(null);
     setWholeList(false);
+    setExcept(new Set());
   }, []);
   /** `rowKey`: the checked row, the anchor of the next range. */
   const toggle = useStableHandler((id: string, rowKey?: string) => {
+    if (rowKey) anchor.current = rowKey;
+    // "Select all N" stays on: the row leaves the whole list, or comes back.
+    if (wholeIds?.includes(id)) {
+      const next = new Set(except);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setExcept(next);
+      return;
+    }
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    if (rowKey) anchor.current = rowKey;
     pick(next, listOf(rowKey) ?? list);
   });
   /** Shift+click on `rowKey`. `from`: the cursor's row, for a range with no anchor on screen. */
@@ -119,9 +139,14 @@ export function useSessionSelection(rows: TreeRow[]) {
     /** The list of the last selection change (for the phone's "Select all"). */
     list,
     /** "Select all N": the whole list (`fullList`), on the server. */
-    selectWholeList: () => setWholeList(fullList() !== null),
+    selectWholeList: () => {
+      setExcept(new Set());
+      setWholeList(fullList() !== null);
+    },
     /** The list that "Select all N" covers, while it is on. A poll that loads new rows keeps it. */
     wholeList: wholeList && selected.size > 0 ? list : null,
+    /** The rows unchecked while "Select all N" is on: the server action leaves them out. */
+    wholeExcept: except,
     /** What a key acts on: the selection, else the cursor's session. */
     keyTargets: (cursorSession: SessionListItem | null): SessionListItem[] =>
       selected.size > 0 ? sessions() : cursorSession ? [cursorSession] : [],

@@ -3,7 +3,8 @@
  * `l` opens its Later part alone (sessions already in Later go straight
  * back to the Inbox, with no menu). It opens at a point (`PointMenu`, plan
  * Phase 4). "Move to group…" opens the move dialog (Phase 5). "Open in
- * split" opens the row in the split pane (Phase 8).
+ * split" opens the row in the split pane (Phase 8). "Star session" stars the
+ * row's session (it lists under Starred).
  */
 
 import {
@@ -16,7 +17,9 @@ import {
   Inbox,
   Mail,
   MailOpen,
+  Star,
 } from "lucide-react";
+import { useSessionFavorite } from "@/api/hooks/use-favorites";
 import type { SessionListItem } from "@/api/types";
 import {
   DropdownMenuItem,
@@ -88,6 +91,7 @@ function RowMenuItems({
   const allDone = targets.every((row) => row.readState === "done");
   const allLater = targets.every((row) => row.readState === "later");
   const anyUnread = targets.some((row) => row.readState === "unread");
+  const star = useSessionFavorite(session.root.id);
 
   return (
     <>
@@ -112,6 +116,12 @@ function RowMenuItems({
             <Columns2 />
             Open in split
             <MenuKey>V</MenuKey>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={star.disabled} onSelect={star.toggle}>
+            <Star
+              className={star.favorite ? "fill-current text-status-warning-strong" : undefined}
+            />
+            {star.favorite ? "Unstar session" : "Star session"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {canTriage ? (

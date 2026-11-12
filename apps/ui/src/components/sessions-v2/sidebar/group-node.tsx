@@ -2,17 +2,20 @@
  * A container row in the sidebar: a section box (Inbox, Later, Done, No
  * group), a group, or an owner under Shared with me (SPEC R4, R5). It shows
  * its icon, its name, a chevron when it has subgroups (the one fold
- * control), a group's star, the group menu "⋯" and a "+" on hover or on
+ * control), a group's star and Hide, the group menu "⋯" and a "+" on hover or on
  * the keyboard cursor, and the counts. The actions sit next to the counts
  * and never cover them. My groups and No group take dropped rows (plan
  * Phase 5). Source groups are read-only: no menu, no "+", and no drops.
  */
 
 import {
+  Activity,
   AlarmClock,
   Archive,
   ChevronDown,
   Ellipsis,
+  Eye,
+  EyeOff,
   Hash,
   Inbox,
   Lock,
@@ -24,7 +27,7 @@ import {
   User,
 } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, memo, type ReactNode, useRef, useState } from "react";
-import { useKeyFavorite } from "@/api/hooks/use-favorites";
+import { useHiddenGroup, useKeyFavorite } from "@/api/hooks/use-favorites";
 import type { SessionSectionCounts } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -49,6 +52,7 @@ import { useGroupDroppable } from "./use-row-drag";
 
 export const SECTION_META: Record<SessionSection, { label: string; icon: LucideIcon }> = {
   inbox: { label: "Inbox", icon: Inbox },
+  working: { label: "Working", icon: Activity },
   later: { label: "Later", icon: AlarmClock },
   done: { label: "Done", icon: Archive },
   nogroup: { label: "No group", icon: SquareDashed },
@@ -360,12 +364,13 @@ function GroupNodeView({
   const { dropRef, isOver } = useGroupDroppable(row.key, dropKey);
   const counts = row.counts;
   const foldTip = row.open ? "Hide subgroups" : "Show subgroups";
-  // Every group can be starred (a use case), read-only source groups too. Threads cannot.
+  // Every group can be starred (a use case) and hidden, read-only source groups too. Threads cannot.
   const starKey = renaming ? null : groupStarKey(row);
   const star = useKeyFavorite(starKey);
+  const hide = useHiddenGroup(starKey);
   const actionCount = renaming
     ? 0
-    : Number(starKey !== null) + Number(Boolean(onMenu)) + Number(Boolean(onNewSession));
+    : 2 * Number(starKey !== null) + Number(Boolean(onMenu)) + Number(Boolean(onNewSession));
   return (
     <TreeRow
       ref={dropRef}
@@ -378,7 +383,10 @@ function GroupNodeView({
       data-drop-over={isOver ? "true" : undefined}
       onClick={(event) => onRowClick(row.key, event)}
       onContextMenu={onMenu ? (event) => onMenu(row.key, event) : undefined}
-      className="h-7 text-data data-[drop-over=true]:bg-primary/10 data-[drop-over=true]:ring-1 data-[drop-over=true]:ring-primary/60 data-[drop-over=true]:ring-inset"
+      className={cn(
+        "h-7 text-data data-[drop-over=true]:bg-primary/10 data-[drop-over=true]:ring-1 data-[drop-over=true]:ring-primary/60 data-[drop-over=true]:ring-inset",
+        row.type === "group" && row.hidden && "text-muted-foreground",
+      )}
     >
       <span className="grid size-4 shrink-0 place-items-center">
         {listSelect ? (
@@ -482,11 +490,13 @@ function GroupNodeView({
       <span
         className={cn(
           "relative flex min-w-0 grow basis-0 items-center justify-end",
-          actionCount === 3
-            ? "min-w-19"
-            : actionCount === 2
-              ? "min-w-12.5"
-              : actionCount === 1 && "min-w-6",
+          actionCount === 4
+            ? "min-w-25.5"
+            : actionCount === 3
+              ? "min-w-19"
+              : actionCount === 2
+                ? "min-w-12.5"
+                : actionCount === 1 && "min-w-6",
           // A thread's name is a session title: it truncates, and its counts stay whole.
           row.type === "group" && row.node.thread && "min-w-max",
         )}
@@ -533,6 +543,19 @@ function GroupNodeView({
                     star.favorite && "fill-current text-status-warning-strong",
                   )}
                 />
+              </RowAction>
+            ) : null}
+            {starKey !== null ? (
+              <RowAction
+                label={hide.favorite ? "Show this group again" : "Hide this group"}
+                disabled={hide.disabled}
+                onClick={hide.toggle}
+              >
+                {hide.favorite ? (
+                  <Eye aria-hidden className="size-3.5" />
+                ) : (
+                  <EyeOff aria-hidden className="size-3.5" />
+                )}
               </RowAction>
             ) : null}
             {onMenu ? (

@@ -5,6 +5,7 @@
 // Relative imports only: `bun:test` runs this from the repo root.
 
 import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { sourceOfGroupKey } from "../../lib/session-groups";
 import { getSessionsShow, type SessionsShow } from "../../lib/sessions-show";
 import { sidebarListParams } from "../../lib/sessions-v2";
 import type {
@@ -55,10 +56,11 @@ function optimisticRow(action: TriageAction): RowPatch {
 }
 
 /**
- * Whether a list page still holds a row in `state`. Inbox, group, and No
- * group lists hold Inbox sessions only (read or unread), as the server does.
- * Later, Done, and Unread lists hold their own state. Any other list (the
- * legacy view) holds every state.
+ * Whether a list page still holds a row in `state`. Inbox, Working, group,
+ * and No group lists hold Inbox sessions only (read or unread), as the
+ * server does. A source group (Slack, ...) holds every state. Later, Done,
+ * and Unread lists hold their own state. Any other list (the legacy view)
+ * holds every state.
  */
 function listHolds(params: SessionListParams | undefined, state: SessionReadState): boolean {
   switch (params?.triage) {
@@ -68,8 +70,10 @@ function listHolds(params: SessionListParams | undefined, state: SessionReadStat
     case "done":
       return state === params.triage;
     case "inbox":
+    case "working":
       return state === "read" || state === "unread";
   }
+  if (params?.groupKey && sourceOfGroupKey(params.groupKey)) return true;
   if (params?.groupKey || params?.keyPrefix || params?.noGroup) {
     return state === "read" || state === "unread";
   }

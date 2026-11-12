@@ -51,7 +51,7 @@ const putFavorite = route({
         row: UserFavoriteSchema.nullable(),
       }),
     },
-    400: { description: "Invalid asset key for a key favorite" },
+    400: { description: "Invalid asset key for a key or hidden-key favorite" },
     401: { description: "No authenticated principal context" },
   },
 });
@@ -96,7 +96,8 @@ export async function handleFavorites(
       return true;
     }
     let itemId = parsed.body.itemId;
-    if (parsed.body.itemType === "key") {
+    // A group key (a star or a hidden group) is stored normalized.
+    if (parsed.body.itemType === "key" || parsed.body.itemType === "hidden-key") {
       try {
         itemId = normalizeAssetKey(itemId);
       } catch (error) {

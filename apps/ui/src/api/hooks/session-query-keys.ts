@@ -40,6 +40,8 @@ export interface UseSessionsOptions {
   keyPrefix?: string;
   /** Exactly this group, not its subgroups (sessions v2). */
   groupKey?: string;
+  /** Only these root task ids, in any read state (the sidebar's starred sessions). */
+  ids?: string[];
   /** Sessions in no group (sessions v2). */
   noGroup?: boolean;
   /** Read-state section: Inbox, Later, Done, or every unread session (sessions v2). */
