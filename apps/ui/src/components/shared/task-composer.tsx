@@ -61,6 +61,7 @@ import {
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useComposerDraft } from "@/lib/composer-drafts";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
 
@@ -98,6 +99,12 @@ export interface TaskComposerProps {
   onCreated?: (task: AgentTask) => void;
   /** Controlled draft. Omit both to keep the draft internal. */
   value?: string;
+  /**
+   * The internal draft's key in the composer drafts store
+   * (`lib/composer-drafts.ts`): it survives a reload, and every composer on
+   * the key shares it, so the owner need not hold (or re-render on) the text.
+   */
+  draftKey?: string;
   onValueChange?: (next: string) => void;
   /**
    * Extra action-row buttons (the session panel's "Add screenshot"). Receives
@@ -253,6 +260,7 @@ export function TaskComposer({
   onCreated,
   value,
   onValueChange,
+  draftKey,
   renderActions,
   fullWidth,
   bar,
@@ -265,7 +273,7 @@ export function TaskComposer({
   // The role's verbs: a follow-up creates a task, steering needs its own verb.
   const mayCreate = useCan("task.create.own");
   const maySteer = useCan("task.steer.own");
-  const [internalDraft, setInternalDraft] = useState("");
+  const { text: internalDraft, setText: setInternalDraft } = useComposerDraft(draftKey);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
@@ -279,7 +287,7 @@ export function TaskComposer({
       if (!isControlled) setInternalDraft(next);
       onValueChange?.(next);
     },
-    [isControlled, onValueChange],
+    [isControlled, onValueChange, setInternalDraft],
   );
 
   const invalidateSent = (taskId: string, parentTaskId: string | undefined) => {

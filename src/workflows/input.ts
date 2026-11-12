@@ -1,3 +1,4 @@
+import { renderAutomationTokens } from "../be/automation-preflight";
 import { getAgentById, getSwarmConfigs } from "../be/db";
 import { can } from "../rbac/can";
 import { isSensitiveKey } from "../utils/secret-scrubber";
@@ -57,13 +58,19 @@ export async function resolveInputValue(value: string): Promise<string> {
 /**
  * Input keys whose value `resolveInputValue` reads with the API server's own
  * authority: `${ENV_VAR}` (server process env) or `secret.NAME` (global secrets).
- * Writers may store these only with `config.read.secrets`.
+ * Writers may store these only with `config.read.secrets`. The run renders
+ * `params` into input before resolving it, so a key counts when its stored or
+ * its param-rendered value is a ref.
  */
-export function serverRefInputKeys(input: Record<string, unknown> | null | undefined): string[] {
+export function serverRefInputKeys(
+  input: Record<string, unknown> | null | undefined,
+  params?: Record<string, unknown> | null,
+): string[] {
   if (!input) return [];
-  return Object.entries(input)
-    .filter(([, v]) => typeof v === "string" && (/^\$\{(.+)\}$/.test(v) || v.startsWith("secret.")))
-    .map(([k]) => k);
+  const rendered = params ? renderAutomationTokens(input, params) : input;
+  const isRef = (v: unknown) =>
+    typeof v === "string" && (/^\$\{(.+)\}$/.test(v) || v.startsWith("secret."));
+  return Object.keys(input).filter((k) => isRef(input[k]) || isRef(rendered[k]));
 }
 
 export function serverRefInputDeniedMessage(keys: string[]): string {

@@ -24,6 +24,7 @@ import {
   type UserFunction,
 } from "@/lib/company-profile";
 import type { NotificationDefinition } from "@/lib/notifications/definitions";
+import { randomUUID } from "../../lib/uuid";
 
 /** The first step's button: the click emails the invite, so it says so. */
 const REQUEST_SUBMIT_LABEL = "Send me the Slack Connect invite";
@@ -162,7 +163,7 @@ export function SlackConnectInviteCard({
     // Optional: an unset role stays out of the request and the event.
     const userFunction = optionValue(USER_FUNCTIONS, values.user_function);
     const role = userFunction ? { user_function: userFunction } : {};
-    const sent = { email: value, userFunction, submissionId: crypto.randomUUID() };
+    const sent = { email: value, userFunction, submissionId: randomUUID() };
     setRequest(sent);
     try {
       await requestInvite(value, { submission_id: sent.submissionId, moment, ...role });

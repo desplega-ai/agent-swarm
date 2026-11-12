@@ -180,6 +180,9 @@ const SessionTreeResponseSchema = z.object({
   labels: z.record(z.string(), z.string()).optional(),
   groups: z.array(SessionTreeGroupSchema),
   inbox: SessionSectionCountsSchema,
+  working: SessionSectionCountsSchema.describe(
+    "Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox.",
+  ),
   later: SessionSectionCountsSchema,
   done: SessionSectionCountsSchema,
   noGroup: SessionSectionCountsSchema,
@@ -589,13 +592,15 @@ const listSessions = route({
     keyPrefix: SessionKeyFilterSchema.optional(),
     /** Exact asset group, including direct resource leaves. */
     groupKey: SessionKeyFilterSchema.optional(),
+    /** Comma-separated root task ids (the first 200 count): only these sessions, in any read state. */
+    ids: z.string().optional(),
     /** Shared and viewer-personal namespace roots and direct resource leaves. */
     noGroup: z
       .enum(["true", "false"])
       .transform((v) => v === "true")
       .optional(),
-    /** Chain-wide read state or Inbox section. */
-    triage: z.enum(["inbox", "later", "done", "unread"]).optional(),
+    /** Chain-wide read state, or the Inbox or Working section. */
+    triage: z.enum(["inbox", "working", "later", "done", "unread"]).optional(),
     /** Latest chain status or pending human attention. */
     status: z.enum(["running", "failed", "needs"]).optional(),
     /** Requester anywhere in the chain or active share recipient. */
@@ -668,19 +673,21 @@ const triageSessionListRoute = route({
   pattern: ["api", "session-triage"],
   summary: "Triage every session of one sidebar list",
   description:
-    "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+    "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.",
   tags: ["Sessions"],
   body: z
     .object({
       action: z.enum(["done", "inbox", "read", "unread"]),
       /** The list: one of Inbox, Later, Done, No group, or a group. */
-      triage: z.enum(["inbox", "later", "done"]).optional(),
+      triage: z.enum(["inbox", "working", "later", "done"]).optional(),
       noGroup: z.boolean().optional(),
       groupKey: SessionKeyFilterSchema.optional(),
       show: SessionShowSchema,
       hideSource: z.array(z.string().min(1)).max(32).optional(),
       /** Root sources to keep; an empty array keeps none. */
       showSource: z.array(z.string().min(1)).max(32).optional(),
+      /** Root task ids to leave out: rows unchecked after 'Select all N'. */
+      exceptIds: z.array(z.string().min(1)).max(500).optional(),
     })
     .refine((body) => [body.triage, body.noGroup, body.groupKey].filter(Boolean).length === 1, {
       message: "Name exactly one list: triage, noGroup, or groupKey",
@@ -1055,6 +1062,11 @@ export async function handleSessions(
       contextKeyPrefix: parsed.query.contextKeyPrefix,
       keyPrefix: parsed.query.keyPrefix,
       groupKey: parsed.query.groupKey,
+      rootIds: parsed.query.ids
+        ?.split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, 200),
       noGroup: parsed.query.noGroup,
       triage: parsed.query.triage,
       status: parsed.query.status,
@@ -1132,10 +1144,10 @@ export async function handleSessions(
       jsonError(res, "Pick a user to triage sessions", 400);
       return true;
     }
-    const { action, show, ...list } = parsed.body;
+    const { action, show, exceptIds, ...list } = parsed.body;
     const updated = await triageSessionList(
       actor.userId,
-      { ...list, mine: show !== "all" },
+      { ...list, exceptRootIds: exceptIds, mine: show !== "all" },
       action,
       actor.readAll,
     );

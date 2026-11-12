@@ -1506,6 +1506,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack#leaving-a-thread`,
       },
       {
+        key: "SLACK_SESSION_MIRROR",
+        label: "Mirror Sessions follow-ups to Slack",
+        description:
+          "Copy a follow-up a person sends from Sessions into the session's Slack thread. `both` posts the message (with the person's name and avatar) and the reply card, `reply` only the reply card, `off` neither. Slack Connect channels are always skipped.",
+        kind: "enum",
+        options: ["off", "reply", "both"],
+        defaultValue: "both",
+        docsUrl: `${DOCS}ui/configuration#slack-session-mirror`,
+      },
+      {
         key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
         label: "Block external Slack channels",
         description:

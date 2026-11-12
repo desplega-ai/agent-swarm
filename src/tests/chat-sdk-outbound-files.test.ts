@@ -473,7 +473,9 @@ describe("chat-reply agent-fs paths", () => {
     try {
       const { result, note } = await failedRead("thoughts/leaky/offline.pdf");
 
-      expect(note).toContain("`offline.pdf`: could not be read (connect failed using [REDACTED:");
+      expect(note).toContain(
+        "`offline.pdf`: could not be read (agent-fs is unreachable: connect failed using [REDACTED:",
+      );
       expect(result).not.toContain(SHORT_FS_KEY);
       expect(note).not.toContain(SHORT_FS_KEY);
     } finally {

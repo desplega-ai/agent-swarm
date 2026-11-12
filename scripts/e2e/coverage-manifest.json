@@ -407,7 +407,7 @@
       "scenarios": ["knowledge-boards"]
     },
     "primitive-objects": {
-      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key",
+      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; the file.changed receiver refuses unsigned, forged and oversized deliveries",
       "scenarios": ["knowledge-objects"]
     },
     "prompt-template-override": {
@@ -471,13 +471,15 @@
       "scenarios": ["core-sessions", "core-use-case-group"]
     },
     "sheets": {
-      "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, ctx.sheets in both executors",
+      "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
       "scenarios": [
         "knowledge-sheets",
         "knowledge-sheets-edges",
         "knowledge-sheets-limits",
         "knowledge-sheets-scripts",
-        "knowledge-sheets-values"
+        "knowledge-sheets-values",
+        "knowledge-sheets-xlsx",
+        "knowledge-sheets-xlsx-scripts"
       ]
     },
     "skills-lifecycle": {
@@ -498,10 +500,13 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
+        "slack-session-mirror",
+        "slack-session-mirror-render-v2",
+        "slack-session-mirror-delegation",
         "slack-failed-task",
         "slack-assistant-file-share",
         "slack-reaction-override",

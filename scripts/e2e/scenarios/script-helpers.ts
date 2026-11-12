@@ -160,14 +160,15 @@ export type Stub = {
  * to loopback, so connections, MCP servers and script `fetch` can target this server.
  */
 export function startStub(
-  handler: (request: Request, body: string) => Response | Promise<Response>,
+  handler: (request: Request, body: string, bytes: Uint8Array) => Response | Promise<Response>,
 ): Stub {
   const seen: Stub["seen"] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      const body = await request.text();
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      const body = new TextDecoder().decode(bytes);
       const url = new URL(request.url);
       seen.push({
         method: request.method,
@@ -175,7 +176,7 @@ export function startStub(
         headers: Object.fromEntries(request.headers.entries()),
         body,
       });
-      return handler(request, body);
+      return handler(request, body, bytes);
     },
   });
   const port = server.port ?? 0;

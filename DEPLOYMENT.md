@@ -266,7 +266,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.322`
 - `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.167.1`
+- `CODEX_VERSION=0.167.2`
 - `OPENCODE_VERSION=2.2.7` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
@@ -525,7 +525,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.24. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.25. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 

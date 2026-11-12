@@ -150,9 +150,10 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
 
         // New ref input, or a new definition over stored ref input, decides
         // where server-resolved values go: both need config.read.secrets.
-        const refKeys = serverRefInputKeys(
-          input !== undefined ? input : definition ? existing.input : undefined,
-        );
+        const refKeys =
+          input !== undefined || definition
+            ? serverRefInputKeys(input !== undefined ? input : existing.input, existing.params)
+            : [];
         if (
           refKeys.length > 0 &&
           !(requestInfo.agentId && (await agentMaySetServerRefInput(requestInfo.agentId)))

@@ -186,6 +186,8 @@ declare module "swarm-sdk" {
     title: string | null;
     fileVersion: number | null;
     ownerAgentId: string | null;
+    /** Set when agent-fs reported the file deleted. */
+    deletedAt: string | null;
     createdAt: string;
     updatedAt: string;
     /** Live app link to the file. */
@@ -194,11 +196,16 @@ declare module "swarm-sdk" {
 
   export interface PrimitiveReindexReport {
     scanned: number;
+    /** Files whose version matched the index: checked, not re-read. */
+    unchanged: number;
     adopted: string[];
     restored: string[];
     missing: string[];
     conflicts: Array<{ path: string; reason: string }>;
+    /** More files remain (at most 50 reads, 16 MiB or 20 s per call): run again. */
     truncated: boolean;
+    /** Which limit cut this call short; null when the pass finished. */
+    cutBy: "files" | "reads" | "time" | "bytes" | null;
   }
 
   /**
@@ -257,6 +264,36 @@ declare module "swarm-sdk" {
     freezeRows: number;
   }
 
+  export interface SheetImportXlsxArgs {
+    /** An `.xlsx` on the drive. */
+    sourcePath: string;
+    /** The new sheet; must end in `.sheet.json`. */
+    path: string;
+    title?: string;
+  }
+
+  export interface SheetImportXlsxResult {
+    message: string;
+    object: PrimitiveObject;
+    link: string | null;
+    /** What the file had that a sheet cannot hold. */
+    dropped: string[];
+  }
+
+  export interface SheetExportXlsxArgs extends SheetRef {
+    targetPath: string;
+    /** Replace `targetPath` when it exists. */
+    overwrite?: boolean;
+  }
+
+  export interface SheetExportXlsxResult {
+    message: string;
+    path: string;
+    link: string | null;
+    /** What the sheet had that xlsx cannot carry. */
+    dropped: string[];
+  }
+
   export interface SheetResult {
     message: string;
     /** agent-fs version after the call. */
@@ -296,6 +333,10 @@ declare module "swarm-sdk" {
     addTab(
       args: SheetRef & { name: string; after?: string },
     ): Promise<SheetResult & { tabs: string[] }>;
+    /** Create-only. Reads an `.xlsx` on the drive. `dropped` names what a sheet cannot hold (styles, charts, comments, frozen panes, ...). Limits: 5 MiB, 20 tabs, 50,000 cells. */
+    importXlsx(args: SheetImportXlsxArgs): Promise<SheetImportXlsxResult>;
+    /** Create-only unless `overwrite`. `targetPath` must end in `.xlsx`. `dropped` names what xlsx cannot carry (frozen panes, spilled array cells). */
+    exportXlsx(args: SheetExportXlsxArgs): Promise<SheetExportXlsxResult>;
   }
 
   /** Palette names (Excalidraw's open-color) or a #rrggbb background. */
@@ -511,6 +552,8 @@ declare module "swarm-sdk" {
     sheets_appendRows(args: SheetRef & { tab: string; rows: SheetCellInput[][] }): Promise<unknown>;
     sheets_clearRange(args: SheetRangeArgs): Promise<unknown>;
     sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
+    sheets_importXlsx(args: SheetImportXlsxArgs): Promise<unknown>;
+    sheets_exportXlsx(args: SheetExportXlsxArgs): Promise<unknown>;
     // --- boards (prefer ctx.boards.*, which unwraps and throws) ---
     boards_create(args: BoardCreateArgs): Promise<unknown>;
     boards_get(args: BoardRef & { detail?: "summary" | "full" }): Promise<unknown>;

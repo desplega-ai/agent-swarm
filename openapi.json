@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.11.0",
+    "version": "2.12.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2547,7 +2547,9 @@
               "workflow",
               "schedule",
               "agent-fs-path",
-              "key"
+              "key",
+              "session",
+              "hidden-key"
             ]
           },
           "itemId": {
@@ -24823,7 +24825,9 @@
                 "workflow",
                 "schedule",
                 "agent-fs-path",
-                "key"
+                "key",
+                "session",
+                "hidden-key"
               ]
             },
             "required": false,
@@ -24903,7 +24907,9 @@
                       "workflow",
                       "schedule",
                       "agent-fs-path",
-                      "key"
+                      "key",
+                      "session",
+                      "hidden-key"
                     ]
                   },
                   "itemId": {
@@ -24941,7 +24947,9 @@
                         "workflow",
                         "schedule",
                         "agent-fs-path",
-                        "key"
+                        "key",
+                        "session",
+                        "hidden-key"
                       ]
                     },
                     "itemId": {
@@ -24969,7 +24977,7 @@
             }
           },
           "400": {
-            "description": "Invalid asset key for a key favorite",
+            "description": "Invalid asset key for a key or hidden-key favorite",
             "content": {
               "application/json": {
                 "schema": {
@@ -33652,6 +33660,103 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/agent-fs-webhook/{id}": {
+      "post": {
+        "summary": "Receive agent-fs file.changed events that keep primitive objects in sync",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Receiver id the swarm registered with agent-fs"
+            },
+            "required": true,
+            "description": "Receiver id the swarm registered with agent-fs",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event applied or ignored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "updated",
+                        "tombstoned",
+                        "restored",
+                        "moved",
+                        "ignored"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "path"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not a valid event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown receiver, missing headers or invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 64 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent-fs could not be read; agent-fs retries the delivery",
             "content": {
               "application/json": {
                 "schema": {
@@ -58422,6 +58527,14 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "ids",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "enum": [
                 "true",
@@ -58437,6 +58550,7 @@
               "type": "string",
               "enum": [
                 "inbox",
+                "working",
                 "later",
                 "done",
                 "unread"
@@ -59002,6 +59116,30 @@
                         "needsYou"
                       ]
                     },
+                    "working": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        },
+                        "unread": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "needsYou": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unread",
+                        "running",
+                        "needsYou"
+                      ],
+                      "description": "Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox."
+                    },
                     "later": {
                       "type": "object",
                       "properties": {
@@ -59094,6 +59232,7 @@
                   "required": [
                     "groups",
                     "inbox",
+                    "working",
                     "later",
                     "done",
                     "noGroup",
@@ -59119,7 +59258,7 @@
     "/api/session-triage": {
       "post": {
         "summary": "Triage every session of one sidebar list",
-        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.",
+        "description": "The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.",
         "tags": [
           "Sessions"
         ],
@@ -59147,6 +59286,7 @@
                     "type": "string",
                     "enum": [
                       "inbox",
+                      "working",
                       "later",
                       "done"
                     ]
@@ -59180,6 +59320,14 @@
                       "minLength": 1
                     },
                     "maxItems": 32
+                  },
+                  "exceptIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 500
                   }
                 },
                 "required": [

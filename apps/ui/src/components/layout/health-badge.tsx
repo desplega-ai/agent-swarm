@@ -44,6 +44,7 @@ import {
   type WorkerTarget,
   workerStartCommand,
 } from "@/lib/worker-start-commands";
+import { randomUUID } from "../../lib/uuid";
 
 export const HEALTH_DOT_CLASS: Record<StatusHealth, string> = {
   ok: "bg-status-success",
@@ -399,7 +400,7 @@ function SetupHelp({
     const checkList = checks.map(({ milestone }) => `${milestone.id}:${milestone.state}`).join(",");
     const pickText = picks ? ` target=${picks.target} harness=${picks.harness}` : "";
     submit.mutate({
-      submission_id: crypto.randomUUID(),
+      submission_id: randomUUID(),
       user_id: userId,
       swarm_version: __APP_VERSION__,
       email: email.trim(),

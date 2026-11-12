@@ -67,7 +67,7 @@ RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemo
 FROM ubuntu:24.04 AS worker-base
 
 # Bump on each Node security release.
-ARG NODE_VERSION=22.23.4-1nodesource1
+ARG NODE_VERSION=22.23.5-1nodesource1
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -97,7 +97,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     postgresql-client \
     nodejs=${NODE_VERSION} \
     gh \
-    && test "$(node -v)" = "v22.23.4" \
+    && test "$(node -v)" = "v22.23.5" \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Bun once, system-wide at /usr/local/bin (shared by root and worker —
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.167.1
+ARG CODEX_VERSION=0.167.2
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -231,7 +231,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.24
+ARG AGENT_FS_VERSION=0.18.25
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -548,8 +548,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.1
-ARG DSH_SHA512=8a347d504558906d7943f43bf49cefccb07340e41f73add52ebf67e9f969c073e1af920a9f6531b619d2a2da3f3fd97ba8677ba4fbc8d516ba4d6ecb1f7a0aa6
+ARG DSH_VERSION=0.2.2-rc.2
+ARG DSH_SHA512=27bdbbaf60b8ef5c767185c68ea6740fd4f5672698403147fd89f1f22abef39a2c94ce27932e584c19db02e4edc4c856ee7858f30b8011f8e314243e2ba4b083
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -564,9 +564,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794398443-g0895e3
-ARG AMP_SHA512_AMD64=f29c5af3769f941e2b07c076a1f17009aaae432e38a804ab6b2578dda3b0ab9091e8f8dd1b8177fe1053ab9391ec27b2b6c8b5cf2f4cac1b71a3f5034ff70672
-ARG AMP_SHA512_ARM64=4d7d3438c65789303f0a7ca7910331e76a7a4b92eb4c7b39398d144dc2827c7e212561c06c7df0f4bf99a13d4b6770138c73cbf00c83428025cfb040a1b245d2
+ARG AMP_VERSION=0.0.1794470450-g3a6702
+ARG AMP_SHA512_AMD64=f5dc4307e15f1b29bcb8f7a591d8c509c534911e3aea8122f2099c6d2df4f03bbee5225e478f206c7b7174fb1d16f09c7241946208da0793aa46daa5d164d528
+ARG AMP_SHA512_ARM64=1bce4f947190048cb9082d7fe1d515e6aeb6329d65e5b5209cb702b0f29682311e013aacd12a3be8ae7cdc910bd42ab547221edb52f6cbbf09916211873af811
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -655,9 +655,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.2.0
-ARG KIRO_CLI_SHA256_AMD64=98a5c8b1fd8d46a4b96fc20ffef7ba6a0740772e725b77a641a2dde1a9bb8638
-ARG KIRO_CLI_SHA256_ARM64=9154499bfeb77046c8e3033961110cb13be3accfc274260742e89e6d0800cd77
+ARG KIRO_CLI_VERSION=3.2.1
+ARG KIRO_CLI_SHA256_AMD64=2551acc2e50139aef81ae6a2d3d1f9b6e96ebf77c7475df54cc4bb8b918fd662
+ARG KIRO_CLI_SHA256_ARM64=cd1a11049594d8b6364d2be03c01e79db7526d00284a964f9882469efc193a0d
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \

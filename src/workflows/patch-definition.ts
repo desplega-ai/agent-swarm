@@ -38,9 +38,10 @@ export async function patchWorkflowDefinition(options: {
   snapshotOptional?: boolean;
   updates?: Omit<Parameters<typeof updateWorkflow>[1], "definition">;
   /**
-   * False when the caller lacks `config.read.secrets`. A workflow whose stored
-   * input holds `${ENV_VAR}` / `secret.NAME` references then refuses the
-   * patch, since a node edit decides where those resolved values go.
+   * False when the caller lacks `config.read.secrets`. A workflow whose input
+   * holds `${ENV_VAR}` / `secret.NAME` references, stored or rendered from its
+   * (new) params, then refuses the patch, since a node or params edit decides
+   * where those resolved values go.
    */
   serverRefInputAllowed?: boolean;
 }): Promise<PatchWorkflowDefinitionResult> {
@@ -50,7 +51,7 @@ export async function patchWorkflowDefinition(options: {
     if (!existing) return { ok: false, reason: "not_found" };
 
     if (options.serverRefInputAllowed === false) {
-      const refKeys = serverRefInputKeys(existing.input);
+      const refKeys = serverRefInputKeys(existing.input, updates?.params ?? existing.params);
       if (refKeys.length > 0) {
         return { ok: false, reason: "forbidden", errors: [serverRefInputDeniedMessage(refKeys)] };
       }

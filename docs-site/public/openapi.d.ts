@@ -8316,7 +8316,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8360,7 +8360,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8376,13 +8376,13 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
                     };
                 };
-                /** @description Invalid asset key for a key favorite */
+                /** @description Invalid asset key for a key or hidden-key favorite */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -13481,6 +13481,87 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/agent-fs-webhook/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive agent-fs file.changed events that keep primitive objects in sync */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Receiver id the swarm registered with agent-fs */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event applied or ignored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            action: "updated" | "tombstoned" | "restored" | "moved" | "ignored";
+                            path: string;
+                            id?: string;
+                            reason?: string;
+                        };
+                    };
+                };
+                /** @description Body is not a valid event */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unknown receiver, missing headers or invalid signature */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 64 KiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs could not be read; agent-fs retries the delivery */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -22953,8 +23034,9 @@ export interface paths {
                     contextKeyPrefix?: string;
                     keyPrefix?: string;
                     groupKey?: string;
+                    ids?: string;
                     noGroup?: "true" | "false";
-                    triage?: "inbox" | "later" | "done" | "unread";
+                    triage?: "inbox" | "working" | "later" | "done" | "unread";
                     status?: "running" | "failed" | "needs";
                     withUserId?: string;
                     fields?: "full" | "slim";
@@ -23123,6 +23205,13 @@ export interface paths {
                                 running: number;
                                 needsYou: number;
                             };
+                            /** @description Inbox sessions with a task running and nothing for the person to answer. They list under Working, not Inbox. */
+                            working: {
+                                total: number;
+                                unread: number;
+                                running: number;
+                                needsYou: number;
+                            };
                             later: {
                                 total: number;
                                 unread: number;
@@ -23179,7 +23268,7 @@ export interface paths {
         put?: never;
         /**
          * Triage every session of one sidebar list
-         * @description The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters). Needs a picked user.
+         * @description The bulk bar's 'Select all N': Done, back to the Inbox, read, or unread for every session that one sessions v2 list shows the caller (the `GET /api/sessions?scope=tree` filters), minus `exceptIds`. Needs a picked user.
          */
         post: {
             parameters: {
@@ -23194,7 +23283,7 @@ export interface paths {
                         /** @enum {string} */
                         action: "done" | "inbox" | "read" | "unread";
                         /** @enum {string} */
-                        triage?: "inbox" | "later" | "done";
+                        triage?: "inbox" | "working" | "later" | "done";
                         noGroup?: boolean;
                         groupKey?: string;
                         /**
@@ -23204,6 +23293,7 @@ export interface paths {
                         show?: "mine" | "all";
                         hideSource?: string[];
                         showSource?: string[];
+                        exceptIds?: string[];
                     };
                 };
             };
@@ -32270,7 +32360,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;

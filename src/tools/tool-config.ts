@@ -227,7 +227,7 @@ export const DEFERRED_TOOLS = new Set([
   "object-list",
   "object-reindex",
 
-  // Sheets (8)
+  // Sheets (10)
   "sheet-create",
   "sheet-get",
   "sheet-list",
@@ -236,6 +236,8 @@ export const DEFERRED_TOOLS = new Set([
   "sheet-append-rows",
   "sheet-clear-range",
   "sheet-add-tab",
+  "sheet-import-xlsx",
+  "sheet-export-xlsx",
   // Boards (6)
   "board-create",
   "board-get",

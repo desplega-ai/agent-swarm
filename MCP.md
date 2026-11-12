@@ -186,6 +186,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [sheet-append-rows](#sheet-append-rows)
   - [sheet-clear-range](#sheet-clear-range)
   - [sheet-add-tab](#sheet-add-tab)
+  - [sheet-import-xlsx](#sheet-import-xlsx)
+  - [sheet-export-xlsx](#sheet-export-xlsx)
   - [board-create](#board-create)
   - [board-get](#board-get)
   - [board-list](#board-list)
@@ -1454,7 +1456,7 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `definition` | `unknown` | Yes | - | The workflow definition with nodes (each node has id, type, config, and optional next/retry/validation) |
 | `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks. |
 | `cooldown` | `unknown` | No | - | Optional cooldown configuration to prevent re-triggering too frequently |
-| `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
+| `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals). Env var and secret references require config.read.secrets (the lead agent). |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
 | `vcsRepo` | `string` | No | - | Default VCS repo for all agent-task nodes (e.g. org/repo) |
 | `triggerSchema` | `object` | No | - | Optional JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. |
@@ -2199,7 +2201,7 @@ Get a primitive object on your default agent-fs drive by `id` or `path`. `missin
 
 **List primitive objects**
 
-List primitive objects on your default agent-fs drive, newest first. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
+List primitive objects on your default agent-fs drive, newest first. Hides objects whose file agent-fs reported deleted. Filter by `kind` and path `prefix`. Pagination via limit (max 200) and offset.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2212,7 +2214,7 @@ List primitive objects on your default agent-fs drive, newest first. Filter by `
 
 **Reindex primitive objects**
 
-Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted.
+Rebuild the object index from the files on your default agent-fs drive. Keeps each file's embedded id; a file with no id (for example a stock Excalidraw save) keeps the id of the row at its path, else gets a new one written back. Rows whose file is gone are reported as `missing`, never deleted. Files whose version matches the index are checked, not re-read (`unchanged`); one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, so run it again while `truncated` is true (`cutBy` names the limit). agent-fs file.changed webhooks keep the index current between runs when the swarm can register them.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2316,6 +2318,31 @@ Add an empty tab (1-31 characters, none of `[]:*?/\`), at the end or after the t
 | `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
 | `name` | `string` | Yes | - | New tab name. |
 | `after` | `string` | No | - | Insert after this tab; default: at the end. |
+
+### sheet-import-xlsx
+
+**Import xlsx as sheet**
+
+Import an `.xlsx` file from your default agent-fs drive as a new sheet, as your own agent-fs identity. Create-only: refuses when the sheet path exists. Keeps tabs, values, formulas (recomputed), number formats, column widths and merges. `dropped` lists what the file had that a sheet cannot hold (styles, charts, comments, frozen panes, and so on). Limits: 5 MiB file, 20 tabs, 50,000 cells; nothing is created when a limit refuses.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourcePath` | `string` | Yes | - | Drive path of the `.xlsx` file to import. |
+| `path` | `string` | Yes | - | Drive path for the new sheet, ending in `.sheet.json`. |
+| `title` | `string` | No | - | - |
+
+### sheet-export-xlsx
+
+**Export sheet as xlsx**
+
+Export a sheet to an `.xlsx` file on your default agent-fs drive. Writes formulas with their cached values, number formats, column widths and merges. `dropped` lists what the file cannot carry (frozen panes, spilled array cells). Create-only: refuses when `targetPath` exists unless `overwrite` is true.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `targetPath` | `string` | Yes | - | Drive path for the new file, ending in `.xlsx`. |
+| `overwrite` | `boolean` | No | - | Replace `targetPath` when it exists. |
 
 ### board-create
 

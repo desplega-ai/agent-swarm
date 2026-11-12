@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useAllUsersScopeChanges, useWithinAllUsersScope } from "../../lib/all-users-scope";
 import { allTasksTerminal } from "../../lib/task-activity";
 import { buildRetryInput } from "../../lib/task-retry";
+import { randomUUID } from "../../lib/uuid";
 import { api } from "../client";
 import type {
   AgentTask,
@@ -332,7 +333,7 @@ function rollbackTaskQueries(queryClient: QueryClient, context?: TaskMutationCon
 
 function optimisticCreatedTask(input: CreateTaskInput): TaskWithLogs {
   const now = new Date().toISOString();
-  const id = `optimistic:${crypto.randomUUID()}`;
+  const id = `optimistic:${randomUUID()}`;
   return {
     id,
     agentId: input.agentId ?? null,
