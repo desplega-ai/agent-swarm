@@ -22,11 +22,13 @@ const GUARDED: Array<[owner: object, name: string, targets: number[]]> = [
       ["symlink", [1]],
       ["link", [1]],
     ] as const
-  ).flatMap(([name, targets]): Array<[object, string, number[]]> => [
-    [promises, name, [...targets]],
-    [fs, `${name}Sync`, [...targets]],
-    [fs, name, [...targets]],
-  ]),
+  ).flatMap(
+    ([name, targets]): Array<[object, string, number[]]> => [
+      [promises, name, [...targets]],
+      [fs, `${name}Sync`, [...targets]],
+      [fs, name, [...targets]],
+    ],
+  ),
   [fs, "createWriteStream", [0]],
 ];
 

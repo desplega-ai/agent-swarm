@@ -20,7 +20,9 @@ const protectedPaths = injected ? JSON.parse(injected) : undefined;
 // checkout would contain a profile file (a clone at /workspace itself).
 const checkout = resolve(import.meta.dir, "..", "..", "..");
 const containsProfile = ["/workspace/SOUL.md", "/tmp/identity-baselines.json"]
-  .concat(protectedPaths ? [join(protectedPaths.workspace, "SOUL.md"), protectedPaths.baselines] : [])
+  .concat(
+    protectedPaths ? [join(protectedPaths.workspace, "SOUL.md"), protectedPaths.baselines] : [],
+  )
   .some((path) => resolve(path).startsWith(checkout + sep));
 installProfileWriteGuard(
   containsProfile ? join(tmpdir(), `write-guard-no-sandbox-${crypto.randomUUID()}`) : checkout,

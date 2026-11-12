@@ -18,6 +18,7 @@ switch (operation) {
       stderr: "inherit",
     });
     process.exit(await grandchild.exited);
+    break;
   }
   default:
     throw new Error(`Unknown probe: ${operation}`);

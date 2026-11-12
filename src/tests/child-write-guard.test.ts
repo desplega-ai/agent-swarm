@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { WRITE_GUARD_PATHS_ENV } from "./fixtures/child-write-guard";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
+type GuardPaths = { workspace: string; baselines: string };
+
 const probe = join(import.meta.dir, "fixtures", "child-write-guard-probe.ts");
 const roots: string[] = [];
 afterEach(async () => {
@@ -29,15 +31,18 @@ async function simulatedWorkspace() {
   return paths;
 }
 
-async function expectIntact(paths: { workspace: string; baselines: string }) {
+async function expectIntact(paths: GuardPaths) {
   expect(await Bun.file(join(paths.workspace, "SOUL.md")).text()).toBe("simulated soul intact");
   expect(await Bun.file(paths.baselines).text()).toBe("simulated baselines intact");
 }
 
 /** Spawned like api-drain-worker-e2e: an explicit env that does not carry the parent's. */
-function spawnProbe(target: string, operation: string, paths: object) {
+function spawnProbe(target: string, operation: string, paths: GuardPaths) {
   return runChild([process.execPath, probe, target, operation], {
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", [WRITE_GUARD_PATHS_ENV]: JSON.stringify(paths) },
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      [WRITE_GUARD_PATHS_ENV]: JSON.stringify(paths),
+    },
   });
 }
 
