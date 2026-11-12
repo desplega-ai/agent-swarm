@@ -3,6 +3,7 @@ import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { isInTransaction } from "../../db-client";
 import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
@@ -63,6 +64,10 @@ export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
   WHERE rowid > ? ORDER BY rowid LIMIT ?`;
 /** How long search reuses one health result. Stale by at most this long. */
 export const SEARCH_HEALTH_TTL_MS = 60_000;
+/** Off-loop health refreshes a search retries when writes invalidate them, before it counts in-process. */
+const SEARCH_HEALTH_MAX_REFRESHES = 3;
+/** An off-loop health refresh, for the DB and generation it started under. */
+type SearchHealthRefresh = { db: unknown; generation: number; promise: Promise<MemoryHealth> };
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
@@ -211,8 +216,12 @@ export class SqliteMemoryStore implements MemoryStore {
   private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
   private searchHealthCache: { health: MemoryHealth; db: unknown; at: number } | null = null;
-  private searchHealthRefresh: Promise<MemoryHealth> | null = null;
-  /** Bumped when the cache is dropped, so a refresh that started before the drop is not stored. */
+  /** The newest refresh. An older one may still run; its result is checked, not shared. */
+  private searchHealthRefresh: SearchHealthRefresh | null = null;
+  /**
+   * Bumped when the cache is dropped. A refresh that started under an older
+   * generation is neither stored nor returned to a search waiting on it.
+   */
   private searchHealthGeneration = 0;
 
   constructor() {
@@ -1595,7 +1604,7 @@ export class SqliteMemoryStore implements MemoryStore {
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
           // The row now misses from memory_vec: search must see the fallback.
-          this.dropSearchHealth();
+          this.invalidateSearchHealth();
         }
       }
     });
@@ -1804,24 +1813,50 @@ export class SqliteMemoryStore implements MemoryStore {
   private async searchHealth(): Promise<MemoryHealth> {
     const db = getDb();
     const cached = this.searchHealthCache;
+    const inTransaction = isInTransaction();
     // The db check drops a result that outlived a DB swap (tests reinit it).
     if (cached && cached.db === db) {
       if (Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) return cached.health;
       // A stale "vec" is at worst one refresh old; a stale fallback is
       // awaited so a repaired index is seen on the next search.
-      if (cached.health.retrievalMode === "vec") {
-        this.refreshSearchHealth(db).catch(() => {});
+      if (cached.health.retrievalMode === "vec" && !inTransaction) {
+        if (!this.searchHealthRefresh) this.startSearchHealthRefresh(db).promise.catch(() => {});
         return cached.health;
       }
     }
-    return this.refreshSearchHealth(db);
+    // A transaction must see its own writes, which may still roll back, and
+    // its search reads run in-process anyway: count there, share and store nothing.
+    if (inTransaction) return this.getHealth();
+    return this.currentSearchHealth();
   }
 
-  /** One refresh at a time: concurrent searches share it. */
-  private refreshSearchHealth(db: unknown): Promise<MemoryHealth> {
-    if (this.searchHealthRefresh) return this.searchHealthRefresh;
+  /**
+   * A health result that no write invalidated before it returns. Searches
+   * share one refresh per DB and generation; one a write overtook is retried,
+   * for every search waiting on it.
+   */
+  private async currentSearchHealth(): Promise<MemoryHealth> {
+    for (let attempt = 0; attempt < SEARCH_HEALTH_MAX_REFRESHES; attempt++) {
+      const db = getDb();
+      const generation = this.searchHealthGeneration;
+      const inFlight = this.searchHealthRefresh;
+      const refresh =
+        inFlight && inFlight.db === db && inFlight.generation === generation
+          ? inFlight
+          : this.startSearchHealthRefresh(db);
+      const health = await refresh.promise;
+      if (getDb() === db && this.searchHealthGeneration === generation) return health;
+    }
+    // Writes kept overtaking the off-loop counts. In-process, no write can
+    // land between the count and the return.
+    const health = this.getHealth();
+    this.searchHealthCache = { health, db: getDb(), at: Date.now() };
+    return health;
+  }
+
+  private startSearchHealthRefresh(db: unknown): SearchHealthRefresh {
     const generation = this.searchHealthGeneration;
-    const refresh = (async () => {
+    const promise = (async () => {
       let health: MemoryHealth;
       try {
         health = this.healthFromCounts(await this.getHealthCountsOffLoop());
@@ -1834,10 +1869,12 @@ export class SqliteMemoryStore implements MemoryStore {
         this.searchHealthCache = { health, db, at: Date.now() };
       return health;
     })().finally(() => {
-      this.searchHealthRefresh = null;
+      // A newer refresh may have replaced this one: leave it in place.
+      if (this.searchHealthRefresh === entry) this.searchHealthRefresh = null;
     });
-    this.searchHealthRefresh = refresh;
-    return refresh;
+    const entry: SearchHealthRefresh = { db, generation, promise };
+    this.searchHealthRefresh = entry;
+    return entry;
   }
 
   /**
@@ -1846,7 +1883,17 @@ export class SqliteMemoryStore implements MemoryStore {
    * recount on the next search, and a stale "vec" is at worst one TTL old.
    */
   private noteVecWrite(): void {
-    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.dropSearchHealth();
+    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.invalidateSearchHealth();
+  }
+
+  /**
+   * Drop now, so no refresh in flight is stored or returned, and again once
+   * the writing transaction commits: a refresh that starts before the commit
+   * reads the snapshot without this write.
+   */
+  private invalidateSearchHealth(): void {
+    this.dropSearchHealth();
+    if (isInTransaction()) getDbClient().afterCommit(() => this.dropSearchHealth());
   }
 
   private dropSearchHealth(): void {
