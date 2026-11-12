@@ -348,6 +348,9 @@ export const LEGACY_POLICY = {
   "comb.presence": operatorOrUser,
   "fs.join.own": anyAuthenticated,
   "page.delete.any": leadOrResourceOwner,
+  // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
+  "objects.read": operatorOrUser,
+  "objects.write": operatorOrUser,
   "app.manage": anyAuthenticated,
   "app.use": anyAuthenticated,
   "script.global.write": leadOnly,

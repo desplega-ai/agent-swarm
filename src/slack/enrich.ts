@@ -138,7 +138,8 @@ export interface SlackParticipantResolution {
  *
  *   1. Existing `(slack, <userId>)` alias, else the Slack profile email.
  *   2. A company-domain email links or creates the user (`role: "member"`);
- *      any other email links an existing user and never creates one.
+ *      any other email links an existing user and never creates one. A sender
+ *      from another Slack team is never linked by email.
  *   3. No email: recorded in the unmapped tracker, trust `unknown`.
  *
  * Trust: `users.metadata.audience` wins; then another Slack team (`userTeam`
@@ -165,8 +166,11 @@ export async function resolveSlackParticipant(
   let user = await findUserByExternalId("slack", slackUserId);
   const email = user?.email || (await enrichSlackUserEmail(client, slackUserId));
 
-  if (!user && email) {
-    if (!foreignTeam && isCompanyEmail(email, domains)) {
+  // Another team's profile email is set by that team, not verified as owned by
+  // this sender, so it never links to an existing user. An operator can link
+  // the alias by hand.
+  if (!user && email && !foreignTeam) {
+    if (isCompanyEmail(email, domains)) {
       // Pull the cached name back out for the user-row hints. The kv read is
       // cheap (single primary-key lookup) and avoids a second `users.info`.
       const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);

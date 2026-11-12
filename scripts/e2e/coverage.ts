@@ -170,7 +170,7 @@ function literalLength(template: string): number {
   return template.replace(PARAM_RE, "").length;
 }
 
-function groupFor(template: string): string {
+export function groupFor(template: string): string {
   const parts = template.split("/").filter(Boolean);
   return parts[0] === "api" ? (parts[1] ?? "api") : (parts[0] ?? "root");
 }

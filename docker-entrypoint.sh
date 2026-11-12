@@ -303,6 +303,26 @@ fi
 # user inherits this after the gosu drop below.
 git config --system --add safe.directory '*' 2>/dev/null || true
 
+# ---- prek pre-push for every clone ----
+# install-repo-hooks.sh only reaches a repo's registered clonePath. A fresh clone
+# elsewhere (mktemp dirs in workflow briefs, second checkouts) had no pre-push hook.
+# A system init.templateDir makes git copy a pre-push shim into every new clone;
+# the shim runs prek only for repos the auto-clone loop below lists in
+# agent-swarm.prekHookRepo (registered with hooks enabled). Skipped when prek is absent.
+PREK_TEMPLATE_SHIM=/usr/local/lib/agent-swarm/prek-template-pre-push
+if command -v prek >/dev/null 2>&1 && [ -f "$PREK_TEMPLATE_SHIM" ]; then
+    GIT_TEMPLATE_DIR_SWARM=/usr/local/share/agent-swarm/git-template
+    rm -rf "$GIT_TEMPLATE_DIR_SWARM"
+    mkdir -p "$GIT_TEMPLATE_DIR_SWARM/hooks"
+    # Keep git's stock template (info/exclude, description) next to the shim.
+    [ -d /usr/share/git-core/templates ] && cp -R /usr/share/git-core/templates/. "$GIT_TEMPLATE_DIR_SWARM/" 2>/dev/null
+    rm -f "$GIT_TEMPLATE_DIR_SWARM"/hooks/*.sample
+    install -m 755 "$PREK_TEMPLATE_SHIM" "$GIT_TEMPLATE_DIR_SWARM/hooks/pre-push" \
+        && git config --system init.templateDir "$GIT_TEMPLATE_DIR_SWARM" \
+        || echo "Warning: could not set up the prek git template"
+fi
+git config --system --unset-all agent-swarm.prekHookRepo 2>/dev/null || true
+
 # Create personal workspace subdirectories.
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
@@ -782,6 +802,14 @@ if [ -n "$AGENT_ID" ]; then
                     gosu worker bash -c "$CLONE_CMD" || echo "  Warning: Could not clone ${REPO_NAME}"
                 fi
 
+                if [ "$REPO_HOOKS_ENABLED" = "true" ]; then
+                    # host/owner/name, the same normalization as prek-template-pre-push.
+                    # shortcut: only autoClone repos are listed; a hooks-enabled repo with
+                    # autoClone=false still gets hooks in its clonePath via the runner, not
+                    # in ad-hoc clones. Upgrade by listing from /api/repos without the filter.
+                    REPO_HOOK_SLUG=$(printf '%s\n' "$REPO_URL" | sed -e 's#^[A-Za-z+]*://##' -e 's#^[^@/]*@##' -e 's#:#/#' -e 's#\.git$##' -e 's#/*$##' | tr 'A-Z' 'a-z')
+                    git config --system --add agent-swarm.prekHookRepo "$REPO_HOOK_SLUG" 2>/dev/null || true
+                fi
                 if [ "$REPO_HOOKS_ENABLED" = "true" ] && [ -d "${REPO_DIR}/.git" ]; then
                     gosu worker /usr/local/bin/install-repo-hooks.sh "$REPO_DIR" "$REPO_NAME" || echo "  Warning: Could not install git hooks for ${REPO_NAME}"
                 fi
