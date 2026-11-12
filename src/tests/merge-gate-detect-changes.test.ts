@@ -95,18 +95,6 @@ const mv = (from: string, to: string) => async (repo: string) => {
 };
 
 describe("merge-gate detect-changes flags", () => {
-  test(
-    "changing the UI E2E image runs the Playwright pin check",
-    async () => {
-      const path = ".github/workflows/ui-e2e.yml";
-      const flags = await flagsFor([path], async (repo) => {
-        await Bun.write(join(repo, path), "edited\n");
-      });
-      expect(flags.lint).toBe("true");
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
   test.each([
     "src/types.ts",
     "src/providers/swarm-events-shared.ts",

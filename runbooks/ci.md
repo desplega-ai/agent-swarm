@@ -52,8 +52,6 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 
 ### ui-e2e.yml secrets and variables
 
-The test shards run in the version-pinned official Playwright Noble container, which includes browsers and their system libraries. They do not run `playwright install --with-deps` or fetch apt packages. Keep the image version aligned with `packages/ui-e2e/package.json` and `Dockerfile.worker`; `bun run check:playwright-version` checks all three. When updating the image version, resolve and update its pinned registry digest too. The report job runs on the hosted runner.
-
 | Name | Kind | Owner | Feeds | When absent |
 |---|---|---|---|---|
 | `E2E_AGENT_FS_API_URL` | secret | Taras | agent-fs upload of screenshots and traces | Uploads skipped, comment stays text-only |

@@ -40,15 +40,7 @@ jobs:
   test:
     if: github.repository == 'desplega-ai/agent-swarm'
     runs-on: ubuntu-latest
-    container:
-      # Browsers and their system libraries are preinstalled; no apt mirror dependency.
-      # Keep this version in sync with packages/ui-e2e/package.json.
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
-      options: --init --shm-size=1g
     timeout-minutes: 25
-    defaults:
-      run:
-        shell: bash
     permissions:
       contents: read
     strategy:
@@ -60,17 +52,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
-      - name: Setup Bun
-        # The Playwright image has npm but does not include unzip for setup-bun.
-        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Read Playwright version
+        id: playwright
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./packages/ui-e2e/package.json').devDependencies['@playwright/test']")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/ui-e2e
 
       - name: Run UI E2E shard
         id: run
