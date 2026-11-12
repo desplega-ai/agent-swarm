@@ -25906,7 +25906,7 @@
             }
           },
           "403": {
-            "description": "A non-admin user token named an email other than its own",
+            "description": "The caller is not the operator key or a user, or a non-admin user token named an email other than its own",
             "content": {
               "application/json": {
                 "schema": {

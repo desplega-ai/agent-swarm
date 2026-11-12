@@ -9134,7 +9134,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A non-admin user token named an email other than its own */
+                /** @description The caller is not the operator key or a user, or a non-admin user token named an email other than its own */
                 403: {
                     headers: {
                         [name: string]: unknown;
