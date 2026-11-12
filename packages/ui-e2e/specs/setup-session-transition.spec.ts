@@ -77,7 +77,7 @@ for (const width of [1280, 390]) {
           await page.getByRole("button", { name: "Switch to light mode", exact: true }).click();
         }
         const task = "e2e first task session handoff";
-        await page.getByPlaceholder("Describe a goal for the swarm").fill(task);
+        await page.getByRole("textbox", { name: "Describe a goal for the swarm" }).fill(task);
         await page.getByRole("button", { name: "Send first task", exact: true }).click();
         await expect(page).toHaveURL(/\/sessions\/[^/?]+/);
         await page.screenshot({ path: testInfo.outputPath("handoff.png") });

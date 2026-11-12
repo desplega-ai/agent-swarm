@@ -1,4 +1,4 @@
-import { type UseQueryResult, useQueries } from "@tanstack/react-query";
+import { type UseQueryResult, useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import type { SessionsListResponse } from "@/api/types";
@@ -34,6 +34,10 @@ export function useTreeRows({
   expanded,
   creating,
   paused,
+  starredGroups,
+  hiddenGroups,
+  showHidden,
+  starredSessionIds,
 }: {
   me: string | null;
   myGroups: MyGroups;
@@ -42,6 +46,11 @@ export function useTreeRows({
   /** A new group's name field shows under this parent. */
   creating: string | null;
   paused: boolean;
+  starredGroups: ReadonlySet<string>;
+  hiddenGroups: ReadonlySet<string>;
+  showHidden: boolean;
+  /** The starred sessions: they list under Starred. */
+  starredSessionIds: ReadonlySet<string>;
 }) {
   const tree = myGroups.treeQuery.data;
   const { groups, localGroups } = myGroups;
@@ -50,9 +59,29 @@ export function useTreeRows({
   const containers = useMemo(
     () =>
       tree && groups
-        ? buildTreeRows({ tree, groups, isOpen, expanded, lists: NO_LISTS }).containers
+        ? buildTreeRows({
+            tree,
+            groups,
+            isOpen,
+            expanded,
+            lists: NO_LISTS,
+            starredGroups,
+            hiddenGroups,
+            showHidden,
+          }).containers
         : EARLY_CONTAINERS.filter(isOpen),
-    [tree, groups, isOpen, expanded],
+    [tree, groups, isOpen, expanded, starredGroups, hiddenGroups, showHidden],
+  );
+  const starredIds = useMemo(() => [...starredSessionIds].sort(), [starredSessionIds]);
+  // shortcut: one page of 50 starred sessions, no paging; page it if people star more.
+  const starredQuery = useQuery({
+    ...sessionsQueryOptions(me, { ids: starredIds, limit: 50 }),
+    enabled: !paused && starredIds.length > 0,
+  });
+  const starred = useMemo(
+    (): ListState | undefined =>
+      starredIds.length > 0 ? { data: starredQuery.data, failed: starredQuery.isError } : undefined,
+    [starredIds, starredQuery.data, starredQuery.isError],
   );
   const states = useQueries({
     queries: containers.map((container) =>
@@ -96,7 +125,24 @@ export function useTreeRows({
       lists,
       creating,
       localGroups,
+      starredGroups,
+      hiddenGroups,
+      showHidden,
+      starred,
     });
     return { rows, updating };
-  }, [tree, groups, isOpen, expanded, lists, creating, localGroups, treeStale]);
+  }, [
+    tree,
+    groups,
+    isOpen,
+    expanded,
+    lists,
+    creating,
+    localGroups,
+    treeStale,
+    starredGroups,
+    hiddenGroups,
+    showHidden,
+    starred,
+  ]);
 }

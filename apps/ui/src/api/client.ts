@@ -3709,6 +3709,8 @@ class ApiClient {
     keyPrefix?: string;
     /** Exactly this group, not its subgroups (sessions v2). */
     groupKey?: string;
+    /** Only these root task ids, in any read state (the sidebar's starred sessions). */
+    ids?: string[];
     /** Sessions in no group: `shared/` or the viewer's `personal/<id>/` (sessions v2). */
     noGroup?: boolean;
     /** Read-state section (sessions v2). */
@@ -3730,6 +3732,7 @@ class ApiClient {
     if (opts?.showSource !== undefined) params.set("showSource", opts.showSource);
     if (opts?.keyPrefix) params.set("keyPrefix", opts.keyPrefix);
     if (opts?.groupKey) params.set("groupKey", opts.groupKey);
+    if (opts?.ids) params.set("ids", opts.ids.join(","));
     if (opts?.noGroup) params.set("noGroup", "true");
     if (opts?.triage) params.set("triage", opts.triage);
     if (opts?.status) params.set("status", opts.status);
@@ -3760,11 +3763,13 @@ class ApiClient {
    */
   async triageSessionList(body: {
     action: "done" | "inbox" | "read" | "unread";
-    triage?: "inbox" | "later" | "done";
+    triage?: "inbox" | "working" | "later" | "done";
     noGroup?: boolean;
     groupKey?: string;
     show?: "all";
     showSource?: string[];
+    /** Sessions to leave out: rows unchecked after "Select all N". */
+    exceptIds?: string[];
   }): Promise<{ updated: number }> {
     const url = `${this.getBaseUrl()}/api/session-triage`;
     const res = await fetch(url, {

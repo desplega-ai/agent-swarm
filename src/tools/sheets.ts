@@ -6,8 +6,10 @@ import {
   appendSheetRows,
   clearSheetRange,
   createSheet,
+  exportSheetXlsx,
   getSheet,
   getSheetRange,
+  importSheetXlsx,
   listSheets,
   setSheetRange,
 } from "@/be/primitives/sheets/service";
@@ -59,6 +61,8 @@ const dataShape = {
   changed: z.number().optional(),
   recalculated: z.number().optional(),
   cleared: z.number().optional(),
+  path: z.string().optional(),
+  dropped: z.array(z.string()).optional(),
 };
 
 const outputSchema = swarmToolOutputSchema(dataShape);
@@ -306,6 +310,68 @@ export const registerSheetAddTabTool = (server: McpServer) => {
         {
           data: { yourAgentId: requestInfo.agentId, ...result.value },
         },
+      );
+    },
+  );
+};
+
+const dropMessage = (dropped: string[]) =>
+  dropped.length ? `Dropped: ${dropped.join(", ")}.` : "Nothing dropped.";
+
+export const registerSheetImportXlsxTool = (server: McpServer) => {
+  createToolRegistrar(server)(
+    "sheet-import-xlsx",
+    {
+      title: "Import xlsx as sheet",
+      annotations: WRITE,
+      description:
+        "Import an `.xlsx` file from your default agent-fs drive as a new sheet, as your own agent-fs identity. Create-only: refuses when the sheet path exists. Keeps tabs, values, formulas (recomputed), number formats, column widths and merges. `dropped` lists what the file had that a sheet cannot hold (styles, charts, comments, frozen panes, and so on). Limits: 5 MiB file, 20 tabs, 50,000 cells; nothing is created when a limit refuses.",
+      inputSchema: z.object({
+        sourcePath: z.string().min(1).describe("Drive path of the `.xlsx` file to import."),
+        path: z.string().min(1).describe("Drive path for the new sheet, ending in `.sheet.json`."),
+        title: z.string().max(200).optional(),
+      }),
+      outputSchema,
+    },
+    async ({ sourcePath, path, title }, requestInfo) => {
+      const result = await refusing(requestInfo.agentId, () =>
+        importSheetXlsx({ agentId: requestInfo.agentId, sourcePath, path, title }),
+      );
+      if ("error" in result) return result.error;
+      const { object, link, dropped } = result.value;
+      return toolOk(
+        `Imported ${sourcePath} as sheet ${object.id} at ${object.path}${link ? ` (${link})` : ""}. ${dropMessage(dropped)}`,
+        { data: { yourAgentId: requestInfo.agentId, ...result.value } },
+      );
+    },
+  );
+};
+
+export const registerSheetExportXlsxTool = (server: McpServer) => {
+  createToolRegistrar(server)(
+    "sheet-export-xlsx",
+    {
+      title: "Export sheet as xlsx",
+      annotations: WRITE,
+      description:
+        "Export a sheet to an `.xlsx` file on your default agent-fs drive. Writes formulas with their cached values, number formats, column widths and merges. `dropped` lists what the file cannot carry (frozen panes, spilled array cells). Create-only: refuses when `targetPath` exists unless `overwrite` is true.",
+      inputSchema: z.object({
+        id: z.string().min(1).optional().describe(ID),
+        path: z.string().min(1).optional().describe(PATH),
+        targetPath: z.string().min(1).describe("Drive path for the new file, ending in `.xlsx`."),
+        overwrite: z.boolean().optional().describe("Replace `targetPath` when it exists."),
+      }),
+      outputSchema,
+    },
+    async ({ id, path, targetPath, overwrite }, requestInfo) => {
+      const result = await refusing(requestInfo.agentId, () =>
+        exportSheetXlsx({ agentId: requestInfo.agentId, id, path, targetPath, overwrite }),
+      );
+      if ("error" in result) return result.error;
+      const r = result.value;
+      return toolOk(
+        `Exported to ${r.path}${r.link ? ` (${r.link})` : ""}. ${dropMessage(r.dropped)}`,
+        { data: { yourAgentId: requestInfo.agentId, ...r } },
       );
     },
   );

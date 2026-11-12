@@ -186,6 +186,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [sheet-append-rows](#sheet-append-rows)
   - [sheet-clear-range](#sheet-clear-range)
   - [sheet-add-tab](#sheet-add-tab)
+  - [sheet-import-xlsx](#sheet-import-xlsx)
+  - [sheet-export-xlsx](#sheet-export-xlsx)
   - [board-create](#board-create)
   - [board-get](#board-get)
   - [board-list](#board-list)
@@ -2316,6 +2318,31 @@ Add an empty tab (1-31 characters, none of `[]:*?/\`), at the end or after the t
 | `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
 | `name` | `string` | Yes | - | New tab name. |
 | `after` | `string` | No | - | Insert after this tab; default: at the end. |
+
+### sheet-import-xlsx
+
+**Import xlsx as sheet**
+
+Import an `.xlsx` file from your default agent-fs drive as a new sheet, as your own agent-fs identity. Create-only: refuses when the sheet path exists. Keeps tabs, values, formulas (recomputed), number formats, column widths and merges. `dropped` lists what the file had that a sheet cannot hold (styles, charts, comments, frozen panes, and so on). Limits: 5 MiB file, 20 tabs, 50,000 cells; nothing is created when a limit refuses.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourcePath` | `string` | Yes | - | Drive path of the `.xlsx` file to import. |
+| `path` | `string` | Yes | - | Drive path for the new sheet, ending in `.sheet.json`. |
+| `title` | `string` | No | - | - |
+
+### sheet-export-xlsx
+
+**Export sheet as xlsx**
+
+Export a sheet to an `.xlsx` file on your default agent-fs drive. Writes formulas with their cached values, number formats, column widths and merges. `dropped` lists what the file cannot carry (frozen panes, spilled array cells). Create-only: refuses when `targetPath` exists unless `overwrite` is true.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | Object id (from sheet-create or sheet-list). |
+| `path` | `string` | No | - | Drive path of the `.sheet.json` file, instead of `id`. |
+| `targetPath` | `string` | Yes | - | Drive path for the new file, ending in `.xlsx`. |
+| `overwrite` | `boolean` | No | - | Replace `targetPath` when it exists. |
 
 ### board-create
 

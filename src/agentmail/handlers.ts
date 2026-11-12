@@ -71,11 +71,13 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
 });
 
 /**
- * Extract bare email address from a from_ field like "Taras Yarema <t@desplega.ai>" or "t@desplega.ai".
+ * Extract the mailbox from one from_ entry like "Taras Yarema <t@desplega.ai>" or "t@desplega.ai".
+ * The mailbox is the trailing `<...>`; a display name may itself contain an address.
  */
 function extractEmailFromField(from: string): string | undefined {
-  const angleMatch = from.match(/<([^>]+@[^>]+)>/);
-  if (angleMatch?.[1]) return angleMatch[1].toLowerCase();
+  const angleMatch = from.match(/<([^<>]+@[^<>]+)>\s*$/);
+  if (angleMatch?.[1]) return angleMatch[1].trim().toLowerCase();
+  if (from.includes("<")) return undefined;
   const bareMatch = from.match(/[\w.+-]+@[\w.-]+\.\w+/);
   return bareMatch?.[0]?.toLowerCase();
 }
@@ -116,18 +118,16 @@ export function isInboxAllowed(inboxId: string, filter: string | undefined): boo
 
 /**
  * Check if a sender address is allowed by the filter (full addresses or domains).
- * Returns true if no filter is set or at least one sender matches an entry.
+ * Returns true if no filter is set or the first From entry matches an entry.
+ * Only the first entry counts: handleMessageReceived takes the sender from it.
  */
 export function isSenderAllowed(
   from: AgentMailMessage["from_"],
   filter: string | undefined,
 ): boolean {
   if (!filter) return true;
-  const fromAddresses = Array.isArray(from) ? from : [from || ""];
-  return fromAddresses.some((addr) => {
-    const emailMatch = addr.match(/<([^>]+)>/);
-    return matchesAddressFilter(emailMatch?.[1] ?? addr, filter);
-  });
+  const email = extractEmailFromField((Array.isArray(from) ? from[0] : from) ?? "");
+  return email !== undefined && matchesAddressFilter(email, filter);
 }
 
 // Simple deduplication cache (60 second TTL)
@@ -190,10 +190,15 @@ export async function handleMessageReceived(
   // primary identifier for inbound email events, so always auto-create when
   // missing. findOrCreateUserByEmail emits identity_added (new row) or
   // auto_merge (existing row matched via primary email or emailAliases).
-  const senderEmail = extractEmailFromField(from);
-  const senderName = extractNameFromField(from);
+  // A sender that failed authentication is never linked to a user.
+  const senderEntry = (Array.isArray(message.from_) ? message.from_[0] : message.from_) ?? "";
+  const senderEmail = extractEmailFromField(senderEntry);
+  const senderName = extractNameFromField(senderEntry);
+  const senderAuthenticated =
+    payload.event_type !== "message.received.unauthenticated" &&
+    !message.labels?.includes("unauthenticated");
   let requestedByUserId: string | undefined;
-  if (senderEmail) {
+  if (senderEmail && senderAuthenticated) {
     const { user } = await findOrCreateUserByEmail(
       senderEmail,
       { name: senderName ?? undefined },
@@ -203,13 +208,15 @@ export async function handleMessageReceived(
   }
   // Render the resolved canonical name (or the UNKNOWN sentinel) for
   // agent-visible text — never the raw From header. `findOrCreateUserByEmail`
-  // above auto-creates on a real email, so `senderEmail` present implies
-  // resolved; a missing/unparseable From header has no machine-carried
-  // identifier at all, so it renders the same non-name sentinel shape via
-  // the identity primitive rather than echoing the raw header string.
-  const senderDisplay = senderEmail
-    ? renderIdentity(await resolveIdentityByEmail(senderEmail))
-    : renderIdentity({ status: "unknown", kind: "email", externalId: "unknown" });
+  // above auto-creates on a real email, so an authenticated `senderEmail`
+  // implies resolved; an unauthenticated sender or a missing/unparseable From
+  // header renders the non-name sentinel shape via the identity primitive
+  // rather than echoing the raw header string.
+  const senderDisplay = renderIdentity(
+    senderEmail && senderAuthenticated
+      ? await resolveIdentityByEmail(senderEmail)
+      : { status: "unknown", kind: "email", externalId: senderEmail ?? "unknown" },
+  );
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event

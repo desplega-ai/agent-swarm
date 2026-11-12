@@ -4,6 +4,7 @@
  */
 
 import {
+  Activity as ActivityIcon,
   AlarmClock,
   Archive,
   Hash,
@@ -34,6 +35,7 @@ import { type Activity, activityOf } from "../sidebar/session-row";
 
 const SECTION_TABS: Record<SessionSection, { title: string; icon: LucideIcon }> = {
   inbox: { title: "Inbox", icon: Inbox },
+  working: { title: "Working", icon: ActivityIcon },
   later: { title: "Later", icon: AlarmClock },
   done: { title: "Done", icon: Archive },
   nogroup: { title: "No group", icon: SquareDashed },

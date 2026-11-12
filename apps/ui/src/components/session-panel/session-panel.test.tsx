@@ -30,6 +30,17 @@ mock.module("@/components/ui/popover", () => require("../ui/popover"));
 mock.module("@/hooks/use-debounced-value", () => require("../../hooks/use-debounced-value"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/lib/composer-paste", () => require("../../lib/composer-paste"));
+mock.module("@/lib/composer-drafts", () => require("../../lib/composer-drafts"));
+mock.module("@/components/shared/error-boundary", () => ({
+  ErrorBoundary: ({ children }: { children: React.ReactNode }) => children,
+}));
+// The editor chunk never loads here: the dock's textarea stand-in is the box under test.
+mock.module("@/components/sessions/composer-editor", () => ({
+  default: () => {
+    throw new Promise(() => {});
+  },
+}));
 mock.module("@/components/sessions/composer-dock", () => require("../sessions/composer-dock"));
 mock.module("@/components/sessions/use-start-session", () =>
   require("../sessions/use-start-session"),

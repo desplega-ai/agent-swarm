@@ -192,6 +192,10 @@ function FavoriteRow({ favorite }: { favorite: UserFavorite }) {
       return <ScheduleRow id={favorite.itemId} />;
     case "agent-fs-path":
       return <PathRow id={favorite.itemId} />;
+    // Home does not list these: the Sessions sidebar reads them.
+    case "session":
+    case "hidden-key":
+      return null;
   }
 }
 

@@ -21,6 +21,11 @@ export function favoriteHref(itemType: FavoriteItemType, itemId: string): string
       const pin = parsePinId(itemId);
       return pin ? combPath(pin) : null;
     }
+    case "session":
+      return `/sessions/${encodeURIComponent(itemId)}`;
+    // A hidden group is a sidebar flag, not a favorite Home lists.
+    case "hidden-key":
+      return null;
   }
 }
 
@@ -37,6 +42,10 @@ export function favoriteKind(itemType: FavoriteItemType, itemId: string): string
       return "Schedule";
     case "agent-fs-path":
       return isFolderPath(itemId) ? "Folder" : "File";
+    case "session":
+      return "Session";
+    case "hidden-key":
+      return "Hidden group";
   }
 }
 

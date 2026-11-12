@@ -61,14 +61,17 @@ export interface WholeListOffer {
   /** The list's name: "Inbox", a group. */
   label: string;
   total: number;
-  /** On: the bar acts on all `total` sessions. */
+  /** On: the bar acts on all `total` sessions, less `except`. */
   on: boolean;
+  /** Rows unchecked while on: the bar leaves them out. */
+  except?: number;
   onSelect: () => void;
 }
 
 /**
  * The count words of the bulk bars: "All N in Inbox" while "Select all N" is
- * on, "10 of N" while it is offered, else "10 selected". The offer acts on
+ * on ("N-1 of N in Inbox" once a row is unchecked), "10 of N" while it is
+ * offered, else "10 selected". The offer acts on
  * the server by list, so it needs a picked user.
  */
 export function bulkCount(
@@ -78,8 +81,11 @@ export function bulkCount(
 ): { label: string; wholeOn: boolean; offer: WholeListOffer | null } {
   const wholeOn = whole?.on === true;
   const offer = whole && !wholeOn && canTriage ? whole : null;
+  const except = whole?.except ?? 0;
   const label = wholeOn
-    ? `All ${whole.total} in ${whole.label}`
+    ? except > 0
+      ? `${Math.max(0, whole.total - except)} of ${whole.total} in ${whole.label}`
+      : `All ${whole.total} in ${whole.label}`
     : offer
       ? `${count} of ${offer.total}`
       : `${count} selected`;
