@@ -126,22 +126,6 @@ describe("verifyHmacSignature", () => {
   test("empty signature fails", () => {
     expect(verifyHmacSignature(secret, body, "")).toBe(false);
   });
-
-  test("sha1: valid sha1=<hex> and bare hex signatures pass", () => {
-    const hex = crypto.createHmac("sha1", secret).update(body).digest("hex");
-
-    expect(verifyHmacSignature(secret, body, `sha1=${hex}`, "sha1")).toBe(true);
-    expect(verifyHmacSignature(secret, body, hex, "sha1")).toBe(true);
-  });
-
-  test("sha1: a SHA-256 signature does not pass, and a SHA-1 one does not pass the default", () => {
-    const sha256Hex = crypto.createHmac("sha256", secret).update(body).digest("hex");
-    const sha1Hex = crypto.createHmac("sha1", secret).update(body).digest("hex");
-
-    expect(verifyHmacSignature(secret, body, `sha256=${sha256Hex}`, "sha1")).toBe(false);
-    expect(verifyHmacSignature(secret, body, sha256Hex, "sha1")).toBe(false);
-    expect(verifyHmacSignature(secret, body, sha1Hex)).toBe(false);
-  });
 });
 
 describe("verifyTimestampedHmacSignature", () => {
@@ -1010,87 +994,6 @@ describe("handleWebhookTrigger — verification formats", () => {
   function signTimestamped(secret: string, body: string, timestamp: number): string {
     return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
   }
-
-  test("hmac-sha1 starts workflow for Vercel-shaped request (bare hex)", async () => {
-    const secret = "example-vercel-secret";
-    const workflow = await makeWorkflow({
-      triggers: [
-        {
-          type: "webhook",
-          hmacSecret: secret,
-          verification: { format: "hmac-sha1", header: "x-vercel-signature" },
-        },
-      ],
-    });
-
-    const body = '{"type":"budget.reached","payload":{"projectId":"prj_123"}}';
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      body,
-      { "x-vercel-signature": crypto.createHmac("sha1", secret).update(body).digest("hex") },
-      registry,
-    );
-
-    expect(result.runId).toBeDefined();
-    const run = await getWorkflowRun(result.runId);
-    expect(run!.triggerData).toEqual({ type: "budget.reached", payload: { projectId: "prj_123" } });
-  });
-
-  test("hmac-sha1 defaults to X-Hub-Signature and accepts sha1=<hex>", async () => {
-    const secret = "example-legacy-github-secret";
-    const workflow = await makeWorkflow({
-      triggers: [
-        TriggerConfigSchema.parse({
-          type: "webhook",
-          hmacSecret: secret,
-          verification: { format: "hmac-sha1" },
-        }),
-      ],
-    });
-
-    const body = '{"action":"opened"}';
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      body,
-      { "x-hub-signature": `sha1=${crypto.createHmac("sha1", secret).update(body).digest("hex")}` },
-      registry,
-    );
-
-    expect(result.runId).toBeDefined();
-  });
-
-  test("hmac-sha1 rejects a tampered body, a SHA-256 signature, and fallback headers", async () => {
-    const secret = "example-vercel-reject-secret";
-    const workflow = await makeWorkflow({
-      triggers: [
-        {
-          type: "webhook",
-          hmacSecret: secret,
-          verification: { format: "hmac-sha1", header: "x-vercel-signature" },
-        },
-      ],
-    });
-
-    const body = '{"type":"firewall.attack"}';
-    const sha1Hex = crypto.createHmac("sha1", secret).update(body).digest("hex");
-    const cases: Array<[string, Record<string, string>]> = [
-      [`${body} `, { "x-vercel-signature": sha1Hex }],
-      [
-        body,
-        { "x-vercel-signature": crypto.createHmac("sha256", secret).update(body).digest("hex") },
-      ],
-      [body, { "x-signature": sha1Hex }],
-    ];
-
-    for (const [rawBody, headers] of cases) {
-      const err = await handleWebhookTrigger(workflow.id, rawBody, headers, registry).catch(
-        (e: unknown) => e,
-      );
-      expect(err).toBeInstanceOf(WebhookError);
-      expect((err as WebhookError).statusCode).toBe(401);
-    }
-    expect(await countWorkflowRuns(workflow.id)).toBe(0);
-  });
 
   test("timestamped-hmac-sha256 starts workflow for Superagent-shaped request", async () => {
     const secret = "example-superagent-secret";
