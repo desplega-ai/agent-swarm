@@ -39,7 +39,7 @@ async function setConfig(
  */
 export const objectsHttp: Scenario = {
   name: "objects-http",
-  order: 599,
+  order: 601,
   async run(ctx) {
     const ownKey = `af_own_objhttp_${ctx.nonce}`;
     const serviceKey = `af_service_objhttp_${ctx.nonce}`;
