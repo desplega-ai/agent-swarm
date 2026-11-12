@@ -70,7 +70,7 @@ test.describe("invites", () => {
 
       // The Requester can start a task: the new-session composer shows.
       await ada.goto("/sessions");
-      await expect(ada.getByPlaceholder("What's the goal?")).toBeVisible();
+      await expect(ada.getByRole("textbox", { name: "What's the goal?" })).toBeVisible();
     } finally {
       await teammate.close();
     }

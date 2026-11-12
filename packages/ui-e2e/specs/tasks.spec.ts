@@ -118,7 +118,7 @@ test("Claude SDK enables Interrupt and sends steer through the real API @local",
     await interrupt.click();
     const message = `SDK redirect ${crypto.randomUUID()}`;
     await page
-      .getByPlaceholder("Steer the task…", { exact: true })
+      .getByRole("textbox", { name: "Steer the task…", exact: true })
       .filter({ visible: true })
       .fill(message);
     const response = page.waitForResponse(
