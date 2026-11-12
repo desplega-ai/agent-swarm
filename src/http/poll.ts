@@ -486,9 +486,11 @@ export async function handlePoll(
         // Check for pending tasks (assigned directly to this agent)
         // Only return a task if agent has capacity (server-side enforcement)
         if (await hasCapacity(myAgentId)) {
-          const pendingTask = await getPendingTaskForAgent(myAgentId);
+          // The probe also escalates when only an affinity-skip log row is due.
+          const pendingProbe = probe ? { skipLogDue: false } : undefined;
+          const pendingTask = await getPendingTaskForAgent(myAgentId, pendingProbe);
+          if (pendingProbe && (pendingTask || pendingProbe.skipLogDue)) return NEEDS_WRITE;
           if (pendingTask) {
-            if (probe) return NEEDS_WRITE;
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
