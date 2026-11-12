@@ -81,6 +81,14 @@ export type AgentFsCommentThread = {
 // A failed identity lookup is not asked again for this long.
 const SERVICE_USER_RETRY_MS = 60_000;
 
+// A stored key is a literal drive path: encode each segment so a `#`, `?` or `%`
+// in a name stays in the URL path. A task-scoped path is already encoded by normalizeName.
+function rawPath(scope: FileScope): string {
+  const path = providerPath(scope);
+  if (scope.key === undefined || scope.key === null || scope.key === "") return path;
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 export class AgentFsProvider implements FileStorageProvider {
   readonly id = "agent-fs";
   readonly capabilities = {
@@ -307,6 +315,13 @@ export class AgentFsProvider implements FileStorageProvider {
     return (await this.ops({ op: "comment-get", id }, drive)) as AgentFsCommentThread;
   }
 
+  /** Current version of one file from the `stat` op; null when agent-fs reports none. */
+  async currentVersion(scope: FileScope): Promise<number | null> {
+    const result = asRecord(await this.ops({ op: "stat", path: providerPath(scope) }, scope));
+    const version = result?.currentVersion;
+    return typeof version === "number" && Number.isFinite(version) ? version : null;
+  }
+
   /** `log` of one file (at most 200 versions). */
   async getFileVersions(drive: AgentFsDrive, path: string): Promise<AgentFsFileVersion[]> {
     const result = asRecord(await this.ops({ op: "log", path, limit: 200 }, drive));
@@ -429,7 +444,13 @@ export class AgentFsProvider implements FileStorageProvider {
           cause: error,
         });
       }
-      throw error;
+      // fetch rejects only when no response arrived: a refused or reset
+      // connection, DNS, TLS. Callers handle it like any other provider error.
+      throw new FilesError(
+        "Provider",
+        `agent-fs is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -437,7 +458,7 @@ export class AgentFsProvider implements FileStorageProvider {
 
   private rawUrl(scope: FileScope): string {
     const { orgId, driveId } = this.scopeFor(scope);
-    return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${providerPath(scope)}/raw`;
+    return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${rawPath(scope)}/raw`;
   }
 
   private scopeFor(scope?: Pick<FileScope, "orgId" | "driveId">): {

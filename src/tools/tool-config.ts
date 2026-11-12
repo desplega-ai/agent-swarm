@@ -227,6 +227,15 @@ export const DEFERRED_TOOLS = new Set([
   "object-list",
   "object-reindex",
 
+  // Sheets (8)
+  "sheet-create",
+  "sheet-get",
+  "sheet-list",
+  "sheet-get-range",
+  "sheet-set-range",
+  "sheet-append-rows",
+  "sheet-clear-range",
+  "sheet-add-tab",
   // Boards (6)
   "board-create",
   "board-get",

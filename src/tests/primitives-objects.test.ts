@@ -22,7 +22,12 @@ const fake = Bun.serve({
   port: 0,
   async fetch(req) {
     const url = new URL(req.url);
-    bearers.push(req.headers.get("authorization") ?? "");
+    // Webhook registration runs as the service key by design
+    // (primitives-object-webhooks.test.ts); every other call must not.
+    const op = url.pathname.endsWith("/ops")
+      ? String(((await req.clone().json()) as { op?: unknown }).op)
+      : "";
+    if (!op.startsWith("webhook-")) bearers.push(req.headers.get("authorization") ?? "");
     if (req.headers.get("authorization") !== `Bearer ${OWN_KEY}`) {
       return new Response("unauthorized", { status: 401 });
     }
@@ -140,7 +145,7 @@ describe("primitive objects", () => {
     await expect(createObject({ agentId, kind: "board", path: "b.json" })).rejects.toThrow(
       "must end with '.excalidraw'",
     );
-    await expect(createObject({ agentId, kind: "sheet", path: "b.excalidraw" })).rejects.toThrow(
+    await expect(createObject({ agentId, kind: "gantt", path: "b.excalidraw" })).rejects.toThrow(
       "unknown kind",
     );
     await expect(createObject({ agentId, kind: "board", path: "../x.excalidraw" })).rejects.toThrow(
