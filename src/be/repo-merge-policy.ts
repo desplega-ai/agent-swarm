@@ -12,7 +12,8 @@ function canonical(value: unknown): string {
 }
 
 /**
- * True when writing `incoming` would change a repo's merge policy: its effective
+ * True when writing `incoming` would change a repo's merge policy: its raw `allowMerge`
+ * flag (a record's `agentsMayMerge` can mask it, but other readers use it directly), its effective
  * `agentsMayMerge` (the record's flag, else `allowMerge`) or any part of its `mergePolicy`
  * record. An omitted `guidelines` leaves it alone and `null` clears it. A resend that drops
  * a stored `mergePolicy` counts as a change. Only the lead, the operator or a user may make
@@ -24,6 +25,7 @@ export function changesMergePolicy(
 ): boolean {
   if (incoming === undefined) return false;
   return (
+    (current?.allowMerge === true) !== (incoming?.allowMerge === true) ||
     agentsMayMerge(current) !== agentsMayMerge(incoming) ||
     canonical(current?.mergePolicy) !== canonical(incoming?.mergePolicy)
   );

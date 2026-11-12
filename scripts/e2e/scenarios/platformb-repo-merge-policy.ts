@@ -120,6 +120,21 @@ export const platformbRepoMergePolicy: Scenario = {
         asRecord(asRecord((await read()).guidelines).mergePolicy).autoMerge !== undefined,
         "A refused update changed the stored mergePolicy",
       );
+      // A record that says agentsMayMerge: false must not mask a raw allowMerge flip.
+      response = await ctx.api("PUT", `/api/repos/${repoId}`, {
+        agentId: workerId,
+        body: {
+          guidelines: guidelines("w", {
+            allowMerge: true,
+            mergePolicy: asRecord((await read()).guidelines).mergePolicy,
+          }),
+        },
+      });
+      expectStatus(response, [403], "worker flips allowMerge under a masking mergePolicy");
+      expect(
+        asRecord((await read()).guidelines).allowMerge !== true,
+        "A masked allowMerge flip was stored",
+      );
       // Resending the stored record (read back, so defaults are included) edits the rest.
       const resend = asRecord((await read()).guidelines).mergePolicy;
       response = await ctx.api("PUT", `/api/repos/${repoId}`, {
