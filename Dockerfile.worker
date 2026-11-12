@@ -271,10 +271,11 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 # they run without the per-hook trusted_hash review that user-level hooks.json
 # needs — codex silently skips untrusted hooks, which in a headless worker means
 # steering would never deliver. PreToolUse carries no steering (codex drops its
-# additionalContext, openai/codex#19385); it runs only the PR body leak guard,
-# which blocks `gh pr create|edit` on public repos with exit code 2. Its
-# `^Bash$` matcher keeps other tools from spawning the CLI (codex reports shell
-# and unified exec calls as Bash). Steering
+# additionalContext, openai/codex#19385); it runs the PR body leak guard, which
+# blocks `gh pr create|edit` on public repos with exit code 2, and reports native
+# calls to extensions (`POST /api/tool-hooks`). Its `^(Bash|apply_patch)$`
+# matcher keeps MCP tools from spawning the CLI (codex reports shell and unified
+# exec calls as Bash, file edits as apply_patch). Steering
 # no-ops unless STEERING_ENABLED reaches the codex env (live-reconciled by the
 # runner).
 # Root-owned on purpose: it's the admin-enforced layer (and /etc needs root).
@@ -289,7 +290,7 @@ RUN mkdir -p /etc/codex && printf '%s\n' \
   'command = "/usr/local/bin/agent-swarm codex-hook"' \
   '' \
   '[[hooks.PreToolUse]]' \
-  'matcher = "^Bash$"' \
+  'matcher = "^(Bash|apply_patch)$"' \
   '[[hooks.PreToolUse.hooks]]' \
   'type = "command"' \
   'command = "/usr/local/bin/agent-swarm codex-hook"' \

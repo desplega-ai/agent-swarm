@@ -15,6 +15,15 @@ import {
   type ProfileFileIO,
   readIdentityBaselines,
 } from "../commands/profile-sync";
+import {
+  canonicalArgs,
+  canonicalToolName,
+  type NativeCall,
+  type NativeHookTarget,
+  rawArgsFromCanonical,
+  runNativePost,
+  runNativePre,
+} from "../hooks/native-tool-hooks";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { renderGoalReminder } from "../prompts/goal-reminder";
 import { isSessionSummarySkipped } from "../utils/env-flag";
@@ -62,6 +71,34 @@ export function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
     "Content-Type": "application/json",
     ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
     "X-Agent-ID": config.agentId,
+  };
+}
+
+/** Where a pi or opencode session reports its native tool calls. */
+export function nativeHookTarget(config: SwarmHooksConfig): NativeHookTarget {
+  return { apiUrl: config.apiUrl, headers: apiHeaders(config), taskId: config.taskId };
+}
+
+/** Pi's own tools. Everything else pi runs (swarm and agent-installed MCP tools) is not native. */
+const PI_NATIVE_TOOLS = new Set([
+  "bash",
+  "powershell",
+  "read",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+]);
+
+export function piNativeCall(toolName: string, input: unknown, toolCallId?: string): NativeCall {
+  return {
+    harness: "pi",
+    tool: canonicalToolName(toolName),
+    nativeTool: toolName,
+    args: canonicalArgs(input),
+    rawArgs: input,
+    toolCallId,
   };
 }
 
@@ -527,6 +564,8 @@ export function piToolGroups(
 export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFactory {
   return (pi) => {
     let lastContextPostTime = 0;
+    /** Native calls in flight, so the post report carries a real duration. */
+    const nativeStartedAt = new Map<string, number>();
 
     // === before_provider_request + message_end → request composition ===
     // The payload is what pi sends, so its system prompt, tool declarations
@@ -657,6 +696,21 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         }
       }
 
+      // Extensions with toolSources "native": last, so every guard above wins. Pi lets a handler
+      // mutate `event.input` in place, which is how a rewrite lands.
+      if (PI_NATIVE_TOOLS.has(event.toolName)) {
+        const call = piNativeCall(event.toolName, event.input, event.toolCallId);
+        const decision = await runNativePre(nativeHookTarget(config), call);
+        if (decision.action === "block") return { block: true, reason: decision.reason };
+        if (decision.action === "modify") {
+          const input = event.input as Record<string, unknown>;
+          const rewritten = rawArgsFromCanonical(decision.args, input) as Record<string, unknown>;
+          for (const key of Object.keys(input)) delete input[key];
+          Object.assign(input, rewritten);
+        }
+        nativeStartedAt.set(event.toolCallId, Date.now());
+      }
+
       return undefined;
     });
 
@@ -694,6 +748,21 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
             }),
           });
         }
+      }
+
+      // Observe-only report to extensions with toolSources "native".
+      if (PI_NATIVE_TOOLS.has(event.toolName)) {
+        const startedAt = nativeStartedAt.get(event.toolCallId);
+        nativeStartedAt.delete(event.toolCallId);
+        void runNativePost(
+          nativeHookTarget(config),
+          piNativeCall(event.toolName, event.input, event.toolCallId),
+          {
+            result: event.content,
+            isError: event.isError,
+            durationMs: startedAt === undefined ? 0 : Date.now() - startedAt,
+          },
+        );
       }
 
       // File sync: check if tool wrote to identity files or memory dirs

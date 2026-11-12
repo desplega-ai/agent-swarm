@@ -67278,6 +67278,40 @@
         }
       }
     },
+    "/api/tool-hooks/status": {
+      "get": {
+        "summary": "Whether any enabled extension takes harness-native tool calls",
+        "description": "Worker shims read this before each native tool call and skip `POST /api/tool-hooks` while `native` is false, so a swarm with no native-tool extension pays no per-call round trip. Shims cache the answer for a short time.",
+        "tags": [
+          "Extensions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native tool hook status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "native": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "native"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/trackers/jira/authorize": {
       "get": {
         "summary": "Start the Jira OAuth flow (admin): redirect to the consent screen, or return its URL",

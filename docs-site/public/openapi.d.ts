@@ -26831,6 +26831,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tool-hooks/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether any enabled extension takes harness-native tool calls
+         * @description Worker shims read this before each native tool call and skip `POST /api/tool-hooks` while `native` is false, so a swarm with no native-tool extension pays no per-call round trip. Shims cache the answer for a short time.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Native tool hook status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            native: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trackers/jira/authorize": {
         parameters: {
             query?: never;
