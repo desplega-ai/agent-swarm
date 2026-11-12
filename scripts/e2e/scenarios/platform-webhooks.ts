@@ -34,6 +34,66 @@ const NOT_CONFIGURED: Record<(typeof WEBHOOKS)[number], string> = {
   "/api/integrations/kapso/webhook": "Kapso integration not configured",
 };
 
+/**
+ * A GitLab sender with no linked identity is linked by its payload email only when that value
+ * is an address. Values GitLab sends for senders without a public email (a redaction marker)
+ * are shared by many senders, so they link nobody.
+ */
+async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<void> {
+  const note = (id: number, username: string, email: string) =>
+    ctx.api("POST", "/api/gitlab/webhook", {
+      apiKey: null,
+      headers: { "X-Gitlab-Token": token },
+      rawBody: JSON.stringify({
+        object_kind: "note",
+        event_type: "note",
+        user: { id, name: `Sender ${username}`, username, avatar_url: "", email },
+        project: {
+          id: 1,
+          name: "app",
+          path_with_namespace: "acme/app",
+          web_url: "https://gitlab.example.test/acme/app",
+          default_branch: "main",
+        },
+        object_attributes: {
+          id: id * 10,
+          note: "a comment with no mention",
+          noteable_type: "MergeRequest",
+          noteable_id: 1,
+          url: `https://gitlab.example.test/acme/app/-/merge_requests/1#note_${id * 10}`,
+          author_id: id,
+          type: null,
+        },
+      }),
+    });
+  const linkedEmail = (username: string) =>
+    ctx.db.get<{ email: string | null }>(
+      `SELECT u.email AS email FROM user_external_ids x JOIN users u ON u.id = x.userId
+       WHERE x.kind = 'gitlab' AND x.externalId = ?`,
+      [username],
+    );
+
+  const real = `gl-real-${ctx.nonce}`;
+  expectStatus(await note(1, real, `${real}@example.test`), [200], "gitlab note, real email");
+  expect(
+    linkedEmail(real)?.email === `${real}@example.test`,
+    "a sender with an email address is linked by it",
+  );
+
+  const first = `gl-redacted-a-${ctx.nonce}`;
+  const second = `gl-redacted-b-${ctx.nonce}`;
+  expectStatus(await note(2, first, "[REDACTED]"), [200], "gitlab note, redacted email");
+  expectStatus(await note(3, second, "[REDACTED]"), [200], "gitlab note, redacted email");
+  expect(
+    linkedEmail(first) === null && linkedEmail(second) === null,
+    "senders with a redacted email stay unlinked",
+  );
+  expect(
+    ctx.db.get("SELECT 1 AS one FROM users WHERE email = ?", ["[REDACTED]"]) === null,
+    "no user is created for a redacted email",
+  );
+}
+
 /** Standard Webhooks / Svix signature headers for an AgentMail delivery. */
 function svixHeaders(secret: string, body: string): Record<string, string> {
   const id = `msg_e2e_${Math.random().toString(16).slice(2, 10)}`;
@@ -274,6 +334,7 @@ export const platformWebhooks: Scenario = {
         [400],
         "gitlab with a non-json body",
       );
+      await checkGitLabSenders(ctx, secret("gitlab"));
 
       // ── Azure DevOps ───────────────────────────────────────────────────────
       const hook = JSON.stringify({ eventType: "build.complete" });
