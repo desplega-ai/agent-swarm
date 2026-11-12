@@ -266,7 +266,7 @@
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
-      "scenarios": ["knowledge-apps"]
+      "scenarios": ["knowledge-apps", "knowledge-apps-large-model"]
     },
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
