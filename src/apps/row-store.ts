@@ -1,12 +1,5 @@
-import {
-  deleteKv,
-  getDbClient,
-  getKv,
-  kvKeyAfter,
-  kvPrefixUpperBound,
-  listKv,
-  upsertKv,
-} from "../be/db";
+import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
 import {
   AppDefinitionSchema,
