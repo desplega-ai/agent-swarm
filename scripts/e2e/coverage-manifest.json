@@ -565,6 +565,10 @@
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
     },
+    "poll-concurrent-claim": {
+      "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
+      "scenarios": ["poll-concurrent-claim"]
+    },
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
