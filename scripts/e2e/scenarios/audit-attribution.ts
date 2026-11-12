@@ -254,7 +254,7 @@ export const auditAttributionWorkflows: Scenario = {
 
 export const auditAttributionSchedules: Scenario = {
   name: "audit-attribution-schedules",
-  order: 357,
+  order: 356,
   async run(ctx) {
     const a = await actor(ctx, await registerWorker(ctx, "audit-sched-a"), "sched-a");
     const b = await actor(ctx, await registerWorker(ctx, "audit-sched-b"), "sched-b");
