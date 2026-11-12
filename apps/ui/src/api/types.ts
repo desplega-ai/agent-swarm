@@ -933,7 +933,12 @@ export interface UnmappedIdentity {
   count: number;
   sampleEventType: string | null;
   sampleContext: unknown | null;
+  /** Set only on rows from the dismissed view. */
+  dismissedAt?: string;
+  dismissedBy?: string;
 }
+
+export type UnmappedIdentityRef = Pick<UnmappedIdentity, "kind" | "externalId">;
 
 export interface UnmappedResponse {
   unmapped: UnmappedIdentity[];

@@ -16,6 +16,7 @@ import type {
   CreateInviteInput,
   CreateUserInput,
   ResolveUnmappedInput,
+  UnmappedIdentityRef,
   UpdateUserInput,
   UserIdentity,
 } from "../types";
@@ -156,9 +157,20 @@ export function useUserMergeJob(jobId: string | null | undefined) {
   });
 }
 
-export function useUnmapped(opts?: { kind?: string; limit?: number }) {
+export function useUnmapped(opts?: {
+  kind?: string;
+  limit?: number;
+  dismissed?: boolean;
+  includeBots?: boolean;
+}) {
   return useQuery({
-    queryKey: ["unmapped", opts?.kind ?? "all", opts?.limit ?? null],
+    queryKey: [
+      "unmapped",
+      opts?.kind ?? "all",
+      opts?.limit ?? null,
+      opts?.dismissed ?? false,
+      opts?.includeBots ?? false,
+    ],
     queryFn: () => api.listUnmapped(opts),
     refetchInterval: 5000,
   });
@@ -178,6 +190,23 @@ export function useResolveUnmapped() {
     }) => api.resolveUnmapped(kind, externalId, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["unmapped"] });
+    },
+  });
+}
+
+/** Dismiss (hide + stop recording, links nothing) or restore unmapped identities. */
+export function useSetUnmappedDismissed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      action,
+      identities,
+    }: {
+      action: "dismiss" | "restore";
+      identities: UnmappedIdentityRef[];
+    }) => api.setUnmappedDismissed(action, identities),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["unmapped"] });
     },
   });

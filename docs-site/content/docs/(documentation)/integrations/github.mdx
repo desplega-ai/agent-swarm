@@ -93,7 +93,7 @@ Mentions in issues, PRs and comments, and submitted PR reviews, create a task on
 - the content's author, when GitHub reports them as `OWNER`, `MEMBER` or `COLLABORATOR` on the repo,
 - a login listed in `GITHUB_ALLOWED_SENDERS` (comma-separated, case-insensitive).
 
-Other senders are listed on the People → Unmapped tab and the event returns `{"created":false}`. Assignment, label and review-request events need write or triage access on GitHub, so they skip this check.
+Other senders are listed on the People → Unmapped tab and the event returns `{"created":false}`. Assignment, label and review-request events need write or triage access on GitHub, so they skip this check. **Dismiss** on that tab hides a sender and stops recording it; it does not link or trust the sender, so their mentions still open no task. Logins ending in `[bot]` are hidden unless you turn on **Show bots**, and **Show dismissed** lists dismissed senders with an **Undo**.
 
 ```bash
 # Optional: extra GitHub logins allowed to trigger mention and review tasks

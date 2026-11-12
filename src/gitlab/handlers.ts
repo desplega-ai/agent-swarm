@@ -17,6 +17,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
@@ -133,7 +134,8 @@ async function resolveGitLabSender(
     return linked.id;
   }
 
-  // No mapping + no inline email → unmapped tracker.
+  // No mapping + no inline email → unmapped tracker, unless an operator dismissed it.
+  if (await isUnmappedIdentityDismissed("gitlab", user.username)) return undefined;
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${user.username}:meta`,
