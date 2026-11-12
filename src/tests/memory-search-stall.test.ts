@@ -171,22 +171,18 @@ describe("memory search does not rescan the tables on every call", () => {
       expect(scans.offLoop).toBe(2);
       expect(scans.health).toBe(0);
 
-      // The health endpoint's read stays fresh on every call.
-      store.getHealth();
+      // The health endpoint's read stays fresh on every call, and the worker's
+      // single-statement counts equal it.
+      const fresh = store.getHealth();
       store.getHealth();
       expect(scans.health).toBe(2);
+      const offLoop = await (
+        store as unknown as { getHealthCountsOffLoop(): Promise<unknown> }
+      ).getHealthCountsOffLoop();
+      expect(offLoop).toEqual(fresh.counts);
     } finally {
       scans.stop();
     }
-  });
-
-  test("the off-loop counts equal the main-thread counts", async () => {
-    const store = new SqliteMemoryStore();
-    await remember(store, healthAgent, "counted-note", "manual", null, 0.6);
-    const offLoop = await (
-      store as unknown as { getHealthCountsOffLoop(): Promise<unknown> }
-    ).getHealthCountsOffLoop();
-    expect(offLoop).toEqual(store.getHealth().counts);
   });
 });
 
