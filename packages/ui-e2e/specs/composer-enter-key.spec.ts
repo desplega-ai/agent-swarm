@@ -28,13 +28,14 @@ test("desktop: Enter submits, Shift+Enter inserts a newline", async ({ page, see
 
   const calls = await interceptTaskCreate(page);
   await page.goto("/sessions");
-  const composer = page.getByPlaceholder("What's the goal?");
+  const composer = page.getByRole("textbox", { name: "What's the goal?" });
   await expect(composer).toBeVisible();
 
   await composer.fill("line one");
   await composer.press("Shift+Enter");
   await composer.pressSequentially("line two");
-  await expect(composer).toHaveValue("line one\nline two");
+  // The box is a rich-text editor: one paragraph per line.
+  await expect(composer.locator("p")).toHaveText(["line one", "line two"]);
   expect(calls).toEqual([]);
 
   await composer.press("Enter");
@@ -57,14 +58,14 @@ test("mobile: Enter inserts a newline, blank lines survive, the send button subm
   await page.goto("/sessions");
   // The sessions v2 phone layout opens on the list. Its New session screen holds the composer.
   await page.getByRole("button", { name: "New session" }).click();
-  const composer = page.getByPlaceholder("What's the goal?");
+  const composer = page.getByRole("textbox", { name: "What's the goal?" });
   await expect(composer).toBeVisible();
 
   await composer.fill("line one");
   await composer.press("Enter"); // soft-keyboard Return: newline, not submit
   await composer.press("Enter"); // a second Return leaves a blank line
   await composer.pressSequentially("line two");
-  await expect(composer).toHaveValue("line one\n\nline two");
+  await expect(composer.locator("p")).toHaveText(["line one", "", "line two"]);
   expect(calls).toEqual([]);
 
   await page.getByRole("button", { name: "Start session" }).click();
@@ -84,7 +85,7 @@ test("IME composition never submits the composer, on any device", async ({
 
   const calls = await interceptTaskCreate(page);
   await page.goto("/sessions");
-  const composer = page.getByPlaceholder("What's the goal?");
+  const composer = page.getByRole("textbox", { name: "What's the goal?" });
   await expect(composer).toBeVisible();
 
   await composer.fill("こんにちは");
@@ -99,7 +100,7 @@ test("IME composition never submits the composer, on any device", async ({
   // land before asserting, so a missing guard actually fails this test.
   await page.waitForTimeout(500);
   expect(calls).toEqual([]);
-  await expect(composer).toHaveValue("こんにちは");
+  await expect(composer).toHaveText("こんにちは");
 
   // Composition ends; the same Enter now submits.
   await composer.dispatchEvent("keydown", {

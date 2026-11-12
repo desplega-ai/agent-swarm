@@ -387,7 +387,9 @@ function StructuredOutputContent({
 function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElement | null) {
   const shown = (element: HTMLElement | null) => !!element && element.getClientRects().length > 0;
   const box = shown(wideBox) ? wideBox : shown(narrowBar) ? narrowBar : null;
-  box?.querySelector("textarea")?.focus({ preventScroll: true });
+  box
+    ?.querySelector<HTMLElement>("textarea, [contenteditable='true']")
+    ?.focus({ preventScroll: true });
 }
 
 export default function TaskDetailPage() {
@@ -450,13 +452,14 @@ export default function TaskDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ["task", task.id, part] });
     }
   }, [taskLive, task, queryClient]);
-  // The draft is owned by the page, not the composer. The narrow and wide
-  // layouts each mount their own <TaskComposer>, and the wide box moves when
-  // the task finishes (the steer box under the log, the follow-up box under
-  // the outcome). Holding the text here means crossing the 60rem layout
-  // switch, a status flip, or a narrow tab switch does not eat what the user
-  // typed.
-  const [draft, setDraft] = useState("");
+  // The draft lives in the composer drafts store under this task's key, not
+  // in the page. The narrow and wide layouts each mount their own
+  // <TaskComposer>, and the wide box moves when the task finishes (the steer
+  // box under the log, the follow-up box under the outcome). One key means
+  // crossing the 60rem layout switch, a status flip, a narrow tab switch or a
+  // reload does not eat what the user typed, and a keystroke re-renders only
+  // the composer, not this page.
+  const draftKey = `task:${id}`;
   // The support dialog opens only from "Get help", and gives focus back to it
   // (or to the "..." trigger of the menu that held it) when it closes.
   const [helpOpen, setHelpOpen] = useState(false);
@@ -478,11 +481,10 @@ export default function TaskDetailPage() {
     );
     target?.focus({ preventScroll: true });
   }, [renaming]);
-  // A draft, an open dialog and a rename belong to one task: Retry and the
-  // spawned task links move this page to another task id.
+  // An open dialog and a rename belong to one task: Retry and the spawned
+  // task links move this page to another task id (the draft key moves with it).
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
   useEffect(() => {
-    setDraft("");
     setHelpOpen(false);
     setRenaming(false);
     refocusAfterRename.current = false;
@@ -723,8 +725,7 @@ export default function TaskDetailPage() {
         canSteer: false,
         followUpAgentId: task.agentId ?? undefined,
         routeLabel: task.agentId ? `Routes to ${agentName ?? "the same agent"}` : undefined,
-        value: draft,
-        onValueChange: setDraft,
+        draftKey,
         onCreated: announceFollowUp,
         fullWidth: true,
         className: "px-0 pt-0 pb-0",
@@ -734,8 +735,7 @@ export default function TaskDetailPage() {
           targetTask: task,
           canSteer: true,
           followUpAgentId: task.agentId ?? undefined,
-          value: draft,
-          onValueChange: setDraft,
+          draftKey,
           fullWidth: true,
           className: "px-0 pt-0 pb-0",
         }

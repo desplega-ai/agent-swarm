@@ -26,7 +26,6 @@ export function NewSessionView({
   onStarted,
   startIn,
   touch,
-  draftState,
 }: {
   /** The group the session starts in (sessions v2). Omit for no group. */
   startKey?: string;
@@ -36,8 +35,6 @@ export function NewSessionView({
   startIn?: ReactNode;
   /** The phone screen: 44 px composer buttons. */
   touch?: boolean;
-  /** The draft text, held by the caller (see `useStartSession`). */
-  draftState?: [string, (value: string) => void];
 } = {}) {
   const navigate = useNavigate();
   // A Viewer reads sessions but cannot start one.
@@ -45,7 +42,9 @@ export function NewSessionView({
   const { userId, setDraft, isPending, addAttachment, composerProps } = useStartSession({
     key: startKey,
     onStarted: onStarted ?? ((created) => void navigate(`/sessions/${created.id}`)),
-    draftState,
+    // One New session draft, in the store: it outlives a remount (the sessions
+    // v2 tab moving between panes) and a reload.
+    draftKey: "new-session",
   });
   // A clip is an attachment: its upload puts the transcript in the root task.
   const recorder = useAudioRecorder(addAttachment);

@@ -104,8 +104,6 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   const current = activePane === 1 && split ? split : focused;
   // The group the New session tab starts in: the one it was opened from.
   const [startIn, setStartIn] = useState<string | null>(null);
-  // Its draft text lives here: the tab remounts when it moves to or from the split.
-  const newSessionDraft = useState("");
   // One New session draft: while the split holds it, "+" and `c` focus it there.
   const newSession = useCallback(
     (group: string | null = null) => {
@@ -214,11 +212,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   const renderPane = (tab: string, pane: PaneIndex) => {
     if (pane === 1) {
       return tab === NEW_SESSION_TAB ? (
-        <NewSessionTab
-          startIn={startIn}
-          onStarted={url.replaceSplit}
-          draftState={newSessionDraft}
-        />
+        <NewSessionTab startIn={startIn} onStarted={url.replaceSplit} />
       ) : (
         renderSession(tab, 1)
       );
@@ -227,11 +221,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
     // sidebar row or another tab never loses its draft.
     const draft = tabs.includes(NEW_SESSION_TAB) ? (
       <div className={tab === NEW_SESSION_TAB ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <NewSessionTab
-          startIn={startIn}
-          onStarted={url.replaceNewTab}
-          draftState={newSessionDraft}
-        />
+        <NewSessionTab startIn={startIn} onStarted={url.replaceNewTab} />
       </div>
     ) : null;
     const body =

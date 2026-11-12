@@ -18,6 +18,7 @@ import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { optionValue, SWARM_ORG_USE_CASE, storedOrgName, USE_CASES } from "@/lib/company-profile";
+import { useComposerDraft } from "@/lib/composer-drafts";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
 import type { LeadReadiness } from "./agents-card";
@@ -59,7 +60,11 @@ export function FirstTaskComposer({
   useEffect(() => {
     if (usersSupported) void prepareSessionsPage();
   }, [usersSupported]);
-  const [draft, setDraft] = useState("");
+  const {
+    text: draft,
+    setText: setDraft,
+    clear: clearDraft,
+  } = useComposerDraft("setup:first-task");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Step 2 asks for the use case; its starters replace the general ones.
@@ -108,6 +113,7 @@ export function FirstTaskComposer({
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       // A quick send can beat the preload. Keep setup visible until it finishes.
       await sessionReady;
+      clearDraft();
       void navigate(taskPath(created.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send the task.");
