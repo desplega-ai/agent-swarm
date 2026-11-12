@@ -407,8 +407,8 @@
       "scenarios": ["knowledge-boards"]
     },
     "primitive-objects": {
-      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; the file.changed receiver refuses unsigned, forged and oversized deliveries",
-      "scenarios": ["knowledge-objects"]
+      "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; reindex prefix and dryRun scope the write-back; a sheet missing swarm.id is refused with the reindex fix; the file.changed receiver refuses unsigned, forged and oversized deliveries",
+      "scenarios": ["knowledge-objects", "knowledge-objects-reindex-scope"]
     },
     "prompt-template-override": {
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",

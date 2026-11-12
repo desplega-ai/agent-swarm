@@ -345,11 +345,17 @@ export type ReindexReport = {
   truncated: boolean;
   /** Which limit cut this call short; null when the pass finished. */
   cutBy: "files" | "reads" | "time" | "bytes" | null;
+  /** True when nothing was written: `adopted` and `restored` list what a real run would change. */
+  dryRun: boolean;
 };
 
 export async function reindexObjects(input: {
   agentId: string | undefined;
   kind?: string;
+  /** Only files whose path starts with this (same match as object-list `prefix`). */
+  prefix?: string;
+  /** Report what would change; write no file and no row. */
+  dryRun?: boolean;
   /** Override the per-call budget (tests). */
   limits?: Partial<ReindexLimits>;
 }): Promise<ReindexReport> {
@@ -364,11 +370,14 @@ export async function reindexObjects(input: {
   }
   reindexing.add(lock);
   try {
-    const report = await reindexDrive(client, kinds, input.agentId, {
-      ...REINDEX_LIMITS,
-      ...input.limits,
-    });
-    watchDrive(client.orgId, client.driveId);
+    const report = await reindexDrive(
+      client,
+      kinds,
+      input.agentId,
+      { ...REINDEX_LIMITS, ...input.limits },
+      { prefix: input.prefix?.replace(/^\/+/, "") ?? "", dryRun: input.dryRun === true },
+    );
+    if (!report.dryRun) watchDrive(client.orgId, client.driveId);
     return report;
   } finally {
     reindexing.delete(lock);
@@ -380,6 +389,7 @@ async function reindexDrive(
   kinds: string[],
   agentId: string | undefined,
   limits: ReindexLimits,
+  { prefix, dryRun }: { prefix: string; dryRun: boolean },
 ): Promise<ReindexReport> {
   const db = getDbClient();
   const report: ReindexReport = {
@@ -391,7 +401,9 @@ async function reindexDrive(
     conflicts: [],
     truncated: false,
     cutBy: null,
+    dryRun,
   };
+  const inScope = (path: string) => path.startsWith(prefix);
   const startedAt = Date.now();
   let reads = 0;
   let bytes = 0;
@@ -404,8 +416,10 @@ async function reindexDrive(
     if (report.truncated) break;
     const kind = kindFor(kindName);
     const all = (await provider.glob(kind.glob)).map((p) => p.replace(/^\/+/, ""));
-    const paths = all.slice(0, MAX_REINDEX_FILES - report.scanned);
-    if (paths.length < all.length) cut("files");
+    const scoped = all.filter(inScope);
+    const paths = scoped.slice(0, MAX_REINDEX_FILES - report.scanned);
+    if (paths.length < scoped.length) cut("files");
+    // The whole drive, not just the prefix: a copy inside the prefix of a file outside it is still a copy.
     const onDrive = new Set(all);
     // Ids already given to a file in this pass: a copied file must not steal one.
     const claimed = new Map<string, string>();
@@ -473,6 +487,11 @@ async function reindexDrive(
         // Stock Excalidraw save (id dropped) or a copy: keep the path's id, else a new one.
         const embedded = kind.readId(json);
         id = atPath && atPath.id !== embedded ? atPath.id : crypto.randomUUID();
+        if (dryRun) {
+          report.adopted.push(path);
+          claimed.set(id, path);
+          continue;
+        }
         try {
           ({ version = null } = await provider.upload(
             scope(path),
@@ -494,6 +513,7 @@ async function reindexDrive(
       }
 
       claimed.set(id, path);
+      if (dryRun) continue;
       const title = swarmBlock(json).title;
       await saveRow({
         id,
@@ -512,7 +532,7 @@ async function reindexDrive(
         "SELECT path FROM primitive_objects WHERE orgId = ? AND driveId = ? AND kind = ? ORDER BY path",
         [orgId, driveId, kindName],
       );
-      report.missing.push(...rows.map((r) => r.path).filter((p) => !onDrive.has(p)));
+      report.missing.push(...rows.map((r) => r.path).filter((p) => inScope(p) && !onDrive.has(p)));
     }
   }
   return report;

@@ -75,7 +75,7 @@ The `primitives` capability (off by default; scripts always reach it through the
 | `object-create` | Create a file create-only and give it a stable id. Kind `board` writes an empty `.excalidraw` scene. |
 | `object-get` | Read one object by `id` or `path`, optionally with its content. |
 | `object-list` | List objects by `kind` and path `prefix`. Hides objects whose file agent-fs reported deleted. |
-| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, and `cutBy` names the limit that stopped it. |
+| `object-reindex` | Rebuild the index from the drive. Ids embedded in files survive; rows whose file is gone are reported. Unchanged files are skipped by version; one call reads at most 50 changed files, 16 MiB, or 20 seconds of work, and `cutBy` names the limit that stopped it. Optional `prefix` limits it to paths that start with it (without one it adopts every id-less file on the drive, including other people's); `dryRun: true` returns the report and writes nothing. |
 | `sheet-create` | Create a spreadsheet (`swarm-sheet/1`, a `.sheet.json` file), optionally with named tabs seeded from A1. |
 | `sheet-get` | A sheet's object, agent-fs `version` and tabs (used rows and columns, frozen rows). |
 | `sheet-list` | List sheets by path `prefix`. |

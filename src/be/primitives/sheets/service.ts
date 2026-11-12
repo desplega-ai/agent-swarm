@@ -58,6 +58,13 @@ const refuse = <T>(run: () => T): T => {
   }
 };
 
+/** The workbook's `swarm.id`, or undefined when a save dropped it. */
+function embeddedId(content: object): string | undefined {
+  const swarm = (content as { swarm?: unknown }).swarm;
+  const id = swarm && typeof swarm === "object" ? (swarm as { id?: unknown }).id : undefined;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 async function load(target: SheetTarget) {
   const { object, missing, content } = await getObject({ ...target, includeContent: true });
   if (object.kind !== "sheet") {
@@ -66,6 +73,12 @@ async function load(target: SheetTarget) {
   if (missing) {
     throw new ObjectsError(
       `the file for ${object.path} is missing on the drive; run object-reindex`,
+    );
+  }
+  if (content && typeof content === "object" && !Array.isArray(content) && !embeddedId(content)) {
+    // A save outside the sheet tools (a hand edit, another app) dropped the embedded id.
+    throw new ObjectsError(
+      `${object.path} has no embedded swarm.id, so a save outside the sheet tools dropped it; run object-reindex (ctx.objects.reindex) with prefix '${object.path}' to write the id back, then retry`,
     );
   }
   const parsed = SheetDocSchema.safeParse(content);
