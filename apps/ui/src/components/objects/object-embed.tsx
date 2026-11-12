@@ -56,11 +56,13 @@ export function ObjectEmbed({
   }
 
   const kind = snapshot.object.kind;
+  // Keyed by object: a view never carries one object's scene or save target into another.
   return (
     <div className={box} style={{ height }} data-object-kind={kind}>
       <Suspense fallback={<Skeleton className="h-full w-full" />}>
         {kind === "board" ? (
           <BoardView
+            key={snapshot.object.id}
             snapshot={snapshot}
             fetchFn={fetch}
             refetch={refetch}
@@ -70,6 +72,7 @@ export function ObjectEmbed({
           />
         ) : kind === "sheet" ? (
           <SheetView
+            key={snapshot.object.id}
             snapshot={snapshot}
             fetchFn={fetch}
             refetch={refetch}

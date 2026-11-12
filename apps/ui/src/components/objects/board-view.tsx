@@ -3,6 +3,7 @@ import {
   CaptureUpdateAction,
   Excalidraw,
   hashElementsVersion,
+  restoreAppState,
   restoreElements,
   serializeAsJSON,
 } from "@excalidraw/excalidraw";
@@ -28,6 +29,46 @@ type Scene = {
 };
 
 type SaveResponse = { version: number | null };
+
+/**
+ * The appState a saved board keeps: Excalidraw's export set, which is what
+ * `serializeAsJSON(…, "local")` writes. Selection, scroll and zoom are view-only.
+ */
+const PERSISTED_APP_STATE = [
+  "viewBackgroundColor",
+  "gridSize",
+  "gridStep",
+  "gridModeEnabled",
+] as const;
+
+type PersistedAppState = Partial<Pick<AppState, (typeof PERSISTED_APP_STATE)[number]>>;
+
+function persistedAppState(appState: Partial<AppState>): PersistedAppState {
+  const out: Record<string, unknown> = {};
+  for (const key of PERSISTED_APP_STATE) {
+    if (appState[key] !== undefined) out[key] = appState[key];
+  }
+  return out as PersistedAppState;
+}
+
+/**
+ * Excalidraw renders an element's `customData.generationData.html` as an iframe
+ * document, and any agent can write a board. This embed has no generate feature,
+ * so the field is dropped before Excalidraw sees the scene.
+ */
+function loadElements(elements: readonly ExcalidrawElement[] | undefined) {
+  const safe = (elements ?? []).map((el) => {
+    const data = el.customData;
+    if (!data || !("generationData" in data)) return el;
+    const { generationData: _html, ...rest } = data;
+    return { ...el, customData: rest };
+  });
+  return restoreElements(safe, null, { refreshDimensions: true });
+}
+
+/** The saved part of a scene; a key unlike the saved one means unsaved edits. */
+const sceneKey = (elements: readonly ExcalidrawElement[], appState: Partial<AppState>) =>
+  `${hashElementsVersion(elements)}:${JSON.stringify(persistedAppState(appState))}`;
 
 export type BoardViewProps = {
   snapshot: ObjectSnapshot;
@@ -56,16 +97,18 @@ export default function BoardView({
   const [initial] = useState(() => snapshot.content as Scene);
   /** The version the scene on screen was loaded from or last saved as. */
   const base = useRef(snapshot.version);
-  /** Element hash at that version; a different hash means unsaved edits. Null until loaded. */
-  const savedHash = useRef<number | null>(null);
+  /** `sceneKey` at that version; a different key means unsaved edits. Null until loaded. */
+  const savedKey = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** False once unmounted: a save that returns later must not mark the next object's version. */
+  const live = useRef(true);
   const [conflict, setConflict] = useState<{ version: number | null } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  const dirty = () => {
+  const dirty = (appState?: Partial<AppState>) => {
     const api = apiRef.current;
-    return api && savedHash.current !== null
-      ? hashElementsVersion(api.getSceneElements()) !== savedHash.current
+    return api && savedKey.current !== null
+      ? sceneKey(api.getSceneElements(), appState ?? api.getAppState()) !== savedKey.current
       : false;
   };
 
@@ -73,11 +116,20 @@ export default function BoardView({
     const api = apiRef.current;
     const scene = next.content as Scene;
     if (!api) return;
-    const elements = restoreElements(scene.elements ?? [], null, { refreshDimensions: true });
-    api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+    const elements = loadElements(scene.elements);
+    // A field the file leaves out takes Excalidraw's default, not the color on screen.
+    const restored = restoreAppState(scene.appState ?? {}, null);
+    const appState = {
+      viewBackgroundColor: restored.viewBackgroundColor,
+      gridSize: restored.gridSize,
+      gridStep: restored.gridStep,
+      gridModeEnabled: restored.gridModeEnabled,
+    } satisfies Required<PersistedAppState>;
+    api.updateScene({ elements, appState, captureUpdate: CaptureUpdateAction.NEVER });
     if (scene.files) api.addFiles(Object.values(scene.files));
     base.current = next.version;
-    savedHash.current = hashElementsVersion(api.getSceneElements());
+    // Key from what was applied: getAppState() can lag a batched updateScene.
+    savedKey.current = sceneKey(api.getSceneElements(), appState);
     setConflict(null);
   }, []);
 
@@ -86,9 +138,10 @@ export default function BoardView({
       const api = apiRef.current;
       if (!api || ifMatch === null) return;
       const elements = api.getSceneElements();
-      const hash = hashElementsVersion(elements);
+      const appState = api.getAppState();
+      const key = sceneKey(elements, appState);
       const scene = JSON.parse(
-        serializeAsJSON(elements, api.getAppState(), api.getFiles(), "local"),
+        serializeAsJSON(elements, appState, api.getFiles(), "local"),
       ) as Scene;
       setStatus("Saving…");
       try {
@@ -97,12 +150,14 @@ export default function BoardView({
           `/api/objects/${encodeURIComponent(snapshot.object.id)}/content`,
           { method: "PUT", body: { content: { ...scene, swarm: initial.swarm }, ifMatch } },
         );
+        if (!live.current) return;
         base.current = saved.version;
-        savedHash.current = hash;
+        savedKey.current = key;
         markVersion(saved.version);
         setConflict(null);
         setStatus("Saved");
       } catch (err) {
+        if (!live.current) return;
         if (err instanceof ObjectRequestError && err.status === 409) {
           setConflict({ version: err.version ?? null });
           setStatus(null);
@@ -122,20 +177,22 @@ export default function BoardView({
     else apply(snapshot);
   }, [snapshot, apply]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
       if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
-  const onChange = () => {
+  const onChange = (_elements: readonly ExcalidrawElement[], appState: AppState) => {
     // The first change is the loaded scene: restoring it may bump versions, so it is the baseline.
-    if (savedHash.current === null && apiRef.current) {
-      savedHash.current = hashElementsVersion(apiRef.current.getSceneElements());
+    if (savedKey.current === null && apiRef.current) {
+      savedKey.current = sceneKey(apiRef.current.getSceneElements(), appState);
       return;
     }
-    if (readOnly || conflict || !dirty()) return;
+    // A selection, scroll or zoom change keeps the key, so it schedules no save.
+    if (readOnly || conflict || !dirty(appState)) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void save(base.current), AUTOSAVE_MS);
   };
@@ -174,8 +231,8 @@ export default function BoardView({
         }}
         initialData={{
           // Re-measure text: an agent may change a label without its width and height.
-          elements: restoreElements(initial.elements ?? [], null, { refreshDimensions: true }),
-          appState: { viewBackgroundColor: initial.appState?.viewBackgroundColor },
+          elements: loadElements(initial.elements),
+          appState: persistedAppState(initial.appState ?? {}),
           files: initial.files,
           scrollToContent: true,
         }}

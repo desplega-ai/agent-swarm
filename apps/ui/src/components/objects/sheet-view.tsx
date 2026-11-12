@@ -58,9 +58,21 @@ export default function SheetView({
   );
   const pinned = range ? parseRange(range) : null;
   const [picked, setPicked] = useState(pinned?.tab ?? tab);
-  const active = tabs.find((t) => t.name === (pinned?.tab ?? picked)) ?? tabs[0];
+  // A range that names a tab pins it: no such tab (or a range that does not parse)
+  // shows nothing and writes nothing, never another tab. `tab` and a click only pick.
+  const pickedTab = tabs.find((t) => t.name === picked) ?? tabs[0];
+  const active =
+    range && !pinned
+      ? undefined
+      : pinned?.tab !== undefined
+        ? tabs.find((t) => t.name === pinned.tab)
+        : pickedTab;
   const [saveError, setSaveError] = useState<string | null>(null);
   const focused = useRef<string | null>(null);
+  // The tab on screen now. A grid callback from an earlier render (an editor that
+  // commits after a poll removed its tab or a new range moved the pin) checks it.
+  const shown = useRef<string | undefined>(undefined);
+  shown.current = active?.name;
 
   const area = active ? (pinned?.window ?? defaultWindow(active)) : null;
   const tabName = active?.name;
@@ -68,6 +80,10 @@ export default function SheetView({
   const write = useCallback(
     async (ref: string, values: SheetValue[][]) => {
       if (!tabName) return;
+      if (shown.current !== tabName) {
+        setSaveError(`Not saved: ${ref} is on tab “${tabName}”, which is no longer shown.`);
+        return;
+      }
       setSaveError(null);
       try {
         await objectCall(
@@ -164,7 +180,13 @@ export default function SheetView({
   };
 
   if (!active || !area) {
-    return <p className="p-4 text-sm text-muted-foreground">This sheet has no tabs.</p>;
+    const why =
+      range && !pinned
+        ? `“${range}” is not a sheet range.`
+        : pinned?.tab !== undefined
+          ? `This sheet has no tab “${pinned.tab}”.`
+          : "This sheet has no tabs.";
+    return <p className="p-4 text-sm text-muted-foreground">{why}</p>;
   }
 
   return (
