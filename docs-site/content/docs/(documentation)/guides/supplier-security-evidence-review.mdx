@@ -35,7 +35,7 @@ This is an illustrative adaptation, not a built-in vendor-assessment feature or 
 
 **2. The swarm collects only evidence already shared.** Reports, policies, questionnaire answers and the contract's security terms are pulled from where the supplier or team already put them, under the terms agreed for that review. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so the raw secret stays out of script source and arguments.
 
-**3. Collection runs as deterministic steps.** `swarm-script` nodes fetch the documents and emit JSON, so the same review pulls the same records every time and no model chooses which files to open. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
+**3. Collection runs as deterministic steps.** The configured `swarm-script` steps fetch the records available to them at run time and emit JSON, so no model chooses which files to open. Because supplier documents and access change, the security owner checks each matrix row against its linked source before deciding. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
 
 **4. An agent prepares the matrix.** The agent reads the collected material against the owner's criteria and writes one row per criterion: the source link, the document date, the scope the document covers, the gap, and any statement that conflicts with another document. Each row points at the record it came from.
 
