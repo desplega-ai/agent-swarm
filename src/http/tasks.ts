@@ -61,6 +61,7 @@ import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
+import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -1317,6 +1318,11 @@ export async function handleTasks(
         },
       });
 
+      // A person's Sessions follow-up shows up in the session's Slack thread too.
+      if (principal.kind === "user" || principal.kind === "operator") {
+        getDbClient().afterCommit(() => mirrorSessionPrompt(task));
+      }
+
       createTask.respond(res, 201, task);
     } catch (error) {
       if (error instanceof TaskRoutingAuthorizationError) {
@@ -1377,6 +1383,10 @@ export async function handleTasks(
     if (!promoted) {
       jsonError(res, "Task not found", 404);
       return true;
+    }
+    // A draft holds back its mirror until its uploads settle, like its claim.
+    if (existingTask.status === "draft") {
+      getDbClient().afterCommit(() => mirrorSessionPrompt(promoted));
     }
 
     promoteDraftTaskRoute.respond(res, 200, promoted);
