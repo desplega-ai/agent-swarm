@@ -34,6 +34,9 @@ beforeEach(() => {
   resetActiveRunsForTests();
   for (const key of ENV_KEYS) delete process.env[key];
   process.env.EVALS_DB_PATH = ":memory:";
+  // Keep the suite offline when a test switches NODE_ENV away from "test".
+  process.env.NODE_ENV = "test";
+  process.env.EVALS_MODEL_CATALOG_REFRESH = "off";
 });
 
 afterEach(() => {
@@ -83,7 +86,6 @@ describe("evals API auth and run cap", () => {
 
   test("NODE_ENV=production with EVALS_API_KEY set gates /api/* on the bearer", async () => {
     process.env.NODE_ENV = "production";
-    process.env.EVALS_MODEL_CATALOG_REFRESH = "off";
     process.env.EVALS_API_KEY = "example-test-master-key";
     const server = await startServer(0);
     try {
@@ -99,7 +101,6 @@ describe("evals API auth and run cap", () => {
 
   test("NODE_ENV=production without a key starts open only with EVALS_ALLOW_OPEN_API=1", async () => {
     process.env.NODE_ENV = "production";
-    process.env.EVALS_MODEL_CATALOG_REFRESH = "off";
     process.env.EVALS_ALLOW_OPEN_API = "1";
     const server = await startServer(0);
     try {
