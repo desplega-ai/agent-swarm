@@ -18,7 +18,12 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
-import { enrichSlackUserEmail, getOurSlackTeamId, resolveSlackUserId } from "./enrich";
+import {
+  enrichSlackUserEmail,
+  getSlackUserTeam,
+  isOurSlackTeam,
+  resolveSlackUserId,
+} from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
@@ -143,6 +148,13 @@ export function checkUserAccess(
 }
 
 /**
+ * Pass as `isUserAllowed`'s `userTeam` for an event that carries no `user_team`: the
+ * sender's team is then read from `users.info`. `Symbol.for` keeps it equal across
+ * module copies.
+ */
+export const LOOKUP_USER_TEAM: unique symbol = Symbol.for("agent-swarm.slack.lookup-user-team");
+
+/**
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
  * The allow/deny decision is `checkUserAccess`; this wrapper only adds the lazy email lookup
@@ -151,7 +163,7 @@ export function checkUserAccess(
 export async function isUserAllowed(
   client: WebClient,
   userId: string,
-  userTeam?: string,
+  userTeam?: string | typeof LOOKUP_USER_TEAM,
 ): Promise<boolean> {
   const config = envUserFilterConfig;
   // Decide without an email first: filtering off and allowlisted IDs pass, and with no
@@ -163,8 +175,20 @@ export async function isUserAllowed(
 
   // A sender from another Slack team (Slack Connect) carries a profile email its own
   // team set, so the email domain does not admit it; only the user ID allowlist does.
-  if (userTeam && userTeam !== (await getOurSlackTeamId(client))) {
-    console.log(`[Slack] User ${userId} is from another Slack team, denying email-domain access`);
+  // An unknown team on either side fails closed.
+  const team =
+    userTeam === LOOKUP_USER_TEAM ? (await getSlackUserTeam(client, userId))?.teamId : userTeam;
+  if (userTeam === LOOKUP_USER_TEAM && !team) {
+    console.log(`[Slack] User ${userId} has no readable Slack team, denying email-domain access`);
+    return false;
+  }
+  const sameTeam = team ? await isOurSlackTeam(client, team, userId) : true;
+  if (sameTeam !== true) {
+    console.log(
+      sameTeam === false
+        ? `[Slack] User ${userId} is from another Slack team, denying email-domain access`
+        : `[Slack] User ${userId}: our own Slack team is unknown, denying email-domain access`,
+    );
     return false;
   }
 

@@ -6,7 +6,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getTaskUrl } from "./blocks";
 import { wasEventSeen } from "./event-dedup";
 import { shouldBlockChannel } from "./external-channel";
-import { isUserAllowed } from "./handlers";
+import { isUserAllowed, LOOKUP_USER_TEAM } from "./handlers";
 import { isAdmittedSlackDelivery } from "./inbound-dispatch";
 import { slackTaskOutput } from "./task-output";
 
@@ -30,7 +30,12 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
     };
   }
 
-  if (!event.user || !event.channel || !(await isUserAllowed(client, event.user))) {
+  // This event carries no `user_team`, so the sender's team comes from `users.info`.
+  if (
+    !event.user ||
+    !event.channel ||
+    !(await isUserAllowed(client, event.user, LOOKUP_USER_TEAM))
+  ) {
     return { error: { status: "restricted" } };
   }
 
