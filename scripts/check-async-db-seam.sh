@@ -32,6 +32,8 @@ ALLOWLIST=(
   src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
   src/http/db-query-shared.ts                   # same columnNames guard (in-process fallback path)
   src/http/db-query-bounded.ts                  # child process opens its own connection outside the seam; parent only reads getDb().filename
+  src/be/memory/search-read-worker.ts           # worker thread opens its own read-only connection outside the seam
+  src/be/memory/search-reader.ts                # host only reads getDb().filename to hand the worker the file
   src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys (wrapped in a client transaction at the call site)
 )
 

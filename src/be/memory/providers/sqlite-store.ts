@@ -17,6 +17,7 @@ import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-
 import { recencyDecay } from "../reranker";
 import { notReviewTaskCompletionSql } from "../review-recall-filter";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
+import { memorySearchReader } from "../search-reader";
 import type {
   MemoryCandidate,
   MemoryDocumentRef,
@@ -812,7 +813,7 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     const missing = ids.filter((id) => !cosines.has(id));
     if (missing.length === 0) return;
-    const rows = await getDbClient().query<{ id: string; embedding: Buffer | null }>(
+    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer | null }>(
       `SELECT id, embedding FROM agent_memory WHERE id IN (${missing.map(() => "?").join(",")})`,
       missing,
     );
@@ -859,7 +860,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     try {
       const sqlLimit = armFetchLimit(limit);
-      const rows = await getDbClient().query<AgentMemoryRow & { rank: number }>(
+      const rows = await memorySearchReader.query<AgentMemoryRow & { rank: number }>(
         `SELECT m.*, bm25(memory_fts) AS rank
          FROM memory_fts
          JOIN agent_memory m ON m.id = memory_fts.memory_id
@@ -944,7 +945,7 @@ export class SqliteMemoryStore implements MemoryStore {
     conditions.push("v.k = ?");
     params.push(knnLimit);
 
-    const rows = await getDbClient().query<AgentMemoryRow & { distance: number }>(
+    const rows = await memorySearchReader.query<AgentMemoryRow & { distance: number }>(
       `SELECT m.*, v.distance
        FROM memory_vec v
        JOIN agent_memory m ON m.id = v.memory_id
@@ -1020,7 +1021,7 @@ export class SqliteMemoryStore implements MemoryStore {
     );
     if (top.length === 0) return [];
 
-    const rows = await getDbClient().query<AgentMemoryRow>(
+    const rows = await memorySearchReader.query<AgentMemoryRow>(
       `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
       top.map((hit) => hit.id),
     );
@@ -1042,7 +1043,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const db = getDbClient();
+    const db = memorySearchReader;
     const counted = await db.get<{ n: number }>(
       `SELECT COUNT(*) AS n FROM (SELECT 1 ${capped})`,
       cappedParams,
@@ -1073,7 +1074,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const rows = await getDbClient().query<{ id: string; embedding: Buffer }>(
+    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer }>(
       `SELECT id, embedding ${capped}`,
       cappedParams,
     );
@@ -1123,7 +1124,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const rows = await getDbClient().query<AgentMemoryRow>(
+    const rows = await memorySearchReader.query<AgentMemoryRow>(
       `SELECT * FROM agent_memory ${whereClause}`,
       params,
     );
