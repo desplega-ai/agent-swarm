@@ -107,14 +107,6 @@
       "reason": "worker command: launches the Claude CLI against a real model; the nightly harness legs run the worker that starts it"
     },
     {
-      "command": "hook",
-      "reason": "worker command: Claude Code hook events on stdin, fired by the harness the nightly legs spawn"
-    },
-    {
-      "command": "codex-hook",
-      "reason": "worker command: Codex hook events on stdin, fired by the harness the nightly legs spawn"
-    },
-    {
       "command": "session-summary-stdin",
       "reason": "worker command: internal session-summary helper the worker runtime calls; nightly harness legs"
     }
@@ -326,6 +318,10 @@
       "description": "Install by catalog name, enable and disable by lead tool, hook blocks and unblocks, run log, version list, owner delete",
       "scenarios": ["extensions", "platformb-extensions"]
     },
+    "extension-native-tools": {
+      "description": "The real hook and codex-hook commands report native tool calls to an extension: sentinel blocked, rewritten, control passes, API down passes, no extension means no round trip",
+      "scenarios": ["native-tool-hooks"]
+    },
     "external-script-endpoint": {
       "description": "A saved script exposed as a bearer or open HTTP endpoint and invoked from outside.",
       "scenarios": ["platform-edge"]
@@ -405,6 +401,10 @@
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
+    },
+    "primitive-object-http": {
+      "description": "GET /api/objects/:id (knownVersion by stat, then from the webhook-fresh row with no agent-fs call), PUT .../content for boards (keeps swarm.id, 409 carries the version) and POST .../sheet-ops as a user, the dashboard and page sessions; operator pages are read-only, password guests, foreign drives and keyless owners are refused",
+      "scenarios": ["objects-http"]
     },
     "primitive-objects": {
       "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; reindex prefix and dryRun scope the write-back; a sheet missing swarm.id is refused with the reindex fix; the file.changed receiver refuses unsigned, forged and oversized deliveries",
@@ -542,6 +542,7 @@
         "slack-http-command",
         "slack-http-interactivity",
         "slack-http-signature-retry",
+        "slack-http-cross-team-identity",
         "slack-http-restart-redelivery"
       ]
     },

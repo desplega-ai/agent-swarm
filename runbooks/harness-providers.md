@@ -579,6 +579,26 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models })` (`models` follows `PI_CODEMODE_MODELS`, default off, only with codemode on; the usage of a script's `models.*` calls reaches `getSessionStats()` cost, proven in `src/tests/providers/pi-cost.test.ts`), wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
+## Native tool interception
+
+Every harness reports its own built-in tool calls (bash, read, write, edit) to `POST /api/tool-hooks`, so an extension with `toolSources: ["native"]` can observe, block and rewrite them. The shared client is `src/hooks/native-tool-hooks.ts`; each harness only maps its event to a `NativeCall` and applies the decision. Server side: `src/http/tool-hooks.ts` and [runbooks/extensions.md § Native tool calls](./extensions.md#native-tool-calls).
+
+| Harness | Where | Block | Rewrite |
+| --- | --- | --- | --- |
+| `claude` | `PreToolUse` and `PostToolUse` in `src/hooks/hook.ts` | exit 2, reason on stderr | `hookSpecificOutput.updatedInput` with `permissionDecision: "allow"` |
+| `codex` | `PreToolUse` and `PostToolUse` in `src/hooks/codex-hook.ts` (image matcher `^(Bash\|apply_patch)$`) | exit 2, reason on stderr | `updatedInput` for `Bash` only; an `apply_patch` rewrite is dropped (unverified) |
+| `pi` | `tool_call` and `tool_result` in `src/providers/pi-mono-extension.ts` | `{ block: true, reason }` | mutate `event.input` in place |
+| `opencode` | `execute.before` and `execute.after` in `src/providers/opencode-swarm-plugin.ts` | throw | assign `event.input` |
+
+Rules every shim keeps:
+
+- Fail open. API down, a 2 s timeout or a non-2xx answer lets the call run.
+- Skip the round trip while no enabled extension takes native calls: `GET /api/tool-hooks/status` is cached 30 s (memory, plus a file under the temp dir for the per-process claude and codex hooks), and a failed read is cached 10 s. An extension enabled or disabled takes effect within 30 s.
+- Scrub args with `scrubObject` before sending. Swarm MCP tools (`mcp__*` on claude and codex, `<server>_*` on opencode, anything outside pi's built-ins) are not native: they reach extensions through the MCP path.
+- Canonical names are `bash`, `read`, `write`, `edit`; every other tool keeps its lowercased harness name (`shell` is `bash`). Claude's `file_path` is `path` in canonical args and maps back on a rewrite.
+- A claude or codex `PostToolUse` runs in a new process, so `durationMs` is 0 there; pi and opencode measure it.
+- Order: cancellation, PR guards, loop and poll checks run first and win. The extension sees the call last.
+
 ## Request composition hooks
 
 Pi and OpenCode post an exact `harness-hook` request composition manifest from the request they are about to send. The shared measurement and reporter live in `src/providers/request-composition-hook.ts`; the server merges the manifest and calibrates the token ratio (see the cost-and-context guide, section "Request composition and cache-hit ratio").
@@ -680,7 +700,7 @@ The adapter starts each thread with `ephemeral: false`. Do not switch it back to
 
 `src/hooks/codex-hook.ts` remains for legacy `codex exec` sessions. The worker image registers it for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each row delivered, then injects the rendered envelope through hook output.
 
-App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard (`src/hooks/pr-body-guard.ts`), which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for `Bash` and `apply_patch` calls. It runs the PR body leak guard (`src/hooks/pr-body-guard.ts`), which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2, then reports the call to native-tool extensions (see [Native tool interception](#native-tool-interception)).
 
 ## Per-task `outputSchema` support
 

@@ -13568,6 +13568,330 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/objects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a board or sheet on the shared drive, or confirm it is unchanged */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description The version the caller holds. A match answers `unchanged: true` with no content */
+                    knownVersion?: number | null;
+                };
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The object with its content, or `unchanged: true` with no content */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            object: {
+                                id: string;
+                                kind: string;
+                                orgId: string;
+                                driveId: string;
+                                path: string;
+                                title: string | null;
+                                fileVersion: number | null;
+                                ownerAgentId: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                link: string | null;
+                            };
+                            version: number | null;
+                            unchanged: boolean;
+                            content?: unknown;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save a board's full Excalidraw scene, guarded by its agent-fs version */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description The Excalidraw scene */
+                        content: {
+                            [key: string]: unknown;
+                        };
+                        /** @description The version the scene was edited from */
+                        ifMatch: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            object: {
+                                id: string;
+                                kind: string;
+                                orgId: string;
+                                driveId: string;
+                                path: string;
+                                title: string | null;
+                                fileVersion: number | null;
+                                ownerAgentId: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                link: string | null;
+                            };
+                            version: number | null;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The board changed since `ifMatch`; the body carries its `version` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The scene exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/{id}/sheet-ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Patch sheet cells; the server recalculates and merges concurrent edits */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        op: "setRange";
+                        range: string;
+                        values: (number | string | boolean | null)[][];
+                    } | {
+                        /** @enum {string} */
+                        op: "clearRange";
+                        range: string;
+                    } | {
+                        /** @enum {string} */
+                        op: "appendRows";
+                        tab: string;
+                        rows: (number | string | boolean | null)[][];
+                    };
+                };
+            };
+            responses: {
+                /** @description Applied: the range written and the new version */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            op: "setRange" | "clearRange" | "appendRows";
+                            range: string;
+                            version: number;
+                            changed?: number;
+                            recalculated?: number;
+                            cleared?: number;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Other writers changed the sheet on every retry; try again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/refresh-locks/{key}": {
         parameters: {
             query?: never;
@@ -26501,6 +26825,47 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tool-hooks/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether any enabled extension takes harness-native tool calls
+         * @description Worker shims read this before each native tool call and skip `POST /api/tool-hooks` while `native` is false, so a swarm with no native-tool extension pays no per-call round trip. Shims cache the answer for a short time.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Native tool hook status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            native: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;

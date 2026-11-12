@@ -385,6 +385,15 @@ export function unregister(extensionId: string): LoadedExtension | undefined {
   return loaded;
 }
 
+/** True when an enabled extension takes native tool calls: workers skip the hook round trip otherwise. */
+export function hasNativeToolHandlers(): boolean {
+  return [...registry.values()].some(
+    (loaded) =>
+      (loaded.manifest.toolSources ?? ["mcp"]).includes("native") &&
+      loaded.handlers.some((h) => h.event === "pre.tool.call" || h.event === "post.tool.call"),
+  );
+}
+
 export function listRegistered(): LoadedExtension[] {
   return [...registry.values()];
 }
