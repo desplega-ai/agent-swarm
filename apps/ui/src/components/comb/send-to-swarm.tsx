@@ -1,4 +1,4 @@
-import { Send } from "lucide-react";
+import { Send, Undo2, X } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import type { CombRepairedComment, CombSkippedComment, CombSkipReason } from "@/
 import { SwarmMarkedText } from "@/components/comb/comment-thread";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
+import type { DismissedSends } from "@/components/comb/use-dismissed-sends";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -34,10 +35,12 @@ import {
   sendFailure,
 } from "@/lib/comb/batch";
 import { selectionState } from "@/lib/comb/bulk";
-import { lineRangeLabel } from "@/lib/comb/comments";
+import { commentCombPath, lineRangeLabel } from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
 type Drive = { orgId: string; driveId: string };
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 const SKIP_LABELS: Record<CombSkipReason, string> = {
   "not-found": "not found",
@@ -220,6 +223,7 @@ export function SendBatchDialog({
   scopePath,
   threads,
   showPaths,
+  dismissal,
   onSent,
   onClose,
 }: {
@@ -228,6 +232,12 @@ export function SendBatchDialog({
   threads: CommentListEntry[];
   /** List each comment's file (a folder batch). */
   showPaths: boolean;
+  /**
+   * The send tray's dismissed comments. Given: each comment, file, and the
+   * whole list get a Dismiss button, `threads` may hold dismissed ones (they
+   * list apart, with Restore), and dismissed comments are never sent.
+   */
+  dismissal?: DismissedSends;
   /** After a send that landed, with the ids the swarm took, before `onClose`. */
   onSent?: (sent: string[]) => void;
   onClose: () => void;
@@ -237,11 +247,23 @@ export function SendBatchDialog({
   // The list is fixed while the dialog is open. One send carries at most
   // COMB_BATCH_MAX comments: the first ones start checked, the rest wait.
   const [listed] = useState(threads);
+  const hidden = dismissal?.ids ?? NO_IDS;
+  const active = listed.filter((thread) => !hidden.has(thread.id));
+  const dismissedHere = listed.filter((thread) => hidden.has(thread.id));
   const [checked, setChecked] = useState(
-    () => new Set(threads.slice(0, COMB_BATCH_MAX).map((thread) => thread.id)),
+    () =>
+      new Set(
+        threads
+          .filter((thread) => !hidden.has(thread.id))
+          .slice(0, COMB_BATCH_MAX)
+          .map((thread) => thread.id),
+      ),
   );
-  const selected = listed.filter((thread) => checked.has(thread.id));
+  const selected = active.filter((thread) => checked.has(thread.id));
   const full = checked.size >= COMB_BATCH_MAX;
+  // The last dismiss, for Undo.
+  const [lastDismissed, setLastDismissed] = useState<string[]>([]);
+  const [showDismissed, setShowDismissed] = useState(false);
   const [note, setNote] = useState("");
   const noteId = useId();
 
@@ -256,11 +278,25 @@ export function SendBatchDialog({
       return next;
     });
 
+  // Dismissing unchecks. Restoring checks again, up to COMB_BATCH_MAX.
+  const dismiss = (ids: readonly string[]) => {
+    if (!dismissal || ids.length === 0) return;
+    dismissal.dismiss(ids);
+    toggleMany(ids, false);
+    setLastDismissed([...ids]);
+  };
+  const restore = (ids: readonly string[]) => {
+    if (!dismissal) return;
+    dismissal.restore(ids);
+    toggleMany(ids, true);
+    setLastDismissed((last) => last.filter((id) => !ids.includes(id)));
+  };
+
   const row = (thread: CommentListEntry) => {
     const on = checked.has(thread.id);
     return (
-      <li key={thread.id}>
-        <label className="hover-linger flex items-start gap-2.5 px-3 py-2 transition-colors hover:bg-accent/50">
+      <li key={thread.id} className="flex items-start">
+        <label className="hover-linger flex min-w-0 flex-1 items-start gap-2.5 px-3 py-2 transition-colors hover:bg-accent/50">
           <Checkbox
             checked={on}
             disabled={full && !on}
@@ -281,9 +317,39 @@ export function SendBatchDialog({
             </span>
           </span>
         </label>
+        {dismissal ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Dismiss this comment"
+            title="Dismiss: not sent, stays on the file"
+            className="mt-1.5 mr-2 shrink-0 text-muted-foreground"
+            onClick={() => dismiss([thread.id])}
+          >
+            <X />
+          </Button>
+        ) : null}
       </li>
     );
   };
+
+  const dismissedRow = (thread: CommentListEntry) => (
+    <li key={thread.id} className="flex items-start gap-2.5 px-3 py-2">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-muted-foreground">
+        <span className="truncate font-mono text-[11px]">
+          {showPaths ? `${commentCombPath(thread.path)} · ` : ""}
+          {lineRangeLabel(thread.lineStart, thread.lineEnd) ?? "File"}
+        </span>
+        <span className="line-clamp-1 break-words text-sm">
+          <SwarmMarkedText text={thread.body} />
+        </span>
+      </span>
+      <Button size="xs" variant="ghost" className="shrink-0" onClick={() => restore([thread.id])}>
+        <Undo2 />
+        Restore
+      </Button>
+    </li>
+  );
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -298,7 +364,7 @@ export function SendBatchDialog({
         <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
           {showPaths ? (
             // A batch from several files: one group per file, with a box for the whole file.
-            groupByFile(listed).map((group) => {
+            groupByFile(active).map((group) => {
               const ids = group.threads.map((thread) => thread.id);
               return (
                 <section
@@ -318,6 +384,22 @@ export function SendBatchDialog({
                     <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
                       {ids.length}
                     </span>
+                    {dismissal ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        aria-label={`Dismiss the comments on ${group.path}`}
+                        className="-my-1 shrink-0 text-muted-foreground"
+                        onClick={(event) => {
+                          // The button sits in the file's label: do not toggle its box.
+                          event.preventDefault();
+                          dismiss(ids);
+                        }}
+                      >
+                        <X />
+                        Dismiss
+                      </Button>
+                    ) : null}
                   </label>
                   <ul className="divide-y divide-border-subtle">
                     {group.threads.map((thread) => row(thread))}
@@ -326,10 +408,51 @@ export function SendBatchDialog({
               );
             })
           ) : (
-            <ul className="divide-y divide-border-subtle">{listed.map((thread) => row(thread))}</ul>
+            <ul className="divide-y divide-border-subtle">{active.map((thread) => row(thread))}</ul>
           )}
+          {active.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              Nothing left to send.
+            </p>
+          ) : null}
         </div>
-        {listed.length > COMB_BATCH_MAX ? (
+        {dismissedHere.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="tabular-nums">{dismissedHere.length} dismissed.</span>
+              <span>They stay on their files and are not sent.</span>
+              {lastDismissed.length > 0 ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="ml-auto"
+                  onClick={() => restore(lastDismissed)}
+                >
+                  <Undo2 />
+                  Undo
+                </Button>
+              ) : null}
+              <Button
+                size="xs"
+                variant="ghost"
+                className={lastDismissed.length > 0 ? undefined : "ml-auto"}
+                aria-expanded={showDismissed}
+                onClick={() => setShowDismissed((on) => !on)}
+              >
+                {showDismissed ? "Hide" : "Show"}
+              </Button>
+            </div>
+            {showDismissed ? (
+              <ul
+                aria-label="Dismissed comments"
+                className="max-h-40 divide-y divide-border-subtle overflow-y-auto rounded-lg border border-border"
+              >
+                {dismissedHere.map((thread) => dismissedRow(thread))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {active.length > COMB_BATCH_MAX ? (
           <p className="text-xs text-muted-foreground">
             Only the first {COMB_BATCH_MAX} are sent in one batch. Send again for the rest.
           </p>
@@ -354,6 +477,16 @@ export function SendBatchDialog({
           ) : null}
         </div>
         <DialogFooter>
+          {dismissal && active.length > 0 ? (
+            <Button
+              variant="ghost"
+              className="text-muted-foreground sm:mr-auto"
+              onClick={() => dismiss(active.map((thread) => thread.id))}
+            >
+              <X />
+              Dismiss all
+            </Button>
+          ) : null}
           <DialogClose asChild>
             <Button variant="ghost">Cancel</Button>
           </DialogClose>

@@ -162,6 +162,75 @@ test("Comb mints a named key per browser, then comments, replies, and resolves",
     await expect(page.getByRole("tab", { name: "Resolved 1" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Open 0" })).toBeVisible();
 
+    // The send tray: dismiss one comment, one file, then all; each undoes.
+    const op = (body: Record<string, unknown>) =>
+      fetch(`${baseUrl}/orgs/${comb?.org_id}/ops`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${human.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ ...body, driveId: comb?.drive_id }),
+      });
+    for (const path of ["/comb-e2e/a.md", "/comb-e2e/b.md"]) {
+      expect((await op({ op: "write", path, content: `# ${path}\n` })).ok).toBe(true);
+    }
+    for (const [path, body] of [
+      ["/comb-e2e/a.md", "stale one"],
+      ["/comb-e2e/a.md", "stale two"],
+      ["/comb-e2e/b.md", "still wanted"],
+    ]) {
+      expect((await op({ op: "comment-add", path, body })).ok, `comment ${body}`).toBe(true);
+    }
+    await page.goto(`/file/~/${drive}/comb-e2e/notes.md`);
+    // The open dialog hides the page from the accessibility tree.
+    const tray = page.getByRole("button", { name: /^Send \d+ to swarm$/, includeHidden: true });
+    await expect(tray).toHaveAttribute("aria-label", "Send 3 to swarm");
+    await tray.click();
+    const dialog = page.getByRole("dialog", { name: "Send to swarm" });
+    await expect(dialog.getByRole("button", { name: "Send 3" })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("dismiss-1-open.png") });
+
+    await dialog
+      .getByRole("listitem")
+      .filter({ hasText: "stale one" })
+      .getByRole("button", { name: "Dismiss this comment" })
+      .click();
+    await expect(dialog.getByRole("button", { name: "Send 2" })).toBeVisible();
+    await expect(tray).toHaveAttribute("aria-label", "Send 2 to swarm");
+    await expect(dialog.getByText("1 dismissed.")).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("dismiss-2-one.png") });
+    await dialog.getByRole("button", { name: "Undo" }).click();
+    await expect(dialog.getByRole("button", { name: "Send 3" })).toBeVisible();
+
+    await dialog.getByRole("button", { name: "Dismiss the comments on /comb-e2e/a.md" }).click();
+    await expect(dialog.getByRole("button", { name: "Send 1" })).toBeVisible();
+    await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
+    await dialog.getByRole("button", { name: "Show" }).click();
+    await expect(dialog.getByRole("list", { name: "Dismissed comments" })).toContainText(
+      "stale two",
+    );
+    await page.screenshot({ path: test.info().outputPath("dismiss-3-file.png") });
+
+    await dialog.getByRole("button", { name: "Dismiss all" }).click();
+    await expect(dialog.getByText("Nothing left to send.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Send 0" })).toBeDisabled();
+    await expect(tray).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath("dismiss-4-all.png") });
+
+    // Dismissals survive a reload; restoring brings a comment back to the count.
+    await dialog.getByRole("button", { name: "Undo" }).click();
+    await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
+    await page.reload();
+    await expect(tray).toHaveAttribute("aria-label", "Send 1 to swarm");
+    await tray.click();
+    await dialog.getByRole("button", { name: "Show" }).click();
+    await dialog
+      .getByRole("list", { name: "Dismissed comments" })
+      .getByRole("listitem")
+      .filter({ hasText: "stale one" })
+      .getByRole("button", { name: "Restore" })
+      .click();
+    await expect(tray).toHaveAttribute("aria-label", "Send 2 to swarm");
+    await expect(dialog.getByRole("button", { name: "Send 2" })).toBeVisible();
+
     await clean.assertClean();
   } finally {
     await secondContext.close();
