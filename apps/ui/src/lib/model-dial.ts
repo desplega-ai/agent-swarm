@@ -1,4 +1,5 @@
 import {
+  CHATGPT_SUBSCRIPTION_PROVIDER,
   compareNewestFirst,
   nearestReasoningLevel,
   type ReasoningEffortLevel,
@@ -103,6 +104,11 @@ export interface DialContext {
    * Absent while they load: the dial has no answer (`dialSetting` is `null`).
    */
   tiers?: readonly ModelTierPreview[] | null;
+  /**
+   * pi runs on the ChatGPT subscription: its levels are the codex tier models
+   * as `openai-codex/<id>` (the codex_oauth pool), at codex's effort.
+   */
+  chatgpt?: boolean;
 }
 
 export function dialHarness(harness: string | null | undefined): DialHarness | null {
@@ -224,7 +230,7 @@ export function dialSetting(
   context: DialContext,
 ): DialSetting | null {
   const settings = settingCacheFor(context);
-  const key = `${harness}:${level}:${harness === "dsh" && context.openrouter}`;
+  const key = `${harness}:${level}:${harness === "dsh" && context.openrouter}:${harness === "pi" && Boolean(context.chatgpt)}`;
   let setting = settings.get(key);
   if (setting === undefined) {
     setting = computeSetting(harness, level, context);
@@ -243,6 +249,21 @@ function computeSetting(
       ? tierModel(context.tiers, harness, level)
       : deepseekDirectModel(level, context);
     return model ? { harness, model, effort: null, custom: true } : null;
+  }
+  if (harness === "pi" && context.chatgpt) {
+    const value = tierModel(context.tiers, "codex", level);
+    if (!value) return null;
+    const model = `${CHATGPT_SUBSCRIPTION_PROVIDER}/${value}`;
+    return {
+      harness,
+      model,
+      effort: nearestReasoningLevel(
+        EFFORT_INTENT.codex[level],
+        effortLevelsFor(harness, model, context.catalog),
+      ),
+      // The API accepts `openai-codex/<id>` when `<id>` is a catalog id.
+      custom: catalogOption("codex", value, context.catalog) === null,
+    };
   }
   const value = tierModel(context.tiers, harness, level);
   if (!value) return null;

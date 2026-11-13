@@ -1,6 +1,7 @@
 import { AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { usePoolKeysSupport } from "@/api/hooks/use-pool-keys-support";
+import type { ProviderName } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { CodexAccountsList } from "@/components/onboarding/codex-accounts-list";
 import { DeviceCodePanel } from "@/components/providers/codex-device-code";
@@ -11,10 +12,12 @@ import { StatusLine } from "@/components/shared/status-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCodexDeviceFlow } from "@/hooks/use-codex-device-flow";
 import { useConfig } from "@/hooks/use-config";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { DISCLOSURE_TITLE } from "./fields";
-import type { AiCardProps } from "./model";
+import { type AiCardProps, CODEX_CARD_TARGETS } from "./model";
 import { ProviderCard } from "./provider-card";
 
 /** Global rows the CLI and the device flow write (`codex_oauth` is the legacy slot 0). */
@@ -23,10 +26,15 @@ const CODEX_SLOT_KEY = /^codex_oauth(_\d+)?$/i;
 export function CodexCard({
   configs,
   onDeviceComplete,
+  onHarnessChange,
   presence: _presence,
   onSaved: _onSaved,
   ...card
-}: AiCardProps & { onDeviceComplete: () => void }) {
+}: AiCardProps & {
+  onDeviceComplete: () => void;
+  /** Pick the harness the subscription runs on (`card.harnesses[0]`). */
+  onHarnessChange: (harness: ProviderName) => void;
+}) {
   const { config } = useConfig();
   const { flow, start: startFlow, reset } = useCodexDeviceFlow(onDeviceComplete);
   const accountsSupport = usePoolKeysSupport();
@@ -58,6 +66,23 @@ export function CodexCard({
       subtitle="Device code login. No terminal needed."
       saved={saved}
     >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span id="codex-harness-label" className="text-xs text-muted-foreground">
+          Run agents on
+        </span>
+        <SegmentedControl
+          aria-labelledby="codex-harness-label"
+          size="sm"
+          value={card.harnesses[0]}
+          onValueChange={onHarnessChange}
+          options={CODEX_CARD_TARGETS.map((harness) => ({
+            value: harness,
+            label: HARNESS_LABEL[harness] ?? harness,
+          }))}
+        />
+        <InfoTip content="Both run GPT models on this ChatGPT subscription. Opencode cannot use it." />
+      </div>
+
       {/* An older API has no account list route. */}
       {accountsSupport === "supported" ? (
         <CodexAccountsList

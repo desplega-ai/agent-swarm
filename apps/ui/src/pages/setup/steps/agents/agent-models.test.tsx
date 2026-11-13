@@ -254,7 +254,7 @@ describe("AgentModels reads the model tiers", () => {
     await view.unmount();
   });
 
-  test("a level shows the model of its tier; codex Optimal and Max differ by effort", async () => {
+  test("a level shows the model of its tier at the level's effort", async () => {
     const view = await mount([agent("1", "codex")]);
     expect(holds.at(-1)).toBeNull();
     const [cheap, optimal, max] = tiles(view.container);
@@ -262,8 +262,7 @@ describe("AgentModels reads the model tiers", () => {
     expect(cheap).toContain("Medium");
     expect(optimal).toContain("Sol");
     expect(optimal).toContain("High");
-    // The smart and ultra tiers share a model: the effort tells them apart.
-    expect(max).toContain("Sol");
+    expect(max).toContain("Astra");
     expect(max).toContain("X-High");
     await view.unmount();
   });
@@ -295,7 +294,7 @@ describe("AgentModels reads the model tiers", () => {
       {
         id: "1",
         harnessProvider: "codex",
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         allowCustomModel: false,
         reasoningEffort: "high",
       },
@@ -323,7 +322,7 @@ describe("AgentModels reads the model tiers", () => {
 
   test("an agent already on a level shows it selected", async () => {
     storedConfigs = [
-      { key: "MODEL_OVERRIDE", value: "gpt-5.6-sol" },
+      { key: "MODEL_OVERRIDE", value: "gpt-6-astra" },
       { key: "REASONING_EFFORT_OVERRIDE", value: "xhigh" },
     ];
     const view = await mount([agent("1", "codex")]);
@@ -332,6 +331,26 @@ describe("AgentModels reads the model tiers", () => {
       '[role="radiogroup"] [aria-checked="true"]',
     );
     expect(max?.textContent).toContain("Max");
+    await view.unmount();
+  });
+
+  test("a pi agent on the ChatGPT subscription stays on it: levels are openai-codex models", async () => {
+    liveAutosave = true;
+    storedConfigs = [{ key: "MODEL_OVERRIDE", value: "openai-codex/gpt-6-luna" }];
+    const view = await mount([agent("1", "pi")]);
+    const [cheap, optimal, max] = tiles(view.container);
+    expect(cheap).toContain("Terra");
+    expect(optimal).toContain("Sol");
+    expect(max).toContain("Astra");
+    await act(async () => {
+      view.container.querySelectorAll<HTMLButtonElement>("fieldset button")[1].click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(writes.map((w) => [w.harnessProvider, w.model, w.reasoningEffort])).toEqual([
+      ["pi", "openai-codex/gpt-6.1-sol", "high"],
+    ]);
     await view.unmount();
   });
 
@@ -356,8 +375,8 @@ describe("AgentModels reads the model tiers", () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
     expect(writes.map((w) => [w.id, w.model, w.reasoningEffort])).toEqual([
-      ["1", "gpt-5.6-sol", "xhigh"],
-      ["2", "gpt-5.6-sol", "xhigh"],
+      ["1", "gpt-6-astra", "xhigh"],
+      ["2", "gpt-6-astra", "xhigh"],
     ]);
     expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
     expect(customize(view.container).text).toContain("Saved. Applies to the next task.");

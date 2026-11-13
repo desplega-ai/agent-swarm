@@ -1,0 +1,52 @@
+---
+title: Repo merge policy
+description: One merge-policy record per repo, stored in the repo guidelines, that sets whether agents may merge and which PRs the swarm may auto-merge.
+---
+
+A repo's `guidelines` can carry a `mergePolicy` record. It lives inside the existing `swarm_repos.guidelines` JSON, so there is no migration and a repo without one behaves as before.
+
+```json
+{
+  "prChecks": ["bun run check:local"],
+  "mergeChecks": ["CI green"],
+  "review": [],
+  "allowMerge": false,
+  "mergePolicy": {
+    "agentsMayMerge": false,
+    "autoMerge": {
+      "enabled": true,
+      "threshold": 80,
+      "baseScores": { "docs": 85 },
+      "maxLines": { "docs": 400 },
+      "riskyPaths": ["migrations/**"],
+      "classes": ["docs", "bump"]
+    },
+    "notify": { "dmWhenNotAutoMerging": true, "digestAt": "08:30", "timezone": "Europe/Madrid" }
+  }
+}
+```
+
+## Fields
+
+| Field | Meaning |
+|---|---|
+| `agentsMayMerge` | Whether an agent may merge a PR itself. When absent, reads fall back to `allowMerge`. |
+| `autoMerge.enabled` | Kill switch for swarm auto-merge. Default `false`. |
+| `autoMerge.threshold` | Minimum score (0 to 100) a PR needs. Default `80`. |
+| `autoMerge.baseScores` | Base score per PR class. An empty map means the scorer's built-in values. |
+| `autoMerge.maxLines` | Hard size cap per PR class, in code lines. Empty means the scorer's built-in caps. |
+| `autoMerge.riskyPaths` | Path globs that always keep a PR out of auto-merge. |
+| `autoMerge.classes` | PR classes allowed to auto-merge. |
+| `notify` | `dmWhenNotAutoMerging` (default `true`), a daily digest time `digestAt` as `HH:MM`, and its `timezone`. |
+
+The server stores and validates the record. It does not score or merge anything: swarm scripts read it through `get-repos`.
+
+## Who can change it
+
+Changing the effective `agentsMayMerge` or any part of `mergePolicy` takes the `repo.merge-policy.write` permission: the lead, the operator or a user. It applies to `POST /api/repos`, `PUT /api/repos/{id}` and the `update-repo` tool.
+
+`guidelines` is replaced as a whole. An agent that edits other guidelines must resend the stored `mergePolicy` unchanged; leaving it out counts as removing it and is refused.
+
+## What agents see
+
+The "Merge Policy" lines in the worker prompt come from the registered template `system.agent.repository.merge_policy`, which an operator can override like any prompt template. A repo with no `mergePolicy` renders the same text as before. A repo with `autoMerge` adds one line: whether swarm auto-merge is on, its minimum score, its classes and its risky paths. The "Auto-merge: Allowed" line follows `agentsMayMerge`, then `allowMerge`.

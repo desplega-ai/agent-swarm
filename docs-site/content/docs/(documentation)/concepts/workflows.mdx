@@ -378,6 +378,19 @@ Set `verification.format` to make the expected format explicit. Explicit formats
 }
 ```
 
+Use `hmac-sha1` for senders that sign the raw body with HMAC-SHA1, such as Vercel (`x-vercel-signature`, bare hex) or GitHub's legacy `X-Hub-Signature` (`sha1=<hex>`). Both shapes are accepted. The header defaults to `X-Hub-Signature`.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.VERCEL_WEBHOOK_SECRET",
+  "verification": {
+    "format": "hmac-sha1",
+    "header": "x-vercel-signature"
+  }
+}
+```
+
 Use `timestamped-hmac-sha256` for Stripe/Superagent-style headers such as `t=<timestamp>,v1=<hex>`. The signed payload is `<timestamp>.<raw body>`, multiple `v1` entries are accepted for secret rotation, and timestamps outside the tolerance window are rejected.
 
 ```json

@@ -276,7 +276,7 @@ Starter env file: `.env.docker-devin.example` at the repo root.
 | `MANAGED_AGENT_ID` | Yes | — | Anthropic Agent ID. Written by `claude-managed-setup` |
 | `MANAGED_ENVIRONMENT_ID` | Yes | — | Anthropic Environment ID. Written by `claude-managed-setup` |
 | `MCP_BASE_URL` | Yes | — | **Must be HTTPS-public** so Anthropic's sandbox can reach `/mcp`. Worker fails fast at boot otherwise |
-| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-5` | Default model on `sessions.create`; per-task `task.model` overrides |
+| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-5-5` | Default model on `sessions.create`; per-task `task.model` overrides |
 | `MANAGED_GITHUB_VAULT_ID` | No | — | Anthropic vault ID holding a GitHub PAT, for repo-bound tasks (recommended for prod) |
 | `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
 | `MANAGED_MCP_VAULT_ID` | No | — | Anthropic vault ID holding the static-bearer credential for the swarm's `/mcp` endpoint, passed via `vault_ids` on `sessions.create` alongside `MANAGED_GITHUB_VAULT_ID`. Written by `claude-managed-setup` and auto-restored from `swarm_config` at worker boot |

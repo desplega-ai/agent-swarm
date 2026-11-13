@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { openAICompatibleProviders, withRegistryCatalogSections } from "@desplega/model-catalog";
+import {
+  type HarnessCatalogModel,
+  harnessCatalogSection,
+  harnessModelIds,
+  modelFamilyKey,
+  openAICompatibleProviders,
+  withRegistryCatalogSections,
+} from "@desplega/model-catalog";
+import { DEFAULT_MODEL_TIER_MAP } from "../../../../src/types";
 import {
   findKnownModel,
   type LiveModelsCatalog,
@@ -9,7 +17,7 @@ import {
   pricingModelOptions,
 } from "./agent-runtime-models";
 import { DIAL_LEVELS, type DialHarness, dialPrice, dialSetting } from "./model-dial";
-import { tierRows } from "./model-tier-fixtures";
+import { DEFAULT_TIER_VALUES, tierRows } from "./model-tier-fixtures";
 import { modelVendor } from "./model-vendor";
 import modelsCache from "./modelsdev-cache.json";
 
@@ -267,5 +275,36 @@ describe("model lists that are not tied to one harness", () => {
     expect(piIds.length).toBeGreaterThan(0);
     expect(piIds.every((id) => snapshot.openrouter?.models[id] !== undefined)).toBe(true);
     expect(pricingModelOptions("devin")).toEqual([]);
+  });
+});
+
+// Onboarding proposes the shipped tier defaults (step 4 reads them from
+// `GET /api/models-catalog/tiers`). A codex or claude-managed default that is
+// missing from the bundled catalog, or older than its family's newest entry,
+// fails here: move `DEFAULT_MODEL_TIER_MAP` with the snapshot. claude tiers are
+// CLI shortnames, which already resolve to the newest model.
+describe("shipped tier defaults follow the bundled catalog", () => {
+  for (const harness of ["codex", "claude-managed"] as const) {
+    test(`${harness} defaults are the newest model of their family`, () => {
+      const section = harnessCatalogSection(harness);
+      expect(section).not.toBeNull();
+      const ids = harnessModelIds(
+        harness,
+        snapshot[section as string]?.models as Record<string, HarnessCatalogModel> | undefined,
+      );
+      for (const [tier, value] of Object.entries(DEFAULT_MODEL_TIER_MAP[harness])) {
+        const newest = ids.find((id) => modelFamilyKey(id) === modelFamilyKey(value));
+        expect({ tier, value, listed: ids.includes(value), newest }).toEqual({
+          tier,
+          value,
+          listed: true,
+          newest: value,
+        });
+      }
+    });
+  }
+
+  test("the dial fixtures mirror the shipped codex defaults", () => {
+    expect(DEFAULT_TIER_VALUES.codex).toEqual(DEFAULT_MODEL_TIER_MAP.codex);
   });
 });

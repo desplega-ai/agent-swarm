@@ -22,8 +22,8 @@ Each harness/provider maps the same tier to its own concrete model:
 | Harness provider | `smol` | `regular` | `smart` | `ultra` |
 | --- | --- | --- | --- | --- |
 | `claude` | `haiku` | `sonnet` | `opus` | `fable` |
-| `claude-managed` | `claude-haiku-4-5` | `claude-sonnet-5` | `claude-opus-4-8` | `claude-fable-5` |
-| `codex` | `gpt-5.6-luna` | `gpt-5.6-terra` | `gpt-5.6-sol` | `gpt-5.6-sol` |
+| `claude-managed` | `claude-haiku-5-5` | `claude-sonnet-5-5` | `claude-opus-5-5` | `claude-fable-5-1` |
+| `codex` | `gpt-6-luna` | `gpt-6.1-terra` | `gpt-6.1-sol` | `gpt-6-astra` |
 | `pi` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `dsh` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `amp` | `low` | `medium` | `high` | `ultra` |

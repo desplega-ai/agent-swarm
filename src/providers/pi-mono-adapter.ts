@@ -32,7 +32,9 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import {
+  getBuiltinProviders,
   getBuiltinModel as getModel,
   getBuiltinModels as getModels,
 } from "@earendil-works/pi-ai/providers/all";
@@ -100,6 +102,68 @@ import type {
 } from "./types";
 
 /**
+ * The env var(s) that can satisfy a provider id, for providers pi-ai ships a
+ * builtin catalog and an env-key list for (`fireworks`, `deepseek`, `xai`, ...).
+ *
+ * Derived from pi-ai rather than hardcoded, so a provider pi-ai adds is
+ * recognised here on the next bump with no change in this file. `findEnvKeys`
+ * is read with an exhaustive env, so it reports the provider's key vars
+ * whatever the caller's env holds. Providers pi-ai has no catalog for return
+ * `undefined`, and so does a provider whose credential is not a plain key
+ * (`amazon-bedrock`, `google-vertex` ADC, `openai-codex`): those have their own
+ * branches in `checkPiMonoCredentials` or are not an inference key pi reads
+ * from `sessionEnv`.
+ *
+ * Computed once per process (the catalog is static). A miss falls back to the
+ * hardcoded provider cases in `modelToCredKeys` and the permissive branch.
+ */
+let piAiKeyVarsByProvider: Map<string, string[]> | undefined;
+function piAiProviderKeyVars(providerId: string): string[] | undefined {
+  if (!piAiKeyVarsByProvider) {
+    // An env that answers every lookup, so `findEnvKeys` returns the full list.
+    const exhaustiveEnv = new Proxy(
+      {},
+      { get: (_target, name) => (typeof name === "string" ? "probe" : undefined) },
+    ) as Record<string, string>;
+    const keyVars = new Map<string, string[]>();
+    for (const provider of getBuiltinProviders()) {
+      const vars = findEnvKeys(provider, exhaustiveEnv)?.filter((name) => !isGatewayTokenVar(name));
+      if (vars?.length) keyVars.set(provider, vars);
+    }
+    piAiKeyVarsByProvider = keyVars;
+  }
+  return piAiKeyVarsByProvider.get(providerId);
+}
+
+/**
+ * Anthropic gateway tokens pi-ai's anthropic provider also accepts. They only
+ * work against a gateway base URL, which this adapter never writes for a pi
+ * session, so they are not an inference credential on their own — the same
+ * reason `modelToCredKeys` has always required `ANTHROPIC_API_KEY`.
+ */
+function isGatewayTokenVar(name: string): boolean {
+  return name === "ANTHROPIC_AUTH_TOKEN" || name === "ANTHROPIC_OAUTH_TOKEN";
+}
+
+/**
+ * Every env var that satisfies a builtin provider with a chat catalog
+ * (`FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY`, ...). This is the set the permissive
+ * branch accepts and `createPiRuntimeAuth` forwards, minus the providers that
+ * resolve auth another way (Bedrock, Vertex ADC) or have no chat models.
+ */
+let piAiInferenceKeyVarsCache: string[] | undefined;
+function piAiInferenceKeyVars(): string[] {
+  if (!piAiInferenceKeyVarsCache) {
+    const keyVars: string[] = [];
+    for (const [envKey] of piRuntimeApiKeys()) {
+      if (!keyVars.includes(envKey)) keyVars.push(envKey);
+    }
+    piAiInferenceKeyVarsCache = keyVars;
+  }
+  return piAiInferenceKeyVarsCache;
+}
+
+/**
  * Map a `MODEL_OVERRIDE` string to the env var(s) that can satisfy it.
  *
  * Anthropic shortnames (`sonnet` / `haiku` / `opus`) accept EITHER
@@ -107,9 +171,10 @@ import type {
  * `OPENROUTER_API_KEY` — in the latter case `resolveModel` swaps to the
  * OpenRouter mirror of the same model so pi-ai's anthropic-provider env
  * lookup (which only checks `ANTHROPIC_*`) doesn't fail with "No API key
- * found for anthropic". Provider-prefixed model IDs only accept that one
- * provider's key. Returns `null` for the permissive case (no MODEL_OVERRIDE
- * or bare unprefixed model name).
+ * found for anthropic". Provider-prefixed model IDs accept that one
+ * provider's key: the pi-ai catalog's key vars when it knows the provider,
+ * else the historical hardcoded names. Returns `null` for the permissive
+ * case (no MODEL_OVERRIDE or bare unprefixed model name).
  */
 function modelToCredKeys(modelStr: string | undefined): string[] | null {
   if (!modelStr) return null;
@@ -131,6 +196,9 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     // worker without that step (or a boot-time check) may only see the alias.
     const direct = openAICompatibleProvider(provider);
     if (direct) return providerKeyVars(direct);
+    // Every other provider pi-ai ships a catalog and env key for.
+    const piAiKeyVars = piAiProviderKeyVars(provider);
+    if (piAiKeyVars) return piAiKeyVars;
   }
   // Bare model name with no provider prefix — adapter falls through to a
   // best-effort resolution against multiple providers, so the boot loop
@@ -247,10 +315,13 @@ export async function runBedrockSdkProbeAndEnumerate(
  *      `checkProviderCredentials`); the API binary never imports the SDK.
  *   2. `~/.pi/agent/auth.json` exists.
  *   3. `MODEL_OVERRIDE` is set to a non-Bedrock provider-prefixed model — only
- *      the matching provider's key is required.
+ *      the matching provider's key is required. The key vars come from pi-ai's
+ *      own per-provider env-key list, so `fireworks/accounts/fireworks/models/
+ *      deepseek-v4p1-flash` needs `FIREWORKS_API_KEY` without another entry in
+ *      this file.
  *   4. `MODEL_OVERRIDE` is empty / unprefixed — any one of the supported
- *      keys (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY) is
- *      enough.
+ *      keys is enough, including any key pi-ai resolves an inference
+ *      credential from (`FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY`, ...).
  *
  * The Bedrock branch is checked first so a stale `auth.json` (Anthropic /
  * OpenRouter creds from a previous login) doesn't get falsely reported as
@@ -381,6 +452,16 @@ export async function checkPiMonoCredentials(
   ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
+
+  // Any other inference key pi-ai resolves (`FIREWORKS_API_KEY`,
+  // `DEEPSEEK_API_KEY`, `XAI_API_KEY`, ...). pi ships the provider and its
+  // model catalog, so a task model routes there without a MODEL_OVERRIDE.
+  // Only providers with a chat catalog count: a classifier-only entry's key
+  // is not an inference credential.
+  if (piAiInferenceKeyVars().some((k) => env[k])) {
+    return { ready: true, missing: [], satisfiedBy: "env" };
+  }
+
   return {
     ready: false,
     missing: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", authFile],
@@ -388,7 +469,9 @@ export async function checkPiMonoCredentials(
       .map((p) => p.envVar)
       .join(" or ")} serve only ${openAICompatibleProviders()
       .map((p) => `${p.id}/*`)
-      .join(" or ")} models), or run \`pi auth login\` to create ~/.pi/agent/auth.json.`,
+      .join(
+        " or ",
+      )} models). Any other provider key pi resolves works too — FIREWORKS_API_KEY, DEEPSEEK_API_KEY, GEMINI_API_KEY, XAI_API_KEY and the rest of pi's built-in providers. Or run \`pi auth login\` to create ${authFile}.`,
   };
 }
 
@@ -512,7 +595,37 @@ function envHasAnthropicCred(env: Record<string, string | undefined>): boolean {
   return !!(env.ANTHROPIC_API_KEY || env.ANTHROPIC_OAUTH_TOKEN);
 }
 
-const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string])[] = [
+/**
+ * `[envKey, provider]` rows for the builtin providers whose credential pi-ai
+ * resolves from an env key, so a `FIREWORKS_API_KEY` (or any later provider's
+ * key) reaches the session as a runtime key. Providers the explicit list below
+ * already covers are left out: that list decides precedence between a
+ * provider's several key vars, and a derived row would silently replace its
+ * pick (`GOOGLE_API_KEY` over `GEMINI_API_KEY`).
+ */
+function piAiRuntimeKeyRows(
+  explicitProviders: ReadonlySet<string>,
+): Array<readonly [string, string]> {
+  const rows: Array<readonly [string, string]> = [];
+  for (const provider of getBuiltinProviders()) {
+    if (explicitProviders.has(provider)) continue;
+    // Bedrock resolves the AWS SDK chain and google-vertex ADC, not a key var;
+    // `openai-codex` is OAuth-only (the ChatGPT pool).
+    if (provider === "amazon-bedrock" || provider === "google-vertex") continue;
+    if (provider === "openai-codex") continue;
+    if (getModels(provider).length === 0) continue;
+    for (const keyVar of piAiProviderKeyVars(provider) ?? []) rows.push([keyVar, provider]);
+  }
+  return rows;
+}
+
+/**
+ * Key var → provider for the providers this adapter handles explicitly. The
+ * order is precedence: a later row for the same provider wins, so a provider's
+ * canonical var comes last (`GOOGLE_API_KEY` over `GEMINI_API_KEY`, and
+ * `NAN_API_KEY` over its `HELMCODE_API_NAN` alias).
+ */
+const EXPLICIT_PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string])[] = [
   ["OPENROUTER_API_KEY", "openrouter"],
   ["ANTHROPIC_API_KEY", "anthropic"],
   ["OPENAI_API_KEY", "openai"],
@@ -528,6 +641,23 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
     [...p.aliasEnvVars, p.envVar].map((name) => [name, p.id] as const),
   ),
 ];
+
+/**
+ * Every runtime-key row the session applies: the explicit list, then a row for
+ * each remaining builtin provider pi-ai resolves from an env key
+ * (`FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY`, ...).
+ */
+let piRuntimeApiKeysCache: ReadonlyArray<readonly [string, string]> | undefined;
+function piRuntimeApiKeys(): ReadonlyArray<readonly [string, string]> {
+  if (!piRuntimeApiKeysCache) {
+    const explicitProviders = new Set(EXPLICIT_PI_RUNTIME_API_KEYS.map(([, provider]) => provider));
+    piRuntimeApiKeysCache = [
+      ...EXPLICIT_PI_RUNTIME_API_KEYS,
+      ...piAiRuntimeKeyRows(explicitProviders),
+    ];
+  }
+  return piRuntimeApiKeysCache;
+}
 
 /**
  * Build pi-coding-agent auth services from the runner's per-task resolved env.
@@ -550,7 +680,7 @@ export async function createPiRuntimeAuth(
       : {}),
     ...(subscription ? { credentials: await subscriptionCredentialStore(subscription) } : {}),
   });
-  for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
+  for (const [envKey, provider] of piRuntimeApiKeys()) {
     const apiKey = env[envKey];
     if (apiKey) {
       await modelRuntime.setRuntimeApiKey(provider, apiKey);

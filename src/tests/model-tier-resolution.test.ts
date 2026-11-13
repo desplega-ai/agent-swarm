@@ -243,7 +243,7 @@ describe("claim-time resolution via /api/poll", () => {
     const trigger = await callPoll(worker.id, header({}));
     expect(trigger?.taskId).toBe(task.id);
     expect(await taskRow(task.id)).toEqual({
-      resolvedModel: "gpt-5.6-terra",
+      resolvedModel: "gpt-6.1-terra",
       modelSource: "tier-default",
       modelAlias: null,
     });
@@ -401,7 +401,7 @@ describe("claim-time harness guard", () => {
     const trigger = await callPoll(worker.id, header({ codex: { smart: "claude-opus-5-5" } }));
     expect(trigger?.task.modelSource).not.toBe("worker-env");
     expect(await taskRow(task.id)).toEqual({
-      resolvedModel: "gpt-5.6-sol",
+      resolvedModel: "gpt-6.1-sol",
       modelSource: "tier-default",
       modelAlias: null,
     });

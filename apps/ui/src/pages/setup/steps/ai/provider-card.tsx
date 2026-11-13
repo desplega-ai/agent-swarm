@@ -4,7 +4,7 @@ import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
-import { type AiCardId, type AiCardProps, CARD_HARNESSES, harnessNames } from "./model";
+import { type AiCardId, type AiCardProps, harnessNames } from "./model";
 import { WaitingPanel } from "./waiting";
 
 const SPEND_CAP_LINE =
@@ -29,11 +29,19 @@ export function ProviderCard({
   dialContext,
   reportSaved,
   autoSwitching,
+  harnesses,
   spendCapPool,
   children,
 }: Pick<
   AiCardProps,
-  "open" | "onOpenChange" | "rollup" | "agents" | "dialContext" | "reportSaved" | "autoSwitching"
+  | "open"
+  | "onOpenChange"
+  | "rollup"
+  | "agents"
+  | "dialContext"
+  | "reportSaved"
+  | "autoSwitching"
+  | "harnesses"
 > & {
   card: AiCardId;
   icon: ReactNode;
@@ -44,7 +52,6 @@ export function ProviderCard({
   spendCapPool?: string;
   children: ReactNode;
 }) {
-  const harnesses = CARD_HARNESSES[card];
   const pool = usePoolKeys(spendCapPool ?? "", !!spendCapPool && saved);
   // An earlier "verified" says nothing while no key can run: every key hit its spend cap.
   const capped =
@@ -80,7 +87,7 @@ export function ProviderCard({
     <StatusIcon
       tone="warning"
       focusable={false}
-      label={`Saved. No worker runs ${harnessNames(card)} yet.`}
+      label={`Saved. No worker runs ${harnessNames(card, "or", harnesses)} yet.`}
     />
   ) : saved ? (
     <StatusIcon
@@ -122,7 +129,7 @@ export function ProviderCard({
         </output>
       ) : saved && noWorker ? (
         <HarnessSwitch
-          harnessPhrase={harnessNames(card)}
+          harnessPhrase={harnessNames(card, "or", harnesses)}
           targets={harnesses}
           agents={agents}
           dialContext={dialContext}

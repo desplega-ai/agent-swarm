@@ -86,26 +86,29 @@ async function mount(
   tiers: readonly ModelTierPreview[] | null,
   targets: string[] = ["codex"],
   agents: AgentWithTasks[] = [agent],
+  chatgpt = false,
 ) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => {
-    root.render(
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <HarnessSwitch
-            harnessPhrase="Codex"
-            targets={targets as never}
-            agents={agents}
-            dialContext={{ openrouter: false, catalog: null, tiers }}
-          />
-        </TooltipProvider>
-      </QueryClientProvider>,
-    );
-  });
-  return { container, unmount: () => act(async () => root.unmount()) };
+  const render = (to: string[]) =>
+    act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <HarnessSwitch
+              harnessPhrase="Codex"
+              targets={to as never}
+              agents={agents}
+              dialContext={{ openrouter: false, catalog: null, tiers, chatgpt }}
+            />
+          </TooltipProvider>
+        </QueryClientProvider>,
+      );
+    });
+  await render(targets);
+  return { container, rerender: render, unmount: () => act(async () => root.unmount()) };
 }
 
 const switchButton = (container: HTMLElement) =>
@@ -196,7 +199,7 @@ describe("HarnessSwitch", () => {
       {
         id: "agent-1",
         harnessProvider: "codex",
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         allowCustomModel: false,
         reasoningEffort: "high",
       },
@@ -242,6 +245,51 @@ describe("HarnessSwitch", () => {
     await switchAgent(view.container);
     expect(runtimeCalls).toEqual([]);
     expect(harnessCalls).toEqual([["agent-1", "codex"]]);
+    await view.unmount();
+  });
+
+  test("pi on the ChatGPT subscription gets the subscription's Optimal model", async () => {
+    // No model yet: pi would fall back to its OpenRouter tier default, which has no key.
+    const view = await mount(tierRows(), ["pi"], [agent], true);
+    await switchAgent(view.container);
+    expect(runtimeCalls).toEqual([
+      {
+        id: "agent-1",
+        harnessProvider: "pi",
+        model: "openai-codex/gpt-6.1-sol",
+        allowCustomModel: false,
+        reasoningEffort: "high",
+      },
+    ]);
+    expect(harnessCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("a mounted list follows the card's new target, in both directions", async () => {
+    // Run agents on: Codex -> Pi-Mono while the list stays mounted.
+    const view = await mount(tierRows(), ["codex"], [agent], true);
+    await view.rerender(["pi"]);
+    expect(switchButton(view.container)?.textContent).toContain("to Pi-Mono");
+    await switchAgent(view.container);
+    expect(runtimeCalls.map((c) => [c.harnessProvider, c.model])).toEqual([
+      ["pi", "openai-codex/gpt-6.1-sol"],
+    ]);
+    expect(harnessCalls).toEqual([]);
+    // And back: Pi-Mono -> Codex.
+    runtimeCalls.length = 0;
+    await view.rerender(["codex"]);
+    expect(switchButton(view.container)?.textContent).toContain("to Codex");
+    await switchAgent(view.container);
+    expect(runtimeCalls).toEqual([]);
+    expect(harnessCalls).toEqual([["agent-1", "codex"]]);
+    await view.unmount();
+  });
+
+  test("pi off the subscription keeps changing only the harness", async () => {
+    const view = await mount(tierRows(), ["pi"], [agent]);
+    await switchAgent(view.container);
+    expect(runtimeCalls).toEqual([]);
+    expect(harnessCalls).toEqual([["agent-1", "pi"]]);
     await view.unmount();
   });
 });
