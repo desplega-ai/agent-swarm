@@ -92,8 +92,8 @@ describe("ensureToken", () => {
 
     // Should have called the token endpoint
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://example.com/oauth/token");
+    const [url, init] = fetchSpy.mock.calls[0] as [string | URL, RequestInit];
+    expect(String(url)).toBe("https://example.com/oauth/token");
     expect(init.method).toBe("POST");
     expect(init.body).toContain("grant_type=refresh_token");
     expect(init.body).toContain("refresh_token=example-refresh-token");
