@@ -1082,18 +1082,31 @@ export async function parseAppDefinition(
       continue;
     }
     // Invoke-time runs the script with the OWNER's bindings, so a writer may
-    // only wire scripts it owns (or global ones). A reference the stored
+    // only wire scripts it owns (or owner-less global ones). A reference the stored
     // definition already carries at this exact path is grandfathered so
     // foreign-authored apps stay editable — the bare id is not, so an existing
     // foreign reference cannot seed a new one elsewhere.
-    if (
-      foreignScriptForWriter(elementContext, script) &&
-      grandfatheredScriptRefs.get(`actions.${name}`) !==
-        scriptRefKey(action.scriptId, action.args, undefined)
-    ) {
+    const grandfatheredRef =
+      grandfatheredScriptRefs.get(`actions.${name}`) ===
+      scriptRefKey(action.scriptId, action.args, undefined);
+    const owner = getSavedScriptOwnerAgentId(script);
+    if (foreignScriptForWriter(elementContext, script) && !grandfatheredRef) {
       issues.push({
         path: `actions.${name}.scriptId`,
         message: `script "${action.scriptId}" is agent-scoped to another agent — reference a script you own or a global script`,
+      });
+    } else if (
+      // A global script with an owning agent also runs as that owner, so the
+      // sync-source rule applies: only that agent or the operator may wire it.
+      script.scope !== "agent" &&
+      owner !== null &&
+      (elementContext.writerIsUser === true || typeof elementContext.writerAgentId === "string") &&
+      elementContext.writerAgentId !== owner &&
+      !grandfatheredRef
+    ) {
+      issues.push({
+        path: `actions.${name}.scriptId`,
+        message: `script "${action.scriptId}" runs with agent "${owner}"'s credentials — only that agent or the operator may wire or alter this action`,
       });
     }
   }
