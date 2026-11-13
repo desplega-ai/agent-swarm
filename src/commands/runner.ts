@@ -161,6 +161,7 @@ import {
   reportAcpStatus,
   reportLatestModel,
   sendCredStatusReport,
+  taskSelectedModelForReport,
 } from "./provider-credentials.ts";
 import { classifyProviderErrorOf } from "./provider-error-class.ts";
 import {
@@ -4691,6 +4692,13 @@ export async function spawnProviderProcess(
     );
   }
   const taskModel = opts.resolvedModel || taskModelSelection.model || "";
+  // What the task itself selected, for the latest-model reports: the same value in the initial,
+  // result and final reports, so a tier or profile run keeps source "task" until it ends.
+  const reportTaskModel = taskSelectedModelForReport({
+    resolvedModel: opts.resolvedModel,
+    modelSource: opts.modelSource,
+    localModel: taskModelSelection.model,
+  });
   // Never start a CLI with a model from another harness family (runbooks/model-tiers.md).
   const spawnModel = guardSpawnModel({
     taskModel,
@@ -4883,7 +4891,7 @@ export async function spawnProviderProcess(
   );
   const initialModelReport = buildLatestModelReport({
     model,
-    taskModel,
+    taskModel: reportTaskModel,
     configModel,
     taskId: realTaskId,
     harnessProvider: opts.harnessProvider,
@@ -5233,7 +5241,7 @@ export async function spawnProviderProcess(
             // final adapter-confirmed report below once the session completes.
             const latestModel = buildLatestModelReport({
               model: event.cost.model,
-              taskModel: opts.model,
+              taskModel: reportTaskModel,
               configModel,
               taskId: realTaskId,
               harnessProvider: opts.harnessProvider,
@@ -5513,7 +5521,7 @@ export async function spawnProviderProcess(
         if (result.cost?.model) {
           const finalModelReport = buildLatestModelReport({
             model: result.cost.model,
-            taskModel: opts.model,
+            taskModel: reportTaskModel,
             configModel,
             taskId: realTaskId,
             harnessProvider: opts.harnessProvider,
