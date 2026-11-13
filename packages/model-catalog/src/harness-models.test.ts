@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  chatgptSubscriptionEquivalent,
   fxModelRoute,
   type HarnessCatalogSections,
   harnessModelIds,
@@ -306,6 +307,28 @@ describe("harnessModelMismatch on fx", () => {
       expect(error).toContain(`Model "${model}" does not run on the fx harness`);
       expect(error).toContain(reason);
       expect(error).toContain('of agent "Fixer"');
+    }
+  });
+});
+
+describe("chatgptSubscriptionEquivalent", () => {
+  test("a bare or openai/ Codex-line GPT maps to openai-codex", () => {
+    expect(chatgptSubscriptionEquivalent("gpt-5.6-luna")).toBe("openai-codex/gpt-5.6-luna");
+    expect(chatgptSubscriptionEquivalent(" OpenAI/gpt-6.1-sol ")).toBe("openai-codex/gpt-6.1-sol");
+  });
+
+  test("everything else has no subscription equivalent", () => {
+    for (const model of [
+      "",
+      null,
+      "gpt-4o",
+      "gpt-5.6-luna-2026-01-01",
+      "sonnet",
+      "openai-codex/gpt-5.6-luna",
+      "openrouter/openai/gpt-5.6-luna",
+      "openai/",
+    ]) {
+      expect(chatgptSubscriptionEquivalent(model)).toBe(null);
     }
   });
 });

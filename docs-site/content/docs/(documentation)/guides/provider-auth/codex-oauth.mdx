@@ -379,6 +379,7 @@ When at least one `codex_oauth_<n>` slot exists, the dashboard's pi model picker
 
 At task time the runner picks a slot the same way it does for Codex: same availability filter, rate-limit tracking and auth-failure benching. The pi adapter then revalidates the slot through the locked `getValidCodexOAuth(...)` refresh. pi gets an in-memory `openai-codex` credential for that session only, holding the access token and an empty refresh token. Nothing is written to `~/.pi/agent/auth.json`, so pi cannot rotate the shared token family.
 
+- **Bare GPT ids:** a pi task whose model is a bare Codex-line id or `openai/<id>` (for example `gpt-5.6-luna`, as a workflow task sets it) runs as `openai-codex/<id>` when the pool has a slot. With no slot it keeps the id and runs on `OPENAI_API_KEY`.
 - **Readiness:** a pi worker whose `MODEL_OVERRIDE` is an `openai-codex/` model reports ready only when the pool has slots (`CODEX_OAUTH_POOL_SLOTS`).
 - **Harness check:** other harnesses reject an `openai-codex/` model. On Codex, use the bare id.
 - **Long sessions:** pi cannot refresh the access token. A session that outlives it fails, the same as Codex. Tasks draw tokens with at least 12 hours left.

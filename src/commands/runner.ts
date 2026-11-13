@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
+import { chatgptSubscriptionEquivalent, isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import { isGroupKey } from "../assets/key.ts";
@@ -2214,6 +2214,23 @@ export async function resolveCodexOAuthCredentialInfo(
   } catch {
     return null;
   }
+}
+
+/**
+ * The model a pi session runs and its ChatGPT pool slot. An `openai-codex/<id>`
+ * model always looks up a slot (none fails the session in the adapter). A bare
+ * or `openai/` Codex-line GPT becomes `openai-codex/<id>` when the pool has a
+ * slot and keeps its OpenAI API key when it has none.
+ */
+export async function resolvePiSubscription(
+  model: string,
+  resolvePoolSlot: () => Promise<CodexOAuthCredentialInfo | null>,
+): Promise<{ model: string; oauthInfo: CodexOAuthCredentialInfo | null }> {
+  if (isChatgptSubscriptionModel(model)) return { model, oauthInfo: await resolvePoolSlot() };
+  const subscriptionModel = chatgptSubscriptionEquivalent(model);
+  if (!subscriptionModel) return { model, oauthInfo: null };
+  const oauthInfo = await resolvePoolSlot();
+  return oauthInfo ? { model: subscriptionModel, oauthInfo } : { model, oauthInfo: null };
 }
 
 /** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
@@ -4714,7 +4731,19 @@ export async function spawnProviderProcess(
     throw new Error(spawnModel.reason);
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
-  const model = spawnModel.model;
+  let model = spawnModel.model;
+  // pi: a ChatGPT subscription slot wins over an OpenAI API key for GPT models.
+  let piOAuthInfo: CodexOAuthCredentialInfo | null = null;
+  if (adapter.name === "pi") {
+    ({ model, oauthInfo: piOAuthInfo } = await resolvePiSubscription(model, () =>
+      resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, { poolOnly: true }),
+    ));
+    if (model !== spawnModel.model) {
+      console.log(
+        `[${opts.role}] ${spawnModel.model} runs on the ChatGPT subscription as ${model}`,
+      );
+    }
+  }
   // Recorded on the task at session start, like the model: what the adapter
   // applies, not just what was asked for.
   const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
@@ -4748,16 +4777,13 @@ export async function spawnProviderProcess(
         realTaskId,
       ).catch(() => {});
     }
-  } else if (adapter.name === "pi" && isChatgptSubscriptionModel(model)) {
+  } else if (adapter.name === "pi" && piOAuthInfo) {
     // An `openai-codex/<id>` model runs on the same pool, with the same slot
     // pick and usage bookkeeping. The adapter revalidates `codexSlot` through
     // the refresh lock and hands the harness the access token only
     // (`loadChatgptSubscriptionCredential`); no slot fails the session there.
-    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, {
-      poolOnly: true,
-    });
-    oauthSelection = oauthInfo?.selection;
-    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    oauthSelection = piOAuthInfo.selection;
+    oauthIsPoolBacked = piOAuthInfo.isPoolBacked;
     if (oauthSelection && realTaskId) {
       reportKeyUsage(
         opts.apiUrl,

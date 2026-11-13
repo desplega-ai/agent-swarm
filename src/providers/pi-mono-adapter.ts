@@ -1018,10 +1018,12 @@ function resolveModelInner(
     return modelRuntime?.getModel(provider, modelId);
   }
 
-  // Try as a full model ID with common providers
+  // Try as a full model ID with common providers. getModel returns undefined
+  // for an unknown id, so keep looking instead of returning the first miss.
   for (const provider of ["anthropic", "openai", "google"]) {
     try {
-      return getModel(provider as "anthropic", modelStr as never);
+      const model = getModel(provider as "anthropic", modelStr as never);
+      if (model) return model;
     } catch {}
   }
 

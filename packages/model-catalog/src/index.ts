@@ -7,6 +7,7 @@ export {
 export { modelDisplayName } from "./display.ts";
 export {
   buildClaudeShortnameMap,
+  chatgptSubscriptionEquivalent,
   compareNewestFirst,
   type FxRoute,
   fxModelRoute,

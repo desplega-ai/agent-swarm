@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { resolvePiSubscription } from "../commands/runner";
 import { CodexOAuthRefreshError } from "../providers/codex-oauth/storage";
 import {
   chatgptSubscriptionAuthFailure,
@@ -122,6 +123,62 @@ describe("pi model resolution and auth", () => {
     expect(auth?.auth.apiKey).toBe(CREDS.access);
     const listed = await runtime.listCredentials();
     expect(listed).toContainEqual({ providerId: "openai-codex", type: "oauth" });
+  });
+});
+
+describe("resolvePiSubscription: GPT models on pi prefer the ChatGPT pool", () => {
+  const slot = {
+    selection: { keyType: "CODEX_OAUTH", keySuffix: "abcde", index: 1, totalKeys: 2 },
+    isPoolBacked: true,
+  };
+  const withSlot = async () => slot;
+  const noSlot = async () => null;
+
+  test("a pool slot moves a bare or openai/ GPT model onto openai-codex", async () => {
+    for (const model of ["gpt-5.6-luna", "openai/gpt-5.6-luna"]) {
+      expect(await resolvePiSubscription(model, withSlot)).toEqual({
+        model: "openai-codex/gpt-5.6-luna",
+        oauthInfo: slot,
+      });
+    }
+  });
+
+  test("no pool slot keeps the model, so it runs on OPENAI_API_KEY", async () => {
+    expect(await resolvePiSubscription("gpt-5.6-luna", noSlot)).toEqual({
+      model: "gpt-5.6-luna",
+      oauthInfo: null,
+    });
+    // ...and the bare id resolves to pi-ai's openai provider, not pi's default model.
+    expect(resolveModel("gpt-5.6-luna", {})?.provider).toBe("openai");
+  });
+
+  test("an explicit openai-codex model looks up a slot either way", async () => {
+    expect(await resolvePiSubscription("openai-codex/gpt-6.1-sol", withSlot)).toEqual({
+      model: "openai-codex/gpt-6.1-sol",
+      oauthInfo: slot,
+    });
+    expect(await resolvePiSubscription("openai-codex/gpt-6.1-sol", noSlot)).toEqual({
+      model: "openai-codex/gpt-6.1-sol",
+      oauthInfo: null,
+    });
+  });
+
+  test("other models never touch the pool", async () => {
+    let looked = false;
+    const spy = async () => {
+      looked = true;
+      return slot;
+    };
+    for (const model of [
+      "",
+      "sonnet",
+      "openrouter/openai/gpt-5.6-luna",
+      "gpt-4o",
+      "nan/gpt-5.6-luna",
+    ]) {
+      expect(await resolvePiSubscription(model, spy)).toEqual({ model, oauthInfo: null });
+    }
+    expect(looked).toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@
 
 import {
   CHATGPT_SUBSCRIPTION_HARNESSES,
+  CHATGPT_SUBSCRIPTION_PROVIDER,
   chatgptSubscriptionModelId,
 } from "./chatgpt-subscription.ts";
 import { isAlias, parseAlias } from "./resolve-alias.ts";
@@ -165,6 +166,20 @@ export function isHarnessCatalogModel(
     return true;
   }
   return false;
+}
+
+/**
+ * The `openai-codex/<id>` form of a bare `<id>` or `openai/<id>` model whose id
+ * is a Codex-line GPT (the ids the subscription serves), else null. A pi worker
+ * with a ChatGPT subscription runs these on it instead of an OpenAI API key.
+ */
+export function chatgptSubscriptionEquivalent(model: string | null | undefined): string | null {
+  const trimmed = model?.trim() ?? "";
+  const id = trimmed.toLowerCase().startsWith("openai/")
+    ? trimmed.slice("openai/".length)
+    : trimmed;
+  if (!id || id.includes("/") || !isHarnessCatalogModel("codex", id)) return null;
+  return `${CHATGPT_SUBSCRIPTION_PROVIDER}/${id}`;
 }
 
 /** Newest first: release_date desc (missing dates sort first — just-launched overlay rows), then id desc. */
