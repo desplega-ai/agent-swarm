@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "portless ui.swarm vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.embed.config.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

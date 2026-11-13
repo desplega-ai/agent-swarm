@@ -422,6 +422,70 @@ export const objectsHttp: Scenario = {
         "a page save names the page and the user",
       );
 
+      // The served page tells the <swarm-object> embed who is viewing, from the same cookie.
+      const viewerMeta = (html: string) =>
+        /<meta name="swarm-viewer" content="([a-z]+)">/.exec(html)?.[1] ?? "missing";
+      const servedAs = async (cookie: string) =>
+        viewerMeta(
+          (await ctx.api("GET", `/p/${authed}`, { apiKey: null, headers: { Cookie: cookie } }))
+            .text,
+        );
+      expect((await servedAs(userSession.headers.Cookie)) === "user", "user page viewer meta");
+      expect(
+        (await servedAs(operatorSession.headers.Cookie)) === "operator",
+        "operator page viewer meta",
+      );
+
+      // Configured app origins serve the embed bundle, so the page CSP allows them for
+      // scripts, styles and fonts. connect-src stays 'self'.
+      const appOrigin = `https://ui-${ctx.nonce}.e2e.test`;
+      // APP_URL also changes link targets, so it is reverted, and the revert awaited, before
+      // the scenario goes on. Scenarios run one at a time on a stack.
+      const appUrlId = await setConfig(ctx, "global", null, "APP_URL", `${appOrigin}/`);
+      const directives = async () => {
+        const served = await ctx.api("GET", `/p/${authed}`, {
+          apiKey: null,
+          headers: { Cookie: userSession.headers.Cookie },
+        });
+        const csp = served.headers.get("content-security-policy") ?? "";
+        return new Map(
+          csp.split(";").map((d) => {
+            const [name = "", ...sources] = d.trim().split(/\s+/);
+            return [name, sources] as const;
+          }),
+        );
+      };
+      const awaitCsp = async (hasOrigin: boolean) => {
+        let current = await directives();
+        const deadline = Date.now() + 10_000;
+        while (
+          (current.get("script-src")?.includes(appOrigin) ?? false) !== hasOrigin &&
+          Date.now() < deadline
+        ) {
+          await Bun.sleep(100);
+          current = await directives();
+        }
+        return current;
+      };
+      let csp: Map<string, string[]>;
+      try {
+        csp = await awaitCsp(true);
+      } finally {
+        await ctx.api("DELETE", `/api/config/${appUrlId}`);
+      }
+      expect(
+        !(await awaitCsp(false)).get("script-src")?.includes(appOrigin),
+        "the APP_URL revert reached the page CSP",
+      );
+      expect(
+        ["script-src", "style-src", "font-src"].every((d) => csp.get(d)?.includes(appOrigin)),
+        `the page CSP lists the app origin: ${JSON.stringify([...csp])}`,
+      );
+      expect(
+        csp.get("connect-src")?.join(" ") === "'self'",
+        `connect-src stays 'self': ${csp.get("connect-src")}`,
+      );
+
       // A password-page guest is refused before any agent-fs call.
       const password = `pw-${ctx.nonce}`;
       const locked = await createPage("password", { password });
@@ -429,6 +493,10 @@ export const objectsHttp: Scenario = {
         apiKey: null,
       });
       expectStatus(guest, [200], "open the password page");
+      expect(
+        /<meta name="swarm-viewer" content="guest">/.test(guest.text),
+        "a password guest is served the guest viewer meta",
+      );
       from = stub.seen.length;
       response = await ctx.api(
         "GET",

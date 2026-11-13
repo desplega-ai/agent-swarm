@@ -158,6 +158,17 @@ export default async function (args, ctx) {
 - `updateElements` patches `label` (an empty string removes it), `x`, `y`, `width`, `height` and `color`. Bound labels and arrows follow. Arrows take only `label` and `color`.
 - `removeElements` sets `isDeleted: true`. A shape takes its label with it and unbinds its arrows.
 
+## Embed in an app or a page
+
+An app shows a live, editable sheet or board with `{ "type": "ObjectEmbed", "props": { "objectId": "<object id>" } }`. A page shows it with this snippet, where `${APP_URL}` is the dashboard origin:
+
+```html
+<script type="module" src="${APP_URL}/embed/v1/swarm-object.js"></script>
+<swarm-object object-id="<object id>"></swarm-object>
+```
+
+Optional attributes: `height` (160-1200 px), `readonly`, and for sheets `tab` and `range` (`B2:F20` or `Tab!B2:F20`). Only signed-in viewers see the object. A public or password page guest sees "sign in to the swarm to view", and a page opened with the shared swarm key is read-only.
+
 ## Hand it over quietly
 
 Put the file where the person already works: send its `link` in the thread reply, the report or the task output they asked for. Do not announce sheets or boards as a feature and do not post about them unprompted. If they ask what the link is, say it is an editable spreadsheet or diagram on the shared drive.

@@ -103,16 +103,19 @@ const allowedHosts =
     ? true
     : process.env.VITE_ALLOWED_HOSTS?.split(",").map((host) => host.trim());
 
+/** Build-time globals, shared with the `<swarm-object>` build (`vite.embed.config.ts`). */
+export const sharedDefine = {
+  __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
+  __AGENT_FS_VERSION__: JSON.stringify(pinnedAgentFsVersion()),
+};
+
+export const sharedAlias = { "@": path.resolve(__dirname, "./src") };
+
 export default defineConfig({
   plugins: [react(), tailwindcss(), plausibleAnalytics(), buildVersionManifest(), devNotes()],
-  define: {
-    __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
-    __AGENT_FS_VERSION__: JSON.stringify(pinnedAgentFsVersion()),
-  },
+  define: sharedDefine,
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: sharedAlias,
   },
   server: {
     port: 5274,

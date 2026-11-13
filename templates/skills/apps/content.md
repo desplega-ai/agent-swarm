@@ -1019,6 +1019,15 @@ Create this with `app-upsert`:
 
 The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the live UI, then continue with the read-patch-validate loop above.
 
+## Embed a sheet or board
+
+`{ "type": "ObjectEmbed", "props": { "objectId": "<object id>" } }` shows a live, editable sheet or board (see the `boards-and-sheets` skill). Optional props: `height` (160-1200), `readOnly`, and for sheets `tab` and `range`. To show the same object on an HTML page instead, use the page snippet, where `${APP_URL}` is the dashboard origin:
+
+```html
+<script type="module" src="${APP_URL}/embed/v1/swarm-object.js"></script>
+<swarm-object object-id="<object id>"></swarm-object>
+```
+
 ## View and screenshot a live app
 
 - An app renders at `<dashboard>/apps/<id>`. Two view modes are set by query string: `?mode=full` (full-viewport overlay with a slim header) and `?mode=chromeless` (only the rendered page, the embed surface). `app.navigate` keeps only `?mode`.
