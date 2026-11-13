@@ -6266,357 +6266,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/config/pool-keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List credential pool suffixes and status */
-        get: {
-            parameters: {
-                query: {
-                    key: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Credential pool */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid pool variable */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Secret read permission required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Test and append keys to a credential pool */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        key: string;
-                        value: string;
-                        /** @description Base URL for the check only. Null tests the provider default. Omit to use the stored URL. */
-                        baseUrl?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Updated credential pool and checks */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                            checks: {
-                                suffix: string;
-                                /** @enum {string} */
-                                result: "verified" | "rejected" | "not_tested";
-                                httpStatus: number | null;
-                                error: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid key */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Config administration and permission to read all secrets required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Duplicate key or deployment env pool */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Provider rejected a key. Nothing was saved. */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            error: string;
-                            checks: {
-                                suffix: string;
-                                /** @enum {string} */
-                                result: "verified" | "rejected" | "not_tested";
-                                httpStatus: number | null;
-                                error: string | null;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        /** Remove one credential pool member */
-        delete: {
-            parameters: {
-                query: {
-                    key: string;
-                    index?: number | null;
-                    suffix: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Updated credential pool */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid pool member */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Config administration and permission to read all secrets required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The pool changed or comes from the deployment env */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/context": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get context usage history for a task */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Context snapshot history */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            snapshots: components["schemas"]["ContextSnapshot"][];
-                            summary: {
-                                compactionCount: number;
-                                peakContextPercent: number | null;
-                                peakContextTokens: number | null;
-                                contextWindowSize: number | null;
-                                snapshotCount: number;
-                            };
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Record a context usage snapshot for a task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        eventType: "progress" | "compaction" | "completion";
-                        sessionId: string;
-                        contextUsedTokens?: number;
-                        contextTotalTokens?: number;
-                        contextPercent?: number;
-                        /** @enum {string} */
-                        compactTrigger?: "auto" | "manual" | "auto-inferred";
-                        preCompactTokens?: number;
-                        cumulativeInputTokens?: number;
-                        cumulativeOutputTokens?: number;
-                        /** @enum {string} */
-                        contextFormula?: "input-cache-output" | "input-cache-no-output" | "input-output-no-cache" | "peak-proxy" | "pi-delegated" | "harness-reported" | "unknown";
-                    };
-                };
-            };
-            responses: {
-                /** @description Snapshot recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            ok: true;
-                            /** Format: uuid */
-                            snapshotId: string;
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keys/report-usage": {
         parameters: {
             query?: never;
@@ -6716,6 +6365,12 @@ export interface paths {
                         rateLimitedUntil: string;
                         scope?: string;
                         scopeId?: string;
+                        spendCap?: {
+                            limitUsd: number | null;
+                            spendUsd: number | null;
+                            /** Format: date-time */
+                            resetsAt: string | null;
+                        };
                     };
                 };
             };
@@ -7187,6 +6842,7 @@ export interface paths {
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
                             seatBlockedIndices?: number[];
+                            spendCappedIndices: number[];
                             authFailureFence: number;
                         };
                     };
@@ -7258,6 +6914,12 @@ export interface paths {
                                 scopeId: string | null;
                                 status: string;
                                 rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
                                 lastUsedAt: string | null;
                                 lastRateLimitAt: string | null;
                                 totalUsageCount: number;
@@ -7866,6 +7528,375 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/api/config/pool-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List credential pool suffixes and status */
+        get: {
+            parameters: {
+                query: {
+                    key: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool variable */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Secret read permission required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Test and append keys to a credential pool */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        key: string;
+                        value: string;
+                        /** @description Base URL for the check only. Null tests the provider default. Omit to use the stored URL. */
+                        baseUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated credential pool and checks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid key */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration and permission to read all secrets required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Duplicate key or deployment env pool */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Provider rejected a key. Nothing was saved. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        /** Remove one credential pool member */
+        delete: {
+            parameters: {
+                query: {
+                    key: string;
+                    index?: number | null;
+                    suffix: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool member */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration and permission to read all secrets required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The pool changed or comes from the deployment env */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get context usage history for a task */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Context snapshot history */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            snapshots: components["schemas"]["ContextSnapshot"][];
+                            summary: {
+                                compactionCount: number;
+                                peakContextPercent: number | null;
+                                peakContextTokens: number | null;
+                                contextWindowSize: number | null;
+                                snapshotCount: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Record a context usage snapshot for a task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        eventType: "progress" | "compaction" | "completion";
+                        sessionId: string;
+                        contextUsedTokens?: number;
+                        contextTotalTokens?: number;
+                        contextPercent?: number;
+                        /** @enum {string} */
+                        compactTrigger?: "auto" | "manual" | "auto-inferred";
+                        preCompactTokens?: number;
+                        cumulativeInputTokens?: number;
+                        cumulativeOutputTokens?: number;
+                        /** @enum {string} */
+                        contextFormula?: "input-cache-output" | "input-cache-no-output" | "input-output-no-cache" | "peak-proxy" | "pi-delegated" | "harness-reported" | "unknown";
+                    };
+                };
+            };
+            responses: {
+                /** @description Snapshot recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            ok: true;
+                            /** Format: uuid */
+                            snapshotId: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/events": {

@@ -5,6 +5,7 @@ import {
   MAX_RATE_LIMIT_RESET_MS,
   parseRateLimitResetTime,
   type RateLimitWindowTelemetry,
+  type SpendCap,
 } from "../utils/error-tracker";
 import {
   type ModelFamily,
@@ -19,7 +20,7 @@ import type {
 
 export type RateLimitOutcome =
   | { kind: "none" }
-  | { kind: "key"; rateLimitedUntil: string }
+  | { kind: "key"; rateLimitedUntil: string; spendCap?: SpendCap }
   /**
    * The key's seat cannot run the model (`credits_required`). Not a rate
    * limit: the seat rejection never marks the key by itself.
@@ -62,10 +63,44 @@ interface ClassifiableResult {
   creditsRequired?: { observedAt: string; overageDisabledReason?: string };
 }
 
-function clampMs(candidateMs: number, nowMs: number): number {
+function clampMs(candidateMs: number, nowMs: number, maxResetMs = MAX_RATE_LIMIT_RESET_MS): number {
   const minMs = nowMs + 60_000;
-  const maxMs = nowMs + MAX_RATE_LIMIT_RESET_MS;
+  const maxMs = nowMs + maxResetMs;
   return Math.min(Math.max(candidateMs, minMs), maxMs);
+}
+
+/**
+ * Longest a spend-capped key stays benched: a monthly key limit resets up to
+ * 31 days out, and a cap with no reset holds this long unless the key is edited.
+ */
+export const MAX_SPEND_CAP_HOLD_MS = 31 * 24 * 60 * 60 * 1000;
+
+/** OpenRouter's key spend limit (403 `openrouter_key_limit`) and its out-of-credits 402. */
+const SPEND_CAP_TEXT =
+  /key limit exceeded|"limit_source"\s*:\s*"openrouter_key_limit"|insufficient credits|requires more credits/i;
+
+function numberOf(text: string, pattern: RegExp): number | null {
+  const value = Number(text.match(pattern)?.[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The spend cap a failure text reports, or null when it is not a spend cap.
+ * Reads the JSON metadata first (`limit_usd`, `spend_usd`, `resets_at`), then
+ * the message ("$1.07 of $1.00 used; resets <ISO>").
+ */
+export function parseSpendCapMessage(text: string): SpendCap | null {
+  if (!SPEND_CAP_TEXT.test(text)) return null;
+  const resetText =
+    text.match(/"resets_at"\s*:\s*"([^"]+)"/)?.[1] ??
+    text.match(/resets (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/)?.[1];
+  const resetMs = resetText ? Date.parse(resetText) : Number.NaN;
+  return {
+    limitUsd: numberOf(text, /"limit_usd"\s*:\s*([\d.]+)/) ?? numberOf(text, /of \$([\d.]+) used/),
+    spendUsd:
+      numberOf(text, /"spend_usd"\s*:\s*([\d.]+)/) ?? numberOf(text, /\$([\d.]+) of \$[\d.]+ used/),
+    resetsAt: Number.isFinite(resetMs) ? new Date(resetMs).toISOString() : null,
+  };
 }
 
 /**
@@ -132,6 +167,21 @@ export function classifyRateLimitOutcome(
       const resetsAtSec = Math.min(sevenDayResetsAtSec ?? fallbackResetsAtSec, maxResetsAtSec);
       return { kind: "model", model: family, window, resetsAtSec, source: "text", ...keyExtra };
     }
+  }
+
+  // Before the rate-limit text check: OpenRouter's cap body says "usage limit",
+  // which would read as a short rate limit and re-hand the key every 5 minutes.
+  const spendCap = failureReason != null ? parseSpendCapMessage(failureReason) : null;
+  if (spendCap) {
+    // shortcut: a cap with no reset holds for MAX_SPEND_CAP_HOLD_MS, not forever; editing the key re-creates its status row.
+    const untilMs = spendCap.resetsAt
+      ? Date.parse(spendCap.resetsAt)
+      : nowMs + MAX_SPEND_CAP_HOLD_MS;
+    return {
+      kind: "key",
+      rateLimitedUntil: new Date(clampMs(untilMs, nowMs, MAX_SPEND_CAP_HOLD_MS)).toISOString(),
+      spendCap,
+    };
   }
 
   if (

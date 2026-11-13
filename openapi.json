@@ -19813,787 +19813,6 @@
         }
       }
     },
-    "/api/config/pool-keys": {
-      "get": {
-        "summary": "List credential pool suffixes and status",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "key",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Credential pool",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "key": {
-                      "type": "string"
-                    },
-                    "source": {
-                      "type": "string",
-                      "enum": [
-                        "stored",
-                        "env",
-                        "none"
-                      ]
-                    },
-                    "readOnly": {
-                      "type": "boolean"
-                    },
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "index": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "suffix": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "ok",
-                              "rejected",
-                              "rate_limited",
-                              "unchecked"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "checkedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "rateLimitedUntil": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "index",
-                          "suffix",
-                          "status",
-                          "error",
-                          "checkedAt",
-                          "rateLimitedUntil"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "key",
-                    "source",
-                    "readOnly",
-                    "keys"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid pool variable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Secret read permission required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Test and append keys to a credential pool",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "key": {
-                    "type": "string"
-                  },
-                  "value": {
-                    "type": "string"
-                  },
-                  "baseUrl": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "Base URL for the check only. Null tests the provider default. Omit to use the stored URL."
-                  }
-                },
-                "required": [
-                  "key",
-                  "value"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated credential pool and checks",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "key": {
-                      "type": "string"
-                    },
-                    "source": {
-                      "type": "string",
-                      "enum": [
-                        "stored",
-                        "env",
-                        "none"
-                      ]
-                    },
-                    "readOnly": {
-                      "type": "boolean"
-                    },
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "index": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "suffix": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "ok",
-                              "rejected",
-                              "rate_limited",
-                              "unchecked"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "checkedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "rateLimitedUntil": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "index",
-                          "suffix",
-                          "status",
-                          "error",
-                          "checkedAt",
-                          "rateLimitedUntil"
-                        ]
-                      }
-                    },
-                    "checks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "suffix": {
-                            "type": "string"
-                          },
-                          "result": {
-                            "type": "string",
-                            "enum": [
-                              "verified",
-                              "rejected",
-                              "not_tested"
-                            ]
-                          },
-                          "httpStatus": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "suffix",
-                          "result",
-                          "httpStatus",
-                          "error"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "key",
-                    "source",
-                    "readOnly",
-                    "keys",
-                    "checks"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Config administration and permission to read all secrets required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Duplicate key or deployment env pool",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Provider rejected a key. Nothing was saved.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "checks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "suffix": {
-                            "type": "string"
-                          },
-                          "result": {
-                            "type": "string",
-                            "enum": [
-                              "verified",
-                              "rejected",
-                              "not_tested"
-                            ]
-                          },
-                          "httpStatus": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "suffix",
-                          "result",
-                          "httpStatus",
-                          "error"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "checks"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "summary": "Remove one credential pool member",
-        "tags": [
-          "Config"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "key",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 0
-            },
-            "required": false,
-            "name": "index",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 5
-            },
-            "required": true,
-            "name": "suffix",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated credential pool",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "key": {
-                      "type": "string"
-                    },
-                    "source": {
-                      "type": "string",
-                      "enum": [
-                        "stored",
-                        "env",
-                        "none"
-                      ]
-                    },
-                    "readOnly": {
-                      "type": "boolean"
-                    },
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "index": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "suffix": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "ok",
-                              "rejected",
-                              "rate_limited",
-                              "unchecked"
-                            ]
-                          },
-                          "error": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "checkedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "rateLimitedUntil": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "index",
-                          "suffix",
-                          "status",
-                          "error",
-                          "checkedAt",
-                          "rateLimitedUntil"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "key",
-                    "source",
-                    "readOnly",
-                    "keys"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid pool member",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Config administration and permission to read all secrets required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The pool changed or comes from the deployment env",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/context": {
-      "post": {
-        "summary": "Record a context usage snapshot for a task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "eventType": {
-                    "type": "string",
-                    "enum": [
-                      "progress",
-                      "compaction",
-                      "completion"
-                    ]
-                  },
-                  "sessionId": {
-                    "type": "string"
-                  },
-                  "contextUsedTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "contextTotalTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "contextPercent": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 100
-                  },
-                  "compactTrigger": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "manual",
-                      "auto-inferred"
-                    ]
-                  },
-                  "preCompactTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "cumulativeInputTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "cumulativeOutputTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "contextFormula": {
-                    "type": "string",
-                    "enum": [
-                      "input-cache-output",
-                      "input-cache-no-output",
-                      "input-output-no-cache",
-                      "peak-proxy",
-                      "pi-delegated",
-                      "harness-reported",
-                      "unknown"
-                    ]
-                  }
-                },
-                "required": [
-                  "eventType",
-                  "sessionId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Snapshot recorded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "snapshotId": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  },
-                  "required": [
-                    "ok",
-                    "snapshotId"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Get context usage history for a task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 500,
-              "default": 100
-            },
-            "required": false,
-            "name": "limit",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Context snapshot history",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "snapshots": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ContextSnapshot"
-                      }
-                    },
-                    "summary": {
-                      "type": "object",
-                      "properties": {
-                        "compactionCount": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "peakContextPercent": {
-                          "type": [
-                            "number",
-                            "null"
-                          ],
-                          "minimum": 0,
-                          "maximum": 100
-                        },
-                        "peakContextTokens": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ],
-                          "minimum": 0
-                        },
-                        "contextWindowSize": {
-                          "type": [
-                            "integer",
-                            "null"
-                          ],
-                          "minimum": 0
-                        },
-                        "snapshotCount": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      },
-                      "required": [
-                        "compactionCount",
-                        "peakContextPercent",
-                        "peakContextTokens",
-                        "contextWindowSize",
-                        "snapshotCount"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "snapshots",
-                    "summary"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keys/report-usage": {
       "post": {
         "summary": "Record which API key was used for a task",
@@ -20739,6 +19958,35 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "spendCap": {
+                    "type": "object",
+                    "properties": {
+                      "limitUsd": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "spendUsd": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "resetsAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "limitUsd",
+                      "spendUsd",
+                      "resetsAt"
+                    ]
                   }
                 },
                 "required": [
@@ -21680,6 +20928,12 @@
                         "type": "integer"
                       }
                     },
+                    "spendCappedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
                     "authFailureFence": {
                       "type": "integer"
                     }
@@ -21688,6 +20942,7 @@
                     "success",
                     "availableIndices",
                     "totalKeys",
+                    "spendCappedIndices",
                     "authFailureFence"
                   ]
                 }
@@ -21801,6 +21056,38 @@
                             "type": [
                               "string",
                               "null"
+                            ]
+                          },
+                          "spendCap": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "limitUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "spendUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "resetsAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "limitUsd",
+                              "spendUsd",
+                              "resetsAt"
                             ]
                           },
                           "lastUsedAt": {
@@ -22225,6 +21512,7 @@
                           "scopeId",
                           "status",
                           "rateLimitedUntil",
+                          "spendCap",
                           "lastUsedAt",
                           "lastRateLimitAt",
                           "totalUsageCount",
@@ -23163,6 +22451,889 @@
           },
           "404": {
             "description": "Key not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/pool-keys": {
+      "get": {
+        "summary": "List credential pool suffixes and status",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "spend_capped",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "spendCap": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "limitUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "spendUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "resetsAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "limitUsd",
+                              "spendUsd",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil",
+                          "spendCap"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pool variable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Secret read permission required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Test and append keys to a credential pool",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "baseUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Base URL for the check only. Null tests the provider default. Omit to use the stored URL."
+                  }
+                },
+                "required": [
+                  "key",
+                  "value"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated credential pool and checks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "spend_capped",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "spendCap": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "limitUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "spendUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "resetsAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "limitUsd",
+                              "spendUsd",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil",
+                          "spendCap"
+                        ]
+                      }
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "verified",
+                              "rejected",
+                              "not_tested"
+                            ]
+                          },
+                          "httpStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "suffix",
+                          "result",
+                          "httpStatus",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys",
+                    "checks"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Config administration and permission to read all secrets required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate key or deployment env pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Provider rejected a key. Nothing was saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "verified",
+                              "rejected",
+                              "not_tested"
+                            ]
+                          },
+                          "httpStatus": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "suffix",
+                          "result",
+                          "httpStatus",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "checks"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove one credential pool member",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "index",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 5
+            },
+            "required": true,
+            "name": "suffix",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated credential pool",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "stored",
+                        "env",
+                        "none"
+                      ]
+                    },
+                    "readOnly": {
+                      "type": "boolean"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "suffix": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "rejected",
+                              "rate_limited",
+                              "spend_capped",
+                              "unchecked"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "spendCap": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "limitUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "spendUsd": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "resetsAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "limitUsd",
+                              "spendUsd",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "suffix",
+                          "status",
+                          "error",
+                          "checkedAt",
+                          "rateLimitedUntil",
+                          "spendCap"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "source",
+                    "readOnly",
+                    "keys"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pool member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Config administration and permission to read all secrets required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The pool changed or comes from the deployment env",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/context": {
+      "post": {
+        "summary": "Record a context usage snapshot for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "progress",
+                      "compaction",
+                      "completion"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "contextUsedTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextTotalTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "compactTrigger": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "manual",
+                      "auto-inferred"
+                    ]
+                  },
+                  "preCompactTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeInputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeOutputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextFormula": {
+                    "type": "string",
+                    "enum": [
+                      "input-cache-output",
+                      "input-cache-no-output",
+                      "input-output-no-cache",
+                      "peak-proxy",
+                      "pi-delegated",
+                      "harness-reported",
+                      "unknown"
+                    ]
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "sessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Snapshot recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "snapshotId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "snapshotId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get context usage history for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context snapshot history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "snapshots": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ContextSnapshot"
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "compactionCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "peakContextPercent": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "peakContextTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0
+                        },
+                        "contextWindowSize": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0
+                        },
+                        "snapshotCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "compactionCount",
+                        "peakContextPercent",
+                        "peakContextTokens",
+                        "contextWindowSize",
+                        "snapshotCount"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "snapshots",
+                    "summary"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
             "content": {
               "application/json": {
                 "schema": {

@@ -39,6 +39,17 @@ export interface RateLimitWindowInfo {
 export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
 
 /**
+ * A key that hit its provider spend limit (OpenRouter key limit or credits).
+ * `resetsAt` is null when the provider names no reset: the key stays benched
+ * until someone edits it.
+ */
+export interface SpendCap {
+  limitUsd: number | null;
+  spendUsd: number | null;
+  resetsAt: string | null;
+}
+
+/**
  * Parses a rate_limit_event into one window entry per key of `unifiedWindows`
  * (when present) merged with the top-level entry when they share a key. The
  * top-level fields win field-by-field (it's the freshest read for its own

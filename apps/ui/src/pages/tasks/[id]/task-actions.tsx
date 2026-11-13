@@ -20,6 +20,7 @@ import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { usePoolKeys } from "@/api/hooks/use-pool-keys";
 import { useCancelTask, usePauseTask, useResumeTask, useRetryTask } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
 import { BetaTag } from "@/components/shared/beta-tag";
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useLeadCredentialIssue } from "@/hooks/use-lead-credential-issue";
+import { spendCapText } from "@/lib/ai-providers";
 import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { shouldShowTaskFailureHelp } from "@/lib/task-support";
@@ -72,6 +74,8 @@ interface TaskActionModel {
   followUp: () => void;
   retry: () => void;
   retrying: boolean;
+  /** Why Retry is off: every key of the task's pool hit its spend cap. Null when it can run. */
+  retryBlocked: string | null;
   pause: () => void;
   pausing: boolean;
   resume: () => void;
@@ -102,6 +106,31 @@ interface TaskActionModel {
   allowed: { create: boolean; cancel: boolean; action: boolean };
 }
 
+/** Failure texts of a provider spend cap (`parseSpendCapMessage`, `KeySpendCapError`). */
+const SPEND_CAP_FAILURE =
+  /spend cap|key limit exceeded|insufficient credits|requires more credits/i;
+
+/**
+ * Why a Retry of this failed task would hit the same wall: every key of the
+ * pool it ran on is spend-capped. Null when a key can run, or when the caller
+ * cannot read the pool.
+ */
+function useSpendCapBlock(task: AgentTask | undefined): string | null {
+  const keyType = task?.credentialKeyType ?? "";
+  const capFailure =
+    task?.status === "failed" &&
+    keyType !== "" &&
+    keyType !== "CODEX_OAUTH" &&
+    SPEND_CAP_FAILURE.test(task.failureReason ?? "");
+  const keys = usePoolKeys(keyType, capFailure).data?.keys ?? [];
+  if (!capFailure || keys.length === 0 || keys.some((k) => k.status !== "spend_capped")) {
+    return null;
+  }
+  const cap = keys.find((k) => k.spendCap)?.spendCap;
+  const detail = cap ? ` ${spendCapText(cap)}.` : "";
+  return `Every ${keyType} key hit its spend cap, so a retry fails the same way.${detail} Raise the key's limit or add a key in Settings, then retry.`;
+}
+
 /** First API version that serves `GET /api/tasks/{id}/lineage`. */
 const TASK_LINEAGE_MIN_VERSION = "2.4.2";
 
@@ -126,6 +155,7 @@ export function useTaskActions(
   const { userId } = useCurrentUser();
   const { issue, resolved, apiVersion } = useLeadCredentialIssue();
   const lineageGate = useFeatureGate(TASK_LINEAGE_MIN_VERSION);
+  const retryBlocked = useSpendCapBlock(task);
   const allowed = {
     create: useCan("task.create.own"),
     cancel: useCan("task.cancel.own"),
@@ -148,6 +178,7 @@ export function useTaskActions(
         },
       ),
     retrying: retryTask.isPending,
+    retryBlocked,
     pause: () => pauseTask.mutate(task.id),
     pausing: pauseTask.isPending,
     resume: () => resumeTask.mutate(task.id),
@@ -250,7 +281,12 @@ function FollowUpButton({ model }: { model: TaskActionModel }) {
 function RetryButton({ model, className }: { model: TaskActionModel; className?: string }) {
   if (!model.allowed.create) return null;
   return (
-    <Button size="sm" onClick={model.retry} disabled={model.retrying} className={className}>
+    <Button
+      size="sm"
+      onClick={model.retry}
+      disabled={model.retrying || model.retryBlocked !== null}
+      className={className}
+    >
       <RotateCcw />
       Retry
     </Button>
@@ -334,7 +370,10 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         {retryInMenu ? (
-          <DropdownMenuItem onSelect={model.retry} disabled={model.retrying}>
+          <DropdownMenuItem
+            onSelect={model.retry}
+            disabled={model.retrying || model.retryBlocked !== null}
+          >
             <RotateCcw />
             Retry
           </DropdownMenuItem>
@@ -431,7 +470,11 @@ export function TaskActionsMenu({
             </DropdownMenuItem>
           ) : null}
           {terminal && allowed.create ? (
-            <DropdownMenuItem className="min-h-11" onSelect={model.retry} disabled={model.retrying}>
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={model.retry}
+              disabled={model.retrying || model.retryBlocked !== null}
+            >
               <RotateCcw />
               Retry
             </DropdownMenuItem>
@@ -590,6 +633,9 @@ export function TaskFailureCallout({
     >
       <div className="mt-1 space-y-3 text-sm leading-relaxed text-foreground">
         <MarkdownView text={model.task.failureReason || "No failure reason was recorded."} />
+        {model.retryBlocked ? (
+          <p className="text-xs text-status-warning-strong">{model.retryBlocked}</p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-1.5">
           <RetryButton model={model} className={NARROW_TARGET} />
           {model.diagnostics ? (

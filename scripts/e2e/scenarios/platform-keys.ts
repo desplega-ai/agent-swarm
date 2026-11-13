@@ -45,6 +45,7 @@ async function available(ctx: ScenarioContext, query: string) {
     modelBlockedIndices?: number[];
     earliestModelResetAt?: string | null;
     seatBlockedIndices?: number[];
+    spendCappedIndices: number[];
   };
 }
 
@@ -216,6 +217,53 @@ export const platformKeys: Scenario = {
       (await available(ctx, `keyType=${keyType}&totalKeys=2`)).availableIndices.join() === "0,1",
       "both keys are available again",
     );
+    // A spend cap is a rate limit that names the provider limit; a clear drops it.
+    const spendCap = { limitUsd: 1, spendUsd: 1.07, resetsAt: future };
+    await report(ctx, "report-rate-limit", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      rateLimitedUntil: future,
+      spendCap,
+    });
+    const capped = await statusOf(ctx, keyType, suffixA);
+    expect(
+      capped.status === "rate_limited" &&
+        JSON.stringify(capped.spendCap) === JSON.stringify(spendCap),
+      "report-rate-limit stores the spend cap",
+    );
+    const cappedAvailability = await available(ctx, `keyType=${keyType}&totalKeys=2`);
+    expect(
+      cappedAvailability.spendCappedIndices.join() === "0" &&
+        cappedAvailability.availableIndices.join() === "1",
+      "available lists a spend-capped key and skips it",
+    );
+    await report(ctx, "clear-rate-limit", { keyType, keySuffix: suffixA });
+    expect(
+      (await statusOf(ctx, keyType, suffixA)).spendCap === null &&
+        (await available(ctx, `keyType=${keyType}&totalKeys=2`)).spendCappedIndices.length === 0,
+      "clearing the limit drops the spend cap",
+    );
+    // A plain rate limit after a cap carries no cap.
+    await report(ctx, "report-rate-limit", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      rateLimitedUntil: future,
+      spendCap,
+    });
+    await report(ctx, "report-rate-limit", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      rateLimitedUntil: future,
+    });
+    expect(
+      (await statusOf(ctx, keyType, suffixA)).spendCap === null,
+      "an ordinary rate limit replaces the spend cap",
+    );
+    await report(ctx, "clear-rate-limit", { keyType, keySuffix: suffixA });
+
     // A rate limit that already expired heals on the next read.
     await report(ctx, "report-rate-limit", {
       keyType,
@@ -894,6 +942,21 @@ export const platformPoolKeys: Scenario = {
         "keys",
       );
       expect(limitedPool[0]?.status === "rate_limited", "the pool view shows the rate limit");
+      await report(ctx, "report-rate-limit", {
+        keyType: NAN_KEY,
+        keySuffix: goodSuffix,
+        keyIndex: 0,
+        rateLimitedUntil: new Date(Date.now() + 3_600_000).toISOString(),
+        spendCap: { limitUsd: 1, spendUsd: 1.07, resetsAt: null },
+      });
+      const cappedPool = asRecords(
+        (await ctx.api("GET", `/api/config/pool-keys?key=${NAN_KEY}`)).json,
+        "keys",
+      );
+      expect(
+        cappedPool[0]?.status === "spend_capped" && asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
+        "the pool view shows the spend cap",
+      );
       await report(ctx, "clear-rate-limit", { keyType: NAN_KEY, keySuffix: goodSuffix });
 
       // ── delete ─────────────────────────────────────────────────────────────

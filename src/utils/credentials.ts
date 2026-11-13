@@ -234,6 +234,24 @@ export class ModelWindowExhaustedError extends Error {
 }
 
 /**
+ * Thrown by `resolveCredentialPools` at task admission when every key of a
+ * pool the task may use hit its provider spend cap (OpenRouter key limit, out
+ * of credits). No retry helps before the cap resets, so the caller fails the
+ * task instead of spawning the CLI, the same as `ModelWindowExhaustedError`.
+ */
+export class KeySpendCapError extends Error {
+  readonly keyType: string;
+
+  constructor(keyType: string) {
+    super(
+      `Every ${keyType} key this task may use hit its provider spend cap. Raise or remove the key's spend limit with the provider, or add another key, then retry.`,
+    );
+    this.name = "KeySpendCapError";
+    this.keyType = keyType;
+  }
+}
+
+/**
  * Thrown by `resolveCredentialPools` when a model profile's credential
  * allowlist names no key of a pool the worker holds. The caller must not
  * spawn the CLI on this error, the same as `ModelWindowExhaustedError`.
@@ -438,6 +456,8 @@ export interface AvailabilityInfo {
   earliestModelResetAt?: string | null;
   /** Indices excluded because the key's subscription plan cannot run the model. */
   seatBlockedIndices?: number[];
+  /** Rate-limited indices whose limit is a provider spend cap. */
+  spendCappedIndices?: number[];
 }
 
 /**
@@ -475,6 +495,7 @@ async function fetchAvailableIndices(
             modelBlockedIndices?: number[];
             earliestModelResetAt?: string | null;
             seatBlockedIndices?: number[];
+            spendCappedIndices?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
@@ -482,6 +503,7 @@ async function fetchAvailableIndices(
             modelBlockedIndices: data.modelBlockedIndices,
             earliestModelResetAt: data.earliestModelResetAt,
             seatBlockedIndices: data.seatBlockedIndices,
+            spendCappedIndices: data.spendCappedIndices,
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
@@ -614,6 +636,17 @@ export async function resolveCredentialPools(
         modelBlockedCount += beforeCount - available.length;
       }
 
+      // A spend-capped key fails every pick until its cap resets: the best-effort
+      // pick skips it, and a pool with only capped keys fails the task now.
+      const spendCapped = (info?.spendCappedIndices ?? []).filter(inAllowlist);
+      const uncapped =
+        available?.length === 0 && spendCapped.length > 0
+          ? pool.filter((i) => inAllowlist(i) && !spendCapped.includes(i))
+          : undefined;
+      if (opts?.enforceModelCapacity && uncapped?.length === 0) {
+        throw new KeySpendCapError(envVar);
+      }
+
       const seatBlockedIndices = info?.seatBlockedIndices ?? [];
       const seatBlockedCount = seatBlockedIndices.filter(inAllowlist).length;
       let seatFallbackIndices: number[] | undefined;
@@ -653,7 +686,9 @@ export async function resolveCredentialPools(
             ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx),
             isRateLimitFallback: true,
           }
-        : selectCredential(val, available, envVar, allowedIdx);
+        : uncapped?.length
+          ? { ...selectCredential(val, uncapped, envVar, allowedIdx), isRateLimitFallback: true }
+          : selectCredential(val, available, envVar, allowedIdx);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
