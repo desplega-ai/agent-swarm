@@ -13,6 +13,7 @@
     "marketplace-catalog-discrepancy-review",
     "ai-inventory-exception-handoff",
     "ai-operations-shift-handoff",
+    "ai-returns-exception-handoff",
     "supplier-security-evidence-review",
     "deployment",
     "one-click-deploy",
