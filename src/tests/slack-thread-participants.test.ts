@@ -154,9 +154,13 @@ describe("resolveSlackParticipant", () => {
       (await findUserByExternalId("slack", "U0OURS2"))?.id,
     );
     expect(await findUserByExternalId("slack", "U0OURS2")).not.toBeNull();
+    // Regression control: the sender from our own team stays internal.
+    expect(
+      (await resolveSlackParticipant(client, "U0OURS2", { ...ctx, userTeam: "T0OURS" })).trust,
+    ).toBe("internal");
 
     // auth.test failed: a sender carrying a team cannot be shown to be ours, so the
-    // email links nothing, even an existing user. Trust still follows the email.
+    // email links nothing, even an existing user, and grants no trust.
     resetSlackTeamIdCacheForTesting();
     authTest = async () => {
       throw new Error("auth.test failed");
@@ -174,9 +178,16 @@ describe("resolveSlackParticipant", () => {
       expect(await findUserByExternalId("slack", "U0NOAUTH")).toBeNull();
       expect(
         await resolveSlackParticipant(client, "U0NOAUTH", { ...ctx, userTeam: "T0OTHER" }),
-      ).toEqual({ userId: undefined, trust: "internal" });
+      ).toEqual({ userId: undefined, trust: "unknown" });
       // Positive control: with no team on the event, the same email still links.
-      expect((await resolveSlackParticipant(client, "U0NOAUTH", ctx)).userId).toBe(owner.id);
+      const noTeam = await resolveSlackParticipant(client, "U0NOAUTH", ctx);
+      expect(noTeam).toEqual({ userId: owner.id, trust: "internal" });
+      // An explicit audience still wins over the unknown team.
+      await makeUser("U0NOAUTHSET", "set@gmail.test", { metadata: { audience: "internal" } });
+      expect(
+        (await resolveSlackParticipant(client, "U0NOAUTHSET", { ...ctx, userTeam: "T0OTHER" }))
+          .trust,
+      ).toBe("internal");
     } finally {
       authTest = async () => ourTeam;
       resetSlackTeamIdCacheForTesting();
