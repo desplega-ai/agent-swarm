@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
+import { api } from "@/api/client";
 import { useAgentFsMediaUrl } from "@/api/hooks/use-agent-fs";
 import { useCombLayout } from "@/components/comb/comb-layout";
+import { ObjectEmbed } from "@/components/objects/object-embed";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useConfig } from "@/hooks/use-config";
 import { useTheme } from "@/hooks/use-theme";
@@ -8,7 +10,7 @@ import { browserStorage } from "@/lib/comb/drafts";
 import { readPropertiesOpen, writePropertiesOpen } from "@/lib/comb/panels";
 import { cn } from "@/lib/utils";
 import { AssetFrame } from "./asset-frame";
-import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
+import { CombMarkdown, type DriveImageProps, type SwarmEmbedBlockProps } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
 
@@ -33,6 +35,7 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
               doc={file}
               DriveImage={DriveImage}
               AssetFrame={AssetFrame}
+              SwarmEmbed={SwarmEmbed}
               liveUrl={liveUrl}
               codeTheme={theme}
               propertiesOpen={propertiesOpen}
@@ -79,4 +82,10 @@ function DriveImage({ file, alt, fallback, lines }: DriveImageProps) {
       />
     </AssetFrame>
   );
+}
+
+/** A `<SwarmSheet />` / `<SwarmBoard />` tag: the live embed, on the dashboard's API and theme. */
+function SwarmEmbed(props: SwarmEmbedBlockProps) {
+  const { theme } = useTheme();
+  return <ObjectEmbed {...props} fetch={api.fetchApi} theme={theme} />;
 }

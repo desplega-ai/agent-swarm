@@ -4,7 +4,7 @@
 // This module uses relative imports only, so `bun:test` can render it from the
 // repo root (where `@/` resolves to the API's `src/`).
 
-import { ChevronRight, Image as ImageIcon } from "lucide-react";
+import { AlertCircle, ChevronRight, Image as ImageIcon } from "lucide-react";
 import {
   type ComponentProps,
   type ComponentType,
@@ -18,7 +18,12 @@ import {
   useState,
 } from "react";
 import { Link } from "react-router-dom";
-import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
+import {
+  type Components,
+  defaultRehypePlugins,
+  defaultRemarkPlugins,
+  Streamdown,
+} from "streamdown";
 import { HIGHLIGHT_MAX_CHARS, prismLanguageForFence } from "../../../lib/comb/code-language";
 import {
   type Frontmatter,
@@ -35,6 +40,12 @@ import {
   resolveRelative,
 } from "../../../lib/comb/paths";
 import { rehypeSourceLines } from "../../../lib/comb/rehype-source-lines";
+import {
+  embedFromElementProps,
+  remarkSwarmEmbed,
+  SWARM_EMBED_ELEMENT,
+  SWARM_EMBED_SANITIZE_ATTRIBUTES,
+} from "../../../lib/markdown/swarm-embed";
 import { type CodeTheme, HighlightedCode } from "./code-tokens";
 import { MermaidBlock } from "./mermaid-block";
 
@@ -45,12 +56,26 @@ type Pluggable = (typeof defaultRehypePlugins)[string];
 // text inside `<style>` would render as a paragraph. `strip` drops the content.
 const [sanitizePlugin, sanitizeSchema] = defaultRehypePlugins.sanitize as unknown as [
   unknown,
-  { strip?: string[] },
+  { strip?: string[]; tagNames?: string[]; attributes?: Record<string, unknown[]> },
 ];
+// The one tag added to the allow list is `swarm-embed`, with its `data-*`
+// attributes only: `remarkSwarmEmbed` emits it from a validated tag, and the
+// component re-validates the props. Every other HTML is sanitized as before.
 const combSanitize = [
   sanitizePlugin,
-  { ...sanitizeSchema, strip: [...(sanitizeSchema.strip ?? []), "style"] },
+  {
+    ...sanitizeSchema,
+    strip: [...(sanitizeSchema.strip ?? []), "style"],
+    tagNames: [...(sanitizeSchema.tagNames ?? []), SWARM_EMBED_ELEMENT],
+    attributes: {
+      ...sanitizeSchema.attributes,
+      [SWARM_EMBED_ELEMENT]: [...SWARM_EMBED_SANITIZE_ATTRIBUTES],
+    },
+  },
 ] as Pluggable;
+
+/** Streamdown's own remark defaults (gfm, codeMeta) plus the swarm embed tags. */
+export const COMB_REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkSwarmEmbed];
 
 /**
  * Streamdown's `rehypePlugins` prop replaces its defaults (raw → sanitize →
@@ -76,6 +101,15 @@ export interface DriveImageProps {
   fallback: ReactNode;
   /** The image's source lines, for its frame (`AssetFrameProps.lines`). */
   lines?: SourceLines;
+}
+
+/** What the caller's embed component renders: one board or sheet. */
+export interface SwarmEmbedBlockProps {
+  objectId: string;
+  height?: number;
+  readOnly?: boolean;
+  tab?: string;
+  range?: string;
 }
 
 /** An asset the markdown shows: an image (a drive file or a web URL), or a rendered diagram. */
@@ -126,6 +160,7 @@ const CombDocContext = createContext<{
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
   AssetFrame?: ComponentType<AssetFrameProps>;
+  SwarmEmbed?: ComponentType<SwarmEmbedBlockProps>;
   liveUrl: string | null;
   codeTheme: CodeTheme;
 } | null>(null);
@@ -318,6 +353,42 @@ function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
   );
 }
 
+const EMBED_CHIP_CLASS =
+  "inline-flex max-w-full items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground";
+
+/**
+ * A `<SwarmSheet … />` or `<SwarmBoard … />` tag (`remarkSwarmEmbed`). The
+ * props are read back through the grammar, so the element only ever renders
+ * what a valid tag could say. A tag that broke a rule shows as an error chip.
+ * Not document text (`data-comb-skip`).
+ */
+function SwarmEmbedBlock(props: Record<string, unknown>) {
+  const SwarmEmbed = useContext(CombDocContext)?.SwarmEmbed;
+  const embed = embedFromElementProps(props);
+  if (embed.status === "invalid") {
+    return (
+      <div data-comb-skip>
+        <span role="alert" className={`${EMBED_CHIP_CLASS} border-destructive/50 text-destructive`}>
+          <AlertCircle className="size-3.5 shrink-0" aria-hidden />
+          {embed.error}
+        </span>
+      </div>
+    );
+  }
+  const { id, height, readonly, tab, range } = embed.props;
+  return (
+    <div data-comb-skip>
+      {SwarmEmbed ? (
+        <SwarmEmbed objectId={id} height={height} readOnly={readonly} tab={tab} range={range} />
+      ) : (
+        <span className={EMBED_CHIP_CLASS}>
+          {embed.tag === "SwarmSheet" ? "Swarm sheet" : "Swarm board"} {id}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export const COMB_MD_COMPONENTS: Components = {
   pre: CombPre,
   code: CombCode,
@@ -330,7 +401,9 @@ export const COMB_MD_COMPONENTS: Components = {
   },
   a: CombLink,
   img: CombImage,
-};
+  // Not an HTML tag: `Components` types only intrinsic element names.
+  [SWARM_EMBED_ELEMENT]: SwarmEmbedBlock,
+} as Components;
 
 /**
  * Render a markdown file. `doc` is the file itself (its links resolve against
@@ -347,6 +420,7 @@ export function CombMarkdown({
   doc,
   DriveImage,
   AssetFrame,
+  SwarmEmbed,
   liveUrl = null,
   codeTheme = "dark",
   propertiesOpen,
@@ -357,6 +431,8 @@ export function CombMarkdown({
   DriveImage?: ComponentType<DriveImageProps>;
   /** The frame around images and diagrams (Maximize, Comment). None: bare assets. */
   AssetFrame?: ComponentType<AssetFrameProps>;
+  /** Renders a board or sheet by object id (`ObjectEmbed` with the dashboard's fetch). None: a plain chip. */
+  SwarmEmbed?: ComponentType<SwarmEmbedBlockProps>;
   liveUrl?: string | null;
   codeTheme?: CodeTheme;
   propertiesOpen?: boolean;
@@ -364,8 +440,15 @@ export function CombMarkdown({
 }): ReactNode {
   const { orgId, driveId, path } = doc;
   const ctx = useMemo(
-    () => ({ doc: { orgId, driveId, path }, DriveImage, AssetFrame, liveUrl, codeTheme }),
-    [orgId, driveId, path, DriveImage, AssetFrame, liveUrl, codeTheme],
+    () => ({
+      doc: { orgId, driveId, path },
+      DriveImage,
+      AssetFrame,
+      SwarmEmbed,
+      liveUrl,
+      codeTheme,
+    }),
+    [orgId, driveId, path, DriveImage, AssetFrame, SwarmEmbed, liveUrl, codeTheme],
   );
   // A leading YAML block shows as a key/value table. Its lines stay in the
   // body as blank lines, so the blocks below keep the file's line numbers.
@@ -389,6 +472,7 @@ export function CombMarkdown({
         mode="static"
         parseIncompleteMarkdown={false}
         controls={false}
+        remarkPlugins={COMB_REMARK_PLUGINS}
         rehypePlugins={COMB_REHYPE_PLUGINS}
         components={COMB_MD_COMPONENTS}
       >
