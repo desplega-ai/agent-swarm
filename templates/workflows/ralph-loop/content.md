@@ -20,7 +20,7 @@ A two-node implement → review pass:
 
 The trigger’s `maxIterations` is only a hint to the agents, not an engine-enforced ceiling. The global engine limits are `WORKFLOW_MAX_ITERATIONS` (default 100 node executions per graph walk, reset on resume) and `WORKFLOW_MAX_STEPS_PER_RUN` (default 500 total steps per run).
 
-**Note:** The shipped definition has no back-edge, so it runs once. The engine supports native loops through port back-edges: add a `property-match` node after review and route its `false` port back to `implement` when the verdict is FAIL.
+**Note:** The shipped definition has no back-edge, so it runs once. The engine supports native loops through port back-edges: add a separate entry node before `implement`, then a `property-match` node after review whose `false` port routes back to `implement` when the verdict is FAIL.
 
 ## When to Use
 
