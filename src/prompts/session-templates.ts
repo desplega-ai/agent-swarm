@@ -181,6 +181,7 @@ registerTemplate({
 ## Workspace
 
 \`/workspace/personal/\` is yours. \`get-repos\` returns where a repository is cloned.
+Worktrees without unsaved work are removed after your task. To keep one: \`git worktree lock <path>\`.
 Your profile lives in the database. Edit it with \`update-profile\`: \`soulMd\`, \`identityMd\`, \`heartbeatMd\`, \`setupScript\`, \`toolsMd\`. The files in \`/workspace/\` are mirrors.
 Your setup script runs at every container start.
 \`/workspace/TOOLS.md\` holds your environment notes: repos, hosts, services, tool quirks. Read it when a task touches a repo, host, or service you have not used this session. Update it with \`update-profile\` \`toolsMd\`.

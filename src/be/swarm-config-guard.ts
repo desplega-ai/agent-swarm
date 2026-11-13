@@ -724,6 +724,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
   ),
+  // Worker worktree reaper (src/commands/worktree-reaper.ts clamps to the same ranges).
+  ...enumValidator("WORKTREE_REAPER_MODE", ["off", "dry-run", "on"]),
+  ...boundedIntegerValidators(["WORKTREE_TTL_HOURS"], 1, 2160),
+  ...boundedIntegerValidators(["WORKTREE_SWEEP_INTERVAL_MINUTES"], 5, 1440),
   ...boundedIntegerValidators(
     ["CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS"],
     CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS.min,

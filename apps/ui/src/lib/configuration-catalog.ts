@@ -465,6 +465,46 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#pr-rooms`,
       },
       {
+        key: "WORKTREE_REAPER_MODE",
+        label: "Worktree reaper",
+        description:
+          "What workers do with the git worktrees agents leave behind. dry-run only logs what it would remove; on removes them; off disables the reaper.",
+        kind: "enum",
+        options: ["dry-run", "on", "off"],
+        defaultValue: "dry-run",
+        docsUrl: `${DOCS}ui/configuration#worktree-reaper`,
+      },
+      {
+        key: "WORKTREE_TTL_HOURS",
+        label: "Worktree TTL",
+        description:
+          "Age after which the sweep removes unowned and pushed-branch worktrees, and deletes the ignored node_modules of held ones. Accepts 1 to 2160.",
+        kind: "number",
+        unit: "h",
+        defaultValue: "72",
+        placeholder: "72",
+        docsUrl: `${DOCS}ui/configuration#worktree-reaper`,
+      },
+      {
+        key: "WORKTREE_SWEEP_INTERVAL_MINUTES",
+        label: "Worktree sweep interval",
+        description: "How often each worker runs the worktree TTL sweep. Accepts 5 to 1440.",
+        kind: "number",
+        unit: "min",
+        defaultValue: "60",
+        placeholder: "60",
+        docsUrl: `${DOCS}ui/configuration#worktree-reaper`,
+      },
+      {
+        key: "WORKTREE_REAPER_EXTRA_ROOTS",
+        label: "Worktree reaper extra repos",
+        description:
+          "Comma-separated repository paths the reaper also checks, for clones outside /workspace/personal.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#worktree-reaper`,
+      },
+      {
         key: "CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS",
         label: "Codex OAuth keep-warm age",
         description:
