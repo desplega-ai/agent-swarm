@@ -14,6 +14,7 @@
     "ai-inventory-exception-handoff",
     "ai-operations-shift-handoff",
     "supplier-security-evidence-review",
+    "supplier-performance-review",
     "deployment",
     "one-click-deploy",
     "kubernetes",
