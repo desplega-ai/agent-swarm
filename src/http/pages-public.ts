@@ -702,7 +702,8 @@ export async function handlePagesPublic(
   const feedback = isPageFeedbackRequested(queryParams);
   const html =
     injectBrowserSdk(page.body, {
-      head: `<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">${pageHead(page, queryParams, wantsPrint)}`,
+      // The viewer meta goes after the head defaults, which start with <base target>.
+      head: `${pageHead(page, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
       headFirst: feedback ? feedbackKeyGuardScript() : "",
       standardsMode: page.designVersion !== 1,
     }) +

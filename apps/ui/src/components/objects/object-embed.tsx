@@ -5,6 +5,16 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ObjectFetch, useObject } from "./use-object";
 
+// Excalidraw's fonts are self-hosted next to the page embed bundle
+// (`vite.embed.config.ts`), on the origin that served this code. Set here, not
+// in board-view: Excalidraw reads it while its module evaluates, before any
+// statement of an importing module runs. The dev server has no copy, so it
+// keeps Excalidraw's esm.sh default.
+const excalidrawWindow = window as Window & { EXCALIDRAW_ASSET_PATH?: string | string[] };
+if (import.meta.env.PROD && excalidrawWindow.EXCALIDRAW_ASSET_PATH === undefined) {
+  excalidrawWindow.EXCALIDRAW_ASSET_PATH = `${new URL(import.meta.url).origin}/embed/v1/`;
+}
+
 // Code-split: Excalidraw and the grid editor load only when an embed shows one.
 const BoardView = lazy(() => import("./board-view"));
 const SheetView = lazy(() => import("./sheet-view"));

@@ -1,6 +1,7 @@
 import { LogIn } from "lucide-react";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { ObjectEmbed } from "@/components/objects/object-embed";
 import type { ObjectFetch } from "@/components/objects/use-object";
 
@@ -175,17 +176,20 @@ export function defineSwarmObject(styles: SwarmObjectStyles, registry = customEl
       const pageId = currentPageId();
       this.#root.render(
         <StrictMode>
-          <SwarmObject
-            objectId={this.getAttribute("object-id")?.trim() ?? ""}
-            height={clampHeight(this.getAttribute("height"))}
-            readOnly={this.hasAttribute("readonly")}
-            tab={this.getAttribute("tab") ?? undefined}
-            range={this.getAttribute("range") ?? undefined}
-            viewer={readPageViewer()}
-            fetch={this.#fetch}
-            theme={dark ? "dark" : "light"}
-            signInUrl={pageId ? `${styles.appOrigin}/pages/${encodeURIComponent(pageId)}` : null}
-          />
+          {/* The grid keeps paging in router search params; a memory router keeps them off the page URL. */}
+          <MemoryRouter>
+            <SwarmObject
+              objectId={this.getAttribute("object-id")?.trim() ?? ""}
+              height={clampHeight(this.getAttribute("height"))}
+              readOnly={this.hasAttribute("readonly")}
+              tab={this.getAttribute("tab") ?? undefined}
+              range={this.getAttribute("range") ?? undefined}
+              viewer={readPageViewer()}
+              fetch={this.#fetch}
+              theme={dark ? "dark" : "light"}
+              signInUrl={pageId ? `${styles.appOrigin}/pages/${encodeURIComponent(pageId)}` : null}
+            />
+          </MemoryRouter>
         </StrictMode>,
       );
     }
