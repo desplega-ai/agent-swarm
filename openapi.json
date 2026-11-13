@@ -4175,6 +4175,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "mergePolicy": {
+            "$ref": "#/components/schemas/RepoMergePolicy"
           }
         },
         "required": [
@@ -4182,6 +4185,85 @@
           "mergeChecks",
           "review"
         ]
+      },
+      "RepoMergePolicy": {
+        "type": "object",
+        "properties": {
+          "autoMerge": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "threshold": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "default": 80
+              },
+              "baseScores": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "default": {}
+              },
+              "maxLines": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "default": {}
+              },
+              "riskyPaths": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "maxItems": 50,
+                "default": []
+              },
+              "classes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                "maxItems": 50,
+                "default": []
+              }
+            }
+          },
+          "agentsMayMerge": {
+            "type": "boolean"
+          },
+          "notify": {
+            "type": "object",
+            "properties": {
+              "dmWhenNotAutoMerging": {
+                "type": "boolean",
+                "default": true
+              },
+              "digestAt": {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            }
+          }
+        }
       },
       "RepoGuidelinesInput": {
         "type": [
@@ -4213,6 +4295,9 @@
               "type": "string"
             },
             "maxItems": 50
+          },
+          "mergePolicy": {
+            "$ref": "#/components/schemas/RepoMergePolicy"
           }
         },
         "required": [
@@ -45418,7 +45503,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can change allowMerge",
+            "description": "Only the lead, the operator or a user can change allowMerge or mergePolicy",
             "content": {
               "application/json": {
                 "schema": {
@@ -45669,7 +45754,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can turn allowMerge on",
+            "description": "Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy",
             "content": {
               "application/json": {
                 "schema": {

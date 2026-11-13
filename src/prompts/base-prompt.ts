@@ -21,7 +21,12 @@
 
 import type { ProviderTraits } from "../providers/types";
 import { getSlackConfiguration } from "../slack/config";
-import type { ProviderName, RequestCompositionPartInput } from "../types";
+import {
+  agentsMayMerge,
+  type ProviderName,
+  type RepoMergePolicy,
+  type RequestCompositionPartInput,
+} from "../types";
 import { agentFsFileLinkQuery, getAppUrl, resolveAgentFsLinkBase } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isSteeringEnabled } from "../utils/steering-enabled";
@@ -155,6 +160,7 @@ export type RepoContext = {
     mergeChecks: string[];
     allowMerge?: boolean;
     review: string[];
+    mergePolicy?: RepoMergePolicy;
   } | null;
 };
 
@@ -506,7 +512,7 @@ export const getTaskContextPrompt = async (args: TaskContextPromptArgs): Promise
   if (args.repoContext) {
     const repoResult = await resolveTemplateAsync(
       "system.agent.repository",
-      renderRepositoryVars(args.repoContext, { hasMcp, hasLocalEnv, provider }),
+      await renderRepositoryVars(args.repoContext, { hasMcp, hasLocalEnv, provider }),
     );
     prompt += repoResult.text;
   }
@@ -577,14 +583,25 @@ function renderToolsAndSkillsVars(input: {
   };
 }
 
+/** The mergePolicy record's swarm auto-merge line, or "" when the repo has no record. */
+function renderSwarmAutoMerge(policy: RepoMergePolicy | undefined): string {
+  const auto = policy?.autoMerge;
+  if (!auto) return "";
+  if (!auto.enabled) return "\n- Swarm auto-merge: off";
+  const parts = [`Swarm auto-merge: on (minimum score ${auto.threshold})`];
+  if (auto.classes.length > 0) parts.push(`classes: ${auto.classes.join(", ")}`);
+  if (auto.riskyPaths.length > 0) parts.push(`never for paths: ${auto.riskyPaths.join(", ")}`);
+  return `\n- ${parts.join("; ")}`;
+}
+
 /**
  * Dynamic parts of `system.agent.repository`. Same split as the tools section:
  * the heading lives in the template, the per-task pieces are built here.
  */
-function renderRepositoryVars(
+async function renderRepositoryVars(
   repo: RepoContext,
   ctx: { hasMcp: boolean; hasLocalEnv: boolean; provider: string },
-): Record<string, string> {
+): Promise<Record<string, string>> {
   const vars: Record<string, string> = {
     clone_note: "",
     warning: "",
@@ -629,7 +646,11 @@ function renderRepositoryVars(
     section += `\n### Repository Guidelines\n\nNo repository guidelines are defined. Ask the lead before you push.\n`;
   } else {
     const hasAnyContent =
-      g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0 || g.allowMerge;
+      g.prChecks.length > 0 ||
+      g.mergeChecks.length > 0 ||
+      g.review.length > 0 ||
+      agentsMayMerge(g) ||
+      g.mergePolicy !== undefined;
     if (hasAnyContent) {
       section += `\n### Repository Guidelines (MANDATORY)\n\n`;
       if (g.prChecks.length > 0) {
@@ -639,14 +660,15 @@ function renderRepositoryVars(
         });
         section += `If ANY check fails, fix the issue before pushing. Do NOT push code with failing checks.\nDo NOT use \`--no-verify\` or any flag that bypasses git hooks.\n\n`;
       }
-      section += `**Merge Policy:**\n`;
-      section += `- Auto-merge: ${g.allowMerge ? "Allowed" : "Not allowed (default)"}\n`;
-      if (g.mergeChecks.length > 0) {
-        section += `- Before merging, verify:\n`;
-        g.mergeChecks.forEach((check) => {
-          section += `  - ${check}\n`;
-        });
-      }
+      const mergePolicy = await resolveTemplateAsync("system.agent.repository.merge_policy", {
+        agents_may_merge: agentsMayMerge(g) ? "Allowed" : "Not allowed (default)",
+        swarm_auto_merge: renderSwarmAutoMerge(g.mergePolicy),
+        merge_checks:
+          g.mergeChecks.length > 0
+            ? `\n- Before merging, verify:\n${g.mergeChecks.map((check) => `  - ${check}`).join("\n")}`
+            : "",
+      });
+      section += `${mergePolicy.text}\n`;
       section += `\n`;
       if (g.review.length > 0) {
         section += `**Review Guidance:**\n`;

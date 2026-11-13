@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { createSwarmRepo, deleteSwarmRepo, getSwarmRepoById, getSwarmRepos } from "../be/db";
 import { updateSwarmRepoChecked } from "../be/repo-checked-update";
-import { changesAllowMerge } from "../be/repo-merge-policy";
+import { changesMergePolicy } from "../be/repo-merge-policy";
 import { can } from "../rbac";
 import { emitIntegrationConnected } from "../telemetry";
 import { RepoGuidelinesInputSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
@@ -62,7 +62,8 @@ const createRepo = route({
     201: { description: "Repo created", schema: SwarmRepoSchema },
     400: { description: "Validation error", schema: z.object({ error: z.string() }) },
     403: {
-      description: "Only the lead, the operator or a user can turn allowMerge on",
+      description:
+        "Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy",
       schema: z.object({ error: z.string() }),
     },
     409: { description: "Duplicate repo", schema: z.object({ error: z.string() }) },
@@ -89,7 +90,7 @@ const updateRepo = route({
   responses: {
     200: { description: "Repo updated", schema: SwarmRepoSchema },
     403: {
-      description: "Only the lead, the operator or a user can change allowMerge",
+      description: "Only the lead, the operator or a user can change allowMerge or mergePolicy",
       schema: z.object({ error: z.string() }),
     },
     404: { description: "Repo not found", schema: z.object({ error: z.string() }) },
@@ -113,7 +114,7 @@ const deleteRepo = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-/** The refusal text when the caller may not change allowMerge, or null when they may. */
+/** The refusal text when the caller may not change the merge policy, or null when they may. */
 async function allowMergeRefusal(
   req: IncomingMessage,
   myAgentId: string | undefined,
@@ -160,7 +161,7 @@ export async function handleRepos(
   if (createRepo.match(req.method, pathSegments)) {
     const parsed = await createRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (changesAllowMerge(null, parsed.body.guidelines)) {
+    if (changesMergePolicy(null, parsed.body.guidelines)) {
       const refusal = await allowMergeRefusal(req, myAgentId);
       if (refusal) {
         jsonError(res, refusal, 403);
@@ -198,7 +199,7 @@ export async function handleRepos(
     const parsed = await updateRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      // The comparison with the stored allowMerge, the decision and the write share one
+      // The comparison with the stored merge policy, the decision and the write share one
       // transaction, so a stale edit cannot overwrite a merge-policy change committed after it.
       const result = await updateSwarmRepoChecked(
         parsed.params.id,
