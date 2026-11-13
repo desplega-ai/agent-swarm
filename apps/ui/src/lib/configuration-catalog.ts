@@ -478,7 +478,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "WORKTREE_TTL_HOURS",
         label: "Worktree TTL",
         description:
-          "Age after which the sweep removes unowned and pushed-branch worktrees, and deletes the ignored node_modules of held ones. Accepts 1 to 2160.",
+          "Age after which the sweep removes unowned and pushed-branch worktrees, and deletes the ignored node_modules of held ones. Accepts 1 hour to 90 days.",
         kind: "number",
         unit: "h",
         defaultValue: "72",
@@ -488,7 +488,8 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "WORKTREE_SWEEP_INTERVAL_MINUTES",
         label: "Worktree sweep interval",
-        description: "How often each worker runs the worktree TTL sweep. Accepts 5 to 1440.",
+        description:
+          "How often each worker runs the worktree TTL sweep. Accepts 5 minutes to 24 hours.",
         kind: "number",
         unit: "min",
         defaultValue: "60",
