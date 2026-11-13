@@ -1,12 +1,13 @@
 import { lookup } from "node:dns/promises";
 
 /**
- * Outbound-request guard shared by the OAuth/MCP fetchers (`assertUrlSafe`)
- * and the quickjs script executor (`guardedFetch`).
+ * Outbound-request guard shared by the OAuth/MCP fetchers and the quickjs
+ * script executor.
  *
- * `assertUrlSafe` checks the URL string only. `guardedFetch` also resolves the
- * hostname, so a public name that points at a private address is refused, and
- * it re-checks every redirect hop.
+ * `assertUrlSafe` checks the URL string only. `createGuardedFetch` (and
+ * `createSsrfGuardedFetch` on top of it) also resolves the hostname, so a
+ * public name that points at a private address is refused, and it re-checks
+ * every redirect hop.
  */
 
 // ─── Address classification ──────────────────────────────────────────────────
@@ -174,7 +175,7 @@ export interface SsrfGuardOptions {
  * allowed), and loopback/private/link-local hosts (unless allowed). Checks the
  * string only: the WHATWG parser normalizes decimal, octal and hex IPv4 forms
  * first, but a public name that resolves to a private address passes. Use
- * `guardedFetch` where that matters.
+ * `createSsrfGuardedFetch` where that matters.
  */
 export function assertUrlSafe(rawUrl: string, opts: SsrfGuardOptions = {}): URL {
   let parsed: URL;
@@ -231,6 +232,10 @@ export type GuardedFetchOptions = {
   resolve?: (hostname: string) => Promise<string[]>;
   /** A destination the host itself is calling (for example the swarm API). Skips the policy. */
   isTrusted?: (url: URL) => boolean;
+  /** Extra check run on every hop before the policy; throw to refuse the hop. */
+  checkUrl?: (url: URL) => void;
+  /** Prefix of refusal messages. Without it, messages name the script egress settings. */
+  label?: string;
 };
 
 export class EgressDeniedError extends Error {
@@ -317,12 +322,14 @@ export async function assertEgressAllowed(
   url: URL,
   options: GuardedFetchOptions,
 ): Promise<string | null> {
+  options.checkUrl?.(url);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     // data:/blob: never leave the process.
     if (url.protocol === "data:" || url.protocol === "blob:") return null;
     throw new EgressDeniedError(`Script egress refused: unsupported protocol ${url.protocol}`);
   }
   if (options.isTrusted?.(url)) return null;
+  const label = options.label ?? "Script egress refused";
 
   const { policy } = options;
   if (policy.allowlist && policy.allowlist.length > 0) {
@@ -336,7 +343,7 @@ export async function assertEgressAllowed(
   const host = stripBrackets(url.hostname);
   const denied = () =>
     new EgressDeniedError(
-      `Script egress refused: ${url.host} is a private or loopback address. Add it to SCRIPT_EGRESS_ALLOWLIST or set SCRIPT_EGRESS_ALLOW_PRIVATE=true`,
+      `${label}: ${url.host} is a private or loopback address.${options.label ? "" : " Add it to SCRIPT_EGRESS_ALLOWLIST or set SCRIPT_EGRESS_ALLOW_PRIVATE=true"}`,
     );
   if (isLoopbackName(host)) throw denied();
   if (isIPv4Literal(host) || isIPv6Literal(host)) {
@@ -348,11 +355,11 @@ export async function assertEgressAllowed(
     addresses = await (options.resolve ?? defaultResolve)(host);
   } catch (error) {
     throw new EgressDeniedError(
-      `Script egress refused: could not resolve ${host} (${error instanceof Error ? error.message : String(error)})`,
+      `${label}: could not resolve ${host} (${error instanceof Error ? error.message : String(error)})`,
     );
   }
   if (addresses.length === 0) {
-    throw new EgressDeniedError(`Script egress refused: ${host} resolved to no address`);
+    throw new EgressDeniedError(`${label}: ${host} resolved to no address`);
   }
   // Deny when ANY answer is private: a mixed answer set is a rebinding setup.
   if (addresses.some(isPrivateAddress)) throw denied();
@@ -522,7 +529,9 @@ export function createGuardedFetch(
       if (mode === "error")
         throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
       if (hop >= MAX_REDIRECTS) {
-        throw new EgressDeniedError(`Script egress refused: more than ${MAX_REDIRECTS} redirects`);
+        throw new EgressDeniedError(
+          `${options.label ?? "Script egress refused"}: more than ${MAX_REDIRECTS} redirects`,
+        );
       }
       await response.body?.cancel().catch(() => {});
       const next = new URL(location, url);
@@ -537,6 +546,27 @@ export function createGuardedFetch(
     }
   };
   return Object.assign(guarded, { preconnect: baseFetch.preconnect }) as typeof fetch;
+}
+
+/**
+ * A fetch for API-side calls to user-supplied URLs (MCP OAuth discovery and
+ * token endpoints, external MCP servers). Every hop passes `assertUrlSafe`
+ * with `opts`; unless `opts.allowPrivateHosts`, a hostname must resolve only
+ * to public addresses and the request connects to the checked address.
+ * Redirects are followed manually and re-checked.
+ */
+export function createSsrfGuardedFetch(
+  opts: SsrfGuardOptions,
+  // Late-bound so a replaced globalThis.fetch (tests) is honoured.
+  baseFetch: typeof fetch = ((input, init) => fetch(input, init)) as typeof fetch,
+): typeof fetch {
+  return createGuardedFetch(baseFetch, {
+    policy: { allowPrivate: opts.allowPrivateHosts === true, allowlist: null },
+    checkUrl: (url) => {
+      assertUrlSafe(url.href, opts);
+    },
+    label: "Outbound request refused",
+  });
 }
 
 /** Parses the comma-separated `SCRIPT_EGRESS_ALLOWLIST` value. Empty = null. */
