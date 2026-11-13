@@ -9,7 +9,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary, plus NaN (`nan/*`) and Helmcode (`helmcode/*`); agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) and [NaN and Helmcode](#nan-and-helmcode-pi-opencode) below |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below), or the ChatGPT subscription pool (`openai-codex/*`, see [Codex OAuth § Using the pool from pi](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)). Every other provider pi-ai ships a catalog for (`fireworks/*`, `deepseek/*`, `xai/*`, ...) works from that provider's own key var, recognised from pi-ai rather than listed here |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below), or the ChatGPT subscription pool (`openai-codex/*`; a bare or `openai/` Codex-line GPT id moves there when the pool has a slot, see [Codex OAuth § Using the pool from pi](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)). Every other provider pi-ai ships a catalog for (`fireworks/*`, `deepseek/*`, `xai/*`, ...) works from that provider's own key var, recognised from pi-ai rather than listed here |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini`, `copilot`, `qwen`, `kiro` and `goose` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
@@ -18,6 +18,18 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 | fx | `fx` | `FxAdapter` | Vercel Labs' fx as an ACP server (`fx acp`) on the shared ACP client; `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` by model route. See [fx](#fx-fx) below |
+
+## Subscription-first credentials
+
+Each harness declares a `chatgptSubscriptionTrait` in `packages/model-catalog/src/chatgpt-subscription.ts`. The runner's one resolver, `resolveSubscriptionFirst`, reads it: a `codex_oauth` pool slot serves OpenAI models first, and `OPENAI_API_KEY` is the fallback only when the pool has no slot.
+
+| Trait | Harness | OpenAI model on a slot |
+|---|---|---|
+| `native` | codex | the bare id, unchanged (a standalone `~/.codex/auth.json` also counts) |
+| `prefixed` | pi | `openai-codex/<id>`; a bare or `openai/` Codex-line GPT id moves there |
+| `unsupported` | opencode, every other harness | never; `reason` says why |
+
+A new harness that can run the ChatGPT subscription adds its trait there, in the same PR as the adapter support.
 
 ## Worker API readiness
 

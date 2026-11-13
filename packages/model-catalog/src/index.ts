@@ -1,12 +1,15 @@
 export {
   CHATGPT_SUBSCRIPTION_HARNESSES,
   CHATGPT_SUBSCRIPTION_PROVIDER,
+  type ChatgptSubscriptionTrait,
   chatgptSubscriptionModelId,
+  chatgptSubscriptionTrait,
   isChatgptSubscriptionModel,
 } from "./chatgpt-subscription.ts";
 export { modelDisplayName } from "./display.ts";
 export {
   buildClaudeShortnameMap,
+  chatgptSubscriptionModel,
   compareNewestFirst,
   type FxRoute,
   fxModelRoute,

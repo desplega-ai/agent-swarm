@@ -14,7 +14,9 @@
 
 import {
   CHATGPT_SUBSCRIPTION_HARNESSES,
+  CHATGPT_SUBSCRIPTION_PROVIDER,
   chatgptSubscriptionModelId,
+  chatgptSubscriptionTrait,
 } from "./chatgpt-subscription.ts";
 import { isAlias, parseAlias } from "./resolve-alias.ts";
 
@@ -165,6 +167,28 @@ export function isHarnessCatalogModel(
     return true;
   }
   return false;
+}
+
+/**
+ * The model `harness` runs on the ChatGPT subscription pool for `model`, from
+ * its trait, else null (the model keeps its API key). `native` serves every
+ * model as is; `prefixed` serves an `openai-codex/<id>` model, and moves a
+ * bare or `openai/` Codex-line GPT id to `openai-codex/<id>`.
+ */
+export function chatgptSubscriptionModel(
+  harness: string,
+  model: string | null | undefined,
+): string | null {
+  const trait = chatgptSubscriptionTrait(harness);
+  const trimmed = model?.trim() ?? "";
+  if (trait.kind === "native") return trimmed;
+  if (trait.kind !== "prefixed") return null;
+  if (chatgptSubscriptionModelId(trimmed)) return trimmed;
+  const id = trimmed.toLowerCase().startsWith("openai/")
+    ? trimmed.slice("openai/".length)
+    : trimmed;
+  if (!id || id.includes("/") || !isHarnessCatalogModel("codex", id)) return null;
+  return `${CHATGPT_SUBSCRIPTION_PROVIDER}/${id}`;
 }
 
 /** Newest first: release_date desc (missing dates sort first — just-launched overlay rows), then id desc. */
