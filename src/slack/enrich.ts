@@ -168,7 +168,7 @@ export async function resolveSlackParticipant(
   // Another team's profile email is set by that team, not verified as owned by
   // this sender, so it never links to an existing user. An operator can link
   // the alias by hand. With our own team unknown (`auth.test` failed), a sender
-  // that carries a team is not linked either; trust below still reads the email.
+  // that carries a team is not linked either, and its email grants no trust.
   const linkable = !eventContext.userTeam || sameTeam === true;
   if (!user && email && linkable) {
     if (isCompanyEmail(email, domains)) {
@@ -207,17 +207,20 @@ export async function resolveSlackParticipant(
       ? audience
       : foreignTeam
         ? "external"
-        : domains.length === 0
-          ? user
-            ? "internal"
-            : email
-              ? "external"
-              : "unknown"
-          : !email
-            ? "unknown"
-            : isCompanyEmail(email, domains)
+        : // Own team unknown: the sender's team may be foreign, so its email proves nothing.
+          eventContext.userTeam && sameTeam === undefined
+          ? "unknown"
+          : domains.length === 0
+            ? user
               ? "internal"
-              : "external";
+              : email
+                ? "external"
+                : "unknown"
+            : !email
+              ? "unknown"
+              : isCompanyEmail(email, domains)
+                ? "internal"
+                : "external";
   return { userId: user?.id, trust };
 }
 
