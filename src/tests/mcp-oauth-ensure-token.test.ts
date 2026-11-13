@@ -1,3 +1,5 @@
+// Resolves the reserved example names these tests fetch, without real DNS.
+import "./fake-dns";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createMcpServer, initDb } from "../be/db";
@@ -155,9 +157,8 @@ describe("ensureMcpToken", () => {
     await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
-      const headers = init?.headers as Record<string, string>;
       const params = new URLSearchParams((init?.body as string) ?? "");
-      expect(headers.Authorization).toBeUndefined();
+      expect(new Headers(init?.headers).get("authorization")).toBeNull();
       expect(params.get("client_id")).toBe("client-abc");
       expect(params.get("client_secret")).toBe("example-secret-xyz");
       return new Response(

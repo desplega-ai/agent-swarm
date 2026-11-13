@@ -5,12 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useModelProfiles } from "@/api/hooks/use-model-profiles";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import {
-  type AgentWithTasks,
-  REASONING_EFFORT_LEVELS,
-  type ReasoningEffortLevel,
-} from "@/api/types";
+import type { AgentWithTasks } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
 import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
@@ -29,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { savedRuntimeByAgent } from "@/lib/agent-saved-runtime";
 import { getAgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { agentSearchText, matchesSearchTerms } from "@/lib/list-search";
 import { formatSmartTime } from "@/lib/utils";
@@ -39,6 +37,7 @@ export default function AgentsPage() {
   const { data: agents, isLoading } = useAgents();
   const { data: agentConfigs } = useConfigs({ scope: "agent" });
   const { data: modelsCatalog } = useModelsCatalog();
+  const { data: modelProfiles } = useModelProfiles();
   const search = readStringParam(searchParams, "search");
   const statusFilter = readStringParam(searchParams, "status", "all");
 
@@ -55,38 +54,24 @@ export default function AgentsPage() {
   // The saved runtime settings, which the next task runs on. The last-reported
   // model and effort (`credStatus.latestModel`) are the fallback only: they lag
   // a change until the agent runs again.
-  const { configuredModelByAgentId, configuredEffortByAgentId } = useMemo(() => {
-    const visibleIds = new Set(filteredAgents.map((agent) => agent.id));
-    const modelByAgentId = new Map<string, string>();
-    const effortByAgentId = new Map<string, ReasoningEffortLevel>();
-    for (const config of agentConfigs ?? []) {
-      if (config.scope !== "agent" || !config.scopeId || !visibleIds.has(config.scopeId)) continue;
-      const value = config.value.trim();
-      if (config.key === "MODEL_OVERRIDE" && value) {
-        modelByAgentId.set(config.scopeId, value);
-      } else if (
-        config.key === "REASONING_EFFORT_OVERRIDE" &&
-        (REASONING_EFFORT_LEVELS as readonly string[]).includes(value)
-      ) {
-        effortByAgentId.set(config.scopeId, value as ReasoningEffortLevel);
-      }
-    }
-    return { configuredModelByAgentId: modelByAgentId, configuredEffortByAgentId: effortByAgentId };
-  }, [agentConfigs, filteredAgents]);
+  const savedByAgentId = useMemo(
+    () => savedRuntimeByAgent(agentConfigs, filteredAgents, modelProfiles),
+    [agentConfigs, filteredAgents, modelProfiles],
+  );
 
   const modelSearchText = useCallback(
     (agent: AgentWithTasks) => {
       const display = getAgentModelDisplay(
-        configuredModelByAgentId.get(agent.id),
+        savedByAgentId.get(agent.id)?.model,
         agent.credStatus?.latestModel?.model,
-        configuredEffortByAgentId.get(agent.id) ?? agent.credStatus?.latestModel?.reasoningEffort,
+        savedByAgentId.get(agent.id)?.effort ?? agent.credStatus?.latestModel?.reasoningEffort,
       );
       const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
       return [primary?.label, primary?.raw, primary?.provider, display.configured, display.lastUsed]
         .filter(Boolean)
         .join(" ");
     },
-    [configuredModelByAgentId, configuredEffortByAgentId, modelsCatalog?.providers],
+    [savedByAgentId, modelsCatalog?.providers],
   );
 
   const gridColumns = useDataGridColumns("agents");
@@ -102,9 +87,9 @@ export default function AgentsPage() {
         const agent = params.data;
         if (!agent) return null;
         const display = getAgentModelDisplay(
-          configuredModelByAgentId.get(agent.id),
+          savedByAgentId.get(agent.id)?.model,
           agent.credStatus?.latestModel?.model,
-          configuredEffortByAgentId.get(agent.id) ?? agent.credStatus?.latestModel?.reasoningEffort,
+          savedByAgentId.get(agent.id)?.effort ?? agent.credStatus?.latestModel?.reasoningEffort,
           agent.credStatus?.latestModel?.source,
         );
         return <AgentModelCell display={display} liveCatalog={modelsCatalog?.providers} />;
@@ -196,13 +181,7 @@ export default function AgentsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ];
-  }, [
-    configuredModelByAgentId,
-    configuredEffortByAgentId,
-    modelColumnGate.supported,
-    modelSearchText,
-    modelsCatalog?.providers,
-  ]);
+  }, [savedByAgentId, modelColumnGate.supported, modelSearchText, modelsCatalog?.providers]);
 
   // One search for both widths, so a phone finds the same agents as the grid.
   const searchedAgents = useMemo(() => {
@@ -268,7 +247,7 @@ export default function AgentsPage() {
           {searchedAgents.map((agent) => {
             const model = getAgentModelPresentation(
               getAgentModelDisplay(
-                configuredModelByAgentId.get(agent.id),
+                savedByAgentId.get(agent.id)?.model,
                 agent.credStatus?.latestModel?.model,
               ).primary,
               modelsCatalog?.providers,

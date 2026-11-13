@@ -130,6 +130,66 @@ export function getAppStoreView(appId: string): StateStore {
   return view;
 }
 
+/** `appId\0page` → its cached page view (identity-stable, like `views`). */
+const pageViews = new Map<string, StateStore>();
+
+/** `/local`, `/local/…` and the core parser's slashless forms. */
+const LOCAL_ROOT = /^\/?local(?=\/|$)/;
+
+/**
+ * The view one PAGE of `appId` renders against: the app view, except that
+ * page-local state (`/local/…`) lives at `/local/<page>/…` in the app's
+ * subtree. Every write (`set`, `update`) is remapped and the snapshot presents
+ * this page's slot as `local`, so `$state`, `$bindState`, `$bindItem`, `watch`
+ * keys, `repeat.statePath` and `ui.set` all address the same per-page slot
+ * without any path rewriting in the spec. Two pages that declare the same
+ * state name therefore never share it, and each page's slot stays warm across
+ * navigation and remounts (the views and the store are never evicted).
+ */
+export function getPageStoreView(appId: string, page: string): StateStore {
+  const key = `${appId}\0${page}`;
+  const cached = pageViews.get(key);
+  if (cached) return cached;
+
+  const app = getAppStoreView(appId);
+  const pageRoot = `/local/${escapeSegment(page)}`;
+  const mapPath = (path: string): string =>
+    LOCAL_ROOT.test(path) ? path.replace(LOCAL_ROOT, pageRoot) : path;
+
+  // Derived snapshot, recomputed only when the app subtree changes, so
+  // `useSyncExternalStore` sees a stable reference between unrelated writes.
+  let lastBase: StateModel | null = null;
+  let lastSnapshot: StateModel = EMPTY_SNAPSHOT;
+  const getSnapshot = (): StateModel => {
+    const base = app.getSnapshot();
+    if (base === lastBase) return lastSnapshot;
+    const locals = base.local;
+    const own =
+      locals !== null && typeof locals === "object"
+        ? (locals as Record<string, unknown>)[page]
+        : undefined;
+    lastBase = base;
+    lastSnapshot = { ...base, local: own };
+    return lastSnapshot;
+  };
+
+  const view: StateStore = {
+    get: (path) => app.get(mapPath(path)),
+    set: (path, value) => app.set(mapPath(path), value),
+    update: (updates) => {
+      const mapped: Record<string, unknown> = {};
+      for (const [path, value] of Object.entries(updates)) mapped[mapPath(path)] = value;
+      app.update(mapped);
+    },
+    getSnapshot,
+    getServerSnapshot: getSnapshot,
+    subscribe: app.subscribe,
+  };
+
+  pageViews.set(key, view);
+  return view;
+}
+
 /**
  * The whole global state tree — dev/debug read-out only
  * (`window.__swarmAppsStore`).

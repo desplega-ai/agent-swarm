@@ -457,7 +457,8 @@ describe("GET /p/:id serves the head of the page's design version", () => {
     ).text();
     const id = await createPage("v1-page", { designVersion: 1 });
     const page = await serve(id, `?${PAGE_THEME_PARAM}=github&${PAGE_MODE_PARAM}=dark`);
-    expect(page).toContain(`<head>${baseline}<script>`);
+    // The viewer meta for `<swarm-object>` follows the frozen head; the head itself is unchanged.
+    expect(page).toContain(`<head>${baseline}<meta name="swarm-viewer" content="guest"><script>`);
     expect(page).toContain("--swarm-bg: #fbfbfa");
     expect(page).not.toContain("@tailwindcss/browser");
     expect(page).not.toContain(DARK_SCRIPT);

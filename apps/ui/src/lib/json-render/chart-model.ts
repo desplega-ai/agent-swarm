@@ -28,7 +28,7 @@ const PIE_PALETTE: ChartColor[] = [
   "chart-3",
 ];
 
-const COLOR_VARS: Record<ChartColor, string> = {
+export const COLOR_VARS: Record<ChartColor, string> = {
   "chart-1": "var(--color-chart-1)",
   "chart-2": "var(--color-chart-2)",
   "chart-3": "var(--color-chart-3)",

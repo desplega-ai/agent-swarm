@@ -4255,6 +4255,8 @@ export interface AppPageDef {
   headerActions?: string;
   /** Sidebar layout: `false` leaves the page out of the sidebar. */
   nav?: boolean;
+  /** Page-local state: initial values, read and written at `/local/<name>`. */
+  state?: Record<string, unknown>;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */

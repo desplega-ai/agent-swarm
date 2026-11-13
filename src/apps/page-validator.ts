@@ -34,6 +34,8 @@ interface SchemaValidationResult {
 interface StateRef {
   path: string;
   value: string;
+  /** A write target (`$bindState`, `ui.set`): only page-local `/local/<name>` state. */
+  write?: boolean;
 }
 
 export const ELEMENT_KEYS = new Set([
@@ -102,7 +104,23 @@ const RESERVED_UI_IDS = new Set(["__proto__", "constructor", "prototype"]);
  * keyed by component type. Chains nested one level deeper (an array prop
  * whose items each carry a chain) are listed in `ITEM_ACTION_CHAINS`.
  */
+/** Mirrors `INPUT_KEYS` (apps/ui `catalog.ts`): the `onKeyDown:<Key>` props an Input accepts. */
+const INPUT_KEYS = [
+  "Backspace",
+  "Delete",
+  "Enter",
+  "Escape",
+  "Tab",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+];
+
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
+  Input: ["onInput", "onPaste", ...INPUT_KEYS.map((key) => `onKeyDown:${key}`)],
   Table: ["onRowClick", "onRetry"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
@@ -265,6 +283,46 @@ function collectRepeatBindingPaths(value: unknown, path: string, paths: string[]
   }
 }
 
+/**
+ * Expression operators and their operand counts `[min, max]`. Mirrors
+ * `apps/ui/src/lib/json-render/expressions.ts`.
+ */
+const EXPRESSION_ARITY: Record<string, readonly [number, number]> = {
+  $add: [1, Infinity],
+  $sub: [2, 2],
+  $mul: [1, Infinity],
+  $div: [2, 2],
+  $min: [1, Infinity],
+  $max: [1, Infinity],
+  $split: [1, 3],
+  $join: [1, 2],
+  $length: [1, 1],
+};
+
+/** The operator of a `{ "$op": [...] }` expression object, or null. */
+function expressionOp(value: unknown): string | null {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value);
+  return keys.length === 1 && Object.hasOwn(EXPRESSION_ARITY, keys[0]!) ? keys[0]! : null;
+}
+
+/** Svg shapes: valid only as children of an `Svg`. */
+const SVG_SHAPES = new Set(["Rect", "Line", "Path", "Circle", "SvgText"]);
+/** Mirrors `SVG_PATH_DATA` (apps/ui `catalog.ts`): path commands and numbers only. */
+const SVG_PATH_DATA = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,\s+-]*$/;
+
+function isBindStateBinding(value: unknown): value is { $bindState: string } {
+  return (
+    isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$bindState === "string"
+  );
+}
+
+function isBindItemBinding(value: unknown): value is { $bindItem: string } {
+  return (
+    isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$bindItem === "string"
+  );
+}
+
 function isActionSentinel(value: unknown): boolean {
   if (!isPlainObject(value) || Object.keys(value).length !== 1) return false;
   if (typeof value.$row === "string") return true;
@@ -337,6 +395,38 @@ function validateSchema(
   }
 
   if (isRepeatBinding(value)) return { issues: [], stateRefs: [] };
+
+  if (isBindStateBinding(value) || isBindItemBinding(value)) {
+    return {
+      issues: [issue(path, "$bindState and $bindItem are only allowed on Input.value")],
+      stateRefs: [],
+    };
+  }
+
+  const op = expressionOp(value);
+  if (op) {
+    const operands = (value as Record<string, unknown>)[op];
+    const [min, max] = EXPRESSION_ARITY[op]!;
+    if (!Array.isArray(operands) || operands.length < min || operands.length > max) {
+      const count = min === max ? `${min}` : max === Infinity ? `at least ${min}` : `${min}-${max}`;
+      return {
+        issues: [issue(appendPath(path, op), `must be an array of ${count} operand(s)`)],
+        stateRefs: [],
+      };
+    }
+    const result: SchemaValidationResult = { issues: [], stateRefs: [] };
+    for (const [index, operand] of operands.entries()) {
+      const operandResult = validateSchema(
+        operand,
+        {},
+        appendPath(appendPath(path, op), index),
+        allowActionSentinels,
+      );
+      result.issues.push(...operandResult.issues);
+      result.stateRefs.push(...operandResult.stateRefs);
+    }
+    return result;
+  }
 
   if (isActionSentinel(value)) {
     return allowActionSentinels
@@ -592,6 +682,20 @@ function actionParams(
         );
       }
     }
+  } else if (step.action === "ui.set") {
+    // A literal path is checked against the page's declared state; a computed
+    // one (an expression) is held to `/local/...` by the runtime handler.
+    if (typeof params.path === "string") {
+      result.stateRefs.push({
+        path: appendPath(paramsPath, "path"),
+        value: params.path,
+        write: true,
+      });
+    } else if (!expressionOp(params.path)) {
+      result.issues.push(
+        issue(appendPath(paramsPath, "path"), "must be a /local/<name> path or an expression"),
+      );
+    }
   } else if (step.action === "ui.toast") {
     // The Undo chain runs through the same handlers as any other chain, so
     // its steps get the same per-action checks (models, queries, actions).
@@ -663,7 +767,24 @@ function validateStateRef(
   formIds: Set<string>,
   uiIds: Set<string>,
   pageParams: Record<string, unknown>,
+  pageState: Record<string, unknown>,
 ): AppValidationIssue | null {
+  const localMatch = /^\/local\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+  if (localMatch) {
+    const name = localMatch[1]!;
+    if (!Object.hasOwn(pageState, name)) {
+      return issue(
+        ref.path,
+        `state reference targets undeclared page state "${name}"; declare it in the page's \`state\``,
+      );
+    }
+    return ref.value.split("/").some((segment) => RESERVED_UI_IDS.has(segment))
+      ? issue(ref.path, `invalid state reference "${ref.value}"`)
+      : null;
+  }
+  if (ref.write) {
+    return issue(ref.path, `only page-local /local/<name> state is writable (got "${ref.value}")`);
+  }
   if (ref.value === "/route/page") return null;
   const routeParam = /^\/route\/params\/([^/]+)$/.exec(ref.value);
   if (routeParam) {
@@ -1716,6 +1837,10 @@ export function validatePage(
   const page = options?.tree ?? definition.pages[pageName!]!;
   const pagePath = options?.path ?? appendPath("pages", pageName!);
   const pageParams = pageName ? (definition.pages[pageName]?.params ?? {}) : {};
+  const pageState = pageName ? (definition.pages[pageName]?.state ?? {}) : {};
+  const inputIds = new Set<string>();
+  /** Input elements whose `value` is a `$bindItem`: they need a repeat over `/local` state. */
+  const bindItemPaths: { elementId: string; path: string }[] = [];
   const elementsPath = appendPath(pagePath, "elements");
   const root = page.root;
   const elements = page.elements;
@@ -1778,9 +1903,25 @@ export function validatePage(
           ? itemActionChains(type, rawElement.props, propsPath).map(({ path }) => path)
           : [],
       );
+      const inputValue =
+        type === "Input" && isPlainObject(rawElement.props) ? rawElement.props.value : undefined;
+      const boundInputValue = isBindStateBinding(inputValue) || isBindItemBinding(inputValue);
       const actionChainPath = (path: string): boolean =>
         (PROP_ACTION_CHAINS[String(type)] ?? []).some((prop) => path === `${propsPath}.${prop}`) ||
-        itemChainPaths.has(path);
+        itemChainPaths.has(path) ||
+        (boundInputValue && path === `${propsPath}.value`);
+      if (isBindStateBinding(inputValue)) {
+        stateRefs.push({ path: `${propsPath}.value`, value: inputValue.$bindState, write: true });
+      } else if (isBindItemBinding(inputValue)) {
+        bindItemPaths.push({ elementId, path: `${propsPath}.value` });
+      }
+      if (
+        type === "Input" &&
+        isPlainObject(rawElement.props) &&
+        typeof rawElement.props.id === "string"
+      ) {
+        inputIds.add(rawElement.props.id);
+      }
       const propsResult = validateSchema(
         Object.hasOwn(rawElement, "props") ? rawElement.props : {},
         component.props,
@@ -2181,6 +2322,82 @@ export function validatePage(
     }
   }
 
+  // `$bindItem` writes into the repeated list, so the nearest repeat must
+  // iterate page-local state.
+  for (const { elementId, path } of bindItemPaths) {
+    let parentId = parentByChild.get(elementId);
+    const seen = new Set<string>();
+    let repeatPath: unknown;
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = elements[parentId];
+      if (isPlainObject(parent) && isPlainObject(parent.repeat)) {
+        repeatPath = parent.repeat.statePath;
+        break;
+      }
+      parentId = parentByChild.get(parentId);
+    }
+    if (typeof repeatPath !== "string") {
+      issues.push(issue(path, "$bindItem is only allowed inside a repeated element"));
+    } else {
+      stateRefs.push({ path, value: repeatPath, write: true });
+    }
+  }
+
+  for (const [elementId, rawElement] of elementEntries) {
+    if (!isPlainObject(rawElement)) continue;
+    const elementPath = `${elementsPath}.${elementId}`;
+    const parent = elements[parentByChild.get(elementId) ?? ""];
+    const parentType = isPlainObject(parent) ? parent.type : undefined;
+    if (typeof rawElement.type === "string" && SVG_SHAPES.has(rawElement.type)) {
+      if (parentType !== "Svg") {
+        issues.push(
+          issue(appendPath(elementPath, "type"), `${rawElement.type} must be a child of an Svg`),
+        );
+      }
+    }
+    if (rawElement.type === "Svg" && parentType !== "Svg") {
+      const props = isPlainObject(rawElement.props) ? rawElement.props : {};
+      for (const key of ["width", "height"]) {
+        if (props[key] === undefined) {
+          issues.push(issue(`${elementPath}.props.${key}`, "is required on an outer Svg"));
+        }
+      }
+    }
+    if (rawElement.type === "Svg" && Array.isArray(rawElement.children)) {
+      for (const [index, child] of rawElement.children.entries()) {
+        const childType = isPlainObject(elements[String(child)])
+          ? (elements[String(child)] as Record<string, unknown>).type
+          : undefined;
+        if (typeof childType === "string" && childType !== "Svg" && !SVG_SHAPES.has(childType)) {
+          issues.push(
+            issue(
+              `${elementPath}.children.${index}`,
+              `Svg children must be Rect, Line, Path, Circle, SvgText or Svg (got ${childType})`,
+            ),
+          );
+        }
+      }
+    }
+    if (
+      rawElement.type === "Path" &&
+      isPlainObject(rawElement.props) &&
+      typeof rawElement.props.d === "string" &&
+      !SVG_PATH_DATA.test(rawElement.props.d)
+    ) {
+      issues.push(issue(`${elementPath}.props.d`, "must hold SVG path commands and numbers only"));
+    }
+  }
+
+  // `ui.focus` ids are literal Input ids of this tree.
+  visitPageActionSteps(page, pagePath, (step, path) => {
+    if (step.action !== "ui.focus" || !isPlainObject(step.params)) return;
+    const id = step.params.id;
+    if (typeof id === "string" && !inputIds.has(id)) {
+      issues.push(issue(`${path}.params.id`, `no Input with id "${id}" on this page`));
+    }
+  });
+
   const visited = new Set<string>();
   const visiting = new Set<string>();
   const visit = (elementId: string): void => {
@@ -2241,7 +2458,12 @@ export function validatePage(
     const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
     const userConfigRef = ref.value === "/user" || ref.value.startsWith("/user/");
     let stateIssue: AppValidationIssue | null;
-    if (options?.elementMode && userConfigRef) {
+    if (options?.elementMode && ref.write) {
+      stateIssue = issue(
+        ref.path,
+        `${options.elementMode} elements cannot write state; bind page-local state at page level`,
+      );
+    } else if (options?.elementMode && userConfigRef) {
       stateIssue = issue(
         ref.path,
         `${options.elementMode} elements cannot read /user state; read userConfig via a prop or bind it at page level`,
@@ -2256,7 +2478,7 @@ export function validatePage(
         `pure element state reference "${ref.value}" escapes /props/<declared>; use a declared prop or switch the element to bound mode`,
       );
     } else {
-      stateIssue = validateStateRef(ref, definition, formIds, uiIds, pageParams);
+      stateIssue = validateStateRef(ref, definition, formIds, uiIds, pageParams, pageState);
     }
     if (stateIssue) issues.push(stateIssue);
   }

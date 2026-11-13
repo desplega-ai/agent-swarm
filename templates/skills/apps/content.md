@@ -526,9 +526,9 @@ The sidebar lists pages in definition order and marks the current one. Below 768
 
 Param `kind` is `string` by default, or `number` / `boolean`; `required` defaults to false. The names `mode`, `apiUrl`, `apiKey`, `email`, and `name` are reserved. `/apps/<id>` renders `defaultPage`; `/apps/<id>/p/<page>?issueId=42` is the shareable deep link for another page. Browser navigation is client-side, so app state and polled data stay warm across page changes.
 
-Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, and Dialog). `watch` maps state paths to an action step or chain.
+Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, Dialog, and Svg). `watch` maps state paths to an action step or chain. A page may also declare `state`: page-local values read and written at `/local/<name>` (see Low-level primitives).
 
-## Component catalog (all 45)
+## Component catalog (all 52)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -585,6 +585,13 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
 | `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
+| `Input` | none | Low-level text field: `value` (bind two-way with `$bindState` / `$bindItem`), `id` (the `ui.focus` target), `label`, `placeholder`, `type: "text"` or `"password"`, `inputMode`, `autoComplete: "off"` or `"one-time-code"`, `maxLength`, `size: "default"` or `"cell"` (square one-character box), `selectOnFocus`, `disabled`; chains `onInput`, `onPaste`, `onKeyDown:<Key>`; see Low-level primitives. |
+| `Svg` | `width`, `height` on the outer Svg | Vector drawing in `width` x `height` user units, scaled to its container; `label` (accessible name). Children: `Rect`, `Line`, `Path`, `Circle`, `SvgText`, or a nested `Svg` (a group offset by `x`/`y`, the place for `repeat`). |
+| `Rect` | `x`, `y`, `width`, `height` | `rx`, `fill`, `stroke`, `strokeWidth`, `opacity`, `title` (tooltip); only inside an Svg. |
+| `Line` | `x1`, `y1`, `x2`, `y2` | `stroke`, `strokeWidth`, `opacity`, `dashed`; only inside an Svg. |
+| `Path` | `d` | `fill`, `stroke`, `strokeWidth`, `opacity`; `d` holds path commands and numbers only; only inside an Svg. |
+| `Circle` | `cx`, `cy`, `r` | `fill`, `stroke`, `strokeWidth`, `opacity`, `title`; only inside an Svg. |
+| `SvgText` | `x`, `y`, `text` | `anchor: "start", "middle", "end"`, `size`, `weight: "normal"` or `"bold"`, `fill`; only inside an Svg. |
 
 Table details:
 
@@ -853,6 +860,7 @@ Valid `$state` roots are:
 - `/actions/<declaredAction>/...`
 - `/route/page` for the active page name
 - `/route/params/<declaredParam>` for a param declared on the current page
+- `/local/<name>/...`, where the current page declares `<name>` in its `state`
 
 `/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
@@ -892,6 +900,178 @@ The `studio` page's `SessionThread` with `"sessionKey": { "$state": "/route/para
 - `swarm.call`: `{ method, endpoint: "/api/...", body? }`, where `method` is `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, or `"PATCH"`; raw authenticated API call.
 
 A failed step halts its chain: when `app.action`, `app.mutate`, `swarm.sdk` or `swarm.call` fails (a thrown error, a script action that returns `ok: false`, a non-2xx `swarm.call`), the steps after it do not run and the error shows as an error toast. A step's `onError` (`{ set }` or `{ action }`) runs first, and the chain still halts. So a `ui.toast` after a write is a real success message. A `Form`'s failed `app.mutate` shows inline under the fields instead of a toast. A task-backed `app.action` succeeds once the task is created; the task's own failure shows in the page banner and does not halt the chain. A Table bulk action reads each step's own outcome, as before.
+
+## Low-level primitives
+
+Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local state, a bindable `Input`, three `ui.*` steps, expressions, and `Svg` shapes. No custom component needed.
+
+**Page state.** `pages.<page>.state` maps names to initial JSON values. The page reads them at `{ "$state": "/local/<name>/..." }` and only this root is writable. Each page has its own `/local`, even when two pages declare the same name. The values are seeded on first render and survive navigation; patching `pages.<page>.state.<name>` replaces that entry. Reusable elements cannot read or write `/local`.
+
+**Input.** `value: { "$bindState": "/local/<name>/..." }` binds two-way; inside a `repeat` over a `/local` list, `{ "$bindItem": "" }` binds the item itself (`"field"` binds a field of it). `$bindState` and `$bindItem` are valid only on `Input.value`. Event chains are props, run by the Input:
+
+- `onInput`: after every edit; `{ "$chain": "value" }` is the new text.
+- `onPaste`: instead of the browser paste; `{ "$chain": "text" }` is the clipboard text.
+- `onKeyDown:<Key>`: instead of that key's default. Keys: `Backspace`, `Delete`, `Enter`, `Escape`, `Tab`, `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`.
+
+`$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`. A state write inside a `watch` chain re-runs the watch and cancels the steps after it, so make `ui.set` the last step there.
+
+**Steps.**
+
+- `ui.set`: `{ path, value }` writes `value` to a `/local/...` path. A literal path must name declared state; `path` may be an expression, e.g. `{ "$join": [["/local/otp", { "$index": true }], "/"] }`.
+- `ui.focus`: `{ id, index? }` focuses the `Input` with that literal `id` on this page. Inside a `repeat`, `index` picks the item. A missing target is a no-op.
+- `ui.when`: `{ value, eq? }` continues the chain only when `value` equals `eq` (or is truthy without `eq`); otherwise the rest of the chain is skipped quietly.
+
+**Expressions.** An object with one operator key and an operand array, valid in any prop or action param. Operands are literals or bindings (`$state`, `$item`, `$index`, `$chain`, another expression):
+
+| Operator | Operands | Result |
+|---|---|---|
+| `$add`, `$mul`, `$min`, `$max` | 1 or more numbers | sum, product, minimum, maximum |
+| `$sub`, `$div` | exactly 2 numbers | difference, quotient |
+| `$split` | text, separator (default `""`), optional limit | array of strings |
+| `$join` | array, separator (default `""`) | text |
+| `$length` | 1 value | length of a text or array (`0` for null) |
+
+A non-numeric operand, or a division by zero, yields no value and the attribute is left out.
+
+**Svg.** `Svg` draws in `width` x `height` user units. Shape attributes (`x`, `y`, `width`, `height`, `x1`..`y2`, `cx`, `cy`, `r`, `d`) accept expressions, so a bar is `x = 100 + (start - min) * scale`. A nested `Svg` is a group: put `repeat` on it to draw its shapes once per item. Colors are palette tokens (`chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted`, `foreground`, `background`, `border`, `none`). The validator rejects unknown attributes, raw colors, a `Path.d` with anything but path commands and numbers, shapes outside an Svg, and non-shape Svg children.
+
+### Example: 6-cell code input
+
+Typing advances to the next cell, Backspace clears the cell and moves back, pasting a 6-character code fills every cell, and the `watch` submits once all 6 are filled. Replace the `ui.toast` step with an `app.action` to verify the code server-side.
+
+```json
+{
+  "models": {},
+  "defaultPage": "verify",
+  "pages": {
+    "verify": {
+      "title": "Verify",
+      "state": { "otp": ["", "", "", "", "", ""], "code": "" },
+      "root": "root",
+      "elements": {
+        "root": {
+          "type": "Stack",
+          "props": { "gap": "md", "padding": "md" },
+          "children": ["heading", "cells", "submitted"],
+          "watch": {
+            "/local/otp": [
+              { "action": "ui.when", "params": { "value": { "$length": [{ "$join": [{ "$state": "/local/otp" }, ""] }] }, "eq": 6 } },
+              { "action": "ui.toast", "params": { "message": "Code submitted", "tone": "success" } },
+              { "action": "ui.set", "params": { "path": "/local/code", "value": { "$join": [{ "$state": "/local/otp" }, ""] } } }
+            ]
+          }
+        },
+        "heading": { "type": "Heading", "props": { "text": "Enter the 6-digit code", "level": "h2" } },
+        "cells": {
+          "type": "Stack",
+          "props": { "direction": "row", "gap": "sm" },
+          "repeat": { "statePath": "/local/otp" },
+          "children": ["cell"]
+        },
+        "cell": {
+          "type": "Input",
+          "props": {
+            "id": "otp",
+            "value": { "$bindItem": "" },
+            "size": "cell",
+            "maxLength": 1,
+            "inputMode": "numeric",
+            "autoComplete": "one-time-code",
+            "selectOnFocus": true,
+            "onInput": [
+              { "action": "ui.when", "params": { "value": { "$length": [{ "$chain": "value" }] }, "eq": 1 } },
+              { "action": "ui.focus", "params": { "id": "otp", "index": { "$min": [{ "$add": [{ "$index": true }, 1] }, 5] } } }
+            ],
+            "onKeyDown:Backspace": [
+              { "action": "ui.set", "params": { "path": { "$join": [["/local/otp", { "$index": true }], "/"] }, "value": "" } },
+              { "action": "ui.focus", "params": { "id": "otp", "index": { "$max": [{ "$sub": [{ "$index": true }, 1] }, 0] } } }
+            ],
+            "onPaste": [
+              { "action": "ui.when", "params": { "value": { "$length": [{ "$chain": "text" }] }, "eq": 6 } },
+              { "action": "ui.set", "params": { "path": "/local/otp", "value": { "$split": [{ "$chain": "text" }, ""] } } },
+              { "action": "ui.focus", "params": { "id": "otp", "index": 5 } }
+            ]
+          }
+        },
+        "submitted": {
+          "type": "Text",
+          "props": { "content": { "$state": "/local/code" }, "tone": "muted" },
+          "visible": { "$state": "/local/code" }
+        }
+      }
+    }
+  }
+}
+```
+
+### Example: Gantt timeline
+
+Each task is a bar at `x = 100 + (start - min) * scale`, `width = days * scale`, one row per item of a repeated list; the dashed line marks day 12. Bind `repeat.statePath` to `/queries/<q>/data` to draw rows from a query instead.
+
+```json
+{
+  "models": {},
+  "defaultPage": "plan",
+  "pages": {
+    "plan": {
+      "title": "Plan",
+      "state": {
+        "axis": { "min": 3, "scale": 24 },
+        "tasks": [
+          { "name": "Research", "start": 3, "days": 4 },
+          { "name": "Design", "start": 6, "days": 5 },
+          { "name": "Build", "start": 10, "days": 8 },
+          { "name": "QA", "start": 16, "days": 4 },
+          { "name": "Launch", "start": 20, "days": 2 }
+        ]
+      },
+      "root": "card",
+      "elements": {
+        "card": { "type": "Card", "props": { "title": "Launch plan", "description": "Days 3-22" }, "children": ["chart"] },
+        "chart": {
+          "type": "Svg",
+          "props": { "width": 640, "height": 200, "label": "Gantt chart of the launch plan" },
+          "children": ["axis", "today", "rows"]
+        },
+        "axis": { "type": "Line", "props": { "x1": 100, "y1": 190, "x2": 632, "y2": 190, "stroke": "border" } },
+        "today": {
+          "type": "Line",
+          "props": {
+            "x1": { "$add": [100, { "$mul": [{ "$sub": [12, { "$state": "/local/axis/min" }] }, { "$state": "/local/axis/scale" }] }] },
+            "y1": 8,
+            "x2": { "$add": [100, { "$mul": [{ "$sub": [12, { "$state": "/local/axis/min" }] }, { "$state": "/local/axis/scale" }] }] },
+            "y2": 190,
+            "stroke": "error",
+            "dashed": true
+          }
+        },
+        "rows": { "type": "Svg", "props": {}, "repeat": { "statePath": "/local/tasks" }, "children": ["label", "bar"] },
+        "label": {
+          "type": "SvgText",
+          "props": {
+            "x": 0,
+            "y": { "$add": [26, { "$mul": [{ "$index": true }, 34] }] },
+            "text": { "$item": "name" },
+            "size": 13
+          }
+        },
+        "bar": {
+          "type": "Rect",
+          "props": {
+            "x": { "$add": [100, { "$mul": [{ "$sub": [{ "$item": "start" }, { "$state": "/local/axis/min" }] }, { "$state": "/local/axis/scale" }] }] },
+            "y": { "$add": [14, { "$mul": [{ "$index": true }, 34] }] },
+            "width": { "$mul": [{ "$item": "days" }, { "$state": "/local/axis/scale" }] },
+            "height": 24,
+            "rx": 4,
+            "fill": "chart-2",
+            "title": { "$item": "name" }
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ## Patch semantics
 
@@ -1018,6 +1198,15 @@ Create this with `app-upsert`:
 ```
 
 The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the live UI, then continue with the read-patch-validate loop above.
+
+## Embed a sheet or board
+
+`{ "type": "ObjectEmbed", "props": { "objectId": "<object id>" } }` shows a live, editable sheet or board (see the `boards-and-sheets` skill). Optional props: `height` (160-1200), `readOnly`, and for sheets `tab` and `range`. To show the same object on an HTML page instead, use the page snippet, where `${APP_URL}` is the dashboard origin:
+
+```html
+<script type="module" src="${APP_URL}/embed/v1/swarm-object.js"></script>
+<swarm-object object-id="<object id>"></swarm-object>
+```
 
 ## View and screenshot a live app
 

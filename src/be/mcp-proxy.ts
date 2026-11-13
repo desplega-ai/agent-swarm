@@ -3,6 +3,7 @@ import { McpHttpClient, type McpTool, type McpToolCallEnvelope } from "@/mcp-cli
 import { ensureMcpToken } from "@/oauth/ensure-mcp-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type { McpServer } from "@/types";
+import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
 const MCP_PROXY_TIMEOUT_MS = 30_000;
@@ -102,16 +103,16 @@ async function createMcpServerClient(
   }
   if (!server.url) throw new Error("MCP server URL is required");
 
-  // Validate when resolving the persisted URL, and again in McpHttpClient
-  // immediately before every request to defend against a changed record or DNS
-  // rebinding between the initial validation and an MCP tool call.
+  // Validate when resolving the persisted URL. Every request then goes through
+  // the guarded fetch, which re-checks the URL, resolves the name and connects
+  // only to a checked address, and re-checks each redirect hop.
   assertUrlSafe(server.url, publicEndpointSsrfOptions());
 
   const client = new McpHttpClient(server.url, "", "", undefined, {
     clientInfo: { name: "agent-swarm-script-mcp-proxy", version: "1.0.0" },
     omitEmptyAuthHeaders: true,
     timeoutMs: context.timeoutMs ?? MCP_PROXY_TIMEOUT_MS,
-    validateUrl: (url) => assertUrlSafe(url, publicEndpointSsrfOptions()),
+    fetch: createSsrfGuardedFetch(publicEndpointSsrfOptions()),
   });
   client.useRawUrl = true;
   client.customHeaders = await resolveMcpHeaders(server, context);

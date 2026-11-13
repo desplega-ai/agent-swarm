@@ -1,13 +1,8 @@
 import { ArrowRight, ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
-import {
-  type Agent,
-  type OnboardingProviderSignal,
-  REASONING_EFFORT_LEVELS,
-  type ReasoningEffortLevel,
-  type SwarmConfig,
-} from "@/api/types";
+import { useModelProfiles } from "@/api/hooks/use-model-profiles";
+import type { Agent, OnboardingProviderSignal } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { setupStepHref } from "@/components/onboarding/step-status";
 import { AgentStatusBadge } from "@/components/shared/agent-status-badge";
@@ -19,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { savedRuntimeByAgent } from "@/lib/agent-saved-runtime";
 import { type AgentModelDisplay, getAgentModelDisplay } from "@/lib/agents-list-model-display";
 import { formatRelative } from "@/lib/relative-time";
 import { parseUTCDate } from "@/lib/utils";
@@ -147,30 +143,6 @@ export function LeadStatusLine({
   );
 }
 
-interface AgentOverrides {
-  model?: string;
-  effort?: ReasoningEffortLevel;
-}
-
-function isEffortLevel(value: string): value is ReasoningEffortLevel {
-  return (REASONING_EFFORT_LEVELS as readonly string[]).includes(value);
-}
-
-/** Agent-scope MODEL_OVERRIDE and REASONING_EFFORT_OVERRIDE rows, by agent id. */
-function overridesByAgent(configs: SwarmConfig[] | undefined): Map<string, AgentOverrides> {
-  const byAgent = new Map<string, AgentOverrides>();
-  for (const row of configs ?? []) {
-    if (row.scope !== "agent" || !row.scopeId) continue;
-    const value = row.value.trim();
-    const entry = byAgent.get(row.scopeId) ?? {};
-    if (row.key === "MODEL_OVERRIDE" && value) entry.model = value;
-    else if (row.key === "REASONING_EFFORT_OVERRIDE" && isEffortLevel(value)) entry.effort = value;
-    else continue;
-    byAgent.set(row.scopeId, entry);
-  }
-  return byAgent;
-}
-
 /** The harness icon. Hover or focus shows the harness, the model, and the effort. */
 function RuntimeTip({
   harness,
@@ -229,7 +201,8 @@ function RuntimeTip({
 function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
   // Mounted only while the popover is open, so the config poll stops when it closes.
   const configsQ = useConfigs({ scope: "agent" });
-  const overrides = overridesByAgent(configsQ.data);
+  const profilesQ = useModelProfiles();
+  const saved = savedRuntimeByAgent(configsQ.data, agents, profilesQ.data);
   const visible = agents.slice(0, MAX_ROWS);
   const hidden = agents.length - visible.length;
 
@@ -252,7 +225,7 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
     <div>
       <ul className="max-h-72 divide-y divide-border-subtle overflow-y-auto">
         {visible.map((agent) => {
-          const override = overrides.get(agent.id);
+          const override = saved.get(agent.id);
           const latest = agent.credStatus?.latestModel;
           // The configured model first, else the last one the agent reported.
           const model = getAgentModelDisplay(

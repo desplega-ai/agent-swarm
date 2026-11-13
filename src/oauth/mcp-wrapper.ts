@@ -1,5 +1,9 @@
 import * as oauth from "oauth4webapi";
-import { assertUrlSafe, type SsrfGuardOptions } from "../utils/egress-guard";
+import {
+  assertUrlSafe,
+  createSsrfGuardedFetch,
+  type SsrfGuardOptions,
+} from "../utils/egress-guard";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isDevOrTestNodeEnv } from "../utils/node-env";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
@@ -74,8 +78,11 @@ async function safeFetch(
   init?: RequestInit,
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> {
-  assertUrlSafe(url, mcpOAuthSsrfOptions());
-  return fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeoutMs) });
+  // Checks every redirect hop and the resolved address, not just the URL string.
+  return createSsrfGuardedFetch(mcpOAuthSsrfOptions())(url, {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
+  });
 }
 
 // ─── Protected Resource Metadata (RFC 9728) ──────────────────────────────────
