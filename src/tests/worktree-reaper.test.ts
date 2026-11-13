@@ -278,6 +278,50 @@ describe("WorktreeReaper slim, dry-run, ledger", () => {
     expect(await exists(join(path, "README.md"))).toBe(true);
   });
 
+  test("never slims a held worktree whose owner is active or unknown", async () => {
+    const r = reaper();
+    const paths: string[] = [];
+    const active: ActiveTaskRef[] = [];
+    for (const held of ["dirty", "unpushed"]) {
+      // active: in this runner's task list; running/unknown: only the API status says so.
+      for (const owner of ["active", "running", "unknown"]) {
+        const taskId = `${held}-${owner}`;
+        const path = await worktreeOfEndedTask(r, taskId, taskId);
+        if (held === "dirty") await writeFile(join(path, "README.md"), "edited\n");
+        else await git(path, ["commit", "-q", "--allow-empty", "-m", "wip"]);
+        await mkdir(join(path, "node_modules", "dep"), { recursive: true });
+        if (owner === "active") active.push({ taskId });
+        else statuses.set(taskId, owner === "running" ? "in_progress" : null);
+        paths.push(path);
+      }
+    }
+    clock += 73 * HOUR;
+    const { decisions } = await r.sweep(active);
+    expect(decisions.map((d) => [d.path, d.action]).sort()).toEqual(
+      paths.map((p) => [p, "skip"]).sort(),
+    );
+    for (const path of paths) expect(await exists(join(path, "node_modules", "dep"))).toBe(true);
+  });
+
+  test("slims a held worktree only after every concurrent candidate ended", async () => {
+    const r = reaper();
+    await r.observe([{ taskId: "A" }, { taskId: "B" }]);
+    const path = await addWorktree("shared-held");
+    await r.observe([{ taskId: "A" }, { taskId: "B" }]);
+    await writeFile(join(path, "README.md"), "edited\n");
+    await mkdir(join(path, "node_modules", "dep"), { recursive: true });
+    clock += 73 * HOUR;
+    expect((await r.sweep([{ taskId: "B" }])).decisions[0]?.action).toBe("skip");
+    statuses.set("B", null);
+    expect((await r.sweep([])).decisions[0]?.action).toBe("skip");
+    expect(await exists(join(path, "node_modules", "dep"))).toBe(true);
+    statuses.set("B", "completed");
+    expect((await r.sweep([])).decisions.map((d) => [d.action, d.reason])).toEqual([
+      ["slim", "held-dirty"],
+    ]);
+    expect(await exists(join(path, "node_modules"))).toBe(false);
+  });
+
   test("dry-run leaves every worktree and node_modules byte-identical", async () => {
     config.mode = "dry-run";
     const r = reaper();

@@ -527,6 +527,8 @@ export class WorktreeReaper {
     const dryRun = mode !== "on";
 
     if (verdict === "held" && isSweep && ageHours !== null && ageHours >= ttlHours) {
+      // Rule 6 guards slimming too: a held worktree's owner may still need its deps.
+      if (await this.ownerActive(entry, active)) return decision;
       const slimmed = await this.slim(entry.path, dryRun);
       if (slimmed.length > 0) {
         decision.action = dryRun ? "would-slim" : "slim";
