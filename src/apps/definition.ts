@@ -390,6 +390,8 @@ const AppPageSchema = z
     headerActions: z.string().optional(),
     /** `false` leaves the page out of the sidebar. Pages with a required param never list. */
     nav: z.boolean().optional(),
+    /** Page-local state: initial JSON values, read and written at `/local/<name>`. */
+    state: z.record(AppNameSchema, z.unknown()).optional(),
   })
   .strict();
 
@@ -1194,7 +1196,9 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
     (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
     (path.length === 3 && path[0] === "models" && path[2] === "sources") ||
     (path.length === 3 && path[0] === "elements" && path[2] === "elements") ||
-    (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
+    (path.length === 3 &&
+      path[0] === "pages" &&
+      (path[2] === "elements" || path[2] === "params" || path[2] === "state"));
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {

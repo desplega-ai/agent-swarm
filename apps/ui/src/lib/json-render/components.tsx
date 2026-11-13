@@ -230,6 +230,15 @@ import {
 } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { PageFrameComponent } from "./page-frame";
+import {
+  CircleComponent,
+  InputComponent,
+  LineComponent,
+  PathComponent,
+  RectComponent,
+  SvgComponent,
+  SvgTextComponent,
+} from "./primitives";
 import { SchemaFormComponent } from "./schema-form";
 import { SessionThreadComponent } from "./session-thread";
 import { SmartLink } from "./smart-link";
@@ -4272,6 +4281,13 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,
+  Input: ({ props, bindings }) => <InputComponent props={props} bindings={bindings} />,
+  Svg: ({ props, children }) => <SvgComponent props={props}>{children}</SvgComponent>,
+  Rect: ({ props }) => <RectComponent props={props} />,
+  Line: ({ props }) => <LineComponent props={props} />,
+  Path: ({ props }) => <PathComponent props={props} />,
+  Circle: ({ props }) => <CircleComponent props={props} />,
+  SvgText: ({ props }) => <SvgTextComponent props={props} />,
   Markdown: ({ props }) => <MarkdownBlock content={props.content} />,
   Container: ({ props, children }) => {
     const direction = props.direction ?? "column";

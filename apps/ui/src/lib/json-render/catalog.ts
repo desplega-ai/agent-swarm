@@ -1272,6 +1272,135 @@ const elementRefProps = z.object({
 
 const elementSlotProps = z.object({});
 
+/** Keys an `Input` can bind a chain to, as `onKeyDown:<Key>` props. */
+export const INPUT_KEYS = [
+  "Backspace",
+  "Delete",
+  "Enter",
+  "Escape",
+  "Tab",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+] as const;
+export type InputKey = (typeof INPUT_KEYS)[number];
+const optionalChain = actionChainSchema.optional();
+const inputKeyChains = Object.fromEntries(
+  INPUT_KEYS.map((key) => [`onKeyDown:${key}`, optionalChain]),
+) as Record<`onKeyDown:${InputKey}`, typeof optionalChain>;
+
+const inputProps = z.object({
+  /** Page-local id `ui.focus` targets; inside a `repeat`, `ui.focus` adds the item index. */
+  id: z.string().optional(),
+  /** The text. Bind it two-way with `{ "$bindState": "/local/..." }` or `{ "$bindItem": "" }`. */
+  value: z.string().optional(),
+  label: z.string().optional(),
+  placeholder: z.string().optional(),
+  type: z.enum(["text", "password"]).optional(),
+  inputMode: z.enum(["text", "numeric", "tel", "email", "url", "search"]).optional(),
+  autoComplete: z.enum(["off", "one-time-code"]).optional(),
+  maxLength: z.number().int().min(1).max(10000).optional(),
+  /** `cell`: a square, centered, single-character box (OTP digits). */
+  size: z.enum(["default", "cell"]).optional(),
+  /** Select the whole value on focus, so typing replaces it. */
+  selectOnFocus: z.boolean().optional(),
+  disabled: z.boolean().optional(),
+  /** Runs after every edit; `{ "$chain": "value" }` is the new text. */
+  onInput: optionalChain,
+  /** Runs instead of the browser paste; `{ "$chain": "text" }` is the pasted text. */
+  onPaste: optionalChain,
+  /** `onKeyDown:<Key>` runs instead of that key's browser default. */
+  ...inputKeyChains,
+});
+
+/** SVG paint: the chart palette plus surface tokens. No raw colors, so no `url(...)`. */
+const svgPaint = z.enum([...CHART_COLORS, "foreground", "background", "border", "none"]);
+const svgStroke = {
+  stroke: svgPaint.optional(),
+  strokeWidth: z.number().min(0).max(100).optional(),
+  opacity: z.number().min(0).max(1).optional(),
+};
+
+const svgProps = z.object({
+  /** Drawing width in user units (the viewBox), required on the outer Svg; it scales to its container. */
+  width: z.number().positive().max(10000).optional(),
+  height: z.number().positive().max(10000).optional(),
+  /** Offset of a nested Svg inside its parent Svg. */
+  x: z.number().optional(),
+  y: z.number().optional(),
+  /** Accessible name; without it the drawing is decorative. */
+  label: z.string().optional(),
+});
+
+const rectProps = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+  rx: z.number().min(0).optional(),
+  fill: svgPaint.optional(),
+  ...svgStroke,
+  /** Hover tooltip. */
+  title: z.string().optional(),
+});
+
+const lineProps = z.object({
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+  dashed: z.boolean().optional(),
+  ...svgStroke,
+});
+
+/** SVG path data: commands and numbers only (checked again by the validator and renderer). */
+export const SVG_PATH_DATA = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,\s+-]*$/;
+const pathProps = z.object({
+  d: z.string().max(10000),
+  fill: svgPaint.optional(),
+  ...svgStroke,
+});
+
+const circleProps = z.object({
+  cx: z.number(),
+  cy: z.number(),
+  r: z.number().min(0),
+  fill: svgPaint.optional(),
+  ...svgStroke,
+  title: z.string().optional(),
+});
+
+const svgTextProps = z.object({
+  x: z.number(),
+  y: z.number(),
+  text: z.string(),
+  anchor: z.enum(["start", "middle", "end"]).optional(),
+  size: z.number().min(6).max(96).optional(),
+  weight: z.enum(["normal", "bold"]).optional(),
+  fill: svgPaint.optional(),
+});
+
+/** `ui.set` — write a value to page-local state (`/local/<name>/...`). */
+export const uiSetActionSchema = z.object({
+  path: z.string(),
+  value: z.unknown(),
+});
+
+/** `ui.focus` — focus the `Input` with this `id` (plus the repeat `index` inside a `repeat`). */
+export const uiFocusActionSchema = z.object({
+  id: z.string(),
+  index: z.number().int().optional(),
+});
+
+/** `ui.when` — continue the chain only when `value` equals `eq` (or is truthy without `eq`). */
+export const uiWhenActionSchema = z.object({
+  value: z.unknown(),
+  eq: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
+});
+
 export type TableColumn = z.infer<typeof tableColumnSchema>;
 export type TableRowAction = z.infer<typeof tableRowActionSchema>;
 export type TableBulkAction = z.infer<typeof tableBulkActionSchema>;
@@ -1381,6 +1510,11 @@ export const swarmCatalogSpec = {
       props: numberInputProps,
       description:
         "Labelled numeric text field (decimal keyboard on touch devices, no debounce). Writes the parsed number into state at `/ui/<id>/value` on every change, or `null` when the field is empty; non-numeric text (a bare '-' mid-edit, letters) leaves the stored value untouched until it parses. `min`/`max` clamp the stored value, and the visible text snaps to that clamped value when the field loses focus.",
+    },
+    Input: {
+      props: inputProps,
+      description:
+        'Low-level text field. `value` binds two-way to page-local state: `{ "$bindState": "/local/<name>/..." }`, or `{ "$bindItem": "" }` inside a `repeat` over a `/local` list. `onInput` runs after every edit (`{ "$chain": "value" }` is the new text); `onPaste` replaces the browser paste (`{ "$chain": "text" }` is the clipboard text); `onKeyDown:<Key>` (Backspace, Delete, Enter, Escape, Tab, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End) replaces that key\'s default. `id` is what `ui.focus` targets. `size: "cell"` is a square one-character box; `selectOnFocus` selects the value so typing replaces it.',
     },
     Button: {
       props: buttonProps,
@@ -1561,6 +1695,33 @@ export const swarmCatalogSpec = {
       description:
         "Reference a reusable element from this app or an exported element from another app. Consumer children are inserted at the target's ElementSlot.",
     },
+    Svg: {
+      props: svgProps,
+      slots: ["default"],
+      description:
+        'Vector drawing, `width` x `height` user units, scaled to its container width. Children are Rect, Line, Path, Circle, SvgText or a nested Svg (a group: put `repeat` on it to draw one set of shapes per item, offset by `x`/`y`). Every numeric attribute accepts an expression, e.g. a Gantt bar `x: { "$mul": [{ "$item": "start" }, 20] }`. Colors are palette tokens only.',
+    },
+    Rect: {
+      props: rectProps,
+      description: "Rectangle inside an Svg. `rx` rounds corners; `title` is a hover tooltip.",
+    },
+    Line: {
+      props: lineProps,
+      description: "Line inside an Svg, from (x1, y1) to (x2, y2). `dashed` draws it dashed.",
+    },
+    Path: {
+      props: pathProps,
+      description: "SVG path inside an Svg. `d` holds path commands and numbers only.",
+    },
+    Circle: {
+      props: circleProps,
+      description: "Circle inside an Svg, centered at (cx, cy) with radius `r`.",
+    },
+    SvgText: {
+      props: svgTextProps,
+      description:
+        "Text label inside an Svg at (x, y). `anchor` start|middle|end aligns it horizontally; `size` is the font size in user units.",
+    },
     ElementSlot: {
       props: elementSlotProps,
       description: "Leaf insertion point for children supplied by an ElementRef consumer.",
@@ -1579,6 +1740,21 @@ export const swarmCatalogSpec = {
       params: uiToastActionSchema,
       description:
         'Show a toast: `message`, optional `description`, `tone` success|error|info|warning (default info). `undo: { label?, actions }` adds an Undo button (label defaults to "Undo") that runs `actions` as a chain — e.g. an `app.mutate` that restores the row a delete just removed.',
+    },
+    "ui.set": {
+      params: uiSetActionSchema,
+      description:
+        'Write `value` to a page-local state path (`/local/<name>/...`, declared in the page `state`). `path` may be an expression, e.g. `{ "$join": [["/local/otp", { "$index": true }], "/"] }`.',
+    },
+    "ui.focus": {
+      params: uiFocusActionSchema,
+      description:
+        'Focus the Input whose `id` matches. Inside a `repeat`, pass the item `index` (an expression such as `{ "$add": [{ "$index": true }, 1] }` moves to the next cell); a missing target is a no-op.',
+    },
+    "ui.when": {
+      params: uiWhenActionSchema,
+      description:
+        "Guard: the chain continues only when `value` equals `eq` (or is truthy when `eq` is omitted); otherwise the rest of the chain is skipped quietly.",
     },
     "app.mutate": {
       params: appMutateActionSchema,

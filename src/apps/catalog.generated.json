@@ -15,6 +15,7 @@
     "SearchInput",
     "Select",
     "NumberInput",
+    "Input",
     "Button",
     "Metric",
     "Chart",
@@ -50,12 +51,21 @@
     "SessionThread",
     "PageFrame",
     "ElementRef",
+    "Svg",
+    "Rect",
+    "Line",
+    "Path",
+    "Circle",
+    "SvgText",
     "ElementSlot"
   ],
   "actionTypes": [
     "swarm.sdk",
     "swarm.call",
     "ui.toast",
+    "ui.set",
+    "ui.focus",
+    "ui.when",
     "app.mutate",
     "app.refresh",
     "app.action",
@@ -629,6 +639,315 @@
           }
         },
         "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "Input": {
+      "description": "Low-level text field. `value` binds two-way to page-local state: `{ \"$bindState\": \"/local/<name>/...\" }`, or `{ \"$bindItem\": \"\" }` inside a `repeat` over a `/local` list. `onInput` runs after every edit (`{ \"$chain\": \"value\" }` is the new text); `onPaste` replaces the browser paste (`{ \"$chain\": \"text\" }` is the clipboard text); `onKeyDown:<Key>` (Backspace, Delete, Enter, Escape, Tab, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End) replaces that key's default. `id` is what `ui.focus` targets. `size: \"cell\"` is a square one-character box; `selectOnFocus` selects the value so typing replaces it.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["text", "password"]
+          },
+          "inputMode": {
+            "type": "string",
+            "enum": ["text", "numeric", "tel", "email", "url", "search"]
+          },
+          "autoComplete": {
+            "type": "string",
+            "enum": ["off", "one-time-code"]
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "size": {
+            "type": "string",
+            "enum": ["default", "cell"]
+          },
+          "selectOnFocus": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "onInput": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onPaste": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Backspace": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Delete": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Enter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Escape": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Tab": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:ArrowLeft": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:ArrowRight": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:ArrowUp": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:ArrowDown": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:Home": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onKeyDown:End": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
         "additionalProperties": false
       }
     },
@@ -3573,6 +3892,364 @@
         "additionalProperties": false
       }
     },
+    "Svg": {
+      "description": "Vector drawing, `width` x `height` user units, scaled to its container width. Children are Rect, Line, Path, Circle, SvgText or a nested Svg (a group: put `repeat` on it to draw one set of shapes per item, offset by `x`/`y`). Every numeric attribute accepts an expression, e.g. a Gantt bar `x: { \"$mul\": [{ \"$item\": \"start\" }, 20] }`. Colors are palette tokens only.",
+      "slots": ["default"],
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10000
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "Rect": {
+      "description": "Rectangle inside an Svg. `rx` rounds corners; `title` is a hover tooltip.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "rx": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fill": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "stroke": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "strokeWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": ["x", "y", "width", "height"],
+        "additionalProperties": false
+      }
+    },
+    "Line": {
+      "description": "Line inside an Svg, from (x1, y1) to (x2, y2). `dashed` draws it dashed.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "x1": {
+            "type": "number"
+          },
+          "y1": {
+            "type": "number"
+          },
+          "x2": {
+            "type": "number"
+          },
+          "y2": {
+            "type": "number"
+          },
+          "dashed": {
+            "type": "boolean"
+          },
+          "stroke": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "strokeWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["x1", "y1", "x2", "y2"],
+        "additionalProperties": false
+      }
+    },
+    "Path": {
+      "description": "SVG path inside an Svg. `d` holds path commands and numbers only.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "d": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "fill": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "stroke": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "strokeWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["d"],
+        "additionalProperties": false
+      }
+    },
+    "Circle": {
+      "description": "Circle inside an Svg, centered at (cx, cy) with radius `r`.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cx": {
+            "type": "number"
+          },
+          "cy": {
+            "type": "number"
+          },
+          "r": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fill": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "stroke": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          },
+          "strokeWidth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": ["cx", "cy", "r"],
+        "additionalProperties": false
+      }
+    },
+    "SvgText": {
+      "description": "Text label inside an Svg at (x, y). `anchor` start|middle|end aligns it horizontally; `size` is the font size in user units.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "anchor": {
+            "type": "string",
+            "enum": ["start", "middle", "end"]
+          },
+          "size": {
+            "type": "number",
+            "minimum": 6,
+            "maximum": 96
+          },
+          "weight": {
+            "type": "string",
+            "enum": ["normal", "bold"]
+          },
+          "fill": {
+            "type": "string",
+            "enum": [
+              "chart-1",
+              "chart-2",
+              "chart-3",
+              "chart-4",
+              "chart-5",
+              "primary",
+              "success",
+              "warning",
+              "error",
+              "info",
+              "muted",
+              "foreground",
+              "background",
+              "border",
+              "none"
+            ]
+          }
+        },
+        "required": ["x", "y", "text"],
+        "additionalProperties": false
+      }
+    },
     "ElementSlot": {
       "description": "Leaf insertion point for children supplied by an ElementRef consumer.",
       "props": {
@@ -3713,6 +4390,55 @@
           }
         },
         "required": ["message"],
+        "additionalProperties": false
+      }
+    },
+    "ui.set": {
+      "description": "Write `value` to a page-local state path (`/local/<name>/...`, declared in the page `state`). `path` may be an expression, e.g. `{ \"$join\": [[\"/local/otp\", { \"$index\": true }], \"/\"] }`.",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": ["path", "value"],
+        "additionalProperties": false
+      }
+    },
+    "ui.focus": {
+      "description": "Focus the Input whose `id` matches. Inside a `repeat`, pass the item `index` (an expression such as `{ \"$add\": [{ \"$index\": true }, 1] }` moves to the next cell); a missing target is a no-op.",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "ui.when": {
+      "description": "Guard: the chain continues only when `value` equals `eq` (or is truthy when `eq` is omitted); otherwise the rest of the chain is skipped quietly.",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "value": {},
+          "eq": {
+            "type": ["string", "number", "boolean", "null"]
+          }
+        },
+        "required": ["value"],
         "additionalProperties": false
       }
     },
