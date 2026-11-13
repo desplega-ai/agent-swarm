@@ -118,13 +118,13 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
+            | "codex"
             | "pi"
+            | "opencode"
             | "claude"
             | "claude-managed"
-            | "codex"
             | "grok"
             | "fx"
-            | "opencode"
             | "dsh"
             | "cursor"
             | "amp"
@@ -286,13 +286,13 @@ declare module "swarm-extension" {
     requestedByUserId?: string | undefined;
     swarmVersion?: string | undefined;
     provider?:
+      | "codex"
       | "pi"
+      | "opencode"
       | "claude"
       | "claude-managed"
-      | "codex"
       | "grok"
       | "fx"
-      | "opencode"
       | "dsh"
       | "cursor"
       | "amp"
@@ -309,13 +309,13 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
+            | "codex"
             | "pi"
+            | "opencode"
             | "claude"
             | "claude-managed"
-            | "codex"
             | "grok"
             | "fx"
-            | "opencode"
             | "dsh"
             | "cursor"
             | "amp"
@@ -353,7 +353,7 @@ declare module "swarm-extension" {
     sourceTaskId: string | undefined;
     auditSourceTaskId: string | undefined;
     contextKey: string | undefined;
-    callOrigin: "mcp" | "native" | "extension" | "script-sdk";
+    callOrigin: "native" | "mcp" | "extension" | "script-sdk";
     harness?: string | undefined;
   };
 
