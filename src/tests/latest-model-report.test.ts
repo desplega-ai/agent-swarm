@@ -1,75 +1,138 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  buildLatestModelReport,
-  taskSelectedModelForReport,
-} from "../commands/provider-credentials";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { spawnProviderProcess } from "../commands/runner";
+import type { CostData, ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
-const CONFIG = "openrouter/deepseek/deepseek-v4-pro";
-const RESOLVED = "openrouter/deepseek/deepseek-v4.1-flash";
+const originalFetch = globalThis.fetch;
+const directory = `${import.meta.dir}/../../work/latest-model-${crypto.randomUUID()}`;
 
-/** The three reports the runner sends for one task, built the way runner.ts builds them. */
-function reportsFor(claim: { resolvedModel?: string; modelSource?: string; localModel?: string }) {
-  const taskModel = taskSelectedModelForReport(claim);
-  const common = { taskModel, configModel: CONFIG, harnessProvider: "pi" as const };
-  const used = claim.resolvedModel ?? claim.localModel ?? CONFIG;
-  return [
-    buildLatestModelReport({ ...common, model: used }),
-    buildLatestModelReport({ ...common, model: used }),
-    buildLatestModelReport({ ...common, model: used }),
-  ].map((r) => r?.source);
+const CONFIG = "openai-codex/gpt-5.5";
+const RESOLVED = "openai-codex/gpt-5.6-luna";
+
+beforeAll(async () => {
+  await Bun.$`mkdir -p ${directory}`.quiet();
+});
+afterAll(async () => {
+  await Bun.$`rm -rf ${directory}`.quiet();
+});
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+type ReportedModel = { model: string; source: string };
+
+/** Runs one task through the real runner and returns the latest_model of every credential-status PUT. */
+async function runTask(
+  claim: { resolvedModel?: string; modelSource?: string; modelTier?: "smol" },
+  agentConfigModel = CONFIG,
+): Promise<ReportedModel[]> {
+  const reports: ReportedModel[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+    if (path === "/api/config/resolved") {
+      return Response.json({ configs: [{ key: "MODEL_OVERRIDE", value: agentConfigModel }] });
+    }
+    if (path.endsWith("/credential-status") && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as { latest_model?: ReportedModel };
+      if (body.latest_model) reports.push(body.latest_model);
+    }
+    return Response.json({ configs: [], enabled: false });
+  }) as typeof fetch;
+
+  const agentId = crypto.randomUUID();
+  const adapter = {
+    name: "pi",
+    traits: {},
+    async createSession(config: ProviderSessionConfig) {
+      const cost: CostData = {
+        sessionId: "provider-session",
+        agentId,
+        totalCostUsd: 0,
+        inputTokens: 1,
+        outputTokens: 1,
+        model: config.model,
+        durationMs: 1,
+        numTurns: 1,
+        isError: false,
+        provider: "pi",
+      };
+      return {
+        sessionId: "provider-session",
+        onEvent(listener: (event: ProviderEvent) => void) {
+          listener({ type: "session_init", sessionId: "provider-session" });
+          listener({ type: "result", cost, isError: false });
+        },
+        async waitForCompletion() {
+          return { exitCode: 0, isError: false, cost };
+        },
+        async abort() {},
+      };
+    },
+  } as unknown as Parameters<typeof spawnProviderProcess>[0];
+
+  const running = await spawnProviderProcess(
+    adapter,
+    {
+      prompt: "hello",
+      systemPrompt: "fixture",
+      logFile: `${directory}/session.jsonl`,
+      role: "worker",
+      apiUrl: "http://runner.invalid",
+      apiKey: "example-runner-key",
+      agentId,
+      runnerSessionId: crypto.randomUUID(),
+      iteration: 1,
+      taskId: crypto.randomUUID(),
+      harnessProvider: "pi",
+      cwd: directory,
+      // `model` stays unset: a tier or profile task carries no raw pin.
+      ...claim,
+    },
+    directory,
+  );
+  await running.promise;
+  return reports;
 }
 
-describe("latest model report source across initial, result and final reports", () => {
+describe("latest model source across the initial, result and final reports", () => {
   test.each([
     "tier-default",
     "tier-config",
     "worker-env",
     "profile:task",
     "profile:tier-alias",
-  ])("claim source %s stays task-selected in every report", (modelSource) => {
-    expect(reportsFor({ resolvedModel: RESOLVED, modelSource })).toEqual(["task", "task", "task"]);
-  });
-
-  test("a task pin stays task-selected", () => {
-    expect(reportsFor({ resolvedModel: RESOLVED, modelSource: "model" })).toEqual([
-      "task",
-      "task",
-      "task",
+  ])("claim source %s stays task in all three reports", async (modelSource) => {
+    const reports = await runTask({ resolvedModel: RESOLVED, modelSource });
+    expect(reports.map((r) => [r.model, r.source])).toEqual([
+      [RESOLVED, "task"],
+      [RESOLVED, "task"],
+      [RESOLVED, "task"],
     ]);
   });
 
-  test("no server resolution: the local tier/pin selection stays task-selected", () => {
-    expect(reportsFor({ localModel: RESOLVED })).toEqual(["task", "task", "task"]);
+  test("a tier resolved only locally (no server resolution) stays task in all three reports", async () => {
+    const reports = await runTask({ modelTier: "smol" });
+    expect(reports).toHaveLength(3);
+    expect(reports.map((r) => r.source)).toEqual(["task", "task", "task"]);
   });
 
-  test("the agent default profile is not task-selected", () => {
-    expect(reportsFor({ resolvedModel: RESOLVED, modelSource: "profile:agent-default" })).toEqual([
-      "custom",
-      "custom",
-      "custom",
-    ]);
-    expect(reportsFor({ resolvedModel: CONFIG, modelSource: "profile:agent-default" })).toEqual([
-      "agent_config",
-      "agent_config",
-      "agent_config",
-    ]);
-  });
-
-  test("the pre-fix final report (raw pin only) loses task origin for a tier run", () => {
-    const old = buildLatestModelReport({
-      model: RESOLVED,
-      taskModel: undefined,
-      configModel: CONFIG,
-      harnessProvider: "pi",
+  test("the agent default profile is never task-selected: custom when it differs from the agent config", async () => {
+    const reports = await runTask({
+      resolvedModel: RESOLVED,
+      modelSource: "profile:agent-default",
     });
-    expect(old?.source).toBe("custom");
+    expect(reports.map((r) => [r.model, r.source])).toEqual([
+      [RESOLVED, "custom"],
+      [RESOLVED, "custom"],
+      [RESOLVED, "custom"],
+    ]);
   });
 
-  test("the runner builds the initial, result and final reports from the same task-selected model", () => {
-    const src = readFileSync(join(import.meta.dir, "../commands/runner.ts"), "utf8");
-    expect(src.match(/taskModel: reportTaskModel,/g)?.length).toBe(3);
-    expect(src).not.toContain("taskModel: opts.model,");
+  test("the agent default profile reports agent_config when it matches the agent config", async () => {
+    const reports = await runTask({ resolvedModel: CONFIG, modelSource: "profile:agent-default" });
+    expect(reports.map((r) => [r.model, r.source])).toEqual([
+      [CONFIG, "agent_config"],
+      [CONFIG, "agent_config"],
+      [CONFIG, "agent_config"],
+    ]);
   });
 });
