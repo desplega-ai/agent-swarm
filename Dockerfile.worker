@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.322
+ARG CLAUDE_CODE_VERSION=2.1.323
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -567,9 +567,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794484845-g2f1e0a
-ARG AMP_SHA512_AMD64=2c0a7cc91e1fde7b9036471bc9d3ef08ed000aa3756e0009d2198638f32df00d00961bd6bdf92768a9a421f0e6c385b1225c11e321f77140cee3c22a7d8f84ad
-ARG AMP_SHA512_ARM64=86888a965cc5b4d72c4970dc0a5d64a34d9f8cc6f65d448835d7a488f40d130d5dc0cb92d00be0c4305b6612ec023ec3d9abbd0ba0f6d8b217500853d27ba801
+ARG AMP_VERSION=0.0.1794542441-g4e0611
+ARG AMP_SHA512_AMD64=46bbab59cd7950d1fa66a1dc9e5fdb5639d6b986d743a44b2b7370845c7c163ff407bc65a05f00327ab4b7d958651da958c567102244f8a119812da1aa678983
+ARG AMP_SHA512_ARM64=6093f5697b80f00e017f0eb62a827593b3ee7b6d3005dff3da5e3187635c448856c1bf0c9b0fb5815b6b89d94bc69891ccf41598ddf857d0b8203a40aba0465a
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -617,7 +617,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.109
+ARG COPILOT_CLI_VERSION=1.0.110
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -627,8 +627,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.27.2), so none run as root.
-ARG QWEN_CODE_VERSION=0.27.2
+# scripts are not needed for ACP (verified on 0.27.3), so none run as root.
+ARG QWEN_CODE_VERSION=0.27.3
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -658,9 +658,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.2.1
-ARG KIRO_CLI_SHA256_AMD64=2551acc2e50139aef81ae6a2d3d1f9b6e96ebf77c7475df54cc4bb8b918fd662
-ARG KIRO_CLI_SHA256_ARM64=cd1a11049594d8b6364d2be03c01e79db7526d00284a964f9882469efc193a0d
+ARG KIRO_CLI_VERSION=3.3.0
+ARG KIRO_CLI_SHA256_AMD64=b88142aa02789504ac77fdf6ee829f0f4bdc9ce2e5dd0cc73084e105003c8fc3
+ARG KIRO_CLI_SHA256_ARM64=18720f7dc5368489b167388c27c47680892032619c4f6d099cfddc17611e039e
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
