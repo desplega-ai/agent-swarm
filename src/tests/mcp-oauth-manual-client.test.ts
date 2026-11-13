@@ -111,6 +111,9 @@ describe("MCP OAuth manual client flow", () => {
     process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.test";
     process.env.APP_URL = "https://dashboard.example.test";
     delete process.env.DASHBOARD_URL;
+    // The fetch stubs here route by URL. Allowing private hosts skips name
+    // resolution and address pinning, which mcp-outbound-fetch-guard.test.ts covers.
+    process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "true";
 
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const href = input.toString();
@@ -134,7 +137,8 @@ describe("MCP OAuth manual client flow", () => {
       }
       if (href === "https://login.salesforce.com/services/oauth2/token") {
         capturedTokenBody = init?.body?.toString() ?? null;
-        capturedTokenHeaders = (init?.headers as Record<string, string> | undefined) ?? null;
+        const authorization = new Headers(init?.headers).get("authorization");
+        capturedTokenHeaders = authorization === null ? {} : { Authorization: authorization };
         return new Response(
           JSON.stringify({
             access_token: "example-sf-access-token",
@@ -152,6 +156,7 @@ describe("MCP OAuth manual client flow", () => {
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
+    delete process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS;
     closeDb();
     await removeDbFiles();
     if (originalPublicMcpBaseUrl === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
