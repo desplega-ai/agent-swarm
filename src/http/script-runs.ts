@@ -57,6 +57,7 @@ import {
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
 import { bodyTask, route } from "./route-def";
+import { resolveTaskRequester } from "./task-requester";
 import { json, jsonError } from "./utils";
 
 const DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP = 10;
@@ -482,6 +483,10 @@ export async function handleScriptRuns(
     // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
     const sourceTaskId = await resolveRunSourceTaskId(req, agent.id);
+    // Same rules as POST /api/tasks: a non-lead agent cannot name another user.
+    const requestedByUserId = parsed.body.requestedByUserId
+      ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
+      : undefined;
     const creation = await getDbClient().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
@@ -491,9 +496,9 @@ export async function handleScriptRuns(
         args: parsed.body.args ?? null,
         scriptName: parsed.body.scriptName,
         idempotencyKey: parsed.body.idempotencyKey,
-        requestedByUserId: parsed.body.requestedByUserId,
+        requestedByUserId,
         sourceTaskId,
-        createdBy: parsed.body.requestedByUserId,
+        createdBy: requestedByUserId,
       });
     });
     if (!creation) {
@@ -737,6 +742,10 @@ export async function handleScriptRuns(
         return true;
       }
       const followUpThread = await followUpThreadForSourceTask(run.sourceTaskId);
+      // A step may name its own requester only when its agent may assign one; else the run's.
+      const stepRequester = parsed.body.requestedByUserId
+        ? await resolveTaskRequester(req, agentId, parsed.body.requestedByUserId, null)
+        : undefined;
       // The replay lookup, the guard decision and the insert share one write
       // transaction. It serializes this step against the run's other steps,
       // other runs and send-task dispatches into the same thread.
@@ -810,7 +819,7 @@ export async function handleScriptRuns(
             vcsRepo: parsed.body.vcsRepo,
             model: parsed.body.model,
             parentTaskId: parsed.body.parentTaskId,
-            requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+            requestedByUserId: stepRequester ?? run.requestedByUserId,
             outputSchema: parsed.body.outputSchema,
             contextKey,
           });
