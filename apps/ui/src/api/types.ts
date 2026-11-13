@@ -1838,6 +1838,10 @@ export type WebhookVerification =
       header?: string;
     }
   | {
+      format: "hmac-sha1";
+      header?: string;
+    }
+  | {
       format: "timestamped-hmac-sha256";
       header: string;
       timestampKey?: string;

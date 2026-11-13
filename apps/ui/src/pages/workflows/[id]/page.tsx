@@ -2292,6 +2292,21 @@ function getWebhookVerificationDisplay(trigger: TriggerConfig): {
     };
   }
 
+  if (verification.format === "hmac-sha1") {
+    const header = verification.header ?? "X-Hub-Signature";
+    return {
+      formatLabel: "hmac-sha1",
+      header,
+      secretLabel: "HMAC secret",
+      hint: (
+        <>
+          Sign the raw request body with HMAC-SHA1 using the secret, then send the digest as{" "}
+          <code className="font-mono">{header}: sha1=&lt;hex&gt;</code> or bare hex.
+        </>
+      ),
+    };
+  }
+
   if (verification.format === "token-equality") {
     return {
       formatLabel: "token-equality",

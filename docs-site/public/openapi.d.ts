@@ -30744,6 +30744,14 @@ export interface paths {
                                 header?: string;
                             } | {
                                 /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
                                 format: "timestamped-hmac-sha256";
                                 /** @description Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>. */
                                 header: string;
@@ -30961,6 +30969,14 @@ export interface paths {
                                 /**
                                  * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                                  * @default X-Hub-Signature-256
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
                                  */
                                 header?: string;
                             } | {
@@ -33747,6 +33763,14 @@ export interface components {
                     header: string;
                 } | {
                     /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
                     format: "timestamped-hmac-sha256";
                     /** @description Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>. */
                     header: string;
@@ -34014,6 +34038,14 @@ export interface components {
                     /**
                      * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                      * @default X-Hub-Signature-256
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
                      */
                     header: string;
                 } | {

@@ -2952,6 +2952,15 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
       ),
   }),
   z.object({
+    format: z.literal("hmac-sha1"),
+    header: z
+      .string()
+      .default("X-Hub-Signature")
+      .describe(
+        "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.",
+      ),
+  }),
+  z.object({
     format: z.literal("timestamped-hmac-sha256"),
     header: z
       .string()
