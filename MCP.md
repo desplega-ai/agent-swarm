@@ -374,11 +374,12 @@ Check whether an agent can run a model profile before you pass it as `profile` o
 
 **Get task details**
 
-Returns detailed information about a specific task, including output, failure reason, and log history.
+Returns detailed information about a specific task, including output, failure reason, attachments and log history. The default view is compact: long text is cut, the log history is trimmed to lifecycle events and the latest progress, and the requester is name, email and role. Pass include ["fullText", "logs", "requester"] for the rest.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to get details for. |
+| `include` | `array` | No | - | Optional extras on top of the compact default. "logs": every log entry with all fields (default: lifecycle events plus the last 3 progress lines, values cut to 240 chars). "fullText": task, output, failureReason, progress and follow-up instructions uncut. "requester": the requester's notes and communication preferences (default: name, email and role). |
 
 ### store-progress
 
