@@ -1100,7 +1100,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1111,7 +1111,7 @@ Update a repo's configuration including guidelines (PR checks, merge policy, rev
 | `defaultBranch` | `string` | No | - | New default branch. |
 | `autoClone` | `boolean` | No | - | Whether to auto-clone. |
 | `hooks` | `unknown` | No | - | Repository hook install config. Best-effort worker hook installation is enabled by default for new repos. Disable it with { enabled: false } (or null), or turn it back on with { enabled: true }. |
-| `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear. |
+| `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers), mergePolicy (per-repo merge policy record: autoMerge, agentsMayMerge, notify). Pass null to clear. |
 
 ## Scheduling Tools
 

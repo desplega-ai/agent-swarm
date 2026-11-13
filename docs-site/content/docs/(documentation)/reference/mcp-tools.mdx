@@ -1538,7 +1538,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 ### update-repo
 
-Update a repo's configuration including guidelines. Only the lead can change `allowMerge`: resend its current value to edit other guidelines.
+Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. See [Repo merge policy](/docs/guides/repo-merge-policy).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
