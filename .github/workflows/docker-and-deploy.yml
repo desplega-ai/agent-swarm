@@ -523,6 +523,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout repository
@@ -549,6 +551,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -676,6 +679,55 @@ jobs:
           docker buildx imagetools create -t "${API_IMAGE}:latest" "${API_IMAGE}@${API_DIGEST}"
           docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
           docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
+
+  # Same main-tip :latest as the api and worker images, in its own job so a failed
+  # dashboard build never holds back their promotion or the release deploy.
+  promote-ui-latest:
+    name: Promote dashboard :latest
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: agent-swarm-main-tags-ui
+      # A late stale build must not evict a queued main-tip promotion.
+      queue: max
+      cancel-in-progress: false
+
+    needs:
+      - build-and-push-ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Same guard as promote-main-tags: scripts/deploy-guard.sh.
+      - name: Check running commit is main tip
+        id: guard
+        shell: bash
+        run: bash scripts/deploy-guard.sh
+
+      - name: Promote :latest
+        if: steps.guard.outputs.is_tip == 'true'
+        env:
+          UI_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-ui
+          UI_DIGEST: ${{ needs.build-and-push-ui.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # Use this run's manifest output, never a SHA tag that a rerun can move.
+          docker buildx imagetools create -t "${UI_IMAGE}:latest" "${UI_IMAGE}@${UI_DIGEST}"
 
   # A version bump (the nightly release PR) also deploys prod, instead of waiting
   # for the next deploy.yml window. Runs after this run's api and worker images and
